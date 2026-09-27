@@ -18,8 +18,9 @@ ROW_CAP = 5000
 
 _QUERIES = {
     'mysql': """
-        SELECT t.table_name AS table_name, t.table_type AS table_type, c.column_name AS column_name,
-               c.data_type AS data_type, c.is_nullable AS is_nullable, c.ordinal_position AS ordinal_position
+        SELECT t.table_schema AS table_schema, t.table_name AS table_name, t.table_type AS table_type,
+               c.column_name AS column_name, c.data_type AS data_type, c.is_nullable AS is_nullable,
+               c.ordinal_position AS ordinal_position
         FROM information_schema.tables t
         JOIN information_schema.columns c
           ON c.table_schema = t.table_schema AND c.table_name = t.table_name
@@ -27,8 +28,9 @@ _QUERIES = {
         ORDER BY t.table_name, c.ordinal_position
     """,
     'postgres': """
-        SELECT t.table_name AS table_name, t.table_type AS table_type, c.column_name AS column_name,
-               c.data_type AS data_type, c.is_nullable AS is_nullable, c.ordinal_position AS ordinal_position
+        SELECT t.table_schema AS table_schema, t.table_name AS table_name, t.table_type AS table_type,
+               c.column_name AS column_name, c.data_type AS data_type, c.is_nullable AS is_nullable,
+               c.ordinal_position AS ordinal_position
         FROM information_schema.tables t
         JOIN information_schema.columns c
           ON c.table_schema = t.table_schema AND c.table_name = t.table_name
@@ -36,24 +38,27 @@ _QUERIES = {
         ORDER BY t.table_name, c.ordinal_position
     """,
     'clickhouse': """
-        SELECT t.name AS table_name, t.engine AS table_type, c.name AS column_name, c.type AS data_type,
-               if(startsWith(c.type, 'Nullable('), 'YES', 'NO') AS is_nullable, c.position AS ordinal_position
+        SELECT t.database AS table_schema, t.name AS table_name, t.engine AS table_type, c.name AS column_name,
+               c.type AS data_type, if(startsWith(c.type, 'Nullable('), 'YES', 'NO') AS is_nullable,
+               c.position AS ordinal_position
         FROM system.tables t
         JOIN system.columns c ON c.database = t.database AND c.table = t.name
         WHERE t.database = currentDatabase()
         ORDER BY t.name, c.position
     """,
     'sqlite': """
-        SELECT m.name AS table_name, m.type AS table_type, ti.name AS column_name, ti.type AS data_type,
-               CASE ti."notnull" WHEN 0 THEN 'YES' ELSE 'NO' END AS is_nullable, ti.cid + 1 AS ordinal_position
+        SELECT 'main' AS table_schema, m.name AS table_name, m.type AS table_type, ti.name AS column_name,
+               ti.type AS data_type, CASE ti."notnull" WHEN 0 THEN 'YES' ELSE 'NO' END AS is_nullable,
+               ti.cid + 1 AS ordinal_position
         FROM sqlite_master m
         JOIN pragma_table_info(m.name) ti
         WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%'
         ORDER BY m.name, ti.cid
     """,
     'h2': """
-        SELECT t.table_name AS table_name, t.table_type AS table_type, c.column_name AS column_name,
-               c.data_type AS data_type, c.is_nullable AS is_nullable, c.ordinal_position AS ordinal_position
+        SELECT t.table_schema AS table_schema, t.table_name AS table_name, t.table_type AS table_type,
+               c.column_name AS column_name, c.data_type AS data_type, c.is_nullable AS is_nullable,
+               c.ordinal_position AS ordinal_position
         FROM information_schema.tables t
         JOIN information_schema.columns c
           ON c.table_schema = t.table_schema AND c.table_name = t.table_name
@@ -61,8 +66,9 @@ _QUERIES = {
         ORDER BY t.table_name, c.ordinal_position
     """,
     'duckdb': """
-        SELECT t.table_name AS table_name, t.table_type AS table_type, c.column_name AS column_name,
-               c.data_type AS data_type, c.is_nullable AS is_nullable, c.ordinal_position AS ordinal_position
+        SELECT t.table_schema AS table_schema, t.table_name AS table_name, t.table_type AS table_type,
+               c.column_name AS column_name, c.data_type AS data_type, c.is_nullable AS is_nullable,
+               c.ordinal_position AS ordinal_position
         FROM information_schema.tables t
         JOIN information_schema.columns c
           ON c.table_schema = t.table_schema AND c.table_name = t.table_name
@@ -94,9 +100,11 @@ def list_databases(connection_name):
 
 
 def fetch_schema(connection_name, database=None):
-    """Return {'tables': [{'name', 'type', 'columns': [{'name', 'type', 'nullable', 'position'}]}], 'truncated'}.
-    ``database`` browses a different database on the same server than the connection's own configured one -
-    Run SQL's database picker; see engine.execute_sql()'s own ``database`` parameter."""
+    """Return {'tables': [{'name', 'schema', 'type', 'columns': [{'name', 'type', 'nullable', 'position'}]}],
+    'truncated'}. ``schema`` is the catalogue schema/namespace a table lives in (e.g. Postgres's 'public',
+    MySQL's own database name, SQLite's fixed 'main') - not present for a mongo collection, which has no
+    such concept. ``database`` browses a different database on the same server than the connection's own
+    configured one - Run SQL's database picker; see engine.execute_sql()'s own ``database`` parameter."""
     details = store.get_connection(connection_name)
     dialect = details['db']
     if dialect == 'mongo':
@@ -116,7 +124,8 @@ def fetch_schema(connection_name, database=None):
         record = dict(zip(lower_columns, row))
         name = record['table_name']
         if name not in tables:
-            tables[name] = {'name': name, 'type': _normalize_table_type(record['table_type']), 'columns': []}
+            tables[name] = {'name': name, 'schema': record['table_schema'],
+                            'type': _normalize_table_type(record['table_type']), 'columns': []}
             order.append(name)
         tables[name]['columns'].append({
             'name': record['column_name'], 'type': record['data_type'],

@@ -303,25 +303,32 @@ UI_HTML = r"""<!doctype html>
   .side-tab-panel[hidden] { display: none; }
   .refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 18px; }
 
-  /* ---- schema browser (click a table/column to insert it into the nearest SQL editor) ---- */
-  .schema-browser { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-  /* Run SQL's Schema tab has more room than the saved-query drawer, but still a fixed cap with its own
-     scrollbar rather than unbounded - so a connection with a lot of tables scrolls inside its own tab
-     instead of ballooning the whole Run SQL row's height and pushing the results panel far down the page. */
-  #run-schema-slot .schema-browser { max-height: 460px; }
+  /* ---- schema browser (click a table for its columns, a column to insert it into the nearest SQL editor) ---- */
+  .schema-browser { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); display: flex; flex-direction: column; }
+  /* The Tables/Columns switch stays put (never scrolls out of reach); only the list below it does - see
+     .schema-content. */
+  .schema-subtabs { display: flex; gap: 2px; padding: 4px 4px 0; flex: none; }
+  .schema-subtab { border: 0; background: none; padding: 4px 8px 6px; font: 600 11px var(--sans); color: var(--ink-3);
+    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+  .schema-subtab:hover:not(:disabled) { color: var(--ink); }
+  .schema-subtab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .schema-subtab:disabled { color: var(--ink-3); opacity: 0.5; cursor: default; }
+  /* A fixed cap with its own scrollbar - not unbounded - so a connection with a lot of tables, or a table
+     with a lot of columns, scrolls inside its own box instead of growing the whole page. */
+  .schema-content { max-height: 220px; overflow: auto; }
+  #run-schema-slot .schema-content { max-height: 460px; }
   .schema-browser .hint, .schema-browser .loading { padding: 9px 10px; }
   .schema-row { display: flex; align-items: center; gap: 0; }
-  .schema-caret { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 9px; cursor: pointer; }
-  .schema-caret:hover { color: var(--ink); }
+  .schema-select { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 11px; cursor: pointer; }
+  .schema-select:hover { color: var(--accent); }
   .schema-table { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: none; color: inherit; font: inherit;
     text-align: left; padding: 4px 6px 4px 0; cursor: pointer; }
   .schema-table:hover { background: var(--surface-2); }
   .schema-preview { flex: none; width: 22px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 9px; cursor: pointer; }
   .schema-preview:hover { color: var(--accent); }
   .schema-table .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .schema-cols { display: flex; flex-direction: column; padding-left: 22px; }
-  .schema-col { display: flex; justify-content: space-between; gap: 8px; border: 0; background: none; color: inherit; font: 12px var(--mono);
-    text-align: left; padding: 3px 6px; cursor: pointer; }
+  .schema-col { display: flex; justify-content: space-between; gap: 8px; width: 100%; border: 0; background: none; color: inherit; font: 12px var(--mono);
+    text-align: left; padding: 6px 10px; cursor: pointer; }
   .schema-col:hover { background: var(--surface-2); }
 
   /* ---- results ---- */
@@ -1295,18 +1302,44 @@ function finishSchemaFetch(key, onDone) {
   onDone();
   if (waiters) waiters.forEach(function (fn) { fn(); });
 }
-/** A self-contained, connection-aware schema tree. `insertFn(text)` is called with a table or column name
- * when the caller clicks one - errors (an unsupported connection type, no permission, ...) render inline
- * rather than through the page-wide error banner, since browsing the schema is optional, not the action the
- * user took. */
+/** A self-contained, connection-aware schema browser: a Tables tab (click a table to see its Columns) and a
+ * Columns tab (click a column to insert it - `insertFn(text)` - into the nearest SQL editor). Errors (an
+ * unsupported connection type, no permission, ...) render inline rather than through the page-wide error
+ * banner, since browsing the schema is optional, not the action the user took. */
 /** `setDatabase()` lets a caller with its own "browse a different database on this server" picker (Run SQL's
  * own Database dropdown) point this same tree at that database instead of the connection's configured
  * default - the exact schema-cache key loadSchema() and the access map's table filter also use, so they
  * all agree on the same fetch and never disagree with each other about what's in a given database. */
-function schemaBrowser(insertFn, previewFn) {
+function schemaBrowser(insertFn, previewFn, selectFn) {
   var box = h('div', { className: 'schema-browser' });
   var current = null, currentDb = null;
+  var view = 'tables', activeTableName = null; // 'tables' or 'columns' - which one activeTableName is showing
   function key() { return currentDb ? current + '::' + currentDb : current; }
+  function showTables() { view = 'tables'; paint(); }
+  function showColumns(name) { view = 'columns'; activeTableName = name; paint(); }
+  function paintTables(content, entry) {
+    entry.tables.forEach(function (t) {
+      content.appendChild(h('div', { className: 'schema-row' },
+        h('button', { type: 'button', className: 'schema-table', title: 'Columns of ' + t.name, onclick: function () { showColumns(t.name); } },
+          h('span', { className: 'name', text: t.name }), h('span', { className: 'tag', text: t.type })),
+        selectFn ? h('button', { type: 'button', className: 'schema-select', title: 'Copy a starter query for ' + t.name + ' into the editor', 'aria-label': 'Copy a starter query for ' + t.name,
+          onclick: function () { selectFn(t); } }, '⧉') : null,
+        previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in Run SQL', 'aria-label': 'Preview ' + t.name,
+          onclick: function () { previewFn(t.name); } }, '👁') : null));
+    });
+    if (entry.truncated) content.appendChild(h('div', { className: 'hint', text: 'Showing the first 5000 columns.' }));
+  }
+  function paintColumns(content, entry) {
+    var t = entry.tables.filter(function (x) { return x.name === activeTableName; })[0];
+    if (!t) { showTables(); return; } // the table it was showing is gone (e.g. a refresh) - nothing sane to show
+    if (!t.columns.length) { content.appendChild(h('div', { className: 'hint', text: 'No columns to show.' })); return; }
+    t.columns.forEach(function (c) {
+      content.appendChild(h('button', {
+        type: 'button', className: 'schema-col', title: c.type + (c.nullable ? ' · nullable' : ' · not null'),
+        onclick: function () { insertFn(c.name); }
+      }, h('span', { text: c.name }), h('span', { className: 'dim', text: c.type })));
+    });
+  }
   function paint() {
     clear(box);
     if (!current) { box.appendChild(h('div', { className: 'hint', text: 'Pick a connection to browse its schema.' })); return; }
@@ -1315,36 +1348,21 @@ function schemaBrowser(insertFn, previewFn) {
     if (entry.status === 'loading') { box.appendChild(loadingNode('Loading schema…')); return; }
     if (entry.status === 'error') { box.appendChild(h('div', { className: 'hint', text: entry.message })); return; }
     if (!entry.tables.length) { box.appendChild(h('div', { className: 'hint', text: 'No tables found.' })); return; }
-    entry.tables.forEach(function (t) {
-      var colsBox = h('div', { className: 'schema-cols', hidden: true });
-      var caret = h('button', { type: 'button', className: 'schema-caret', text: '▸', 'aria-label': 'Expand ' + t.name });
-      caret.onclick = function () {
-        var open = colsBox.hidden;
-        colsBox.hidden = !open;
-        caret.textContent = open ? '▾' : '▸';
-        if (open && !colsBox.childNodes.length) {
-          t.columns.forEach(function (c) {
-            colsBox.appendChild(h('button', {
-              type: 'button', className: 'schema-col', title: c.type + (c.nullable ? ' · nullable' : ' · not null'),
-              onclick: function () { insertFn(c.name); }
-            }, h('span', { text: c.name }), h('span', { className: 'dim', text: c.type })));
-          });
-        }
-      };
-      box.appendChild(h('div', { className: 'schema-row' }, caret,
-        h('button', { type: 'button', className: 'schema-table', title: 'Insert ' + t.name, onclick: function () { insertFn(t.name); } },
-          h('span', { className: 'name', text: t.name }), h('span', { className: 'tag', text: t.type })),
-        previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in Run SQL', 'aria-label': 'Preview ' + t.name,
-          onclick: function () { previewFn(t.name); } }, '▶') : null));
-      box.appendChild(colsBox);
-    });
-    if (entry.truncated) box.appendChild(h('div', { className: 'hint', text: 'Showing the first 5000 columns.' }));
+    box.appendChild(h('div', { className: 'schema-subtabs' },
+      h('button', { type: 'button', className: 'schema-subtab' + (view === 'tables' ? ' active' : ''), onclick: showTables }, 'Tables'),
+      h('button', { type: 'button', className: 'schema-subtab' + (view === 'columns' ? ' active' : ''), disabled: !activeTableName,
+        onclick: function () { if (activeTableName) showColumns(activeTableName); } },
+        'Columns' + (activeTableName ? ' · ' + activeTableName : ''))));
+    var content = h('div', { className: 'schema-content' });
+    box.appendChild(content);
+    if (view === 'columns' && activeTableName) paintColumns(content, entry);
+    else paintTables(content, entry);
   }
   paint();
   return {
     node: box,
-    setConnection: function (name) { current = name || null; currentDb = null; paint(); },
-    setDatabase: function (database) { currentDb = database || null; paint(); },
+    setConnection: function (name) { current = name || null; currentDb = null; view = 'tables'; activeTableName = null; paint(); },
+    setDatabase: function (database) { currentDb = database || null; view = 'tables'; activeTableName = null; paint(); },
     refresh: function () { delete schemaCache[key()]; paint(); }
   };
 }
@@ -3362,7 +3380,8 @@ async function openQueryForm(baseName, baseVersion) {
   paintFormMode();
   paintRefs();
   var querySchema = schemaBrowser(function (text) { insertAtCursor(sqlTa, text); },
-    function (tableName) { previewTable(connSelect.value, tableName); closeDrawer(); });
+    function (tableName) { previewTable(connSelect.value, tableName); closeDrawer(); },
+    function (table) { applySelectQuery(sqlTa, connSelect.value, table); paintRefs(); });
   querySchema.setConnection(connSelect.value);
   connSelect.onchange = function () { querySchema.setConnection(connSelect.value); paintFormMode(); paintRefs(); };
   var collectionInput = h('input', { id: 'q-collection', list: 'q-collection-list', placeholder: 'optional — e.g. reporting', autocomplete: 'off', spellcheck: 'false' });
@@ -3997,7 +4016,8 @@ bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
   });
 })();
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
-  function (tableName) { previewTable($('run-connection').value, tableName); });
+  function (tableName) { previewTable($('run-connection').value, tableName); },
+  function (table) { applySelectQuery($('run-sql'), $('run-connection').value, table); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
 $('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
@@ -4091,6 +4111,30 @@ function runMongo(opts) {
   });
 }
 
+/** A starter SELECT for a SQL table - every column by name (not "*"; the schema browser already knows
+ * them), one per line, ordered by the first one, capped at a sane default so a quick look never pulls an
+ * entire table. The table name is schema-qualified (schema.fetch_schema()'s 'schema' field - Postgres's
+ * 'public', MySQL/ClickHouse's own database name, SQLite/DuckDB's fixed 'main', ...) since the same table
+ * name can exist in more than one schema on the same connection. */
+function buildSqlSelect(table) {
+  var cols = table.columns.length ? table.columns.map(function (c) { return '  ' + c.name; }).join(',\n') : '  *';
+  var target = (table.schema ? table.schema + '.' : '') + table.name;
+  var sql = 'SELECT\n' + cols + '\nFROM ' + target;
+  if (table.columns.length) sql += '\nORDER BY ' + table.columns[0].name;
+  return sql + '\nLIMIT 100';
+}
+/** The schema browser's "select" icon: writes a starter query for `table` into `textarea` - a full SELECT
+ * (SQL) or an equivalent find() document (mongo: filter is already "every field", so there is nothing to
+ * list there the way SQL's SELECT does; sort is mongo's ORDER BY - "limit" is left out on purpose, since
+ * paging is already the Page/Page size fields, not something this JSON convention's body reads). Replaces
+ * the whole editor rather than inserting at the cursor, same as previewTable() below - this is a complete
+ * statement, not a fragment to weave into an existing one. */
+function applySelectQuery(textarea, connectionName, table) {
+  var isMongo = (connectionsCache[connectionName] || {}).db === 'mongo';
+  textarea.value = isMongo ? JSON.stringify({ collection: table.name, filter: {}, sort: { _id: 1 } }, null, 2)
+                            : buildSqlSelect(table);
+  if (textarea.repaint) textarea.repaint();
+}
 /** Jump to the Run SQL tab pre-filled with a preview of one table - from either schema browser. */
 function previewTable(connectionName, tableName) {
   showTab('run');
