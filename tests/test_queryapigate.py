@@ -1234,15 +1234,24 @@ class NamedQueryTests(ApiTestCase):
             self.client.patch('/connections', json={'connections': {
                 'new': {'db': 'sqlite', 'database': 'x.db', 'active': True}}})
             self.assertEqual(close.call_count, 1)
-            self.client.delete('/connections/new')
+            self.client.delete('/connections/new', json={'reason': 'cleanup'})
             self.assertEqual(close.call_count, 2)
             self.client.patch('/connections', json={'connections': {'bad': {'db': 'oracle'}}})  # rejected: no change
             self.assertEqual(close.call_count, 2)
 
     def test_delete_connection(self):
-        self.assertEqual(self.client.delete('/connections/off').status_code, 200)
+        self.assertEqual(self.client.delete('/connections/off', json={'reason': 'no longer used'}).status_code, 200)
         self.assertNotIn('off', self.client.get('/connections').get_json()['connections'])
-        self.assertEqual(self.client.delete('/connections/off').status_code, 404)
+        self.assertEqual(self.client.delete('/connections/off', json={'reason': 'again'}).status_code, 404)
+
+    def test_delete_connection_requires_a_reason(self):
+        for body in (None, {}, {'reason': ''}, {'reason': '   '}):
+            kwargs = {'json': body} if body is not None else {}
+            self.assertEqual(self.client.delete('/connections/off', **kwargs).status_code, 400, body)
+        self.assertIn('off', self.client.get('/connections').get_json()['connections'])  # never deleted
+
+    def test_missing_connection_is_404_even_without_a_reason(self):
+        self.assertEqual(self.client.delete('/connections/nope').status_code, 404)
 
 
 class PaginationAndFormatTests(ApiTestCase):

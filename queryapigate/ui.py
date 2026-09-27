@@ -254,7 +254,10 @@ UI_HTML = r"""<!doctype html>
 
   /* ---- SQL editor (hand-rolled highlighting: a <pre> painted behind a transparent <textarea>) ---- */
   .editor { position: relative; min-height: 220px; height: 260px; resize: vertical; overflow: hidden; background: var(--surface); }
-  .editor .hl, .editor textarea { position: absolute; inset: 0; margin: 0; padding: 12px 14px; border: 0; border-radius: 0;
+  .editor-gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 42px; padding: 12px 8px 12px 0; overflow: hidden;
+    text-align: right; font: 13px/1.6 var(--mono); color: var(--ink-3); background: var(--surface-2); border-right: 1px solid var(--line);
+    user-select: none; pointer-events: none; }
+  .editor .hl, .editor textarea { position: absolute; top: 0; right: 0; bottom: 0; left: 42px; margin: 0; padding: 12px 14px; border: 0; border-radius: 0;
     font: 13px/1.6 var(--mono); tab-size: 2; white-space: pre; overflow: auto; letter-spacing: 0; }
   .editor .hl { pointer-events: none; color: var(--ink); overflow: hidden; }
   .editor textarea { color: transparent; caret-color: var(--ink); background: transparent; resize: none; min-height: 0; height: 100%; }
@@ -276,9 +279,15 @@ UI_HTML = r"""<!doctype html>
   .runner-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
   .runner-bar select { width: auto; height: 28px; font-size: 12.5px; }
   .runner-bar .lbl { font-size: 11.5px; color: var(--ink-3); }
-  .runner-side { padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+  .runner-side { padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); overflow: hidden; }
   .runner-side textarea { min-height: 96px; }
   .runner-side .grid2 input { height: 28px; }
+  /* The Schema panel is the one thing in this column with an unbounded amount to show, so it grows to fill
+     whatever room the editor's own height leaves - rather than sitting in a small fixed box with a blank
+     gap below it once the editor is taller than the rest of the column's fixed-height fields. */
+  #run-schema-slot { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
+  #run-schema-slot .field { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #run-schema-slot .schema-browser { flex: 1; min-height: 0; max-height: none; }
   .refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 18px; }
 
   /* ---- schema browser (click a table/column to insert it into the nearest SQL editor) ---- */
@@ -735,6 +744,7 @@ UI_HTML = r"""<!doctype html>
           <button type="submit" class="btn primary md" id="run-button" style="padding:0 16px">Run</button>
         </div>
         <div class="editor" id="run-editor">
+          <div class="editor-gutter" id="run-sql-gutter" aria-hidden="true"></div>
           <pre class="hl" id="run-sql-hl" aria-hidden="true"></pre>
           <textarea id="run-sql" required spellcheck="false" wrap="off" autocomplete="off" aria-label="SQL" placeholder="SELECT * FROM t WHERE id = :id"></textarea>
         </div>
@@ -783,6 +793,7 @@ UI_HTML = r"""<!doctype html>
   </div>
   <div class="drawer-body">
     <div id="connection-form-slot"></div>
+    <div id="delete-connection-slot"></div>
     <div id="query-form-slot"></div>
     <div id="apikey-form-slot"></div>
     <div id="role-form-slot"></div>
@@ -1093,7 +1104,7 @@ $('key-bar').onsubmit = function (e) {
 
 // ---- drawer (hosts the connection and saved-query forms) ----
 function openDrawer(slotId, title, kicker) {
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
   $('drawer').classList.add('open');
@@ -1105,7 +1116,7 @@ function closeDrawer() {
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   $('drawer-backdrop').hidden = true;
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot'));
 }
 $('drawer-close').onclick = closeDrawer;
 $('drawer-backdrop').onclick = closeDrawer;
@@ -1151,14 +1162,31 @@ function sqlParams(sql) {
   while ((m = SQL_TOKEN.exec(sql))) if (m[5] && !seen[m[5]]) { seen[m[5]] = true; out.push(m[5].slice(1)); }
   return out;
 }
-function bindEditor(textarea, pre, onChange) {
+/** `gutter`, if given, gets one line number per line, kept in sync with the textarea's own scroll position -
+ * "what line is that part of the query on" for anything longer than a couple of lines, the same question a
+ * code editor's own gutter answers. Rebuilt on every keystroke like the highlight overlay already was;
+ * SQL is never long enough for that to be a real cost. */
+function bindEditor(textarea, pre, onChange, gutter) {
+  var gutterLines = 0;
+  function paintGutter() {
+    var count = (textarea.value.match(/\n/g) || []).length + 1;
+    if (count === gutterLines) return;
+    gutterLines = count;
+    var lines = [];
+    for (var i = 1; i <= count; i++) lines.push(i);
+    clear(gutter).appendChild(h('div', { style: 'white-space:pre' }, lines.join('\n')));
+  }
   function paint() {
     highlightInto(pre, textarea.value + '\n');
     pre.scrollTop = textarea.scrollTop; pre.scrollLeft = textarea.scrollLeft;
+    if (gutter) { paintGutter(); gutter.scrollTop = textarea.scrollTop; }
     if (onChange) onChange(textarea.value);
   }
   textarea.addEventListener('input', paint);
-  textarea.addEventListener('scroll', function () { pre.scrollTop = textarea.scrollTop; pre.scrollLeft = textarea.scrollLeft; });
+  textarea.addEventListener('scroll', function () {
+    pre.scrollTop = textarea.scrollTop; pre.scrollLeft = textarea.scrollLeft;
+    if (gutter) gutter.scrollTop = textarea.scrollTop;
+  });
   textarea.addEventListener('keydown', function (e) {
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
@@ -1175,8 +1203,9 @@ function makeEditor(attrs, value) {
   var ta = h('textarea', Object.assign({ spellcheck: 'false', wrap: 'off', autocomplete: 'off' }, attrs));
   ta.value = value || '';
   var pre = h('pre', { className: 'hl', 'aria-hidden': 'true' });
-  var wrap = h('div', { className: 'editor boxed' }, pre, ta);
-  bindEditor(ta, pre);
+  var gutter = h('div', { className: 'editor-gutter', 'aria-hidden': 'true' });
+  var wrap = h('div', { className: 'editor boxed' }, gutter, pre, ta);
+  bindEditor(ta, pre, undefined, gutter);
   return wrap;
 }
 
@@ -1228,14 +1257,20 @@ function finishSchemaFetch(key, onDone) {
  * when the caller clicks one - errors (an unsupported connection type, no permission, ...) render inline
  * rather than through the page-wide error banner, since browsing the schema is optional, not the action the
  * user took. */
+/** `setDatabase()` lets a caller with its own "browse a different database on this server" picker (Run SQL's
+ * own Database dropdown) point this same tree at that database instead of the connection's configured
+ * default - the exact schema-cache key loadSchema() and paintRunTable() already use, so the tree, the flat
+ * Table dropdown and the access map's table filter all agree on the same fetch and never disagree with
+ * each other about what's in a given database. */
 function schemaBrowser(insertFn, previewFn) {
   var box = h('div', { className: 'schema-browser' });
-  var current = null;
+  var current = null, currentDb = null;
+  function key() { return currentDb ? current + '::' + currentDb : current; }
   function paint() {
     clear(box);
     if (!current) { box.appendChild(h('div', { className: 'hint', text: 'Pick a connection to browse its schema.' })); return; }
-    var entry = schemaCache[current];
-    if (!entry || entry.status === 'loading') { loadSchema(current, paint); entry = { status: 'loading' }; }
+    var entry = schemaCache[key()];
+    if (!entry || entry.status === 'loading') { loadSchema(current, paint, currentDb); entry = { status: 'loading' }; }
     if (entry.status === 'loading') { box.appendChild(loadingNode('Loading schema…')); return; }
     if (entry.status === 'error') { box.appendChild(h('div', { className: 'hint', text: entry.message })); return; }
     if (!entry.tables.length) { box.appendChild(h('div', { className: 'hint', text: 'No tables found.' })); return; }
@@ -1267,8 +1302,9 @@ function schemaBrowser(insertFn, previewFn) {
   paint();
   return {
     node: box,
-    setConnection: function (name) { current = name || null; paint(); },
-    refresh: function () { if (current) delete schemaCache[current]; paint(); }
+    setConnection: function (name) { current = name || null; currentDb = null; paint(); },
+    setDatabase: function (database) { currentDb = database || null; paint(); },
+    refresh: function () { delete schemaCache[key()]; paint(); }
   };
 }
 function schemaField(browser) {
@@ -1400,10 +1436,34 @@ async function saveConnection(originalName, details, newName, btn) {
   btn.disabled = false;
   if (res) { showError(''); closeDrawer(); toast((originalName ? 'Saved ' : 'Created ') + name); loadConnections(); }
 }
-async function deleteConnection(name) {
-  if (!confirm("Delete connection '" + name + "'?")) return;
-  var res = await apiJson('connections/' + enc(name), { method: 'DELETE' });
-  if (res) { toast('Deleted ' + name); loadConnections(); }
+/** Deleting a connection is destructive and breaks every saved query that used it, so this asks for a
+ * reason (kept nowhere but the audit log - see app.py's delete_connection()) and makes the admin type the
+ * connection's own name back, exactly, before the Delete button will even enable - the same "you cannot
+ * click this by reflex" friction a terminal's "type the resource name to confirm" prompt gives. */
+function openDeleteConnectionForm(name) {
+  var slot = openDrawer('delete-connection-slot', 'Delete connection', name);
+  var reasonInput = h('textarea', { id: 'del-reason', placeholder: 'Why is this connection being deleted?' });
+  var confirmInput = h('input', { id: 'del-confirm', type: 'text', autocomplete: 'off', spellcheck: 'false', placeholder: name });
+  var actions = formActions('Delete', closeDrawer);
+  actions.submit.classList.remove('primary'); actions.submit.classList.add('danger');
+  actions.submit.disabled = true;
+  function checkReady() { actions.submit.disabled = !(reasonInput.value.trim() && confirmInput.value === name); }
+  reasonInput.addEventListener('input', checkReady);
+  confirmInput.addEventListener('input', checkReady);
+  var form = h('form', { className: 'form', novalidate: true, onsubmit: async function (e) {
+    e.preventDefault();
+    actions.submit.disabled = true;
+    var res = await apiJson('connections/' + enc(name), { method: 'DELETE', json: { reason: reasonInput.value.trim() } });
+    if (res) { closeDrawer(); toast('Deleted ' + name); loadConnections(); loadAuditLog(); }
+    else checkReady();
+  } },
+    h('p', { className: 'd-desc' }, 'This deletes ', h('span', { className: 'name' }, name),
+      ' permanently. Every saved query that uses it will stop working. It moves to the Deleted tab, with the reason and who deleted it.'),
+    field('del-reason', 'Reason', reasonInput, 'Recorded in the audit log - required.'),
+    field('del-confirm', 'Type "' + name + '" to confirm', confirmInput),
+    actions.node);
+  slot.appendChild(form);
+  reasonInput.focus();
 }
 async function loadConnections() {
   var data = await apiJson('connections');
@@ -1428,17 +1488,56 @@ function usageCell(usage) {
   return h('td', { title: title, style: 'white-space:nowrap', text: parts.join(' · ') });
 }
 var connFilter = 'all';
+/** Every 'delete_connection' audit entry, newest first - the Deleted tab's whole data source. There is no
+ * separate deleted-connections store; a delete is destructive (the connection is gone, and store.py never
+ * kept a tombstone for it), so the audit log - which already recorded a full snapshot plus the reason - is
+ * the only place this can come from, exactly like #35's "everything auditable" design elsewhere. */
+function deletedConnections() {
+  return auditLogCache.filter(function (e) { return e.action === 'delete_connection'; });
+}
 function renderConnections() {
   var box = clear($('connections-table'));
   var all = Object.keys(connectionsCache).sort();
   var activeCount = all.filter(function (n) { return connectionsCache[n].active; }).length;
+  var deleted = deletedConnections();
   $('count-connections').textContent = all.length ? String(all.length) : '';
   var tabs = clear($('conn-tabs'));
-  [['all', 'All', all.length], ['active', 'Active', activeCount], ['inactive', 'Inactive', all.length - activeCount]].forEach(function (t) {
+  [['all', 'All', all.length], ['active', 'Active', activeCount], ['inactive', 'Inactive', all.length - activeCount],
+   ['deleted', 'Deleted', deleted.length]].forEach(function (t) {
     tabs.appendChild(h('button', { type: 'button', className: connFilter === t[0] ? 'on' : '', onclick: function () { connFilter = t[0]; renderConnections(); } },
       t[1], h('span', { className: 'n', text: String(t[2]) })));
   });
   var foot = clear($('connections-foot'));
+  $('conn-filter').placeholder = connFilter === 'deleted' ? 'Filter by name, actor, reason…' : 'Filter by name, type, host…';
+  $('new-connection').hidden = connFilter === 'deleted';
+
+  if (connFilter === 'deleted') {
+    if (!deleted.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No deleted connections' }),
+      h('span', { text: 'Every connection deletion is recorded here, with who did it, when, and why.' }))); return; }
+    var qd = $('conn-filter').value.trim().toLowerCase();
+    var shown = deleted.filter(function (e) {
+      return !qd || [e.target, e.actor, e.changes.deleted_reason, e.changes.db, e.changes.host].join(' ').toLowerCase().indexOf(qd) !== -1;
+    });
+    foot.appendChild(h('span', { text: 'Showing ' + shown.length + ' of ' + deleted.length + (deleted.length === 1 ? ' deleted connection' : ' deleted connections') }));
+    if (!shown.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No deleted connections match “' + qd + '”.' }))); return; }
+    var drows = shown.map(function (e) {
+      var c = e.changes || {};
+      var endpoint = c.host ? c.host + (c.port ? ':' + c.port : '') : '';
+      return h('tr', {},
+        h('td', {}, h('span', { className: 'name', text: e.target })),
+        h('td', {}, h('span', { className: 'tag', text: c.db || '?' })),
+        h('td', { className: 'mono', style: 'white-space:nowrap' }, endpoint || h('span', { className: 'dim', text: '—' })),
+        h('td', { className: 'mono', text: c.database || '' }),
+        h('td', { className: 'mono dim', style: 'white-space:nowrap', text: e.timestamp || '—' }),
+        h('td', { className: 'mono', text: e.actor || '—' }),
+        h('td', { text: c.deleted_reason || '—' }));
+    });
+    box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+      h('thead', {}, h('tr', {}, ['Name', 'Type', 'Host', 'Database', 'Deleted at', 'Deleted by', 'Reason'].map(function (t) { return h('th', { text: t }); }))),
+      h('tbody', {}, drows))));
+    return;
+  }
+
   if (!all.length) {
     box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No connections yet' }),
       h('span', { text: 'Add a MySQL, PostgreSQL, ClickHouse, SQLite or H2 database to start running SQL.' }),
@@ -1471,7 +1570,7 @@ function renderConnections() {
         h('button', { type: 'button', className: 'btn sm outlined', text: 'Query', disabled: !c.active, title: 'Open in Run SQL', onclick: function () {
           showTab('run'); selectRunConnection(name); $('run-sql').focus(); } }),
         h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openConnectionForm(name, c); } }),
-        h('button', { type: 'button', className: 'btn ghost sm danger', text: 'Delete', onclick: function () { deleteConnection(name); } }))));
+        h('button', { type: 'button', className: 'btn ghost sm danger', text: 'Delete', onclick: function () { openDeleteConnectionForm(name); } }))));
   });
   box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
     h('thead', {}, h('tr', {}, ['Name', 'Type', 'Host', 'Database', 'User', 'Status', 'Usage', 'Created', 'Last modified', ''].map(function (t) { return h('th', { text: t }); }))),
@@ -1546,13 +1645,16 @@ function paintRunDatabase() {
   var sel = $('run-database');
   var connName = $('run-connection').value;
   clear(sel);
-  if (!connName || !connectionsCache[connName]) { sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true; paintRunTable(); return; }
+  if (!connName || !connectionsCache[connName]) {
+    sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true;
+    runSchema.setDatabase(null); paintRunTable(); return;
+  }
   var c = connectionsCache[connName];
   if (c.db !== 'mysql' && c.db !== 'postgres' && c.db !== 'clickhouse') {
     // Nothing to switch to - sqlite/duckdb are a single file, h2/jdbc have no supported "list databases" query.
     sel.disabled = true;
     sel.appendChild(h('option', { value: c.database || '', text: c.database || '(default)' }));
-    paintRunTable(); return;
+    runSchema.setDatabase(null); paintRunTable(); return;
   }
   var entry = dbListCache[connName];
   if (!entry) { loadDatabases(connName, function () { if ($('run-connection').value === connName) paintRunDatabase(); }); entry = { status: 'loading' }; }
@@ -1561,6 +1663,9 @@ function paintRunDatabase() {
   sel.disabled = false;
   entry.databases.forEach(function (name) { sel.appendChild(h('option', { value: name, text: name })); });
   if (entry.databases.indexOf(c.database) !== -1) sel.value = c.database;
+  // The tree gets an override only when it actually differs from the connection's own default - same rule
+  // paintRunTable() applies, so both always agree on exactly which fetch to make.
+  runSchema.setDatabase(sel.value !== c.database ? sel.value : null);
   paintRunTable();
 }
 function paintRunTable() {
@@ -1592,7 +1697,11 @@ function paintRunTable() {
   sel.appendChild(h('option', { value: '', text: entry.tables.length + (entry.tables.length === 1 ? ' table' : ' tables') }));
   entry.tables.forEach(function (t) { sel.appendChild(h('option', { value: t.name, text: t.name })); });
 }
-$('run-database').onchange = paintRunTable;
+$('run-database').onchange = function () {
+  var connName = $('run-connection').value, c = connectionsCache[connName];
+  runSchema.setDatabase(c && $('run-database').value !== c.database ? $('run-database').value : null);
+  paintRunTable();
+};
 $('run-table').onchange = function () {
   var t = $('run-table').value;
   if (t) insertAtCursor($('run-sql'), t);
@@ -1875,6 +1984,7 @@ async function loadAuditLog() {
   actions.forEach(function (a) { actionSelect.appendChild(h('option', { value: a, text: a })); });
   if (actions.indexOf(currentAction) !== -1) actionSelect.value = currentAction;
   renderAuditLog();
+  renderConnections(); // the Connections screen's Deleted tab reads auditLogCache too
 }
 $('refresh-auditlog').onclick = loadAuditLog;
 $('auditlog-action-filter').onchange = renderAuditLog;
@@ -3750,7 +3860,7 @@ function paintRunRefs(sql) {
   box.appendChild(h('span', { className: 'hint', text: 'In SQL:' }));
   names.forEach(function (n) { box.appendChild(h('span', { className: 'tag', text: ':' + n })); });
 }
-bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs);
+bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); });
 $('run-schema-slot').appendChild(schemaField(runSchema));

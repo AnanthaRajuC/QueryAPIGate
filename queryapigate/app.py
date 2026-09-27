@@ -770,11 +770,21 @@ def test_connection_route():
 
 @bp.route('/connections/<name>', methods=['DELETE'])
 def delete_connection(name):
+    """Deleting a connection is destructive and hard to reason about after the fact - every saved query that
+    used it stops working - so the caller must say why. The reason is stored nowhere but the audit log (there
+    is no separate "deleted connections" table); the admin UI's own Deleted tab reads it straight from there,
+    the same as everything else on this route already does."""
     require_admin()
     before = store.read_connections().get(name)
+    if before is None:
+        raise ApiError(f"Connection '{name}' not found", 404)
+    data = get_json_body(required=False)
+    reason = (data.get('reason') or '').strip()
+    if not reason:
+        raise ApiError('A reason is required to delete a connection')
     store.delete_connection(name)
-    if before is not None:
-        store.record_audit(caller_key_name(), 'delete_connection', name, store.mask_passwords({name: before})[name])
+    changes = {**store.mask_passwords({name: before})[name], 'deleted_reason': reason}
+    store.record_audit(caller_key_name(), 'delete_connection', name, changes)
     pool.close_pooled_connections()  # a removed connection must not keep serving from idle sockets
     return jsonify({'message': f"Connection '{name}' deleted"}), 200
 

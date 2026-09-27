@@ -274,7 +274,11 @@ def build_spec(version, saved_queries=None):
                 'responses': {'200': {'description': 'Database names'}, **_ERRORS}}},
             '/connections/{name}': {'delete': {
                 'summary': 'Delete a connection', 'tags': ['Connections'],
+                'description': 'A reason is required - deleting a connection breaks every saved query that '
+                    "used it, so it is not left to guesswork afterward. Recorded in the audit log's "
+                    "'deleted_reason' field; there is no separate deleted-connections store.",
                 'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
+                'requestBody': _body({'reason': {'type': 'string'}}, ['reason']),
                 'responses': {'200': {'description': 'Deleted'}, **_ERRORS}}},
             '/connections/{name}/schema': {'get': {
                 'summary': "List a connection's tables/views and their columns", 'tags': ['Connections'],

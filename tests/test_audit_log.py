@@ -124,11 +124,18 @@ class ConnectionAuditTests(AppTestCase):
 
     def test_delete_is_recorded_with_the_password_masked(self):
         self.create_connection('a', password='super-secret')
-        self.client.delete('/connections/a', headers=self.admin_headers)
+        self.client.delete('/connections/a', json={'reason': 'retiring this database'}, headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual(entry['action'], 'delete_connection')
         self.assertEqual(entry['changes']['password'], config.PASSWORD_MASK)
+        self.assertEqual(entry['changes']['deleted_reason'], 'retiring this database')
         self.assertNotIn('super-secret', json.dumps(entry))
+
+    def test_delete_without_a_reason_is_rejected_and_not_recorded(self):
+        self.create_connection('a')
+        res = self.client.delete('/connections/a', headers=self.admin_headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(self.entries()[0]['action'], 'create_connection')  # no delete entry was ever added
 
     def test_an_env_var_password_reference_is_shown_as_written(self):
         self.create_connection('a', password='${SOME_VAR}')
