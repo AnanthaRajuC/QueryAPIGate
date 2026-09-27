@@ -292,16 +292,23 @@ UI_HTML = r"""<!doctype html>
   .runner-side { padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); overflow: hidden; }
   .runner-side textarea { min-height: 96px; }
   .runner-side .grid2 input { height: 28px; }
-  /* The Schema panel is the one thing in this column with an unbounded amount to show, so it grows to fill
-     whatever room the editor's own height leaves - rather than sitting in a small fixed box with a blank
-     gap below it once the editor is taller than the rest of the column's fixed-height fields. */
-  #run-schema-slot { flex: 1; min-height: 120px; display: flex; flex-direction: column; }
-  #run-schema-slot .field { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  #run-schema-slot .schema-browser { flex: 1; min-height: 0; max-height: none; }
+  /* Recent queries, query settings and the schema browser are three tabs rather than one long scroll - the
+     sidebar is narrow, and only one of the three needs to be visible at once. */
+  .side-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 2px; flex: none; }
+  .side-tab { flex: 1; min-width: 0; border: 0; background: none; padding: 0 2px 8px; font: 600 11.5px var(--sans); color: var(--ink-3);
+    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side-tab:hover { color: var(--ink); }
+  .side-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .side-tab-panel { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+  .side-tab-panel[hidden] { display: none; }
   .refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 18px; }
 
   /* ---- schema browser (click a table/column to insert it into the nearest SQL editor) ---- */
   .schema-browser { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  /* Run SQL's Schema tab has more room than the saved-query drawer, but still a fixed cap with its own
+     scrollbar rather than unbounded - so a connection with a lot of tables scrolls inside its own tab
+     instead of ballooning the whole Run SQL row's height and pushing the results panel far down the page. */
+  #run-schema-slot .schema-browser { max-height: 460px; }
   .schema-browser .hint, .schema-browser .loading { padding: 9px 10px; }
   .schema-row { display: flex; align-items: center; gap: 0; }
   .schema-caret { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 9px; cursor: pointer; }
@@ -741,8 +748,6 @@ UI_HTML = r"""<!doctype html>
           <select id="run-connection" required aria-label="Connection"></select>
           <span class="lbl">Database</span>
           <select id="run-database" aria-label="Database" disabled></select>
-          <span class="lbl">Table</span>
-          <select id="run-table" aria-label="Insert a table" disabled></select>
           <span class="lbl">Format</span>
           <select id="run-format" aria-label="Format">
             <option value="json">json</option><option value="ndjson">ndjson</option>
@@ -762,18 +767,29 @@ UI_HTML = r"""<!doctype html>
       </div>
       <div class="runner-splitter" id="run-splitter" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
       <div class="runner-side">
-        <div id="run-history-slot"></div>
-        <div class="field">
-          <label for="run-params">Bound parameters <span class="type">JSON</span></label>
-          <textarea id="run-params" spellcheck="false" placeholder='{"id": 1}'></textarea>
-          <div class="refs" id="run-refs"></div>
+        <div class="side-tabs" role="tablist">
+          <button type="button" class="side-tab" data-side-tab="recent" role="tab" aria-selected="false">Recent</button>
+          <button type="button" class="side-tab" data-side-tab="settings" role="tab" aria-selected="false">Settings</button>
+          <button type="button" class="side-tab" data-side-tab="schema" role="tab" aria-selected="false">Schema</button>
         </div>
-        <div class="grid2">
-          <div class="field"><label for="run-page">Page</label><input id="run-page" type="number" min="1" value="1"></div>
-          <div class="field"><label for="run-page-size">Page size</label><input id="run-page-size" type="number" min="1" value="10"></div>
+        <div class="side-tab-panel" data-side-panel="recent" hidden>
+          <div id="run-history-slot"></div>
         </div>
-        <div class="field"><label for="run-timeout">Timeout <span class="type">seconds, optional</span></label><input id="run-timeout" type="number" min="0" step="any" placeholder="server default"></div>
-        <div id="run-schema-slot"></div>
+        <div class="side-tab-panel" data-side-panel="settings" hidden>
+          <div class="field">
+            <label for="run-params">Bound parameters <span class="type">JSON</span></label>
+            <textarea id="run-params" spellcheck="false" placeholder='{"id": 1}'></textarea>
+            <div class="refs" id="run-refs"></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label for="run-page">Page</label><input id="run-page" type="number" min="1" value="1"></div>
+            <div class="field"><label for="run-page-size">Page size</label><input id="run-page-size" type="number" min="1" value="10"></div>
+          </div>
+          <div class="field"><label for="run-timeout">Timeout <span class="type">seconds, optional</span></label><input id="run-timeout" type="number" min="0" step="any" placeholder="server default"></div>
+        </div>
+        <div class="side-tab-panel" data-side-panel="schema" hidden>
+          <div id="run-schema-slot"></div>
+        </div>
       </div>
     </form>
     <div class="panel results" id="run-results-panel">
@@ -1271,9 +1287,8 @@ function finishSchemaFetch(key, onDone) {
  * user took. */
 /** `setDatabase()` lets a caller with its own "browse a different database on this server" picker (Run SQL's
  * own Database dropdown) point this same tree at that database instead of the connection's configured
- * default - the exact schema-cache key loadSchema() and paintRunTable() already use, so the tree, the flat
- * Table dropdown and the access map's table filter all agree on the same fetch and never disagree with
- * each other about what's in a given database. */
+ * default - the exact schema-cache key loadSchema() and the access map's table filter also use, so they
+ * all agree on the same fetch and never disagree with each other about what's in a given database. */
 function schemaBrowser(insertFn, previewFn) {
   var box = h('div', { className: 'schema-browser' });
   var current = null, currentDb = null;
@@ -1649,9 +1664,8 @@ function paintRunConnection() {
   runSchema.setConnection(select.value || '');
   paintRunDatabase();
 }
-// ---- Run SQL's own "browse a different database on this same server" picker, and the table dropdown that
-// follows it - separate from the tree-based schema browser above, which always shows the connection's own
-// configured database and is unaffected by either of these. ----
+// ---- Run SQL's own "browse a different database on this same server" picker - separate from the tree-based
+// schema browser above, which always shows the connection's own configured database and is unaffected by it. ----
 var dbListCache = {}; // connection name -> {status: 'loading'|'ready'|'error', databases, message}
 async function loadDatabases(name, onDone) {
   dbListCache[name] = { status: 'loading' };
@@ -1669,14 +1683,14 @@ function paintRunDatabase() {
   clear(sel);
   if (!connName || !connectionsCache[connName]) {
     sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true;
-    runSchema.setDatabase(null); paintRunTable(); return;
+    runSchema.setDatabase(null); return;
   }
   var c = connectionsCache[connName];
   if (c.db !== 'mysql' && c.db !== 'postgres' && c.db !== 'clickhouse') {
     // Nothing to switch to - sqlite/duckdb are a single file, h2/jdbc have no supported "list databases" query.
     sel.disabled = true;
     sel.appendChild(h('option', { value: c.database || '', text: c.database || '(default)' }));
-    runSchema.setDatabase(null); paintRunTable(); return;
+    runSchema.setDatabase(null); return;
   }
   var entry = dbListCache[connName];
   if (!entry) { loadDatabases(connName, function () { if ($('run-connection').value === connName) paintRunDatabase(); }); entry = { status: 'loading' }; }
@@ -1685,49 +1699,12 @@ function paintRunDatabase() {
   sel.disabled = false;
   entry.databases.forEach(function (name) { sel.appendChild(h('option', { value: name, text: name })); });
   if (entry.databases.indexOf(c.database) !== -1) sel.value = c.database;
-  // The tree gets an override only when it actually differs from the connection's own default - same rule
-  // paintRunTable() applies, so both always agree on exactly which fetch to make.
+  // The tree gets an override only when it actually differs from the connection's own default.
   runSchema.setDatabase(sel.value !== c.database ? sel.value : null);
-  paintRunTable();
-}
-function paintRunTable() {
-  var sel = $('run-table');
-  var connName = $('run-connection').value;
-  var c = connectionsCache[connName];
-  // Only an actual override for a dialect that supports switching - otherwise this is exactly the
-  // connection's own already-configured database, and passing it anyway would hit the same "switching
-  // isn't supported" error the tree-based schema browser (which never passes one) correctly never sees.
-  var switchable = c && (c.db === 'mysql' || c.db === 'postgres' || c.db === 'clickhouse');
-  var database = switchable ? $('run-database').value : null;
-  clear(sel);
-  if (!connName) { sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true; return; }
-  var key = database ? connName + '::' + database : connName;
-  var entry = schemaCache[key];
-  if (!entry || entry.status === 'loading') {
-    loadSchema(connName, function () {
-      // For a non-switchable dialect `database` is always null, which a <select>'s own .value never is - so
-      // only compare it when it actually applies, or this callback's guard would never pass and the
-      // "Loading tables…" placeholder would never resolve for sqlite/duckdb/h2/jdbc.
-      var stillCurrent = $('run-connection').value === connName && (!switchable || $('run-database').value === database);
-      if (stillCurrent) paintRunTable();
-    }, database);
-    entry = { status: 'loading' };
-  }
-  if (entry.status === 'loading') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Loading tables…' })); return; }
-  if (entry.status === 'error') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Unavailable' })); return; }
-  sel.disabled = false;
-  sel.appendChild(h('option', { value: '', text: entry.tables.length + (entry.tables.length === 1 ? ' table' : ' tables') }));
-  entry.tables.forEach(function (t) { sel.appendChild(h('option', { value: t.name, text: t.name })); });
 }
 $('run-database').onchange = function () {
   var connName = $('run-connection').value, c = connectionsCache[connName];
   runSchema.setDatabase(c && $('run-database').value !== c.database ? $('run-database').value : null);
-  paintRunTable();
-};
-$('run-table').onchange = function () {
-  var t = $('run-table').value;
-  if (t) insertAtCursor($('run-sql'), t);
-  $('run-table').value = ''; // reset to the placeholder so the same table (or another) can be inserted again
 };
 function populateConnectionSelect() {
   paintRunConnType();
@@ -3884,6 +3861,28 @@ function paintRunRefs(sql) {
 }
 bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
 
+// ---- Run SQL: sidebar tabs (Recent queries / Query settings) ----
+(function () {
+  var SIDE_TAB_KEY = 'queryapigate-ui-run-side-tab';
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.side-tabs .side-tab'));
+  var panels = {};
+  document.querySelectorAll('.side-tab-panel').forEach(function (p) { panels[p.dataset.sidePanel] = p; });
+  function selectSideTab(name) {
+    if (!panels[name]) return;
+    tabs.forEach(function (t) {
+      var on = t.dataset.sideTab === name;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== name; });
+    try { localStorage.setItem(SIDE_TAB_KEY, name); } catch (e) {}
+  }
+  tabs.forEach(function (t) { t.onclick = function () { selectSideTab(t.dataset.sideTab); }; });
+  var saved = null;
+  try { saved = localStorage.getItem(SIDE_TAB_KEY); } catch (e) {}
+  selectSideTab(saved && panels[saved] ? saved : 'recent');
+})();
+
 // ---- Run SQL: draggable splitter between the editor and the sidebar (recent queries, params, schema) ----
 (function () {
   var RUNNER_SIDE_W_KEY = 'queryapigate-ui-runner-side-w';
@@ -4003,8 +4002,7 @@ function recordRunHistory() {
 function renderRunHistory() {
   var box = clear($('run-history-slot'));
   var list = loadRunHistory();
-  if (!list.length) return;
-  box.appendChild(h('div', { className: 'sub-h', text: 'Recent queries' }));
+  if (!list.length) { box.appendChild(h('div', { className: 'hint', text: 'Queries you run will show up here.' })); return; }
   box.appendChild(h('div', { className: 'history-list' }, list.map(function (entry) {
     return h('button', { type: 'button', className: 'history-item', title: entry.sql, onclick: function () {
       $('run-sql').value = entry.sql;
