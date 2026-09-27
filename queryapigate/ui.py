@@ -4123,6 +4123,24 @@ function buildSqlSelect(table) {
   if (table.columns.length) sql += '\nORDER BY ' + table.columns[0].name;
   return sql + '\nLIMIT 100';
 }
+/** Grows `textarea`'s editor box (its parent .editor/.editor.boxed - both make the textarea's own height
+ * meaningless, see the "hand-rolled highlighting" CSS comment, so it's the box, not the textarea, that has
+ * to change) tall enough to show every line of the current value without needing to drag-resize it first -
+ * never shrinks (a later shorter query just leaves spare room, same as picking a smaller browser window
+ * wouldn't retroactively shrink a manually-resized box), and caps at 60% of the viewport so one huge query
+ * cannot push the rest of the page off-screen; still hand-resizable past that with the box's own drag handle
+ * either way. */
+function fitEditorToContent(textarea) {
+  var editorEl = textarea.parentElement;
+  var lines = (textarea.value.match(/\n/g) || []).length + 1;
+  var cs = getComputedStyle(textarea);
+  var lineHeight = parseFloat(cs.lineHeight) || 18;
+  var padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  var needed = Math.ceil(lines * lineHeight + padY) + 2; // a couple of px of slack so the last line never clips
+  var current = editorEl.getBoundingClientRect().height;
+  var maxAllowed = Math.max(needed, Math.round(window.innerHeight * 0.6));
+  editorEl.style.height = Math.min(Math.max(needed, current), maxAllowed) + 'px';
+}
 /** The schema browser's "select" icon: writes a starter query for `table` into `textarea` - a full SELECT
  * (SQL) or an equivalent find() document (mongo: filter is already "every field", so there is nothing to
  * list there the way SQL's SELECT does; sort is mongo's ORDER BY - "limit" is left out on purpose, since
@@ -4134,6 +4152,7 @@ function applySelectQuery(textarea, connectionName, table) {
   textarea.value = isMongo ? JSON.stringify({ collection: table.name, filter: {}, sort: { _id: 1 } }, null, 2)
                             : buildSqlSelect(table);
   if (textarea.repaint) textarea.repaint();
+  fitEditorToContent(textarea);
 }
 /** Jump to the Run SQL tab pre-filled with a preview of one table - from either schema browser. */
 function previewTable(connectionName, tableName) {
