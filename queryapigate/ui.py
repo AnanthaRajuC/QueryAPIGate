@@ -2315,12 +2315,15 @@ function queryStats(f) {
 /** A read-only popup (the existing drawer, repurposed) with everything queryStats() knows about one saved
  * query, plus a per-version breakdown - the "tell me more about this one query" the access map's info icon
  * opens, so the matrix itself doesn't need three more columns per query to answer it. */
-function openQueryInfo(f) {
+var queryInfoToken = 0; // bumped on every open, so a slow getContent() from a previous popup can never paint over a newer one
+async function openQueryInfo(f) {
+  var token = ++queryInfoToken;
   var stats = queryStats(f);
   var latest = stats.latest;
   var conn = connectionsCache[stats.connectionName];
   var slot = openDrawer('query-info-slot', f.filename, (f.collection || 'uncollected') + ' · ' +
     f.versions.length + (f.versions.length === 1 ? ' version' : ' versions'));
+  var sqlBox = h('div', {}, loadingNode('Loading SQL…'));
   slot.appendChild(h('div', { className: 'form' },
     latest.description ? h('p', { className: 'd-desc', text: latest.description }) : null,
     h('dl', { className: 'meta' },
@@ -2333,6 +2336,8 @@ function openQueryInfo(f) {
       metaItem('last modified', stats.modified || '—'),
       metaItem('last used', stats.lastUsed || 'never'),
       (latest.tags || []).length ? metaItem('tags', latest.tags.join(', ')) : null),
+    h('p', { className: 'sub-h', style: 'margin-top:6px', text: 'SQL · v' + latest.version + (f.versions.length > 1 ? ' (latest)' : '') }),
+    sqlBox,
     h('p', { className: 'sub-h', style: 'margin-top:6px', text: 'Versions' }),
     h('div', { className: 'panel', style: 'overflow:auto' }, h('table', { className: 'grid qi-versions' },
       h('thead', {}, h('tr', {}, ['Version', 'Created', 'Last modified', 'Runs'].map(function (t) { return h('th', { text: t }); }))),
@@ -2350,6 +2355,15 @@ function openQueryInfo(f) {
         selected.name = f.filename; selected.version = latest.version; selected.tab = 'run';
         renderQueryList(); renderDetail();
       } }))));
+  var c = await getContent(f.filename);
+  if (token !== queryInfoToken) return; // the popup moved on (or closed) while this was in flight
+  clear(sqlBox);
+  if (!c) { sqlBox.appendChild(h('div', { className: 'hint', text: 'Could not load the SQL.' })); return; }
+  var data = c.parsed && c.parsed[String(latest.version)];
+  var sql = data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : c.raw;
+  sqlBox.appendChild(codeBox(sql));
+  sqlBox.appendChild(h('div', { style: 'margin-top:6px' },
+    h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(sql); } })));
 }
 /** true once a key's expires_at date has passed - the same check renderApiKeys() makes, factored out so the
  * access map can grey out an expired key exactly like the API keys screen does. */
