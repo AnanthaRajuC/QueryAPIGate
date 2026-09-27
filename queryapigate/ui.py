@@ -496,6 +496,12 @@ UI_HTML = r"""<!doctype html>
   .amap-dot.conn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .amap-dot.role { background: var(--surface-3); color: var(--ink-2); }
   .legend .amap-dot { min-width: 16px; height: 16px; font-size: 9px; vertical-align: middle; }
+  .amap-q-row { display: flex; align-items: center; gap: 6px; }
+  .amap-q-row span { overflow: hidden; text-overflow: ellipsis; }
+  .amap-info { flex: none; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--ink-3); color: var(--ink-3);
+    font: 600 10px/1 var(--mono); background: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  .amap-info:hover { border-color: var(--accent); color: var(--accent); }
+  .qi-versions td.mono { font-size: 11.5px; }
   .legend { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 11.5px; }
   .legend .amap-dot { margin-left: 10px; }
 
@@ -753,6 +759,7 @@ UI_HTML = r"""<!doctype html>
     <div id="query-form-slot"></div>
     <div id="apikey-form-slot"></div>
     <div id="role-form-slot"></div>
+    <div id="query-info-slot"></div>
   </div>
 </aside>
 <div id="palette" hidden role="dialog" aria-label="Search">
@@ -1059,7 +1066,7 @@ $('key-bar').onsubmit = function (e) {
 
 // ---- drawer (hosts the connection and saved-query forms) ----
 function openDrawer(slotId, title, kicker) {
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
   $('drawer').classList.add('open');
@@ -1071,7 +1078,7 @@ function closeDrawer() {
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   $('drawer-backdrop').hidden = true;
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot'));
 }
 $('drawer-close').onclick = closeDrawer;
 $('drawer-backdrop').onclick = closeDrawer;
@@ -2286,6 +2293,64 @@ function accessBox(queryName, collection, connectionName) {
 }
 /** The Access map screen: every saved query against every API key, so "which keys can call which endpoints"
  * is answered at a glance instead of by opening each query or each key in turn. */
+/** Everything about a saved query that isn't already on screen in the Saved queries detail view: when it was
+ * first created (the earliest version, not just the one being looked at), when it was last changed, when it
+ * was last actually called (the newest execution_history entry across *every* version, not just the latest),
+ * and the dialect of the connection it runs on. Shared by the access map's info popup and, potentially, any
+ * other place that wants the same "everything about this query" summary. */
+function queryStats(f) {
+  var earliest = f.versions[0];
+  f.versions.forEach(function (v) { if ((v.created_at || '') < (earliest.created_at || '')) earliest = v; });
+  var latest = latestOf(f);
+  var lastUsed = null;
+  f.versions.forEach(function (v) {
+    (v.execution_history || []).forEach(function (run) {
+      if (run.executed_at && (!lastUsed || run.executed_at > lastUsed)) lastUsed = run.executed_at;
+    });
+  });
+  var conn = connectionsCache[latest.connection_name];
+  return { created: earliest.created_at || null, modified: latest.last_modified_at || latest.created_at || null,
+    lastUsed: lastUsed, dbType: conn ? conn.db : null, connectionName: latest.connection_name, latest: latest };
+}
+/** A read-only popup (the existing drawer, repurposed) with everything queryStats() knows about one saved
+ * query, plus a per-version breakdown - the "tell me more about this one query" the access map's info icon
+ * opens, so the matrix itself doesn't need three more columns per query to answer it. */
+function openQueryInfo(f) {
+  var stats = queryStats(f);
+  var latest = stats.latest;
+  var conn = connectionsCache[stats.connectionName];
+  var slot = openDrawer('query-info-slot', f.filename, (f.collection || 'uncollected') + ' · ' +
+    f.versions.length + (f.versions.length === 1 ? ' version' : ' versions'));
+  slot.appendChild(h('div', { className: 'form' },
+    latest.description ? h('p', { className: 'd-desc', text: latest.description }) : null,
+    h('dl', { className: 'meta' },
+      metaItem('connection', stats.connectionName || '—'),
+      h('div', {}, h('dt', { text: 'database' }), h('dd', {}, conn ? h('span', { className: 'tag', text: conn.db }) : h('span', { className: 'dim', text: '—' }))),
+      metaItem('collection', f.collection || '—'),
+      metaItem('status', latest.status || '—'),
+      metaItem('author', latest.author || '—'),
+      metaItem('created', stats.created || '—'),
+      metaItem('last modified', stats.modified || '—'),
+      metaItem('last used', stats.lastUsed || 'never'),
+      (latest.tags || []).length ? metaItem('tags', latest.tags.join(', ')) : null),
+    h('p', { className: 'sub-h', style: 'margin-top:6px', text: 'Versions' }),
+    h('div', { className: 'panel', style: 'overflow:auto' }, h('table', { className: 'grid qi-versions' },
+      h('thead', {}, h('tr', {}, ['Version', 'Created', 'Last modified', 'Runs'].map(function (t) { return h('th', { text: t }); }))),
+      h('tbody', {}, f.versions.slice().reverse().map(function (v) {
+        return h('tr', {}, h('td', { className: 'mono', text: 'v' + v.version }),
+          h('td', { className: 'mono dim', text: v.created_at || '—' }),
+          h('td', { className: 'mono dim', text: v.last_modified_at || '—' }),
+          h('td', { className: 'mono', style: 'text-align:right', text: String((v.execution_history || []).length) }));
+      })))),
+    h('div', { className: 'form-actions' },
+      h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer }),
+      h('button', { type: 'button', className: 'btn primary', text: 'Open in Saved queries', onclick: function () {
+        closeDrawer(); showTab('queries');
+        if (f.collection) collapsedGroups[f.collection] = false;
+        selected.name = f.filename; selected.version = latest.version; selected.tab = 'run';
+        renderQueryList(); renderDetail();
+      } }))));
+}
 /** true once a key's expires_at date has passed - the same check renderApiKeys() makes, factored out so the
  * access map can grey out an expired key exactly like the API keys screen does. */
 function isKeyExpired(k) {
@@ -2341,7 +2406,11 @@ function renderAccessMap() {
         h('span', { className: 'amap-dot' + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
     });
     return h('tr', {},
-      h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
+      h('td', { className: 'amap-query' },
+        h('div', { className: 'amap-q-row' }, h('span', { text: f.filename }),
+          h('button', { type: 'button', className: 'amap-info', title: 'Details for ' + f.filename, 'aria-label': 'Details for ' + f.filename,
+            onclick: function () { openQueryInfo(f); } }, 'i')),
+        f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
       h('td', { className: 'mono dim', text: l.connection_name || '—' }),
       cells,
       h('td', { className: 'num', text: rowReach ? String(rowReach) : '—' }));
