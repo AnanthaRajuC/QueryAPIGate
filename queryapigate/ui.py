@@ -203,6 +203,7 @@ UI_HTML = r"""<!doctype html>
   textarea { height: auto; padding: 8px 9px; font: 12.5px/1.5 var(--mono); resize: vertical; min-height: 84px; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   input:disabled { background: var(--surface-2); color: var(--ink-2); }
+  select:disabled { background: var(--surface-2); color: var(--ink-3); cursor: not-allowed; }
   input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); margin: 0; }
   input[type=number] { font-family: var(--mono); font-size: 12.5px; }
   input::placeholder, textarea::placeholder { color: var(--ink-3); }
@@ -688,6 +689,8 @@ UI_HTML = r"""<!doctype html>
       <div class="titles"><h1>Access map</h1><span class="sub">Which API keys can reach which saved queries - the whole point of collections and connection grants, in one place.
         <span class="legend"><span class="amap-dot">Q</span> named query &nbsp;<span class="amap-dot">C</span> collection &nbsp;<span class="amap-dot conn">W</span> whole connection</span></span></div>
       <span class="spacer"></span>
+      <select id="accessmap-conn-filter"><option value="">All connections</option></select>
+      <select id="accessmap-table-filter" disabled><option value="">Select a connection first</option></select>
       <select id="accessmap-db-filter"><option value="">All databases</option></select>
       <select id="accessmap-reach-filter">
         <option value="">Any reach</option>
@@ -2435,6 +2438,63 @@ function amapInfoCells(f) {
 // it; click again to reverse; a third click returns to the default collection/name order. `field` is one of
 // the scalar names ('query', 'database', ..., 'reach'), or 'col' for a specific key/role's own reach, in
 // which case colType ('key'|'role') and colName pick out which one. ----
+// ---- access map connection/table drill-down: pick a connection, see its actual tables (via the same
+// /connections/<name>/schema the Run SQL schema browser already uses), then pick one to find out which
+// saved queries - if any - already expose it. This is the "which tables are already exposed" discovery
+// tool: at tens or hundreds of endpoints, nobody can hold that in their head from the query list alone. ----
+var amapConnFilter = '';
+var amapTableFilter = '';
+var amapTableMatches = null; // null (no table filter), 'loading', or a Set of filenames that reference the table
+/** Rebuilds the Table select from schemaCache[amapConnFilter] - "pick a connection first", a loading state,
+ * an error state, or the real table list - fetching that connection's schema at most once (schemaBrowser()
+ * follows the same already-cached-unless-absent rule). */
+function amapPaintTableOptions() {
+  var sel = $('accessmap-table-filter');
+  clear(sel);
+  if (!amapConnFilter) { sel.appendChild(h('option', { value: '', text: 'Select a connection first' })); sel.disabled = true; return; }
+  var entry = schemaCache[amapConnFilter];
+  if (!entry) { loadSchema(amapConnFilter, function () { amapPaintTableOptions(); renderAccessMap(); }); entry = { status: 'loading' }; }
+  if (entry.status === 'loading') { sel.appendChild(h('option', { value: '', text: 'Loading tables…' })); sel.disabled = true; return; }
+  if (entry.status === 'error') { sel.appendChild(h('option', { value: '', text: 'Schema unavailable' })); sel.disabled = true; return; }
+  sel.disabled = false;
+  sel.appendChild(h('option', { value: '', text: 'All tables (' + entry.tables.length + ')' }));
+  entry.tables.forEach(function (t) { sel.appendChild(h('option', { value: t.name, text: t.name + ' · ' + t.columns.length + (t.columns.length === 1 ? ' col' : ' cols') })); });
+  sel.value = entry.tables.some(function (t) { return t.name === amapTableFilter; }) ? amapTableFilter : '';
+}
+/** Which of `connName`'s saved queries actually mention `tableName` in their (latest version's) SQL - a
+ * plain word-boundary text search, not real parsing, same trade-off as formatSql(). Scoped to one
+ * connection's queries, not every query on the server, so this stays cheap even with hundreds of endpoints
+ * overall. getContent() caches per file, so re-picking the same table later costs nothing further. */
+async function computeTableMatches(connName, tableName) {
+  var candidates = filesCache.filter(function (f) { return latestOf(f).connection_name === connName; });
+  var needle = new RegExp('\\b' + tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  var hits = await Promise.all(candidates.map(async function (f) {
+    var c = await getContent(f.filename);
+    if (!c) return null;
+    var latest = latestOf(f);
+    var data = c.parsed && c.parsed[String(latest.version)];
+    var sql = data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : c.raw;
+    return needle.test(sql) ? f.filename : null;
+  }));
+  return new Set(hits.filter(Boolean));
+}
+$('accessmap-conn-filter').onchange = function () {
+  amapConnFilter = this.value;
+  amapTableFilter = ''; amapTableMatches = null;
+  renderAccessMap();
+};
+$('accessmap-table-filter').onchange = function () {
+  amapTableFilter = this.value;
+  if (!amapTableFilter) { amapTableMatches = null; renderAccessMap(); return; }
+  amapTableMatches = 'loading';
+  var conn = amapConnFilter, table = amapTableFilter;
+  renderAccessMap();
+  computeTableMatches(conn, table).then(function (set) {
+    if (amapConnFilter !== conn || amapTableFilter !== table) return; // selection moved on while this was in flight
+    amapTableMatches = set;
+    renderAccessMap();
+  });
+};
 var amapSort = { field: null, colType: null, colName: null, dir: 1 };
 function amapSortLabel(field, colType, colName) {
   var on = amapSort.field === field && amapSort.colType === (colType || null) && amapSort.colName === (colName || null);
@@ -2509,6 +2569,15 @@ function renderAccessMap() {
   dbTypes.forEach(function (t) { dbSelect.appendChild(h('option', { value: t, text: t })); });
   if (dbTypes.indexOf(dbCurrent) !== -1) dbSelect.value = dbCurrent;
 
+  // Connection drill-down: every defined connection, whether or not a saved query uses it yet - listing an
+  // unused one is exactly how this screen surfaces "nothing exposes this database at all".
+  var connSelect = $('accessmap-conn-filter');
+  var connNamesAll = Object.keys(connectionsCache).sort();
+  clear(connSelect).appendChild(h('option', { value: '', text: 'All connections' }));
+  connNamesAll.forEach(function (name) { connSelect.appendChild(h('option', { value: name, text: name })); });
+  connSelect.value = connNamesAll.indexOf(amapConnFilter) !== -1 ? amapConnFilter : '';
+  amapPaintTableOptions();
+
   var keyNames = Object.keys(apiKeysCache).sort();
   var roleNames = Object.keys(rolesCache).sort();
   if (!keyNames.length && !roleNames.length) {
@@ -2529,7 +2598,28 @@ function renderAccessMap() {
   var rows = rowsMatch.length ? rowsMatch : (anyMatch ? allRows : []);
   var keyCols = keyColsMatch.length ? keyColsMatch : (anyMatch ? keyNames : []);
   var roleCols = roleColsMatch.length ? roleColsMatch : (anyMatch ? roleNames : []);
-  if (!rows.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
+
+  if (amapConnFilter) rows = rows.filter(function (f) { return latestOf(f).connection_name === amapConnFilter; });
+  // The table filter needs each candidate query's actual SQL, fetched (and cached) on demand - amapTableMatches
+  // is null until that finishes, and the sentinel string 'loading' while it's in flight.
+  if (amapTableFilter && amapTableMatches === 'loading') { box.appendChild(loadingNode('Checking which queries reference ' + amapTableFilter + '…')); return; }
+  if (amapTableFilter && amapTableMatches) rows = rows.filter(function (f) { return amapTableMatches.has(f.filename); });
+
+  if (!rows.length) {
+    var reason = q ? 'Nothing matches “' + q + '”.'
+      : amapTableFilter ? '“' + amapTableFilter + '” on ' + amapConnFilter + ' is not exposed by any saved query yet.'
+      : amapConnFilter ? 'No saved query uses “' + amapConnFilter + '” yet.'
+      : 'Nothing matches these filters.';
+    var empty = h('div', { className: 'empty' }, h('span', { text: reason }));
+    if (!q && amapConnFilter) {
+      empty.appendChild(h('button', { type: 'button', className: 'btn primary', text: 'New saved query' + (amapTableFilter ? ' on ' + amapTableFilter : ''), onclick: function () {
+        var conn = amapConnFilter, table = amapTableFilter;
+        showTab('queries');
+        openQueryForm(null, table ? { connection_name: conn, sql_query: 'SELECT * FROM ' + table } : { connection_name: conn });
+      } }));
+    }
+    box.appendChild(empty); return;
+  }
 
   // One record per row up front - {f, l, stats, reach} - so the Database and Reach filters and every sortable
   // column can all read off the same precomputed values instead of re-deriving them in three different places.
@@ -2889,6 +2979,8 @@ async function openQueryForm(baseName, baseVersion) {
     var d = c && c.parsed && c.parsed[String(baseVersion.version)];
     sql = (d && d.sql_query) || '';
     clear(slot);
+  } else if (prefill.sql_query) {
+    sql = prefill.sql_query; // e.g. a `SELECT * FROM <table>` starting point from the access map's "not yet exposed" prompt
   }
   function inp(id, value, ph, req) {
     return h('input', { id: id, value: value || '', placeholder: ph || null, required: req ? true : null, autocomplete: 'off', spellcheck: 'false' });
