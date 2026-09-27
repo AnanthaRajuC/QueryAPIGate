@@ -498,6 +498,9 @@ UI_HTML = r"""<!doctype html>
   .amap-dot.role.conn { background: color-mix(in oklab, var(--warn) 12%, var(--surface-3)); color: var(--warn); }
   table.amap th.amap-group { background: var(--bg); border-bottom: 1px solid var(--line); text-align: center; font: 600 10.5px var(--sans); letter-spacing: 0.06em; color: var(--ink-3); }
   table.amap th.amap-group.role { color: var(--ink-2); }
+  table.amap th.amap-sortable { cursor: pointer; user-select: none; }
+  table.amap th.amap-sortable:hover { color: var(--ink); }
+  table.amap th.amap-key-head.amap-sortable:hover .amap-key-name { color: var(--accent); }
   .legend .amap-dot { min-width: 16px; height: 16px; font-size: 9px; vertical-align: middle; }
   .amap-q-row { display: flex; align-items: center; gap: 6px; }
   .amap-q-row span { overflow: hidden; text-overflow: ellipsis; }
@@ -685,6 +688,12 @@ UI_HTML = r"""<!doctype html>
       <div class="titles"><h1>Access map</h1><span class="sub">Which API keys can reach which saved queries - the whole point of collections and connection grants, in one place.
         <span class="legend"><span class="amap-dot">Q</span> named query &nbsp;<span class="amap-dot">C</span> collection &nbsp;<span class="amap-dot conn">W</span> whole connection</span></span></div>
       <span class="spacer"></span>
+      <select id="accessmap-db-filter"><option value="">All databases</option></select>
+      <select id="accessmap-reach-filter">
+        <option value="">Any reach</option>
+        <option value="reachable">Reachable by a key</option>
+        <option value="unreachable">Reachable by no key</option>
+      </select>
       <input id="accessmap-filter" class="search" type="search" placeholder="Filter by query or key…">
     </div>
     <div id="accessmap-body" class="panel"><div class="loading"><span class="spin"></span>Loading…</div></div>
@@ -2408,6 +2417,7 @@ function isKeyExpired(k) {
 }
 var AMAP_CODE = { query: 'Q', collection: 'C', connection: 'W' };
 var AMAP_INFO_HEADERS = ['Database', 'Created', 'Last modified', 'Last used', 'Version'];
+var AMAP_INFO_FIELDS = ['database', 'created', 'modified', 'lastUsed', 'version']; // same order, for sortable headers
 /** The same five at-a-glance facts the info popup opens to show, as plain <td>s for the access map's rows -
  * so the common case (what dialect, how stale, which version) never needs a click to see. */
 function amapInfoCells(f) {
@@ -2421,13 +2431,55 @@ function amapInfoCells(f) {
     h('td', { className: 'mono', text: 'v' + stats.latest.version })
   ];
 }
+// ---- access map sorting: click any header (a scalar column or a specific key/role's own column) to sort by
+// it; click again to reverse; a third click returns to the default collection/name order. `field` is one of
+// the scalar names ('query', 'database', ..., 'reach'), or 'col' for a specific key/role's own reach, in
+// which case colType ('key'|'role') and colName pick out which one. ----
+var amapSort = { field: null, colType: null, colName: null, dir: 1 };
+function amapSortLabel(field, colType, colName) {
+  var on = amapSort.field === field && amapSort.colType === (colType || null) && amapSort.colName === (colName || null);
+  return on ? (amapSort.dir === 1 ? ' ▲' : ' ▼') : '';
+}
+function amapToggleSort(field, colType, colName) {
+  var same = amapSort.field === field && amapSort.colType === (colType || null) && amapSort.colName === (colName || null);
+  amapSort = same && amapSort.dir === 1 ? { field: field, colType: colType || null, colName: colName || null, dir: -1 }
+    : same ? { field: null, colType: null, colName: null, dir: 1 }
+    : { field: field, colType: colType || null, colName: colName || null, dir: 1 };
+  renderAccessMap();
+}
+/** The value one row sorts by, for whichever column was clicked - `item` is one of the {f, l, stats, reach}
+ * records renderAccessMap() builds per row. 'col' reads whether the given key or role reaches this row at
+ * all (0 or 1), so sorting a key's own column groups every query it can reach at one end. */
+function amapCompareValue(item, field, colType, colName) {
+  switch (field) {
+    case 'query': return item.f.filename.toLowerCase();
+    case 'database': return (item.stats.dbType || '').toLowerCase();
+    case 'created': return item.stats.created || '';
+    case 'modified': return item.stats.modified || '';
+    case 'lastUsed': return item.stats.lastUsed || '';
+    case 'version': return Number(item.stats.latest.version) || 0;
+    case 'connection': return (item.stats.connectionName || '').toLowerCase();
+    case 'reach': return item.reach;
+    case 'col':
+      var cache = colType === 'key' ? apiKeysCache : rolesCache;
+      return reachVia(cache[colName], item.f.filename, item.f.collection, item.l.connection_name).length ? 1 : 0;
+    default: return '';
+  }
+}
+/** A clickable, sortable header for one of the fixed scalar columns (Query, Database, ..., Reach). */
+function amapTh(label, className, field) {
+  return h('th', { className: className, onclick: function () { amapToggleSort(field, null, null); } }, label + amapSortLabel(field, null, null));
+}
 /** One column header, shared by an API key and a role - both have a name, connections/queries/collections
  * grants, allow_writes and rate_limit, so the same two-line header (name, then access + rate limit) fits
- * either. `revokedTitle` is set only for a key (roles have no active/expires_at state of their own). */
-function amapColHead(name, entry, revokedTitle) {
+ * either. `revokedTitle` is set only for a key (roles have no active/expires_at state of their own);
+ * `colType` ('key'|'role') is what sorting by this specific column records in amapSort. */
+function amapColHead(name, entry, revokedTitle, colType) {
   var sub = (entry.allow_writes ? 'Read/write' : 'Read-only') + ' · ' + (entry.rate_limit || 'server default');
-  return h('th', { className: 'amap-key-head' + (revokedTitle ? ' revoked' : ''), title: revokedTitle ? name + revokedTitle : name },
-    h('span', { className: 'amap-key-name' }, name, revokedTitle ? h('span', { className: 'dim', text: revokedTitle }) : null),
+  return h('th', { className: 'amap-key-head amap-sortable' + (revokedTitle ? ' revoked' : ''),
+    title: revokedTitle ? name + revokedTitle : name, onclick: function () { amapToggleSort('col', colType, name); } },
+    h('span', { className: 'amap-key-name' }, name, amapSortLabel('col', colType, name),
+      revokedTitle ? h('span', { className: 'dim', text: revokedTitle }) : null),
     h('span', { className: 'amap-key-sub', text: sub }));
 }
 /** One reach cell - a key's and a role's are identical apart from the `role` modifier class, which mutes
@@ -2445,6 +2497,18 @@ function amapCell(entry, f, l, roleClass) {
 function renderAccessMap() {
   var box = clear($('accessmap-body'));
   if (!filesCache.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }))); return; }
+
+  // The Database filter's own options are rebuilt every render (which dialects exist can change), keeping
+  // whatever was already picked if it is still one of them.
+  var dbSelect = $('accessmap-db-filter');
+  var dbCurrent = dbSelect.value;
+  var dbTypes = Array.from(new Set(filesCache.map(function (f) {
+    var conn = connectionsCache[latestOf(f).connection_name]; return conn ? conn.db : null;
+  }).filter(Boolean))).sort();
+  clear(dbSelect).appendChild(h('option', { value: '', text: 'All databases' }));
+  dbTypes.forEach(function (t) { dbSelect.appendChild(h('option', { value: t, text: t })); });
+  if (dbTypes.indexOf(dbCurrent) !== -1) dbSelect.value = dbCurrent;
+
   var keyNames = Object.keys(apiKeysCache).sort();
   var roleNames = Object.keys(rolesCache).sort();
   if (!keyNames.length && !roleNames.length) {
@@ -2467,6 +2531,30 @@ function renderAccessMap() {
   var roleCols = roleColsMatch.length ? roleColsMatch : (anyMatch ? roleNames : []);
   if (!rows.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
 
+  // One record per row up front - {f, l, stats, reach} - so the Database and Reach filters and every sortable
+  // column can all read off the same precomputed values instead of re-deriving them in three different places.
+  var dbFilter = dbSelect.value;
+  var reachFilter = $('accessmap-reach-filter').value;
+  var enriched = rows.map(function (f) {
+    var l = latestOf(f);
+    var stats = queryStats(f);
+    var reach = keyCols.reduce(function (n, name) {
+      return n + (reachVia(apiKeysCache[name], f.filename, f.collection, l.connection_name).length ? 1 : 0);
+    }, 0);
+    return { f: f, l: l, stats: stats, reach: reach };
+  });
+  if (dbFilter) enriched = enriched.filter(function (item) { return item.stats.dbType === dbFilter; });
+  if (reachFilter === 'reachable') enriched = enriched.filter(function (item) { return item.reach > 0; });
+  else if (reachFilter === 'unreachable') enriched = enriched.filter(function (item) { return item.reach === 0; });
+  if (amapSort.field) {
+    enriched.sort(function (a, b) {
+      var va = amapCompareValue(a, amapSort.field, amapSort.colType, amapSort.colName);
+      var vb = amapCompareValue(b, amapSort.field, amapSort.colType, amapSort.colName);
+      return va < vb ? -amapSort.dir : va > vb ? amapSort.dir : 0;
+    });
+  }
+  if (!enriched.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No queries match these filters.' }))); return; }
+
   var leadCols = 2 + AMAP_INFO_HEADERS.length; // Query + Connection + the five at-a-glance columns
   var groupRow = h('tr', {},
     h('th', { colSpan: leadCols }),
@@ -2475,24 +2563,23 @@ function renderAccessMap() {
       title: 'What a key created from each role would reach - a role grants nothing on its own', text: 'ROLES' }) : null,
     h('th'));
   var thead = h('thead', {}, groupRow, h('tr', {},
-    h('th', { className: 'amap-query', text: 'Query' }),
-    AMAP_INFO_HEADERS.map(function (t) { return h('th', { text: t }); }),
-    h('th', { text: 'Connection' }),
+    amapTh('Query', 'amap-query amap-sortable', 'query'),
+    AMAP_INFO_FIELDS.map(function (field, i) { return amapTh(AMAP_INFO_HEADERS[i], 'amap-sortable', field); }),
+    amapTh('Connection', 'amap-sortable', 'connection'),
     keyCols.map(function (name) {
       var k = apiKeysCache[name], expired = isKeyExpired(k);
-      return amapColHead(name, k, !k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '');
+      return amapColHead(name, k, !k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '', 'key');
     }),
-    roleCols.map(function (name) { return amapColHead(name, rolesCache[name], ''); }),
-    h('th', { className: 'num', text: 'Reach' })));
+    roleCols.map(function (name) { return amapColHead(name, rolesCache[name], '', 'role'); }),
+    amapTh('Reach', 'num amap-sortable', 'reach')));
 
   var keyTotals = {}; keyCols.forEach(function (name) { keyTotals[name] = 0; });
   var roleTotals = {}; roleCols.forEach(function (name) { roleTotals[name] = 0; });
-  var tbody = h('tbody', {}, rows.map(function (f) {
-    var l = latestOf(f);
-    var rowReach = 0;
+  var tbody = h('tbody', {}, enriched.map(function (item) {
+    var f = item.f, l = item.l;
     var keyCells = keyCols.map(function (name) {
       var cell = amapCell(apiKeysCache[name], f, l, false);
-      if (cell.reached) { rowReach++; keyTotals[name]++; }
+      if (cell.reached) keyTotals[name]++;
       return cell.node;
     });
     var roleCells = roleCols.map(function (name) {
@@ -2509,19 +2596,21 @@ function renderAccessMap() {
       amapInfoCells(f),
       h('td', { className: 'mono dim', text: l.connection_name || '—' }),
       keyCells, roleCells,
-      h('td', { className: 'num', title: 'Reachable by an actual API key (roles alone reach nothing)', text: rowReach ? String(rowReach) : '—' }));
+      h('td', { className: 'num', title: 'Reachable by an actual API key (roles alone reach nothing)', text: item.reach ? String(item.reach) : '—' }));
   }));
 
   var tfoot = h('tfoot', {}, h('tr', {},
     h('td', { className: 'amap-query', text: 'Reaches' }),
     AMAP_INFO_HEADERS.map(function () { return h('td'); }), h('td'),
-    keyCols.map(function (name) { return h('td', { className: 'num', text: keyTotals[name] + ' / ' + rows.length }); }),
-    roleCols.map(function (name) { return h('td', { className: 'num', text: roleTotals[name] + ' / ' + rows.length }); }),
+    keyCols.map(function (name) { return h('td', { className: 'num', text: keyTotals[name] + ' / ' + enriched.length }); }),
+    roleCols.map(function (name) { return h('td', { className: 'num', text: roleTotals[name] + ' / ' + enriched.length }); }),
     h('td')));
 
   box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody, tfoot)));
 }
 $('accessmap-filter').oninput = renderAccessMap;
+$('accessmap-db-filter').onchange = renderAccessMap;
+$('accessmap-reach-filter').onchange = renderAccessMap;
 
 
 function renderDetail() {
