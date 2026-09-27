@@ -114,7 +114,11 @@ def build_spec(version, saved_queries=None):
                 'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
                 'requestBody': _body({'sql': {'type': 'string'}, 'connection_name': {'type': 'string'},
                                       'params': {'type': 'object',
-                                                 'description': 'Values for :name bound parameters.'}},
+                                                 'description': 'Values for :name bound parameters.'},
+                                      'database': {'type': 'string', 'description':
+                                          'Run against a different database on the same server than this '
+                                          "connection's own configured one (admin only - 403 for a scoped "
+                                          'key, even one already granted this connection).'}},
                                      ['sql', 'connection_name']),
                 'responses': {'200': _ROWS, **_ERRORS}}},
             '/q/{name}': {
@@ -254,13 +258,31 @@ def build_spec(version, saved_queries=None):
                     'jar': {'type': 'string'}, 'driver_class': {'type': 'string'}, 'jdbc_url': {'type': 'string'}},
                     ['db']),
                 'responses': {'200': {'description': 'Connected'}, **_ERRORS}}},
+            '/connections/databases': {'post': {
+                'summary': "List every database on a connection's server (admin only)", 'tags': ['Connections'],
+                'description': "Give 'name' alone for an already-saved connection - Run SQL's own database "
+                    "picker. Give the connection's own fields, as POST /connections/test does, to probe one "
+                    "that isn't saved yet - the New/Edit connection form's 'Default database' dropdown - or "
+                    "to try changed fields before saving them. Only supported for mysql, postgres and "
+                    "clickhouse connections; sqlite and duckdb are a single file, and h2/jdbc have no one "
+                    "catalogue query that works across every database reachable that way.",
+                'requestBody': _body({
+                    'name': {'type': 'string', 'description': 'An already-saved connection to list databases for.'},
+                    'db': {'type': 'string', 'enum': list(config.SUPPORTED_DB_TYPES)},
+                    'host': {'type': 'string'}, 'port': {'type': 'integer'},
+                    'user': {'type': 'string'}, 'password': {'type': 'string'}, 'database': {'type': 'string'}}, []),
+                'responses': {'200': {'description': 'Database names'}, **_ERRORS}}},
             '/connections/{name}': {'delete': {
                 'summary': 'Delete a connection', 'tags': ['Connections'],
                 'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
                 'responses': {'200': {'description': 'Deleted'}, **_ERRORS}}},
             '/connections/{name}/schema': {'get': {
                 'summary': "List a connection's tables/views and their columns", 'tags': ['Connections'],
-                'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
+                'description': "'database' browses a different database on the same server than the "
+                    "connection's own configured one (admin only; a scoped key gets 403 on it, even one "
+                    "granted this connection) - Run SQL's own database picker, not a new grant.",
+                'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}},
+                               {'name': 'database', 'in': 'query', 'required': False, 'schema': {'type': 'string'}}],
                 'responses': {'200': {'description': 'Tables and columns', 'content': {'application/json': {
                     'schema': {'type': 'object', 'properties': {
                         'tables': {'type': 'array', 'items': {'type': 'object', 'properties': {

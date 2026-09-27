@@ -23,7 +23,7 @@ def _sql_hash(sql):
 
 
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
-                allowed_write_ops=None):
+                allowed_write_ops=None, database=None):
     """Run ``sql`` on a named connection and return the requested page as a ResultSetDTO.
 
     ``allow_writes`` is the caller's own permission (e.g. a scoped API key); the connection is only ever
@@ -31,8 +31,13 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     server's setting, never widen it. ``key_name`` is only for the query counter in ``/metrics`` (audit: which
     key touched which connection); it plays no part in what the query is allowed to do. ``allowed_write_ops``
     is a key's own narrower allow-list of write keywords, if it has one - see ``sqltools.validate_sql()``.
+    ``database`` overrides the connection's own configured database for just this call - Run SQL's "browse a
+    different database on this same server" picker (see schema.fetch_schema()); a stored, scoped API key can
+    never send this itself (there is no request field for it), only the admin UI's own ad-hoc calls do.
     """
     details = store.get_connection(connection_name)
+    if database:
+        details = {**details, 'database': database}
     effective_allow_writes = config.allow_writes() and allow_writes
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,
                        allowed_write_ops=allowed_write_ops)
@@ -95,6 +100,43 @@ def _redact_password(message, password):
     """A driver's own error text sometimes echoes back the connection string it tried - never let that hand
     a real password back to whoever is testing the connection."""
     return message.replace(str(password), '********') if password else message
+
+
+# Every database on the server, for a dialect that actually has more than one - sqlite and duckdb are a
+# single file (there is no "other database" on the same server to list), and h2 and jdbc have no one
+# catalogue query that works for every database reachable that way, so listing there is a clear, named-dialect
+# ApiError rather than a best-effort guess. schema.list_databases() re-exposes this same dict for an
+# already-saved connection, so the two paths can never drift apart on which dialects are supported.
+LIST_DATABASES_QUERIES = {
+    'mysql': 'SELECT schema_name AS name FROM information_schema.schemata ORDER BY schema_name',
+    'postgres': 'SELECT datname AS name FROM pg_database WHERE NOT datistemplate ORDER BY datname',
+    'clickhouse': 'SELECT name FROM system.databases ORDER BY name',
+}
+# PostgreSQL has no server-wide connection, only a connection to one specific database - so listing every
+# *other* database first needs some database that (almost) always exists to connect to. MySQL and ClickHouse
+# have no such requirement; they are omitted here on purpose.
+_LIST_DATABASES_BOOTSTRAP = {'postgres': 'postgres'}
+
+
+def list_databases(details):
+    """Every database on the server ``details`` points at - the New/Edit connection form's "Default database"
+    dropdown (before the connection is even saved, so there is no name to look up yet) and, for an
+    already-saved connection, Run SQL's own "browse a different database on this server" picker (via
+    schema.list_databases()). Bypasses execute_sql like test_connection() does, for the same reason: this is
+    metadata about the server, not a governed query against one specific, already-chosen database."""
+    dialect = details.get('db')
+    query = LIST_DATABASES_QUERIES.get(dialect)
+    if not query:
+        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections")
+    probe = details if details.get('database') else {**details, 'database': _LIST_DATABASES_BOOTSTRAP.get(dialect, '')}
+    try:
+        _columns, rows = RUNNERS[dialect](probe, query, None, 1000, 0, True, config.CONNECT_TIMEOUT, get_pool())
+    except ImportError as error:
+        raise ApiError(f"The driver for '{dialect}' is not installed", 500, detail=str(error)) from error
+    except Exception as error:
+        detail = _redact_password(str(error), details.get('password'))
+        raise ApiError('Could not list databases', 502, detail=detail) from error
+    return [row[0] for row in rows]
 
 
 def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-'):

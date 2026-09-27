@@ -411,6 +411,12 @@ def execute_sql_endpoint():
     if not data.get('connection_name'):
         raise ApiError('Connection name is missing')
     require_connection(data['connection_name'])
+    database = data.get('database')
+    if database and not g.permission.admin:
+        # Every other scoped-key boundary is per connection, never per database within one - a key granted a
+        # connection may run any SQL that connection's own configured database allows, but not redirect that
+        # same connection at a sibling database on the same server the admin never listed it for.
+        raise ApiError('Only the admin key may run a query against a different database on this connection', 403)
     params = get_object(data.get('params'), 'params')
     output_format = get_output_format(data)
     timeout = get_timeout(data)
@@ -420,7 +426,7 @@ def execute_sql_endpoint():
     limit, offset, page = get_pagination()
     result = engine.execute_sql(data['sql'], data['connection_name'], limit, offset, params, timeout,
                                 allow_writes=g.permission.allow_writes, key_name=caller_key_name(),
-                                allowed_write_ops=g.permission.allowed_write_ops)
+                                allowed_write_ops=g.permission.allowed_write_ops, database=database)
     return render(result, output_format, page, limit)
 
 
@@ -722,6 +728,29 @@ def update_connections():
     return jsonify({'message': 'Connections updated successfully'}), 200
 
 
+@bp.route('/connections/databases', methods=['POST'])
+def list_databases_route():
+    """Every database on the server a connection points at - saved, or not yet saved. Give 'name' alone for
+    an already-saved connection (Run SQL's database picker); give the connection's own fields (as
+    /connections/test does) to probe one that isn't saved yet - the New/Edit connection form's 'Default
+    database' dropdown - or to try changed fields before saving them. Admin only, like every other endpoint
+    that reveals the server's own configuration or reaches into a connection's server ahead of a real query."""
+    require_admin()
+    body = get_json_body()
+    if not isinstance(body, dict):
+        raise ApiError('Connection fields are missing')
+    if body.get('name') and not body.get('db'):
+        databases = schema.list_databases(body['name'])
+    else:
+        if body.get('db') not in config.SUPPORTED_DB_TYPES:
+            raise ApiError(f"'db' must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}")
+        if body.get('password') == config.PASSWORD_MASK:
+            existing = store.read_connections().get(body.get('name') or '', {})
+            body = {**body, 'password': existing.get('password', '')}
+        databases = engine.list_databases(store.resolve_ad_hoc(body))
+    return jsonify({'databases': databases}), 200
+
+
 @bp.route('/connections/test', methods=['POST'])
 def test_connection_route():
     """Try to connect with the given fields - not a saved connection's name, the fields themselves, exactly
@@ -753,7 +782,10 @@ def delete_connection(name):
 @bp.route('/connections/<name>/schema', methods=['GET'])
 def connection_schema(name):
     require_connection(name)
-    return jsonify(schema.fetch_schema(name)), 200
+    database = request.args.get('database') or None
+    if database and not g.permission.admin:
+        raise ApiError('Only the admin key may browse a different database on this connection', 403)
+    return jsonify(schema.fetch_schema(name, database=database)), 200
 
 
 # --------------------------------------------------------------------------------------

@@ -330,6 +330,95 @@ class TestConnectionTests(ApiTestCase):
         self.assertEqual(res.status_code, 403)
 
 
+class ListDatabasesTests(ApiTestCase):
+    def test_ad_hoc_mysql_lists_databases(self):
+        cursor = mock.MagicMock()
+        cursor.description = [('name',)]
+        cursor.fetchall.return_value = [('orders',), ('billing',)]
+        conn = mock.MagicMock()
+        conn.cursor.return_value = cursor
+        with mock.patch('mysql.connector.connect', return_value=conn):
+            res = self.client.post('/connections/databases',
+                                   json={'db': 'mysql', 'host': 'h', 'user': 'u', 'password': 'p'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['databases'], ['orders', 'billing'])
+
+    def test_ad_hoc_postgres_bootstraps_with_the_postgres_database_when_none_is_given_yet(self):
+        cursor = mock.MagicMock()
+        cursor.description = [('name',)]
+        cursor.fetchall.return_value = [('warehouse',)]
+        conn = mock.MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with mock.patch('psycopg2.connect', return_value=conn) as connect:
+            res = self.client.post('/connections/databases', json={'db': 'postgres', 'host': 'h', 'user': 'u'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(connect.call_args.kwargs['dbname'], 'postgres')
+        self.assertEqual(res.get_json()['databases'], ['warehouse'])
+
+    def test_named_saved_connection_uses_its_own_database_to_connect(self):
+        cursor = mock.MagicMock()
+        cursor.description = [('name',)]
+        cursor.fetchall.return_value = [('d',)]
+        conn = mock.MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with mock.patch('psycopg2.connect', return_value=conn) as connect:
+            res = self.client.post('/connections/databases', json={'name': 'pg'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(connect.call_args.kwargs['dbname'], 'd')  # 'pg' is already configured with database 'd'
+        self.assertEqual(res.get_json()['databases'], ['d'])
+
+    def test_unsupported_dialect_is_a_clear_error_not_a_guess(self):
+        res = self.client.post('/connections/databases', json={'db': 'sqlite', 'database': self.db_path})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('sqlite', res.get_json()['error'])
+
+    def test_password_is_never_leaked_on_failure(self):
+        res = self.client.post('/connections/databases',
+                               json={'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret'})
+        self.assertEqual(res.status_code, 502)
+        self.assertNotIn('secret', res.get_data(as_text=True))
+
+    def test_requires_the_admin_key(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        self.assertEqual(self.client.post('/connections/databases', json={'name': 'pg'}).status_code, 401)
+
+
+class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
+    def test_admin_can_run_against_a_different_database_on_the_same_connection(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        recorder = mock.MagicMock(return_value=(['x'], [(1,)]))
+        with mock.patch.dict(engine.RUNNERS, {'sqlite': recorder}):
+            res = self.client.post('/execute_sql', json={
+                'sql': 'SELECT 1', 'connection_name': 'lite', 'database': 'other.db'},
+                headers={'X-API-Key': 'admin-key'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(recorder.call_args.args[0]['database'], 'other.db')
+
+    def test_a_scoped_key_cannot_choose_a_different_database(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        admin = {'X-API-Key': 'admin-key'}
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
+        key = scoped.get_json()['key']
+        res = self.client.post('/execute_sql', json={
+            'sql': 'SELECT 1', 'connection_name': 'lite', 'database': 'other.db'}, headers={'X-API-Key': key})
+        self.assertEqual(res.status_code, 403)
+
+    def test_schema_browsing_a_different_database_is_admin_only(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        admin = {'X-API-Key': 'admin-key'}
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
+        key = scoped.get_json()['key']
+        self.assertEqual(self.client.get('/connections/lite/schema?database=other.db',
+                                         headers={'X-API-Key': key}).status_code, 403)
+        # The admin key clears the permission check; 'lite' is sqlite, which doesn't support switching
+        # databases at all, so its own (different) error surfaces instead - never 403 for the admin key.
+        self.assertEqual(self.client.get('/connections/lite/schema?database=other.db', headers=admin).status_code, 400)
+
+
 class SchemaTests(ApiTestCase):
     def setUp(self):
         super().setUp()

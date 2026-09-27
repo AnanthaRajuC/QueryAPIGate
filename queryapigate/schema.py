@@ -77,12 +77,29 @@ def _normalize_table_type(value):
     return 'view' if 'view' in (value or '').lower() else 'table'
 
 
-def fetch_schema(connection_name):
-    """Return {'tables': [{'name', 'type', 'columns': [{'name', 'type', 'nullable', 'position'}]}], 'truncated'}."""
+def list_databases(connection_name):
+    """Every database on the server a saved connection points at - Run SQL's "browse a different database on
+    this same server" picker. Goes through the normal execute_sql path, like fetch_schema() below (unlike
+    engine.list_databases(), which the New/Edit connection form's ad-hoc probe needs instead, since that
+    connection may not be saved yet). Shares engine.LIST_DATABASES_QUERIES with that function so the two can
+    never disagree about which dialects support this."""
+    dialect = store.get_connection(connection_name)['db']
+    if dialect not in engine.LIST_DATABASES_QUERIES:
+        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections")
+    result = engine.execute_sql(engine.LIST_DATABASES_QUERIES[dialect], connection_name, 1000, 0)
+    return [row[0] for row in result.rows]
+
+
+def fetch_schema(connection_name, database=None):
+    """Return {'tables': [{'name', 'type', 'columns': [{'name', 'type', 'nullable', 'position'}]}], 'truncated'}.
+    ``database`` browses a different database on the same server than the connection's own configured one -
+    Run SQL's database picker; see engine.execute_sql()'s own ``database`` parameter."""
     dialect = store.get_connection(connection_name)['db']
     if dialect not in _QUERIES:
         raise ApiError(f"Schema introspection isn't supported for '{dialect}' connections yet")
-    result = engine.execute_sql(_QUERIES[dialect], connection_name, ROW_CAP, 0)
+    if database and dialect not in engine.LIST_DATABASES_QUERIES:
+        raise ApiError(f"Switching databases isn't supported for '{dialect}' connections")
+    result = engine.execute_sql(_QUERIES[dialect], connection_name, ROW_CAP, 0, database=database)
     lower_columns = [str(c).lower() for c in result.columns]
     tables = {}
     order = []

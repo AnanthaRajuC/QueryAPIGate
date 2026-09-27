@@ -719,6 +719,10 @@ UI_HTML = r"""<!doctype html>
           <select id="run-conn-host" aria-label="Host"></select>
           <span class="lbl">Connection</span>
           <select id="run-connection" required aria-label="Connection"></select>
+          <span class="lbl">Database</span>
+          <select id="run-database" aria-label="Database" disabled></select>
+          <span class="lbl">Table</span>
+          <select id="run-table" aria-label="Insert a table" disabled></select>
           <span class="lbl">Format</span>
           <select id="run-format" aria-label="Format">
             <option value="json">json</option><option value="ndjson">ndjson</option>
@@ -1185,22 +1189,40 @@ function insertAtCursor(textarea, text) {
   textarea.focus();
   if (textarea.repaint) textarea.repaint();
 }
-var schemaCache = {}; // connection name -> {status: 'loading'|'ready'|'error', tables, truncated, message}
-async function loadSchema(name, onDone) {
-  schemaCache[name] = { status: 'loading' };
+var schemaCache = {}; // "name" (or "name::database" - see below) -> {status: 'loading'|'ready'|'error', tables, truncated, message}
+// Three independent consumers now share this one cache by connection (the tree-based schema browser below,
+// the access map's table filter, and Run SQL's own table dropdown) - schemaWaiters is what lets more than one
+// of them wait on the *same* in-flight fetch instead of only whichever one happened to start it getting
+// notified when it resolves. A caller asks for `key` by calling loadSchema() whenever schemaCache[key] is
+// either absent or already 'loading' - the second case is exactly "someone else started this fetch," which
+// loadSchema() below turns into "queue behind it" rather than firing a second, redundant request.
+var schemaWaiters = {}; // key -> [onDone, ...] queued behind an in-flight fetch for that key
+async function loadSchema(name, onDone, database) {
+  var key = database ? name + '::' + database : name;
+  if (schemaCache[key] && schemaCache[key].status === 'loading') {
+    (schemaWaiters[key] = schemaWaiters[key] || []).push(onDone);
+    return;
+  }
+  schemaCache[key] = { status: 'loading' };
+  var url = 'connections/' + enc(name) + '/schema' + (database ? '?database=' + enc(database) : '');
   var res;
-  try { res = await apiFetch('connections/' + enc(name) + '/schema'); }
-  catch (e) { schemaCache[name] = { status: 'error', message: 'Network error: ' + e.message }; onDone(); return; }
+  try { res = await apiFetch(url); }
+  catch (e) { schemaCache[key] = { status: 'error', message: 'Network error: ' + e.message }; return finishSchemaFetch(key, onDone); }
   if (!res.ok) {
     var body = null;
     try { body = await res.json(); } catch (e) {}
-    schemaCache[name] = { status: 'error', message: (body && body.error) || ('HTTP ' + res.status) };
-    onDone();
-    return;
+    schemaCache[key] = { status: 'error', message: (body && body.error) || ('HTTP ' + res.status) };
+    return finishSchemaFetch(key, onDone);
   }
   var data = await res.json();
-  schemaCache[name] = { status: 'ready', tables: data.tables || [], truncated: !!data.truncated };
+  schemaCache[key] = { status: 'ready', tables: data.tables || [], truncated: !!data.truncated };
+  finishSchemaFetch(key, onDone);
+}
+function finishSchemaFetch(key, onDone) {
+  var waiters = schemaWaiters[key];
+  delete schemaWaiters[key];
   onDone();
+  if (waiters) waiters.forEach(function (fn) { fn(); });
 }
 /** A self-contained, connection-aware schema tree. `insertFn(text)` is called with a table or column name
  * when the caller clicks one - errors (an unsupported connection type, no permission, ...) render inline
@@ -1213,7 +1235,7 @@ function schemaBrowser(insertFn, previewFn) {
     clear(box);
     if (!current) { box.appendChild(h('div', { className: 'hint', text: 'Pick a connection to browse its schema.' })); return; }
     var entry = schemaCache[current];
-    if (!entry) { loadSchema(current, paint); entry = { status: 'loading' }; }
+    if (!entry || entry.status === 'loading') { loadSchema(current, paint); entry = { status: 'loading' }; }
     if (entry.status === 'loading') { box.appendChild(loadingNode('Loading schema…')); return; }
     if (entry.status === 'error') { box.appendChild(h('div', { className: 'hint', text: entry.message })); return; }
     if (!entry.tables.length) { box.appendChild(h('div', { className: 'hint', text: 'No tables found.' })); return; }
@@ -1293,6 +1315,40 @@ function openConnectionForm(name, existing) {
       database: $('c-database').value || undefined
     };
   }
+  // The Default database field starts as a plain text input (the only option for sqlite/duckdb/h2/jdbc, and
+  // the fallback for mysql/postgres/clickhouse until "Load databases…" is clicked) and can turn into a
+  // dropdown of the server's real databases, in place, without disturbing anything else on the form.
+  var dbFieldSlot = h('div', {});
+  function paintDatabaseField(options, selected) {
+    clear(dbFieldSlot);
+    if (!options) { dbFieldSlot.appendChild(inp('c-database', 'text', selected, 'SQLite, DuckDB and H2 take a file path')); return; }
+    var sel = h('select', { id: 'c-database' }, options.map(function (name) { return h('option', { value: name, text: name }); }));
+    if (options.indexOf(selected) !== -1) sel.value = selected;
+    dbFieldSlot.appendChild(sel);
+  }
+  paintDatabaseField(null, existing.database);
+  var dbLoadResult = h('span', { className: 'test-result' });
+  var dbLoadBtn = h('button', { type: 'button', className: 'btn sm ghost', text: 'Load databases…', hidden: true, onclick: async function () {
+    var current = $('c-database').value;
+    dbLoadBtn.disabled = true; dbLoadBtn.textContent = 'Loading…'; clear(dbLoadResult);
+    var details = collectDetails();
+    if (isEdit) details.name = name;
+    var res, body = null;
+    try { res = await apiFetch('connections/databases', { method: 'POST', json: details }); body = await res.json().catch(function () { return null; }); }
+    catch (e) { res = null; }
+    dbLoadBtn.disabled = false; dbLoadBtn.textContent = 'Load databases…';
+    if (res && res.ok && body && body.databases) {
+      paintDatabaseField(body.databases, current);
+      dbLoadResult.appendChild(h('span', { className: 'test-ok', text: '✓ ' + body.databases.length + (body.databases.length === 1 ? ' database' : ' databases') }));
+    } else {
+      var msg = (body && body.error) || 'Network error';
+      if (body && body.detail) msg += ': ' + body.detail;
+      dbLoadResult.appendChild(h('span', { className: 'test-fail', text: '✗ ' + msg }));
+    }
+  } });
+  function paintDbLoadVisibility() { dbLoadBtn.hidden = ['mysql', 'postgres', 'clickhouse'].indexOf(dbSelect.value) === -1; }
+  dbSelect.addEventListener('change', paintDbLoadVisibility);
+  paintDbLoadVisibility();
   var testResult = h('span', { className: 'test-result' });
   var testBtn = h('button', { type: 'button', className: 'btn', text: 'Test connection', onclick: async function () {
     testBtn.disabled = true; testBtn.textContent = 'Testing…'; clear(testResult);
@@ -1322,7 +1378,8 @@ function openConnectionForm(name, existing) {
     h('div', { className: 'grid2' }, field('c-user', 'User', inp('c-user', 'text', existing.user, '')),
       field('c-password', 'Password', withRevealToggle(inp('c-password', 'password', isEdit ? (existing.password === undefined ? '' : existing.password) : '', '')),
         isEdit ? 'Leave the mask to keep the stored password.' : '${ENV_VAR} references are resolved on the server.')),
-    field('c-database', 'Database / file path', inp('c-database', 'text', existing.database, 'SQLite, DuckDB and H2 take a file path'), null),
+    field('c-database', 'Default database', dbFieldSlot, 'SQLite, DuckDB and H2 take a file path here instead.'),
+    h('div', { className: 'test-row' }, dbLoadBtn, dbLoadResult),
     h('label', { className: 'switch' }, active, 'Active', h('span', { className: 'hint', text: '— inactive connections refuse queries' })),
     h('div', { className: 'test-row' }, testBtn, testResult),
     isEdit && existing.created_at ? h('div', { className: 'hint' },
@@ -1469,7 +1526,78 @@ function paintRunConnection() {
   if (names.indexOf(current) !== -1) select.value = current;
   else { var firstActive = names.filter(function (n) { return connectionsCache[n].active; })[0]; if (firstActive) select.value = firstActive; }
   runSchema.setConnection(select.value || '');
+  paintRunDatabase();
 }
+// ---- Run SQL's own "browse a different database on this same server" picker, and the table dropdown that
+// follows it - separate from the tree-based schema browser above, which always shows the connection's own
+// configured database and is unaffected by either of these. ----
+var dbListCache = {}; // connection name -> {status: 'loading'|'ready'|'error', databases, message}
+async function loadDatabases(name, onDone) {
+  dbListCache[name] = { status: 'loading' };
+  var res, body = null;
+  try { res = await apiFetch('connections/databases', { method: 'POST', json: { name: name } }); }
+  catch (e) { dbListCache[name] = { status: 'error', message: 'Network error: ' + e.message }; onDone(); return; }
+  try { body = await res.json(); } catch (e) {}
+  dbListCache[name] = res.ok && body ? { status: 'ready', databases: body.databases }
+    : { status: 'error', message: (body && body.error) || ('HTTP ' + res.status) };
+  onDone();
+}
+function paintRunDatabase() {
+  var sel = $('run-database');
+  var connName = $('run-connection').value;
+  clear(sel);
+  if (!connName || !connectionsCache[connName]) { sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true; paintRunTable(); return; }
+  var c = connectionsCache[connName];
+  if (c.db !== 'mysql' && c.db !== 'postgres' && c.db !== 'clickhouse') {
+    // Nothing to switch to - sqlite/duckdb are a single file, h2/jdbc have no supported "list databases" query.
+    sel.disabled = true;
+    sel.appendChild(h('option', { value: c.database || '', text: c.database || '(default)' }));
+    paintRunTable(); return;
+  }
+  var entry = dbListCache[connName];
+  if (!entry) { loadDatabases(connName, function () { if ($('run-connection').value === connName) paintRunDatabase(); }); entry = { status: 'loading' }; }
+  if (entry.status === 'loading') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Loading…' })); return; }
+  if (entry.status === 'error') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Unavailable' })); return; }
+  sel.disabled = false;
+  entry.databases.forEach(function (name) { sel.appendChild(h('option', { value: name, text: name })); });
+  if (entry.databases.indexOf(c.database) !== -1) sel.value = c.database;
+  paintRunTable();
+}
+function paintRunTable() {
+  var sel = $('run-table');
+  var connName = $('run-connection').value;
+  var c = connectionsCache[connName];
+  // Only an actual override for a dialect that supports switching - otherwise this is exactly the
+  // connection's own already-configured database, and passing it anyway would hit the same "switching
+  // isn't supported" error the tree-based schema browser (which never passes one) correctly never sees.
+  var switchable = c && (c.db === 'mysql' || c.db === 'postgres' || c.db === 'clickhouse');
+  var database = switchable ? $('run-database').value : null;
+  clear(sel);
+  if (!connName) { sel.appendChild(h('option', { value: '', text: '—' })); sel.disabled = true; return; }
+  var key = database ? connName + '::' + database : connName;
+  var entry = schemaCache[key];
+  if (!entry || entry.status === 'loading') {
+    loadSchema(connName, function () {
+      // For a non-switchable dialect `database` is always null, which a <select>'s own .value never is - so
+      // only compare it when it actually applies, or this callback's guard would never pass and the
+      // "Loading tables…" placeholder would never resolve for sqlite/duckdb/h2/jdbc.
+      var stillCurrent = $('run-connection').value === connName && (!switchable || $('run-database').value === database);
+      if (stillCurrent) paintRunTable();
+    }, database);
+    entry = { status: 'loading' };
+  }
+  if (entry.status === 'loading') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Loading tables…' })); return; }
+  if (entry.status === 'error') { sel.disabled = true; sel.appendChild(h('option', { value: '', text: 'Unavailable' })); return; }
+  sel.disabled = false;
+  sel.appendChild(h('option', { value: '', text: entry.tables.length + (entry.tables.length === 1 ? ' table' : ' tables') }));
+  entry.tables.forEach(function (t) { sel.appendChild(h('option', { value: t.name, text: t.name })); });
+}
+$('run-database').onchange = paintRunTable;
+$('run-table').onchange = function () {
+  var t = $('run-table').value;
+  if (t) insertAtCursor($('run-sql'), t);
+  $('run-table').value = ''; // reset to the placeholder so the same table (or another) can be inserted again
+};
 function populateConnectionSelect() {
   paintRunConnType();
   paintRunConnHost();
@@ -1485,6 +1613,7 @@ function selectRunConnection(name) {
   $('run-conn-host').value = runConnHostLabel(c); paintRunConnection();
   $('run-connection').value = name;
   runSchema.setConnection(name);
+  paintRunDatabase();
 }
 $('run-conn-type').onchange = function () { paintRunConnHost(); paintRunConnection(); };
 $('run-conn-host').onchange = function () { paintRunConnection(); };
@@ -2532,7 +2661,7 @@ function amapPaintTableOptions() {
   clear(sel);
   if (!amapConnFilter) { sel.appendChild(h('option', { value: '', text: 'Select a connection first' })); sel.disabled = true; return; }
   var entry = schemaCache[amapConnFilter];
-  if (!entry) { loadSchema(amapConnFilter, function () { amapPaintTableOptions(); renderAccessMap(); }); entry = { status: 'loading' }; }
+  if (!entry || entry.status === 'loading') { loadSchema(amapConnFilter, function () { amapPaintTableOptions(); renderAccessMap(); }); entry = { status: 'loading' }; }
   if (entry.status === 'loading') { sel.appendChild(h('option', { value: '', text: 'Loading tables…' })); sel.disabled = true; return; }
   if (entry.status === 'error') { sel.appendChild(h('option', { value: '', text: 'Schema unavailable' })); sel.disabled = true; return; }
   sel.disabled = false;
@@ -3625,7 +3754,7 @@ bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs);
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
-$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); };
+$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
 $('run-sql').addEventListener('keydown', keyRun);
 $('run-params').addEventListener('keydown', keyRun);
@@ -3657,8 +3786,14 @@ function runSql(opts) {
   var qs = 'format=' + enc(format) + '&page=' + runPage + '&page_size=' + pageSize + (timeout ? '&timeout=' + enc(timeout) : '');
   var connection = $('run-connection').value;
   var sqlToRun = opts.explain ? 'EXPLAIN ' + sql : sql;
+  // Only sent when it actually differs from the connection's own configured database - the common case (left
+  // at the default) behaves exactly as before this existed, for every key, admin or scoped.
+  var connDb = (connectionsCache[connection] || {}).database;
+  var chosenDb = $('run-database').value;
+  var body = { sql: sqlToRun, connection_name: connection, params: params };
+  if (chosenDb && chosenDb !== connDb) body.database = chosenDb;
   execute(function () {
-    return apiFetch('execute_sql?' + qs, { method: 'POST', json: { sql: sqlToRun, connection_name: connection, params: params } });
+    return apiFetch('execute_sql?' + qs, { method: 'POST', json: body });
   }, {
     results: $('run-results'), status: $('run-status'), button: opts.button || $('run-button'), page: runPage, pageSize: pageSize,
     filename: opts.explain ? 'explain' : 'query', format: format,
