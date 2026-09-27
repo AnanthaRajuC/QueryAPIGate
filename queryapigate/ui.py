@@ -470,6 +470,26 @@ UI_HTML = r"""<!doctype html>
   .tag.act { border: 0; padding: 1px 6px; background: var(--surface-2); color: var(--ink-2); }
   .tag.act.ok { background: var(--accent-soft); color: var(--accent); }
   .tag.act.bad { background: var(--danger-soft); color: var(--danger); }
+  .access-box { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .access-summary { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+  .access-summary b { font: 600 12.5px var(--mono); }
+  .access-names { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: 4px; }
+  .access-names .name { font: 600 12px var(--mono); }
+  .access-roles { margin: 0; }
+  #accessmap-body { overflow: auto; }
+  table.amap { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+  table.amap th, table.amap td { padding: 8px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; }
+  table.amap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font: 600 11px var(--sans); letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-3); }
+  table.amap .amap-query { position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; font: 600 12px var(--mono); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  table.amap thead th.amap-query { z-index: 3; }
+  table.amap .amap-coll { display: block; font: 11px var(--sans); color: var(--ink-3); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+  table.amap td.amap-cell { text-align: center; }
+  table.amap .amap-key-head { text-align: center; font: 600 12px var(--mono) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--ink) !important; }
+  table.amap .amap-key-head.revoked { color: var(--ink-3) !important; }
+  .amap-dot { display: inline-flex; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .amap-dot.conn { background: var(--warn); }
+  .legend { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 11.5px; }
+  .legend .amap-dot { margin-left: 10px; }
 
   /* ---- metrics ---- */
   .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
@@ -532,6 +552,7 @@ UI_HTML = r"""<!doctype html>
     <div class="nav-group"><div class="nav-label">Access</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="apikeys" data-group="Access" data-label="API keys" title="API keys"><span class="nav-abbr">Ky</span><span class="nav-text">API keys</span><span class="count" id="count-apikeys"></span></button>
       <button type="button" role="tab" data-tab="roles" data-group="Access" data-label="Roles" title="Roles"><span class="nav-abbr">Ro</span><span class="nav-text">Roles</span><span class="count" id="count-roles"></span></button>
+      <button type="button" role="tab" data-tab="accessmap" data-group="Access" data-label="Access map" title="Access map"><span class="nav-abbr">Am</span><span class="nav-text">Access map</span></button>
     </div>
     <div class="nav-group"><div class="nav-label">Observability</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="metrics" data-group="Observability" data-label="Metrics" title="Metrics"><span class="nav-abbr">Mt</span><span class="nav-text">Metrics</span></button>
@@ -640,6 +661,16 @@ UI_HTML = r"""<!doctype html>
       <button id="refresh-metrics" type="button" class="btn">Refresh</button>
     </div>
     <div id="metrics-body"><div class="loading"><span class="spin"></span>Loading metrics…</div></div>
+  </section>
+
+  <section id="tab-accessmap">
+    <div class="page-head">
+      <div class="titles"><h1>Access map</h1><span class="sub">Which API keys can reach which saved queries - the whole point of collections and connection grants, in one place.
+        <span class="legend"><span class="amap-dot"></span> named query or collection grant<span class="amap-dot conn"></span> whole-connection grant</span></span></div>
+      <span class="spacer"></span>
+      <input id="accessmap-filter" class="search" type="search" placeholder="Filter by query or key…">
+    </div>
+    <div id="accessmap-body" class="panel"><div class="loading"><span class="spin"></span>Loading…</div></div>
   </section>
 
   <section id="tab-run">
@@ -1371,6 +1402,7 @@ async function loadApiKeys() {
   apiKeysCache = data.keys || {};
   renderApiKeys();
   if (Object.keys(rolesCache).length) renderRoles(); // the Keys column counts keys created from each role
+  renderAccessMap();
 }
 function renderApiKeys() {
   var box = clear($('apikeys-table'));
@@ -1448,6 +1480,7 @@ async function loadRoles() {
   }
   rolesCache = data.roles || {};
   renderRoles();
+  if (selected.name) renderDetail(); // the accessBox's "also granted to role X" line needs rolesCache too
 }
 function renderRoles() {
   var box = clear($('roles-table'));
@@ -2031,6 +2064,34 @@ function queryGrantNode(entry) {
   var tags = queryGrantTags(entry);
   return tags.length ? h('div', { className: 'tags' }, tags) : h('span', { className: 'dim', text: '—' });
 }
+/** Every way `entry` (an API key or role) can reach a specific saved query - additive, so more than one can
+ * apply at once (e.g. both a collection grant and a connection grant). Mirrors apikeys.can_run_saved(): a
+ * named `queries` grant, a `collections` grant covering the query's collection, or a `connections` grant
+ * covering the whole connection it runs on (which reaches every query on that connection, this one included). */
+function reachVia(entry, queryName, collection, connectionName) {
+  var via = [];
+  if (entry.queries === '*') via.push({ label: 'all queries', kind: 'query' });
+  else if ((entry.queries || []).some(function (q) { return (q && typeof q === 'object' ? q.name : q) === queryName; })) {
+    via.push({ label: 'named', kind: 'query' });
+  }
+  if (collection && (entry.collections || []).indexOf(collection) !== -1) via.push({ label: 'collection ' + collection, kind: 'collection' });
+  if (entry.connections === '*') via.push({ label: 'all connections', kind: 'connection' });
+  else if (connectionName && (entry.connections || []).indexOf(connectionName) !== -1) via.push({ label: 'connection ' + connectionName, kind: 'connection' });
+  return via;
+}
+/** Every API key and role that can reach a saved query, and why - the reverse of queryGrantNode() (which
+ * answers "what can this key reach"), used for the per-query Access panel and the Access map screen. The
+ * admin key is never listed here: it is not one of apiKeysCache's entries, and it can always run everything. */
+function queryReach(queryName, collection, connectionName) {
+  var keys = Object.keys(apiKeysCache).sort().map(function (name) {
+    return { name: name, active: apiKeysCache[name].active, via: reachVia(apiKeysCache[name], queryName, collection, connectionName) };
+  }).filter(function (k) { return k.via.length; });
+  var roles = Object.keys(rolesCache).sort().map(function (name) {
+    return { name: name, via: reachVia(rolesCache[name], queryName, collection, connectionName) };
+  }).filter(function (r) { return r.via.length; });
+  return { keys: keys, roles: roles };
+}
+
 /** Checkboxes over the existing collections for a key/role form; a name the entry already holds stays listed even when it has emptied. */
 function collectionGrantField(held) {
   var checks = {};
@@ -2118,6 +2179,7 @@ async function loadQueries(selectName) {
   else if (!f.versions.some(function (v) { return v.version === selected.version; })) selected.version = latestOf(f).version;
   renderQueryList();
   renderDetail();
+  renderAccessMap();
 }
 function paintQueriesSub() {
   var sub = clear($('queries-sub'));
@@ -2188,6 +2250,69 @@ async function getContent(name) {
   return contentCache[name];
 }
 
+/** The always-visible "who can reach this" panel on a saved query - the answer this app has and a plain
+ * request client (Postman and friends) never will, so it sits beside the run panel, not behind a tab. */
+function accessBox(queryName, collection, connectionName) {
+  var reach = queryReach(queryName, collection, connectionName);
+  var summary = h('div', { className: 'access-summary' },
+    h('b', { text: String(reach.keys.length) }), ' ' + (reach.keys.length === 1 ? 'API key' : 'API keys') + (reach.keys.length ? ' reach' : ' reaches') + ' this query');
+  if (reach.keys.length) {
+    var names = h('div', { className: 'access-names' });
+    reach.keys.forEach(function (k, i) {
+      names.appendChild(h('span', { className: 'name', title: k.via.map(function (v) { return v.label; }).join(', '), text: k.name + (i < reach.keys.length - 1 ? ',' : '') }),
+        k.active ? null : h('span', { className: 'dim', text: ' (revoked)' }));
+    });
+    summary.appendChild(names);
+  } else {
+    summary.appendChild(h('span', { className: 'hint', text: 'Only the admin key can run it.' }));
+  }
+  summary.appendChild(h('button', { type: 'button', className: 'btn sm ghost', style: 'margin-left:auto', text: 'View access map', onclick: function () {
+    showTab('accessmap'); $('accessmap-filter').value = queryName; renderAccessMap();
+  } }));
+  var roleLine = reach.roles.length
+    ? h('div', { className: 'access-roles hint' }, 'Also granted to role' + (reach.roles.length > 1 ? 's' : '') + ' ',
+        h('span', { className: 'mono' }, reach.roles.map(function (r) { return r.name; }).join(', ')),
+        ' - a key must be created from one of these to actually call it.')
+    : null;
+  return h('div', { className: 'access-box' }, summary, roleLine);
+}
+/** The Access map screen: every saved query against every API key, so "which keys can call which endpoints"
+ * is answered at a glance instead of by opening each query or each key in turn. */
+function renderAccessMap() {
+  var box = clear($('accessmap-body'));
+  if (!filesCache.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }))); return; }
+  var keyNames = Object.keys(apiKeysCache).sort();
+  if (!keyNames.length) {
+    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No scoped API keys yet' }),
+      h('span', { text: 'Every query is reachable by the admin key only until a scoped key is created.' })));
+    return;
+  }
+  var q = $('accessmap-filter').value.trim().toLowerCase();
+  var rows = filesCache.filter(function (f) {
+    return !q || [f.filename, f.collection].join(' ').toLowerCase().indexOf(q) !== -1;
+  }).sort(function (a, b) { return ((a.collection || '￿') + a.filename) < ((b.collection || '￿') + b.filename) ? -1 : 1; });
+  var cols = keyNames.filter(function (n) { return !q || n.toLowerCase().indexOf(q) !== -1 || rows.length; });
+  if (!rows.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
+  var thead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }),
+    cols.map(function (name) {
+      var k = apiKeysCache[name];
+      return h('th', { className: 'amap-key-head' + (k.active ? '' : ' revoked'), title: name + (k.active ? '' : ' (revoked)') }, name);
+    })));
+  var tbody = h('tbody', {}, rows.map(function (f) {
+    var l = latestOf(f);
+    return h('tr', {},
+      h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
+      cols.map(function (name) {
+        var via = reachVia(apiKeysCache[name], f.filename, f.collection, l.connection_name);
+        if (!via.length) return h('td', { className: 'amap-cell' });
+        var kind = via.some(function (v) { return v.kind === 'query' || v.kind === 'collection'; }) ? '' : ' conn';
+        return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') }, h('span', { className: 'amap-dot' + kind }));
+      }));
+  }));
+  box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody)));
+}
+$('accessmap-filter').oninput = renderAccessMap;
+
 function renderDetail() {
   var box = clear($('query-detail'));
   var f = selected.name && findFile(selected.name);
@@ -2232,6 +2357,7 @@ function renderDetail() {
       metaItem('connection', v.connection_name || '—'), metaItem('collection', f.collection || '—'), metaItem('author', v.author || '—'),
       metaItem('modified', v.last_modified_at || v.created_at || '—'), metaItem('status', v.status || '—'),
       tagsText ? metaItem('tags', tagsText) : null),
+    accessBox(f.filename, f.collection, v.connection_name),
     h('div', { className: 'subtabs', role: 'tablist' },
       subtab('run', 'Run'), subtab('sql', 'SQL'),
       subtab('history', 'History', h('span', { className: 'count', text: history.length ? String(history.length) : '' })),
