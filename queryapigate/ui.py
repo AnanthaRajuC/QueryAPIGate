@@ -503,6 +503,14 @@ UI_HTML = r"""<!doctype html>
   .menu { position: fixed; z-index: 60; min-width: 190px; padding: 4px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
   .menu button { border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 5px; font: 500 12.5px var(--sans); color: var(--danger); cursor: pointer; }
   .menu button:hover { background: var(--danger-soft); }
+  /* ---- double-click a column/value in the SQL editor to turn it into a bound parameter ---- */
+  .paramize-popover { position: fixed; z-index: 65; width: 260px; padding: 10px; background: var(--surface);
+    border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+  .paramize-popover .preview { font: 12px var(--mono); color: var(--ink-2); margin-bottom: 8px; overflow-wrap: anywhere; }
+  .paramize-popover .preview b { color: var(--ink); }
+  .paramize-popover button { width: 100%; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+    text-align: center; padding: 6px 10px; border-radius: 5px; font: 600 12.5px var(--sans); cursor: pointer; }
+  .paramize-popover button:hover { filter: brightness(1.06); }
   .tags.scope .tag { border-style: dashed; }
   .panel-bar select { width: auto; height: 30px; padding: 0 8px; background: var(--bg); border-color: var(--line-strong); font-size: 12.5px; }
   .results:has(.resbar:empty):has(.res-body:empty) { display: none; }
@@ -3955,6 +3963,82 @@ function paintRunRefs(sql) {
   names.forEach(function (n) { box.appendChild(h('span', { className: 'tag', text: ':' + n })); });
 }
 bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
+
+// ---- Run SQL: double-click a column (or its value) in the SQL editor to turn it into a bound parameter ----
+// col = 'literal', col = 123, col = NULL/TRUE/FALSE, and the comparison operators <>/<=/>=/!=/</> as well as
+// =. A double-click's native word-selection is what tells us which column - textarea.selectionStart/End
+// after that native selection, not any pixel-position guessing - so this only needs a plain <textarea>, the
+// same trick sqlParams()/highlightInto() already lean on elsewhere. Scoped to a single line, both to keep
+// the regex simple and because a real WHERE condition is realistically never split use across lines in a way
+// this needs to follow. Mongo's find() filter is JSON, not "col = value" SQL, so the regex below simply never
+// matches there - no separate dialect check needed, double-clicking inside a mongo query is just a no-op.
+// The trailing \b only guards the number/NULL/TRUE/FALSE branch (so "5" never matches inside "50") - it
+// cannot also sit after the quoted-string branch, since a closing quote is itself a non-word character and
+// \b never matches non-word-to-non-word (e.g. quote-to-space, or quote-to-end-of-line), which would make
+// every quoted value fail to match at all.
+var PARAMIZE_CANDIDATE_RE = /([A-Za-z_]\w*)\s*(=|!=|<>|<=|>=|<|>)\s*('(?:[^']|'')*'|(?:-?\d+(?:\.\d+)?|NULL|TRUE|FALSE)\b)/gid;
+function literalToJsValue(text) {
+  if (/^null$/i.test(text)) return null;
+  if (/^true$/i.test(text)) return true;
+  if (/^false$/i.test(text)) return false;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  if (text[0] === "'" && text[text.length - 1] === "'") return text.slice(1, -1).replace(/''/g, "'");
+  return text;
+}
+/** Whichever `col OP literal` match (if any) on the double-clicked word's line covers the click - column or
+ * value clicked, either way the whole thing is described the same way: `name` (the column) and the literal
+ * value's own span to replace with `:name`. */
+function paramizeCandidateAt(text, clickStart, clickEnd) {
+  var lineStart = text.lastIndexOf('\n', clickStart - 1) + 1;
+  var lineEnd = text.indexOf('\n', clickEnd);
+  if (lineEnd === -1) lineEnd = text.length;
+  var line = text.slice(lineStart, lineEnd);
+  var offset = clickStart - lineStart, endOffset = clickEnd - lineStart;
+  PARAMIZE_CANDIDATE_RE.lastIndex = 0;
+  var m;
+  while ((m = PARAMIZE_CANDIDATE_RE.exec(line))) {
+    var identRange = m.indices[1], valueRange = m.indices[3];
+    var hit = (offset < identRange[1] && endOffset > identRange[0]) || (offset < valueRange[1] && endOffset > valueRange[0]);
+    if (hit) {
+      return { name: m[1], valueText: m[3], absStart: lineStart + valueRange[0], absEnd: lineStart + valueRange[1] };
+    }
+  }
+  return null;
+}
+function openParameterizePopover(x, y, candidate, textarea, paramsTa) {
+  var old = document.getElementById('paramize-popover');
+  if (old) old.remove();
+  var box = h('div', { id: 'paramize-popover', className: 'paramize-popover' },
+    h('div', { className: 'preview' }, candidate.name + ' = ' + candidate.valueText + '  →  ' + candidate.name + ' = ',
+      h('b', { text: ':' + candidate.name })),
+    h('button', { type: 'button', text: 'Parameterize', onclick: function () {
+      close();
+      var before = textarea.value.slice(0, candidate.absStart), after = textarea.value.slice(candidate.absEnd);
+      textarea.value = before + ':' + candidate.name + after;
+      var caret = candidate.absStart + 1 + candidate.name.length;
+      textarea.selectionStart = textarea.selectionEnd = caret;
+      if (textarea.repaint) textarea.repaint();
+      textarea.focus();
+      var params = {};
+      try { params = paramsTa.value.trim() ? JSON.parse(paramsTa.value) : {}; } catch (e) { params = {}; }
+      params[candidate.name] = literalToJsValue(candidate.valueText);
+      paramsTa.value = JSON.stringify(params, null, 2);
+    } }));
+  function close() { box.remove(); document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', esc, true); }
+  function outside(e) { if (!box.contains(e.target)) close(); }
+  function esc(e) { if (e.key === 'Escape') close(); }
+  document.body.appendChild(box);
+  var left = Math.min(x, window.innerWidth - box.offsetWidth - 12);
+  box.style.left = Math.max(8, left) + 'px';
+  box.style.top = (y + 12) + 'px';
+  setTimeout(function () { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc, true); }, 0);
+}
+$('run-sql').addEventListener('dblclick', function (e) {
+  var start = this.selectionStart, end = this.selectionEnd;
+  if (start === end) return; // double-click landed on whitespace/punctuation - nothing was selected
+  var candidate = paramizeCandidateAt(this.value, start, end);
+  if (candidate) openParameterizePopover(e.clientX, e.clientY, candidate, this, $('run-params'));
+});
 
 // ---- Run SQL: sidebar tabs (Recent queries / Query settings) ----
 (function () {
