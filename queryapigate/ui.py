@@ -495,6 +495,9 @@ UI_HTML = r"""<!doctype html>
     background: var(--accent-soft); color: var(--accent); font: 600 10px var(--mono); }
   .amap-dot.conn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .amap-dot.role { background: var(--surface-3); color: var(--ink-2); }
+  .amap-dot.role.conn { background: color-mix(in oklab, var(--warn) 12%, var(--surface-3)); color: var(--warn); }
+  table.amap th.amap-group { background: var(--bg); border-bottom: 1px solid var(--line); text-align: center; font: 600 10.5px var(--sans); letter-spacing: 0.06em; color: var(--ink-3); }
+  table.amap th.amap-group.role { color: var(--ink-2); }
   .legend .amap-dot { min-width: 16px; height: 16px; font-size: 9px; vertical-align: middle; }
   .amap-q-row { display: flex; align-items: center; gap: 6px; }
   .amap-q-row span { overflow: hidden; text-overflow: ellipsis; }
@@ -2418,53 +2421,84 @@ function amapInfoCells(f) {
     h('td', { className: 'mono', text: 'v' + stats.latest.version })
   ];
 }
+/** One column header, shared by an API key and a role - both have a name, connections/queries/collections
+ * grants, allow_writes and rate_limit, so the same two-line header (name, then access + rate limit) fits
+ * either. `revokedTitle` is set only for a key (roles have no active/expires_at state of their own). */
+function amapColHead(name, entry, revokedTitle) {
+  var sub = (entry.allow_writes ? 'Read/write' : 'Read-only') + ' · ' + (entry.rate_limit || 'server default');
+  return h('th', { className: 'amap-key-head' + (revokedTitle ? ' revoked' : ''), title: revokedTitle ? name + revokedTitle : name },
+    h('span', { className: 'amap-key-name' }, name, revokedTitle ? h('span', { className: 'dim', text: revokedTitle }) : null),
+    h('span', { className: 'amap-key-sub', text: sub }));
+}
+/** One reach cell - a key's and a role's are identical apart from the `role` modifier class, which mutes
+ * the dot so the two column groups stay visually distinct even without re-reading the group header. Returns
+ * {node, reached} rather than just the <td> so callers can tally reach without re-deriving it from the DOM. */
+function amapCell(entry, f, l, roleClass) {
+  var via = reachVia(entry, f.filename, f.collection, l.connection_name);
+  if (!via.length) return { node: h('td', { className: 'amap-cell' }), reached: false };
+  var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
+  var viaConnOnly = codes.length === 1 && codes[0] === 'W';
+  var node = h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') },
+    h('span', { className: 'amap-dot' + (roleClass ? ' role' : '') + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
+  return { node: node, reached: true };
+}
 function renderAccessMap() {
   var box = clear($('accessmap-body'));
   if (!filesCache.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }))); return; }
   var keyNames = Object.keys(apiKeysCache).sort();
-  if (!keyNames.length) {
-    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No scoped API keys yet' }),
+  var roleNames = Object.keys(rolesCache).sort();
+  if (!keyNames.length && !roleNames.length) {
+    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No scoped API keys or roles yet' }),
       h('span', { text: 'Every query is reachable by the admin key only until a scoped key is created.' })));
     return;
   }
   var q = $('accessmap-filter').value.trim().toLowerCase();
   var allRows = filesCache.slice().sort(function (a, b) { return ((a.collection || '￿') + a.filename) < ((b.collection || '￿') + b.filename) ? -1 : 1; });
-  var rowsMatch = q ? allRows.filter(function (f) { return [f.filename, f.collection].join(' ').toLowerCase().indexOf(q) !== -1; }) : allRows;
-  var colsMatch = q ? keyNames.filter(function (n) { return n.toLowerCase().indexOf(q) !== -1; }) : keyNames;
-  // A search term narrows whichever axis it matches; when it matches only keys (or only queries), the other
-  // axis stays whole rather than collapsing to nothing - "acme" shows every query under just that key's column.
-  var rows = rowsMatch.length ? rowsMatch : (colsMatch.length ? allRows : []);
-  var cols = colsMatch.length ? colsMatch : (rowsMatch.length ? keyNames : []);
+  var match = function (name) { return name.toLowerCase().indexOf(q) !== -1; };
+  var rowsMatch = q ? allRows.filter(function (f) { return match(f.filename) || (f.collection && match(f.collection)); }) : allRows;
+  var keyColsMatch = q ? keyNames.filter(match) : keyNames;
+  var roleColsMatch = q ? roleNames.filter(match) : roleNames;
+  // A search term narrows whichever axis (or axes) it actually matches; an axis it doesn't touch stays whole
+  // rather than collapsing to nothing - "acme" shows every query under just that key's column, with every
+  // role column still shown too, and "top_films" shows every key and role column for just that one row.
+  var anyMatch = rowsMatch.length || keyColsMatch.length || roleColsMatch.length;
+  var rows = rowsMatch.length ? rowsMatch : (anyMatch ? allRows : []);
+  var keyCols = keyColsMatch.length ? keyColsMatch : (anyMatch ? keyNames : []);
+  var roleCols = roleColsMatch.length ? roleColsMatch : (anyMatch ? roleNames : []);
   if (!rows.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
 
-  var thead = h('thead', {}, h('tr', {},
+  var leadCols = 2 + AMAP_INFO_HEADERS.length; // Query + Connection + the five at-a-glance columns
+  var groupRow = h('tr', {},
+    h('th', { colSpan: leadCols }),
+    keyCols.length ? h('th', { colSpan: keyCols.length, className: 'amap-group', text: 'API KEYS' }) : null,
+    roleCols.length ? h('th', { colSpan: roleCols.length, className: 'amap-group role',
+      title: 'What a key created from each role would reach - a role grants nothing on its own', text: 'ROLES' }) : null,
+    h('th'));
+  var thead = h('thead', {}, groupRow, h('tr', {},
     h('th', { className: 'amap-query', text: 'Query' }),
     AMAP_INFO_HEADERS.map(function (t) { return h('th', { text: t }); }),
     h('th', { text: 'Connection' }),
-    cols.map(function (name) {
-      var k = apiKeysCache[name];
-      var expired = isKeyExpired(k);
-      var sub = (k.allow_writes ? 'Read/write' : 'Read-only') + ' · ' + (k.rate_limit || 'server default');
-      return h('th', { className: 'amap-key-head' + (k.active && !expired ? '' : ' revoked'),
-        title: name + (!k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '') },
-        h('span', { className: 'amap-key-name' }, name, !k.active ? h('span', { className: 'dim', text: ' revoked' }) :
-          expired ? h('span', { className: 'dim', text: ' expired' }) : null),
-        h('span', { className: 'amap-key-sub', text: sub }));
+    keyCols.map(function (name) {
+      var k = apiKeysCache[name], expired = isKeyExpired(k);
+      return amapColHead(name, k, !k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '');
     }),
+    roleCols.map(function (name) { return amapColHead(name, rolesCache[name], ''); }),
     h('th', { className: 'num', text: 'Reach' })));
 
-  var colTotals = {}; cols.forEach(function (name) { colTotals[name] = 0; });
+  var keyTotals = {}; keyCols.forEach(function (name) { keyTotals[name] = 0; });
+  var roleTotals = {}; roleCols.forEach(function (name) { roleTotals[name] = 0; });
   var tbody = h('tbody', {}, rows.map(function (f) {
     var l = latestOf(f);
     var rowReach = 0;
-    var cells = cols.map(function (name) {
-      var via = reachVia(apiKeysCache[name], f.filename, f.collection, l.connection_name);
-      if (!via.length) return h('td', { className: 'amap-cell' });
-      rowReach++; colTotals[name]++;
-      var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
-      var viaConnOnly = codes.length === 1 && codes[0] === 'W';
-      return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') },
-        h('span', { className: 'amap-dot' + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
+    var keyCells = keyCols.map(function (name) {
+      var cell = amapCell(apiKeysCache[name], f, l, false);
+      if (cell.reached) { rowReach++; keyTotals[name]++; }
+      return cell.node;
+    });
+    var roleCells = roleCols.map(function (name) {
+      var cell = amapCell(rolesCache[name], f, l, true);
+      if (cell.reached) roleTotals[name]++;
+      return cell.node;
     });
     return h('tr', {},
       h('td', { className: 'amap-query' },
@@ -2474,42 +2508,18 @@ function renderAccessMap() {
         f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
       amapInfoCells(f),
       h('td', { className: 'mono dim', text: l.connection_name || '—' }),
-      cells,
-      h('td', { className: 'num', text: rowReach ? String(rowReach) : '—' }));
+      keyCells, roleCells,
+      h('td', { className: 'num', title: 'Reachable by an actual API key (roles alone reach nothing)', text: rowReach ? String(rowReach) : '—' }));
   }));
 
   var tfoot = h('tfoot', {}, h('tr', {},
     h('td', { className: 'amap-query', text: 'Reaches' }),
     AMAP_INFO_HEADERS.map(function () { return h('td'); }), h('td'),
-    cols.map(function (name) { return h('td', { className: 'num', text: colTotals[name] + ' / ' + rows.length }); }),
+    keyCols.map(function (name) { return h('td', { className: 'num', text: keyTotals[name] + ' / ' + rows.length }); }),
+    roleCols.map(function (name) { return h('td', { className: 'num', text: roleTotals[name] + ' / ' + rows.length }); }),
     h('td')));
 
   box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody, tfoot)));
-
-  var roleNames = Object.keys(rolesCache).sort();
-  if (roleNames.length) {
-    var rthead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }),
-      AMAP_INFO_HEADERS.map(function (t) { return h('th', { text: t }); }), h('th', { text: 'Connection' }),
-      roleNames.map(function (name) { return h('th', { className: 'amap-key-head' }, name); })));
-    var rtbody = h('tbody', {}, rows.map(function (f) {
-      var l = latestOf(f);
-      return h('tr', {},
-        h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
-        amapInfoCells(f),
-        h('td', { className: 'mono dim', text: l.connection_name || '—' }),
-        roleNames.map(function (name) {
-          var via = reachVia(rolesCache[name], f.filename, f.collection, l.connection_name);
-          if (!via.length) return h('td', { className: 'amap-cell' });
-          var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
-          return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') },
-            h('span', { className: 'amap-dot role', text: codes.join('·') }));
-        }));
-    }));
-    box.appendChild(h('p', { className: 'sub-h', style: 'margin:18px 0 8px', text: 'Roles' }));
-    box.appendChild(h('div', { className: 'hint', style: 'margin-bottom:8px',
-      text: 'What a key created from each role would reach - a role grants nothing on its own.' }));
-    box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, rthead, rtbody)));
-  }
 }
 $('accessmap-filter').oninput = renderAccessMap;
 
