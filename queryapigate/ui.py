@@ -151,6 +151,7 @@ UI_HTML = r"""<!doctype html>
 
   /* ---- layout ---- */
   main { padding: 24px 28px 48px; max-width: 1480px; }
+  main:has(> #tab-run.active) { max-width: none; }
   main > section { display: none; }
   main > section.active { display: block; }
   .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -247,13 +248,13 @@ UI_HTML = r"""<!doctype html>
   .run-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .run-row .field { width: 150px; }
   .sub-h { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
-  .history-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 140px; overflow: auto; }
+  .history-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 320px; overflow: auto; }
   .history-item { border: 0; background: none; color: var(--ink-2); font: 11.5px var(--mono); text-align: left; padding: 4px 6px; border-radius: 4px;
     cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .history-item:hover { background: var(--surface-2); color: var(--ink); }
 
   /* ---- SQL editor (hand-rolled highlighting: a <pre> painted behind a transparent <textarea>) ---- */
-  .editor { position: relative; min-height: 220px; height: 260px; resize: vertical; overflow: hidden; background: var(--surface); }
+  .editor { position: relative; min-height: 110px; height: 150px; resize: vertical; overflow: hidden; background: var(--surface); }
   .editor-gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 42px; padding: 12px 8px 12px 0; overflow: hidden;
     text-align: right; font: 13px/1.6 var(--mono); color: var(--ink-3); background: var(--surface-2); border-right: 1px solid var(--line);
     user-select: none; pointer-events: none; }
@@ -274,11 +275,20 @@ UI_HTML = r"""<!doctype html>
   .c { color: var(--syn-cmt); font-style: italic; }
 
   /* ---- run SQL tab ---- */
-  .runner { display: grid; grid-template-columns: minmax(0, 1fr) 280px; overflow: hidden; }
-  .runner-main { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+  .runner { display: grid; grid-template-columns: minmax(0, 1fr) 7px var(--runner-side-w, 280px); overflow: hidden; }
+  .runner-main { display: flex; flex-direction: column; min-width: 0; }
   .runner-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
   .runner-bar select { width: auto; height: 28px; font-size: 12.5px; }
   .runner-bar .lbl { font-size: 11.5px; color: var(--ink-3); }
+  .runner-splitter { position: relative; cursor: col-resize; background: var(--surface); touch-action: none; }
+  .runner-splitter::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); transform: translateX(-50%); }
+  .runner-splitter:hover::after, .runner-splitter.dragging::after { width: 3px; background: var(--accent); }
+  /* A grip - a short stack of dots - so the splitter reads as draggable rather than as a stray divider line. */
+  .runner-splitter::before { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; border-radius: 50%;
+    background: var(--ink-3); transform: translate(-50%, -50%);
+    box-shadow: 0 -7px 0 var(--ink-3), 0 7px 0 var(--ink-3), 0 -14px 0 var(--ink-3), 0 14px 0 var(--ink-3); }
+  .runner-splitter:hover::before, .runner-splitter.dragging::before { background: var(--accent);
+    box-shadow: 0 -7px 0 var(--accent), 0 7px 0 var(--accent), 0 -14px 0 var(--accent), 0 14px 0 var(--accent); }
   .runner-side { padding: 12px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); overflow: hidden; }
   .runner-side textarea { min-height: 96px; }
   .runner-side .grid2 input { height: 28px; }
@@ -409,6 +419,7 @@ UI_HTML = r"""<!doctype html>
     .split, .runner { grid-template-columns: minmax(0, 1fr); }
     #queries-panel { position: static; max-height: 320px; }
     .runner-main { border-right: 0; border-bottom: 1px solid var(--line); }
+    .runner-splitter { display: none; }
     .hide-sm { display: none; }
   }
 
@@ -568,7 +579,7 @@ UI_HTML = r"""<!doctype html>
   .set-row.pref .set-what { flex: 0 1 auto; }
   body.compact table.grid td { padding: 5px 14px; }
   body.compact table.rs td { padding: 2px 12px; }
-  @media (max-width: 980px) { .split, .runner { grid-template-columns: minmax(0, 1fr); } #queries-panel { position: static; max-height: 320px; } }
+  @media (max-width: 980px) { .split, .runner { grid-template-columns: minmax(0, 1fr); } #queries-panel { position: static; max-height: 320px; } .runner-splitter { display: none; } }
 </style></head>
 <body>
 <aside class="side" id="side">
@@ -749,6 +760,7 @@ UI_HTML = r"""<!doctype html>
           <textarea id="run-sql" required spellcheck="false" wrap="off" autocomplete="off" aria-label="SQL" placeholder="SELECT * FROM t WHERE id = :id"></textarea>
         </div>
       </div>
+      <div class="runner-splitter" id="run-splitter" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
       <div class="runner-side">
         <div id="run-history-slot"></div>
         <div class="field">
@@ -1364,7 +1376,7 @@ function openConnectionForm(name, existing) {
   }
   paintDatabaseField(null, existing.database);
   var dbLoadResult = h('span', { className: 'test-result' });
-  var dbLoadBtn = h('button', { type: 'button', className: 'btn sm ghost', text: 'Load databases…', hidden: true, onclick: async function () {
+  async function runDbLoad() {
     var current = $('c-database').value;
     dbLoadBtn.disabled = true; dbLoadBtn.textContent = 'Loading…'; clear(dbLoadResult);
     var details = collectDetails();
@@ -1381,8 +1393,18 @@ function openConnectionForm(name, existing) {
       if (body && body.detail) msg += ': ' + body.detail;
       dbLoadResult.appendChild(h('span', { className: 'test-fail', text: '✗ ' + msg }));
     }
-  } });
-  function paintDbLoadVisibility() { dbLoadBtn.hidden = ['mysql', 'postgres', 'clickhouse'].indexOf(dbSelect.value) === -1; }
+  }
+  var dbLoadBtn = h('button', { type: 'button', className: 'btn sm ghost', text: 'Load databases…', hidden: true, onclick: runDbLoad });
+  // Editing an existing connection already has real, saved credentials, so there is no need to make the user
+  // click "Load databases…" themselves - do it once, automatically, the first time the field becomes relevant.
+  var dbAutoLoaded = false;
+  function paintDbLoadVisibility() {
+    dbLoadBtn.hidden = ['mysql', 'postgres', 'clickhouse'].indexOf(dbSelect.value) === -1;
+    // Deferred: the rest of the form (host/port/user/password fields collectDetails() reads) is still being
+    // built when this first runs on initial paint, and only exists in the DOM once this synchronous function
+    // returns.
+    if (!dbLoadBtn.hidden && isEdit && !dbAutoLoaded) { dbAutoLoaded = true; setTimeout(runDbLoad, 0); }
+  }
   dbSelect.addEventListener('change', paintDbLoadVisibility);
   paintDbLoadVisibility();
   var testResult = h('span', { className: 'test-result' });
@@ -3861,6 +3883,45 @@ function paintRunRefs(sql) {
   names.forEach(function (n) { box.appendChild(h('span', { className: 'tag', text: ':' + n })); });
 }
 bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
+
+// ---- Run SQL: draggable splitter between the editor and the sidebar (recent queries, params, schema) ----
+(function () {
+  var RUNNER_SIDE_W_KEY = 'queryapigate-ui-runner-side-w';
+  var MIN_SIDE_W = 220, MAX_SIDE_W = 560, MIN_MAIN_W = 320;
+  var splitter = $('run-splitter'), runner = document.querySelector('.runner');
+  function setSideWidth(px) { runner.style.setProperty('--runner-side-w', px + 'px'); }
+  try {
+    var saved = Number(localStorage.getItem(RUNNER_SIDE_W_KEY));
+    if (saved) setSideWidth(Math.max(MIN_SIDE_W, Math.min(MAX_SIDE_W, saved)));
+  } catch (e) {}
+  var dragging = false, startX = 0, startW = 0;
+  splitter.addEventListener('pointerdown', function (e) {
+    dragging = true; startX = e.clientX; startW = runner.querySelector('.runner-side').getBoundingClientRect().width;
+    splitter.classList.add('dragging');
+    splitter.setPointerCapture(e.pointerId);
+    document.body.style.userSelect = 'none';
+  });
+  splitter.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var proposed = startW - (e.clientX - startX);
+    var maxAllowed = Math.min(MAX_SIDE_W, runner.getBoundingClientRect().width - MIN_MAIN_W - 7);
+    setSideWidth(Math.max(MIN_SIDE_W, Math.min(maxAllowed, proposed)));
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false; splitter.classList.remove('dragging'); document.body.style.userSelect = '';
+    try { localStorage.setItem(RUNNER_SIDE_W_KEY, parseFloat(getComputedStyle(runner).getPropertyValue('--runner-side-w')) || ''); } catch (err) {}
+  }
+  splitter.addEventListener('pointerup', endDrag);
+  splitter.addEventListener('pointercancel', endDrag);
+  splitter.addEventListener('keydown', function (e) {
+    var step = e.shiftKey ? 40 : 12;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setSideWidth(Math.min(MAX_SIDE_W, (runner.querySelector('.runner-side').getBoundingClientRect().width) + step)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); setSideWidth(Math.max(MIN_SIDE_W, (runner.querySelector('.runner-side').getBoundingClientRect().width) - step)); }
+    else return;
+    try { localStorage.setItem(RUNNER_SIDE_W_KEY, parseFloat(getComputedStyle(runner).getPropertyValue('--runner-side-w')) || ''); } catch (err) {}
+  });
+})();
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
