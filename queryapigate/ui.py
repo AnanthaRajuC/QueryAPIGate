@@ -477,17 +477,25 @@ UI_HTML = r"""<!doctype html>
   .access-names .name { font: 600 12px var(--mono); }
   .access-roles { margin: 0; }
   #accessmap-body { overflow: auto; }
-  table.amap { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
-  table.amap th, table.amap td { padding: 8px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; }
+  table.amap { border-collapse: separate; border-spacing: 0; font-size: 12.5px; margin-bottom: 4px; }
+  table.amap th, table.amap td { padding: 7px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; }
   table.amap thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); font: 600 11px var(--sans); letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-3); }
   table.amap .amap-query { position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; font: 600 12px var(--mono); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
   table.amap thead th.amap-query { z-index: 3; }
+  table.amap tfoot .amap-query { position: static; background: var(--surface-2); font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-3); }
   table.amap .amap-coll { display: block; font: 11px var(--sans); color: var(--ink-3); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
   table.amap td.amap-cell { text-align: center; }
-  table.amap .amap-key-head { text-align: center; font: 600 12px var(--mono) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--ink) !important; }
-  table.amap .amap-key-head.revoked { color: var(--ink-3) !important; }
-  .amap-dot { display: inline-flex; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
-  .amap-dot.conn { background: var(--warn); }
+  table.amap td.num, table.amap th.num { text-align: right; font: 12px var(--mono); color: var(--ink-2); }
+  table.amap tfoot td { border-bottom: 0; background: var(--surface-2); }
+  table.amap .amap-key-head { text-align: center; vertical-align: top; }
+  table.amap .amap-key-name { display: block; font: 600 12px var(--mono) !important; letter-spacing: 0 !important; text-transform: none !important; color: var(--ink) !important; }
+  table.amap .amap-key-sub { display: block; margin-top: 2px; font: 10.5px var(--sans) !important; text-transform: none !important; letter-spacing: 0 !important; color: var(--ink-3) !important; font-weight: 400 !important; white-space: normal; }
+  table.amap .amap-key-head.revoked .amap-key-name { color: var(--ink-3) !important; text-decoration: line-through; }
+  .amap-dot { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 9px;
+    background: var(--accent-soft); color: var(--accent); font: 600 10px var(--mono); }
+  .amap-dot.conn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
+  .amap-dot.role { background: var(--surface-3); color: var(--ink-2); }
+  .legend .amap-dot { min-width: 16px; height: 16px; font-size: 9px; vertical-align: middle; }
   .legend { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 11.5px; }
   .legend .amap-dot { margin-left: 10px; }
 
@@ -666,7 +674,7 @@ UI_HTML = r"""<!doctype html>
   <section id="tab-accessmap">
     <div class="page-head">
       <div class="titles"><h1>Access map</h1><span class="sub">Which API keys can reach which saved queries - the whole point of collections and connection grants, in one place.
-        <span class="legend"><span class="amap-dot"></span> named query or collection grant<span class="amap-dot conn"></span> whole-connection grant</span></span></div>
+        <span class="legend"><span class="amap-dot">Q</span> named query &nbsp;<span class="amap-dot">C</span> collection &nbsp;<span class="amap-dot conn">W</span> whole connection</span></span></div>
       <span class="spacer"></span>
       <input id="accessmap-filter" class="search" type="search" placeholder="Filter by query or key…">
     </div>
@@ -2278,6 +2286,13 @@ function accessBox(queryName, collection, connectionName) {
 }
 /** The Access map screen: every saved query against every API key, so "which keys can call which endpoints"
  * is answered at a glance instead of by opening each query or each key in turn. */
+/** true once a key's expires_at date has passed - the same check renderApiKeys() makes, factored out so the
+ * access map can grey out an expired key exactly like the API keys screen does. */
+function isKeyExpired(k) {
+  var today = new Date().toISOString().slice(0, 10);
+  return !!(k.expires_at && k.expires_at < today);
+}
+var AMAP_CODE = { query: 'Q', collection: 'C', connection: 'W' };
 function renderAccessMap() {
   var box = clear($('accessmap-body'));
   if (!filesCache.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }))); return; }
@@ -2288,30 +2303,82 @@ function renderAccessMap() {
     return;
   }
   var q = $('accessmap-filter').value.trim().toLowerCase();
-  var rows = filesCache.filter(function (f) {
-    return !q || [f.filename, f.collection].join(' ').toLowerCase().indexOf(q) !== -1;
-  }).sort(function (a, b) { return ((a.collection || '￿') + a.filename) < ((b.collection || '￿') + b.filename) ? -1 : 1; });
-  var cols = keyNames.filter(function (n) { return !q || n.toLowerCase().indexOf(q) !== -1 || rows.length; });
+  var allRows = filesCache.slice().sort(function (a, b) { return ((a.collection || '￿') + a.filename) < ((b.collection || '￿') + b.filename) ? -1 : 1; });
+  var rowsMatch = q ? allRows.filter(function (f) { return [f.filename, f.collection].join(' ').toLowerCase().indexOf(q) !== -1; }) : allRows;
+  var colsMatch = q ? keyNames.filter(function (n) { return n.toLowerCase().indexOf(q) !== -1; }) : keyNames;
+  // A search term narrows whichever axis it matches; when it matches only keys (or only queries), the other
+  // axis stays whole rather than collapsing to nothing - "acme" shows every query under just that key's column.
+  var rows = rowsMatch.length ? rowsMatch : (colsMatch.length ? allRows : []);
+  var cols = colsMatch.length ? colsMatch : (rowsMatch.length ? keyNames : []);
   if (!rows.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
-  var thead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }),
+
+  var thead = h('thead', {}, h('tr', {},
+    h('th', { className: 'amap-query', text: 'Query' }),
+    h('th', { text: 'Connection' }),
     cols.map(function (name) {
       var k = apiKeysCache[name];
-      return h('th', { className: 'amap-key-head' + (k.active ? '' : ' revoked'), title: name + (k.active ? '' : ' (revoked)') }, name);
-    })));
+      var expired = isKeyExpired(k);
+      var sub = (k.allow_writes ? 'Read/write' : 'Read-only') + ' · ' + (k.rate_limit || 'server default');
+      return h('th', { className: 'amap-key-head' + (k.active && !expired ? '' : ' revoked'),
+        title: name + (!k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '') },
+        h('span', { className: 'amap-key-name' }, name, !k.active ? h('span', { className: 'dim', text: ' revoked' }) :
+          expired ? h('span', { className: 'dim', text: ' expired' }) : null),
+        h('span', { className: 'amap-key-sub', text: sub }));
+    }),
+    h('th', { className: 'num', text: 'Reach' })));
+
+  var colTotals = {}; cols.forEach(function (name) { colTotals[name] = 0; });
   var tbody = h('tbody', {}, rows.map(function (f) {
     var l = latestOf(f);
+    var rowReach = 0;
+    var cells = cols.map(function (name) {
+      var via = reachVia(apiKeysCache[name], f.filename, f.collection, l.connection_name);
+      if (!via.length) return h('td', { className: 'amap-cell' });
+      rowReach++; colTotals[name]++;
+      var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
+      var viaConnOnly = codes.length === 1 && codes[0] === 'W';
+      return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') },
+        h('span', { className: 'amap-dot' + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
+    });
     return h('tr', {},
       h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
-      cols.map(function (name) {
-        var via = reachVia(apiKeysCache[name], f.filename, f.collection, l.connection_name);
-        if (!via.length) return h('td', { className: 'amap-cell' });
-        var kind = via.some(function (v) { return v.kind === 'query' || v.kind === 'collection'; }) ? '' : ' conn';
-        return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') }, h('span', { className: 'amap-dot' + kind }));
-      }));
+      h('td', { className: 'mono dim', text: l.connection_name || '—' }),
+      cells,
+      h('td', { className: 'num', text: rowReach ? String(rowReach) : '—' }));
   }));
-  box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody)));
+
+  var tfoot = h('tfoot', {}, h('tr', {},
+    h('td', { className: 'amap-query', text: 'Reaches' }), h('td'),
+    cols.map(function (name) { return h('td', { className: 'num', text: colTotals[name] + ' / ' + rows.length }); }),
+    h('td')));
+
+  box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody, tfoot)));
+
+  var roleNames = Object.keys(rolesCache).sort();
+  if (roleNames.length) {
+    var rthead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }), h('th', { text: 'Connection' }),
+      roleNames.map(function (name) { return h('th', { className: 'amap-key-head' }, name); })));
+    var rtbody = h('tbody', {}, rows.map(function (f) {
+      var l = latestOf(f);
+      return h('tr', {},
+        h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
+        h('td', { className: 'mono dim', text: l.connection_name || '—' }),
+        roleNames.map(function (name) {
+          var via = reachVia(rolesCache[name], f.filename, f.collection, l.connection_name);
+          if (!via.length) return h('td', { className: 'amap-cell' });
+          var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
+          return h('td', { className: 'amap-cell', title: via.map(function (v) { return v.label; }).join(', ') },
+            h('span', { className: 'amap-dot role', text: codes.join('·') }));
+        }));
+    }));
+    box.appendChild(h('p', { className: 'sub-h', style: 'margin:18px 0 8px', text: 'Roles' }));
+    box.appendChild(h('div', { className: 'hint', style: 'margin-bottom:8px',
+      text: 'What a key created from each role would reach - a role grants nothing on its own.' }));
+    box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, rthead, rtbody)));
+  }
 }
 $('accessmap-filter').oninput = renderAccessMap;
+
 
 function renderDetail() {
   var box = clear($('query-detail'));
