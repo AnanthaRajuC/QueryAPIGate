@@ -1478,5 +1478,165 @@ class ServiceEndpointTests(ApiTestCase):
         self.assertIn('error', res.get_json())
 
 
+def _mongo_cursor(docs):
+    """A chainable fake of a pymongo Cursor: .sort()/.skip()/.limit()/.max_time_ms() all return itself,
+    same as the real thing, and iterating it yields ``docs`` - matches how runners.mongo_find() calls it."""
+    cursor = mock.MagicMock()
+    cursor.sort.return_value = cursor
+    cursor.skip.return_value = cursor
+    cursor.limit.return_value = cursor
+    cursor.max_time_ms.return_value = cursor
+    cursor.__iter__.return_value = iter(docs)
+    return cursor
+
+
+def _mongo_client(docs=(), collection_names=(), database_names=()):
+    """A fake pymongo.MongoClient: client[db][collection].find(...) is a _mongo_cursor(docs), client.admin.
+    command('ping') succeeds, and list_database_names()/list_collection_names() return the given names."""
+    coll = mock.MagicMock()
+    coll.find.return_value = _mongo_cursor(list(docs))
+    database = mock.MagicMock()
+    database.__getitem__.return_value = coll
+    database.list_collection_names.return_value = list(collection_names)
+    client = mock.MagicMock()
+    client.__getitem__.return_value = database
+    client.list_database_names.return_value = list(database_names)
+    client.admin.command.return_value = {'ok': 1.0}
+    return client
+
+
+class MongoConnectionTests(ApiTestCase):
+    """Mirrors TestConnectionTests/ListDatabasesTests, but for the mongo dialect - pymongo.MongoClient is
+    mocked (see _mongo_client() above) since these tests run without a real MongoDB server."""
+
+    def test_connection_test_pings_the_server(self):
+        with mock.patch('pymongo.MongoClient', return_value=_mongo_client()):
+            res = self.client.post('/connections/test', json={
+                'db': 'mongo', 'host': 'h', 'user': 'u', 'password': 'p', 'database': 'd'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertIn('elapsed_ms', res.get_json())
+
+    def test_connection_test_failure_redacts_the_password(self):
+        with mock.patch('pymongo.MongoClient', side_effect=Exception('auth failed for secret')):
+            res = self.client.post('/connections/test', json={
+                'db': 'mongo', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd'})
+        self.assertEqual(res.status_code, 502)
+        self.assertNotIn('secret', res.get_data(as_text=True))
+
+    def test_list_databases(self):
+        client = _mongo_client(database_names=['orders', 'billing'])
+        with mock.patch('pymongo.MongoClient', return_value=client):
+            res = self.client.post('/connections/databases',
+                                   json={'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['databases'], ['orders', 'billing'])
+
+    def test_schema_lists_collections_not_columns(self):
+        self.client.patch('/connections', json={'connections': {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
+        client = _mongo_client(collection_names=['orders', 'users'])
+        with mock.patch('pymongo.MongoClient', return_value=client):
+            res = self.client.get('/connections/mg/schema')
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        body = res.get_json()
+        self.assertEqual([t['name'] for t in body['tables']], ['orders', 'users'])
+        self.assertTrue(all(t['type'] == 'collection' and t['columns'] == [] for t in body['tables']))
+
+
+class MongoQueryTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.patch('/connections', json={'connections': {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
+
+    def test_ad_hoc_find(self):
+        docs = [{'_id': 1, 'name': 'a'}, {'_id': 2, 'name': 'b'}]
+        with mock.patch('pymongo.MongoClient', return_value=_mongo_client(docs=docs)):
+            res = self.client.post('/execute_mongo', json={
+                'collection': 'users', 'filter': {}, 'connection_name': 'mg'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        rows = res.get_json()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r['name'] for r in rows}, {'a', 'b'})
+
+    def test_pagination_has_more_header(self):
+        # page_size defaults to 10; 11 docs back means the "limit + 1" trick correctly reports another page.
+        docs = [{'_id': i} for i in range(11)]
+        with mock.patch('pymongo.MongoClient', return_value=_mongo_client(docs=docs)):
+            res = self.client.post('/execute_mongo', json={'collection': 'users', 'connection_name': 'mg'})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.headers.get('X-Has-More'), 'true')
+        self.assertEqual(len(res.get_json()), 10)
+
+    def test_where_is_rejected(self):
+        res = self.client.post('/execute_mongo', json={
+            'collection': 'users', 'filter': {'$where': 'true'}, 'connection_name': 'mg'})
+        self.assertEqual(res.status_code, 403)
+
+    def test_collection_is_required(self):
+        res = self.client.post('/execute_mongo', json={'filter': {}, 'connection_name': 'mg'})
+        self.assertEqual(res.status_code, 400)
+
+    def test_saved_mongo_query_runs_through_q_name(self):
+        saved = self.client.patch('/save_sql_to_file', json={
+            'filename': 'active_users', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'users', 'mongo_filter': {'active': ':active'},
+            'query_parameters': {'active': 'bool'}, 'connection_name': 'mg'})
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        with mock.patch('pymongo.MongoClient', return_value=_mongo_client(docs=[{'_id': 1}])) as ctor:
+            res = self.client.get('/q/active_users?active=true')
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(len(res.get_json()), 1)
+        self.assertTrue(ctor.called)  # actually reached the driver, not short-circuited before execution
+
+    def test_saved_mongo_query_substitutes_the_placeholder_into_the_real_filter(self):
+        self.client.patch('/save_sql_to_file', json={
+            'filename': 'by_status', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'orders', 'mongo_filter': {'status': ':status'}, 'connection_name': 'mg'})
+        coll = mock.MagicMock()
+        coll.find.return_value = _mongo_cursor([])
+        database = mock.MagicMock()
+        database.__getitem__.return_value = coll
+        client = mock.MagicMock()
+        client.__getitem__.return_value = database
+        with mock.patch('pymongo.MongoClient', return_value=client):
+            res = self.client.get('/q/by_status?status=shipped')
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(coll.find.call_args.args[0], {'status': 'shipped'})
+
+    def test_scoped_key_without_a_grant_on_the_connection_is_refused(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        admin = {'X-API-Key': 'admin-key'}
+        self.client.patch('/connections', json={'connections': {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}}, headers=admin)
+        self.client.patch('/save_sql_to_file', json={
+            'filename': 'orders', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'orders', 'mongo_filter': {}, 'connection_name': 'mg'}, headers=admin)
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=admin)
+        key = scoped.get_json()['key']
+        res = self.client.get('/q/orders', headers={'X-API-Key': key})
+        self.assertEqual(res.status_code, 403)
+
+    def test_streaming_is_not_supported_yet(self):
+        self.client.patch('/save_sql_to_file', json={
+            'filename': 'orders2', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'orders', 'mongo_filter': {}, 'connection_name': 'mg'})
+        res = self.client.get('/q/orders2?stream=true')
+        self.assertEqual(res.status_code, 400)
+
+    def test_openapi_and_catalog_list_a_saved_mongo_query(self):
+        self.client.patch('/save_sql_to_file', json={
+            'filename': 'orders3', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'orders', 'mongo_filter': {'status': ':status'},
+            'query_parameters': {'status': 'string'}, 'connection_name': 'mg'})
+        spec = self.client.get('/openapi.json').get_json()
+        self.assertIn('/q/orders3', spec['paths'])  # not silently excluded, unlike before _is_runnable() existed
+        param_names = [p['name'] for p in spec['paths']['/q/orders3']['get']['parameters']]
+        self.assertIn('status', param_names)  # the declared mongo_filter parameter made it through
+        catalog_names = [q['name'] for q in self.client.get('/catalog').get_json()['queries']]
+        self.assertIn('orders3', catalog_names)
+
+
 if __name__ == '__main__':
     unittest.main()

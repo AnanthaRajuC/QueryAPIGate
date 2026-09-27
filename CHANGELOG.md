@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **MongoDB support (find-only).** A new `mongo` connection type; ad-hoc `find()` queries from Run SQL and
+  `POST /execute_mongo`; saved Mongo queries (`query_type: "mongo"`) exposed through `GET/POST /q/{name}`
+  exactly like a saved SQL query, including OpenAPI/`/catalog` listing, bundle export/import and `:name`
+  bound parameters (substituted as real JSON values via `mongotools.fill_placeholders()`, not string
+  splicing); collection listing in the Schema tab; native database listing/switching. Read-only, full stop -
+  there is no write path at all yet (see BACKLOG #36 for the deliberately-deferred remainder: aggregation
+  pipelines, writes, per-field schema sampling, caching, streaming and a dedicated query-builder UI - v1
+  uses one JSON textarea, `{"collection", "filter", "projection", "sort"}`, in both Run SQL and the
+  saved-query form). A `$where`/`$function`/`$accumulator` filter is rejected outright (arbitrary
+  server-side JavaScript execution), the Mongo equivalent of the SQL guard's read-only/single-statement
+  check.
+- **Run SQL's sidebar redesign**: Recent/Settings/Schema tabs instead of one long stacked column, a
+  draggable splitter between the editor and the sidebar (width remembered across sessions), the redundant
+  Table dropdown removed now that the Schema tab already inserts a table on click, and the schema browser
+  capped with its own scrollbar instead of growing unbounded for a connection with a lot of tables. Editing
+  an existing mysql/postgres/clickhouse(/mongo) connection now loads its database list automatically instead
+  of waiting for a manual click, and the tab drops its usual width cap so the editor and results fill the
+  whole window on wide screens.
 - **A "Test connection" button** on the New/Edit connection form, and `POST /connections/test` (admin only):
   tries to actually connect with the fields on screen - not yet saved - so a typo'd host or a firewalled port
   is found out before saving, not on the query that comes after. Never touches the connection pool's saved

@@ -35,8 +35,9 @@ postgres = ["psycopg2-binary>=2.9"]
 clickhouse = ["clickhouse-driver>=0.2"]
 h2 = ["JayDeBeApi>=1.2", "JPype1>=1.4"]  # also needs a Java runtime
 duckdb = ["duckdb>=1.0"]  # Connection.interrupt()/InterruptException, relied on for query timeouts, verified from here
+mongo = ["pymongo>=4.0"]
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
-all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,encryption]"]
+all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,encryption]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
 dev = ["queryapigate[all]", "ruff>=0.5", "openapi-spec-validator>=0.7", "hypothesis>=6.100", "mypy>=1.10",

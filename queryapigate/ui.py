@@ -1190,6 +1190,20 @@ function sqlParams(sql) {
   while ((m = SQL_TOKEN.exec(sql))) if (m[5] && !seen[m[5]]) { seen[m[5]] = true; out.push(m[5].slice(1)); }
   return out;
 }
+/** Mirrors mongotools.placeholder_names() client-side, for a Mongo query's "detected params" preview - a
+ * string leaf that is exactly ":name" (not sqlParams()'s SQL tokenizer, which treats a JSON-quoted string
+ * as opaque and would miss every one of these). Returns [] for text that isn't valid JSON. */
+function mongoDocParams(text) {
+  var doc;
+  try { doc = text.trim() ? JSON.parse(text) : {}; } catch (e) { return []; }
+  var seen = {}, out = [];
+  (function walk(node) {
+    if (typeof node === 'string') { var m = /^:([A-Za-z_]\w*)$/.exec(node); if (m && !seen[m[1]]) { seen[m[1]] = true; out.push(m[1]); } }
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node && typeof node === 'object') Object.keys(node).forEach(function (k) { walk(node[k]); });
+  })(doc);
+  return out;
+}
 /** `gutter`, if given, gets one line number per line, kept in sync with the textarea's own scroll position -
  * "what line is that part of the query on" for anything longer than a couple of lines, the same question a
  * code editor's own gutter answers. Rebuilt on every keystroke like the highlight overlay already was;
@@ -1340,7 +1354,10 @@ function schemaField(browser) {
 }
 
 // ---- connections ----
-var DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb']; // mirrors config.SUPPORTED_DB_TYPES
+var DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo']; // mirrors config.SUPPORTED_DB_TYPES
+// Dialects that support browsing/switching to a different database on the same server - the Load-databases
+// button on the connection form and the Database dropdown/tree override in Run SQL.
+var DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
 var PASSWORD_MASK = '********'; // mirrors config.PASSWORD_MASK; sending it back unchanged keeps the stored password
 var connectionsCache = {};
 
@@ -1414,7 +1431,7 @@ function openConnectionForm(name, existing) {
   // click "Load databases…" themselves - do it once, automatically, the first time the field becomes relevant.
   var dbAutoLoaded = false;
   function paintDbLoadVisibility() {
-    dbLoadBtn.hidden = ['mysql', 'postgres', 'clickhouse'].indexOf(dbSelect.value) === -1;
+    dbLoadBtn.hidden = DB_SWITCHABLE_TYPES.indexOf(dbSelect.value) === -1;
     // Deferred: the rest of the form (host/port/user/password fields collectDetails() reads) is still being
     // built when this first runs on initial paint, and only exists in the DOM once this synchronous function
     // returns.
@@ -1663,6 +1680,7 @@ function paintRunConnection() {
   else { var firstActive = names.filter(function (n) { return connectionsCache[n].active; })[0]; if (firstActive) select.value = firstActive; }
   runSchema.setConnection(select.value || '');
   paintRunDatabase();
+  paintRunEditorMode();
 }
 // ---- Run SQL's own "browse a different database on this same server" picker - separate from the tree-based
 // schema browser above, which always shows the connection's own configured database and is unaffected by it. ----
@@ -1686,7 +1704,7 @@ function paintRunDatabase() {
     runSchema.setDatabase(null); return;
   }
   var c = connectionsCache[connName];
-  if (c.db !== 'mysql' && c.db !== 'postgres' && c.db !== 'clickhouse') {
+  if (DB_SWITCHABLE_TYPES.indexOf(c.db) === -1) {
     // Nothing to switch to - sqlite/duckdb are a single file, h2/jdbc have no supported "list databases" query.
     sel.disabled = true;
     sel.appendChild(h('option', { value: c.database || '', text: c.database || '(default)' }));
@@ -1714,6 +1732,18 @@ function populateConnectionSelect() {
 /** Jumps the Type/Host filters to wherever `name` actually lives, then selects it - so a shortcut into Run SQL
  * from elsewhere (the Connections table's "Query" button, run history, a schema preview) always lands on the
  * right connection instead of silently failing because the cascade happened to be filtered to something else. */
+/** The editor holds SQL for every dialect except mongo (BACKLOG #36: find-only, one JSON textarea - see
+ * runMongo()) - so its placeholder/label and the Explain button (no EXPLAIN equivalent yet) follow whichever
+ * connection is currently selected. */
+function paintRunEditorMode() {
+  var c = connectionsCache[$('run-connection').value];
+  var isMongo = !!c && c.db === 'mongo';
+  var ta = $('run-sql');
+  ta.placeholder = isMongo ? '{"collection": "orders", "filter": {"status": ":status"}}'
+                            : 'SELECT * FROM t WHERE id = :id';
+  ta.setAttribute('aria-label', isMongo ? 'Mongo find query (JSON)' : 'SQL');
+  $('run-explain-button').hidden = isMongo;
+}
 function selectRunConnection(name) {
   var c = connectionsCache[name];
   if (!c) return;
@@ -1722,6 +1752,7 @@ function selectRunConnection(name) {
   $('run-connection').value = name;
   runSchema.setConnection(name);
   paintRunDatabase();
+  paintRunEditorMode();
 }
 $('run-conn-type').onchange = function () { paintRunConnHost(); paintRunConnection(); };
 $('run-conn-host').onchange = function () { paintRunConnection(); };
@@ -2692,7 +2723,7 @@ async function openQueryInfo(f) {
   clear(sqlBox);
   if (!c) { sqlBox.appendChild(h('div', { className: 'hint', text: 'Could not load the SQL.' })); return; }
   var data = c.parsed && c.parsed[String(latest.version)];
-  var sql = data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : c.raw;
+  var sql = queryDisplayText(data, c.raw);
   // Several example queries (and anything else authored as one Python string) have no line breaks of their
   // own; showing that verbatim is an unreadable, horizontally-scrolling wall of text. Reformat only when the
   // author supplied no line breaks at all - a query someone hand-formatted keeps exactly the layout they gave it.
@@ -2790,7 +2821,7 @@ async function computeTableMatches(connName, tableName) {
     if (!c) return null;
     var latest = latestOf(f);
     var data = c.parsed && c.parsed[String(latest.version)];
-    var sql = data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : c.raw;
+    var sql = queryDisplayText(data, c.raw);
     return needle.test(sql) ? f.filename : null;
   }));
   return new Set(hits.filter(Boolean));
@@ -2931,8 +2962,11 @@ function renderAccessMap() {
     if (!q && amapConnFilter) {
       empty.appendChild(h('button', { type: 'button', className: 'btn primary', text: 'New saved query' + (amapTableFilter ? ' on ' + amapTableFilter : ''), onclick: function () {
         var conn = amapConnFilter, table = amapTableFilter;
+        var isMongo = (connectionsCache[conn] || {}).db === 'mongo';
+        var starter = table && isMongo ? JSON.stringify({ collection: table, filter: {} }, null, 2)
+                                       : table ? 'SELECT * FROM ' + table : null;
         showTab('queries');
-        openQueryForm(null, table ? { connection_name: conn, sql_query: 'SELECT * FROM ' + table } : { connection_name: conn });
+        openQueryForm(null, starter ? { connection_name: conn, sql_query: starter } : { connection_name: conn });
       } }));
     }
     box.appendChild(empty); return;
@@ -3117,8 +3151,7 @@ async function renderSqlTab(body, f, v) {
   clear(body);
   if (!c) return;
   var data = c.parsed && c.parsed[String(v.version)];
-  var sql = data && data.sql_query;
-  var shown = sql !== undefined && sql !== null ? String(sql) : c.raw;
+  var shown = queryDisplayText(data, c.raw);
   var codeEl = codeBox(shown);
   var raw = h('pre', { className: 'code', text: c.raw });
   raw.hidden = true;
@@ -3294,7 +3327,7 @@ async function openQueryForm(baseName, baseVersion) {
     slot.appendChild(loadingNode());
     var c = await getContent(baseName);
     var d = c && c.parsed && c.parsed[String(baseVersion.version)];
-    sql = (d && d.sql_query) || '';
+    sql = mongoEditorText(d) !== null ? mongoEditorText(d) : (d && d.sql_query) || '';
     clear(slot);
   } else if (prefill.sql_query) {
     sql = prefill.sql_query; // e.g. a `SELECT * FROM <table>` starting point from the access map's "not yet exposed" prompt
@@ -3311,18 +3344,27 @@ async function openQueryForm(baseName, baseVersion) {
   var detected = h('div', { className: 'refs' });
   var editor = makeEditor({ id: 'q-sql', required: true, placeholder: 'SELECT * FROM t WHERE id = :id' }, sql);
   var sqlTa = editor.querySelector('textarea');
+  var sqlLabel = h('label', { for: 'q-sql' }, 'SQL', h('span', { className: 'type', text: 'use :name for bound parameters' }));
+  function isFormMongo() { return (connectionsCache[connSelect.value] || {}).db === 'mongo'; }
+  function paintFormMode() {
+    var mongo = isFormMongo();
+    clear(sqlLabel).appendChild(document.createTextNode(mongo ? 'Query' : 'SQL'));
+    sqlLabel.appendChild(h('span', { className: 'type', text: mongo ? 'a find() filter document - use ":name" for bound parameters' : 'use :name for bound parameters' }));
+    sqlTa.placeholder = mongo ? '{"collection": "orders", "filter": {"status": ":status"}}' : 'SELECT * FROM t WHERE id = :id';
+  }
   function paintRefs() {
     clear(detected);
-    var names = sqlParams(sqlTa.value);
-    if (names.length) detected.appendChild(h('span', { className: 'hint', text: 'Bound in SQL:' }));
+    var names = isFormMongo() ? mongoDocParams(sqlTa.value) : sqlParams(sqlTa.value);
+    if (names.length) detected.appendChild(h('span', { className: 'hint', text: 'Bound in the query:' }));
     names.forEach(function (n) { detected.appendChild(h('span', { className: 'tag', text: ':' + n })); });
   }
   sqlTa.addEventListener('input', paintRefs);
+  paintFormMode();
   paintRefs();
   var querySchema = schemaBrowser(function (text) { insertAtCursor(sqlTa, text); },
     function (tableName) { previewTable(connSelect.value, tableName); closeDrawer(); });
   querySchema.setConnection(connSelect.value);
-  connSelect.onchange = function () { querySchema.setConnection(connSelect.value); };
+  connSelect.onchange = function () { querySchema.setConnection(connSelect.value); paintFormMode(); paintRefs(); };
   var collectionInput = h('input', { id: 'q-collection', list: 'q-collection-list', placeholder: 'optional — e.g. reporting', autocomplete: 'off', spellcheck: 'false' });
   var collectionImpact = h('div', {});
   collectionInput.addEventListener('input', function () { clear(collectionImpact).appendChild(collectionInput.value.trim() ? impactNode(null, collectionInput.value.trim()) : h('span')); });
@@ -3333,7 +3375,7 @@ async function openQueryForm(baseName, baseVersion) {
   var form = h('form', { className: 'form', novalidate: true, onsubmit: function (e) { e.preventDefault(); saveQuery(actions.submit); } },
     field('q-filename', 'Filename', inp('q-filename', baseName, 'films_by_rating', true), 'Letters, digits, spaces, “.”, “_” and “-”. Saving an existing name adds a version.'),
     h('div', { className: 'grid2' }, field('q-author', 'Author', inp('q-author', prefill.author, '', true)), field('q-connection', 'Default connection', connSelect)),
-    h('div', { className: 'field' }, h('label', { for: 'q-sql' }, 'SQL', h('span', { className: 'type', text: 'use :name for bound parameters' })), editor, detected),
+    h('div', { className: 'field' }, sqlLabel, editor, detected),
     schemaField(querySchema),
     field('q-description', 'Description', inp('q-description', prefill.description, '', true)),
     baseName ? null : collectionField,
@@ -3342,6 +3384,22 @@ async function openQueryForm(baseName, baseVersion) {
     actions.node);
   slot.appendChild(form);
   (baseName ? sqlTa : $('q-filename')).focus();
+}
+/** A mongo saved version's editor text - the same {"collection", "filter", ...} JSON convention runMongo()
+ * uses - or null when ``d`` isn't a mongo version (so the caller falls back to plain sql_query text). */
+function mongoEditorText(d) {
+  if (!d || d.query_type !== 'mongo') return null;
+  var doc = { collection: d.mongo_collection, filter: d.mongo_filter || {} };
+  if (d.mongo_projection) doc.projection = d.mongo_projection;
+  if (d.mongo_sort) doc.sort = d.mongo_sort;
+  return JSON.stringify(doc, null, 2);
+}
+/** What to show for a saved version, wherever the UI displays "the query": the mongo JSON convention, plain
+ * sql_query text, or (a version so old/malformed neither applies) the raw file content as a last resort. */
+function queryDisplayText(data, raw) {
+  var mongo = mongoEditorText(data);
+  if (mongo !== null) return mongo;
+  return data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : raw;
 }
 $('new-query').onclick = function () { openQueryForm(); };
 
@@ -3354,15 +3412,32 @@ async function saveQuery(btn) {
   }
   var tags = $('q-tags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
   var filename = $('q-filename').value.trim();
+  var isMongo = (connectionsCache[$('q-connection').value] || {}).db === 'mongo';
   var body = {
     filename: filename,
-    sql_query: $('q-sql').value,
     author: $('q-author').value,
     description: $('q-description').value,
     tags: tags,
     connection_name: $('q-connection').value || undefined,
     query_parameters: queryParameters
   };
+  if (isMongo) {
+    var doc;
+    try { doc = $('q-sql').value.trim() ? JSON.parse($('q-sql').value) : {}; }
+    catch (e) { showError('The query must be valid JSON: ' + e.message, { errors: { sql_query: e.message } }); return; }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !doc.collection) {
+      showError('The query must be a JSON object with a "collection" field, e.g. {"collection": "users", "filter": {}}.',
+               { errors: { sql_query: 'collection is required' } });
+      return;
+    }
+    body.query_type = 'mongo';
+    body.mongo_collection = doc.collection;
+    body.mongo_filter = doc.filter || {};
+    if (doc.projection) body.mongo_projection = doc.projection;
+    if (doc.sort) body.mongo_sort = doc.sort;
+  } else {
+    body.sql_query = $('q-sql').value;
+  }
   var collectionEl = $('q-collection');
   var chosen = collectionEl ? collectionEl.value.trim() : '';
   if (chosen) {
@@ -3604,7 +3679,7 @@ async function renderResponse(res, o) {
       downloadBlob(new Blob([payload], { type: contentType || 'text/plain' }), base + '.' + (EXT[format] || 'txt')); } }));
   }
   if (tableData) bar.appendChild(h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy as TSV', onclick: function () { copyText(rowsToTsv(tableData)); } }));
-  if (o.sql !== undefined) bar.appendChild(h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy as curl', onclick: function () { copyText(asCurl(o)); } }));
+  if (o.sql !== undefined || o.mongo) bar.appendChild(h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy as curl', onclick: function () { copyText(asCurl(o)); } }));
   var chartPanel = null;
   if (tableData && tableData.length && numericColumns(tableData).length) {
     chartPanel = buildChartPanel(tableData);
@@ -3747,14 +3822,14 @@ function barChartSvg(rows, labelCol, valueCol) {
 }
 
 function shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
-/** o.sql/o.connection/o.params come from runSql()'s call to execute() - ad-hoc runs only, not saved-query
- * ones. The API key, if any, is a placeholder rather than the real value: this text is meant to be copied
- * out of the browser (to a terminal, a ticket, a chat), and the key typed into this page shouldn't ride
- * along by default. */
+/** o.sql/o.connection/o.params (or, for a mongo connection, o.mongoBody) come from runSql()/runMongo()'s
+ * call to execute() - ad-hoc runs only, not saved-query ones. The API key, if any, is a placeholder rather
+ * than the real value: this text is meant to be copied out of the browser (to a terminal, a ticket, a
+ * chat), and the key typed into this page shouldn't ride along by default. */
 function asCurl(o) {
   var qs = 'format=' + enc(o.format) + '&page=' + o.page + '&page_size=' + o.pageSize + (o.timeout ? '&timeout=' + enc(o.timeout) : '');
-  var url = new URL('execute_sql?' + qs, location.href).href;
-  var body = JSON.stringify({ sql: o.sql, connection_name: o.connection, params: o.params || {} });
+  var url = new URL((o.mongo ? 'execute_mongo' : 'execute_sql') + '?' + qs, location.href).href;
+  var body = JSON.stringify(o.mongo ? o.mongoBody : { sql: o.sql, connection_name: o.connection, params: o.params || {} });
   var lines = ['curl -X POST ' + shQuote(url), "  -H 'Content-Type: application/json'"];
   if (getKey()) lines.push("  -H 'X-API-Key: YOUR_KEY_HERE'  # replace with your own key");
   lines.push('  -d ' + shQuote(body));
@@ -3924,7 +3999,7 @@ bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
-$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); };
+$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
 $('run-sql').addEventListener('keydown', keyRun);
 $('run-params').addEventListener('keydown', keyRun);
@@ -3940,9 +4015,12 @@ $('run-explain-button').onclick = function () {
   runSql({ explain: true, button: $('run-explain-button') });
 };
 function runSql(opts) {
+  var connection = $('run-connection').value;
+  if (!connection) { showError('Pick a connection first — add one on the Connections tab.'); return; }
+  var isMongo = (connectionsCache[connection] || {}).db === 'mongo';
+  if (isMongo) { runMongo(opts); return; }
   var sql = $('run-sql').value;
   if (!sql.trim()) { showError('Write some SQL to run.', { errors: { sql: 'This field is required' } }); $('run-sql').focus(); return; }
-  if (!$('run-connection').value) { showError('Pick a connection first — add one on the Connections tab.'); return; }
   var paramsText = $('run-params').value.trim();
   var params = {};
   if (paramsText) {
@@ -3954,7 +4032,6 @@ function runSql(opts) {
   var timeout = $('run-timeout').value;
   $('run-page').value = String(runPage);
   var qs = 'format=' + enc(format) + '&page=' + runPage + '&page_size=' + pageSize + (timeout ? '&timeout=' + enc(timeout) : '');
-  var connection = $('run-connection').value;
   var sqlToRun = opts.explain ? 'EXPLAIN ' + sql : sql;
   // Only sent when it actually differs from the connection's own configured database - the common case (left
   // at the default) behaves exactly as before this existed, for every key, admin or scoped.
@@ -3973,11 +4050,54 @@ function runSql(opts) {
   });
 }
 
+/** The mongo branch of runSql(): the editor holds one JSON object - {"collection", "filter", "projection",
+ * "sort"} - rather than SQL text (see BACKLOG #36 - MongoDB support is find-only, so there is no EXPLAIN
+ * and no dedicated Collection/Filter form fields yet, just this one-textarea convention). */
+function runMongo(opts) {
+  if (opts.explain) { showError('EXPLAIN is not supported for Mongo connections yet.'); return; }
+  var raw = $('run-sql').value;
+  var doc;
+  try { doc = raw.trim() ? JSON.parse(raw) : {}; }
+  catch (e) { showError('The query must be valid JSON: ' + e.message, { errors: { sql: e.message } }); $('run-sql').focus(); return; }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !doc.collection) {
+    showError('The query must be a JSON object with a "collection" field, e.g. {"collection": "users", "filter": {}}.',
+             { errors: { sql: 'collection is required' } });
+    $('run-sql').focus();
+    return;
+  }
+  var paramsText = $('run-params').value.trim();
+  var params = {};
+  if (paramsText) {
+    try { params = JSON.parse(paramsText); }
+    catch (e) { showError('Bound parameters must be valid JSON: ' + e.message, { errors: { params: e.message } }); return; }
+  }
+  var format = $('run-format').value;
+  var pageSize = Number($('run-page-size').value) || 10;
+  var timeout = $('run-timeout').value;
+  $('run-page').value = String(runPage);
+  var qs = 'format=' + enc(format) + '&page=' + runPage + '&page_size=' + pageSize + (timeout ? '&timeout=' + enc(timeout) : '');
+  var connection = $('run-connection').value;
+  var body = { collection: doc.collection, filter: doc.filter || {}, connection_name: connection, params: params };
+  if (doc.projection) body.projection = doc.projection;
+  if (doc.sort) body.sort = doc.sort;
+  execute(function () {
+    return apiFetch('execute_mongo?' + qs, { method: 'POST', json: body });
+  }, {
+    results: $('run-results'), status: $('run-status'), button: opts.button || $('run-button'), page: runPage, pageSize: pageSize,
+    filename: 'query', format: format, connection: connection, params: params, timeout: timeout,
+    mongo: true, mongoBody: body,
+    onPage: function (n) { runPage = n; runMongo(opts); },
+    onPageSize: function (n) { $('run-page-size').value = String(n); runPage = 1; runMongo(opts); }
+  });
+}
+
 /** Jump to the Run SQL tab pre-filled with a preview of one table - from either schema browser. */
 function previewTable(connectionName, tableName) {
   showTab('run');
   if (connectionName && connectionsCache[connectionName]) selectRunConnection(connectionName);
-  $('run-sql').value = 'SELECT * FROM ' + tableName;
+  var isMongo = (connectionsCache[connectionName] || {}).db === 'mongo';
+  $('run-sql').value = isMongo ? JSON.stringify({ collection: tableName, filter: {} }, null, 2)
+                                : 'SELECT * FROM ' + tableName;
   if ($('run-sql').repaint) $('run-sql').repaint();
   runPage = 1;
   recordRunHistory();

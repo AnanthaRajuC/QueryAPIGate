@@ -973,42 +973,58 @@ that already do it well.
 
 ## 36. Broader database backend support
 
-**Status: not started.** Raised as "support MySQL Workbench, DBeaver, etc." - worth being precise about what
-that actually means: those are GUI *clients*, not protocols, and they already work today, because they talk
-to a real MySQL/PostgreSQL/etc. server over that database's own wire protocol - the same server a QueryAPIGate
-connection of that type points at. QueryAPIGate is never in that path at all: it is the thing being queried
-*through* (a REST API in front of a database), not a database a desktop client opens a session with. So there
-is nothing to add for those tools by name; the real, useful version of this request is **more of the seven
-already-supported dialects' cousins**: `SUPPORTED_DB_TYPES` today is `mysql, postgres, clickhouse, sqlite, h2,
-jdbc, duckdb` (`queryapigate/config.py`) - MariaDB rides in under `mysql` and any JDBC-reachable database
-already rides in under `jdbc`, but there is no native driver (its own runner in `queryapigate/runners.py`,
-its own `schema.py` catalogue query, its own connection-form fields) for **MSSQL/SQL Server, Oracle,
-MongoDB, Redis, Snowflake or BigQuery** - each a real, commonly-requested backend on its own merits.
+**Status: MongoDB shipped as a find-only slice; MSSQL/Oracle/Redis/Snowflake/BigQuery not started.** Raised
+as "support MySQL Workbench, DBeaver, etc." - worth being precise about what that actually means: those are
+GUI *clients*, not protocols, and they already work today, because they talk to a real MySQL/PostgreSQL/etc.
+server over that database's own wire protocol - the same server a QueryAPIGate connection of that type points
+at. QueryAPIGate is never in that path at all: it is the thing being queried *through* (a REST API in front
+of a database), not a database a desktop client opens a session with. So there is nothing to add for those
+tools by name; the real, useful version of this request is **more of the already-supported dialects'
+cousins**: `SUPPORTED_DB_TYPES` today is `mysql, postgres, clickhouse, sqlite, h2, jdbc, duckdb, mongo`
+(`queryapigate/config.py`) - MariaDB rides in under `mysql` and any JDBC-reachable database already rides in
+under `jdbc`, but there is no native driver (its own runner in `queryapigate/runners.py`, its own
+`schema.py` catalogue query, its own connection-form fields) for **MSSQL/SQL Server, Oracle, Redis,
+Snowflake or BigQuery** - each a real, commonly-requested backend on its own merits.
 
 **Impact:** the project's pitch is "expose *your* database as a governed REST API" - every dialect it can't
 speak is a team it can't help at all, not a team that gets a worse experience.
 
-**Notes:** each dialect is a real, separately-scoped unit of work, not one ticket - a new `_Driver` subclass
-in `runners.py` (`connect`/`query`/`stream`, its own parameter style and literal-quoting rules for
-`sqltools.py`'s guard), a schema-introspection query in `schema.py` (most of these have an
-`information_schema`-shaped catalogue; MongoDB and Redis do not, since they are not relational and "list
-tables/columns" doesn't map onto them cleanly - collections/keys would need their own, differently-shaped
-introspection, or schema browsing could be a no-op for these), a new admin-UI form field set if the dialect
-needs something the current form doesn't ask for, and a new optional dependency group in `pyproject.toml`
-(mirroring how `mysql-connector-python`, `psycopg2`, `clickhouse-connect` etc. are already optional extras,
-so installing QueryAPIGate never pulls in every driver for a dialect nobody uses). MSSQL and Oracle are the
-most natural next two (both relational, both have a normal `information_schema`-shaped or close-enough
-catalogue); MongoDB/Redis (non-relational) and Snowflake/BigQuery (cloud warehouses with their own auth
-models - key pairs, service accounts) are each a bigger, more different-shaped addition and worth scoping
-separately rather than bundled into "add a driver."
+**MongoDB (shipped, find-only):** a `mongo` connection type, ad-hoc and saved `find()` queries (`POST
+/execute_mongo`, saved queries with `query_type: 'mongo'`), collection listing in the Schema tab (as
+`{'type': 'collection', 'columns': []}` - no field-level introspection, since collections are schemaless),
+and database listing/switching (native to Mongo, unlike the SQL dialects' catalogue-query approach). See
+`queryapigate/mongotools.py` (JSON-document placeholder substitution and the `$where`/`$function`/
+`$accumulator` guard - the non-SQL sibling of `sqltools.py`) and `engine.execute_mongo()`. Deliberately not
+included, each its own separately-scoped follow-up: aggregation pipelines, insert/update/delete (there is no
+write path at all yet, not even behind `QUERYAPIGATE_ALLOW_WRITES` - see `engine.execute_mongo()`'s
+docstring), per-field schema sampling, `cache_ttl` for a saved Mongo query, streaming (`?stream=true` 400s
+for one), a dedicated query-builder UI (Run SQL and the saved-query form currently use one JSON textarea -
+`{"collection", "filter", "projection", "sort"}` - rather than separate form fields), and Postman export
+(a saved Mongo query is silently excluded from `queryapigate/postman.py`'s output, same as it always was for
+anything without a `sql_query`).
+
+**Notes (remaining dialects):** each is a real, separately-scoped unit of work, not one ticket - a new
+`_Driver` subclass in `runners.py` (`connect`/`query`/`stream`, its own parameter style and literal-quoting
+rules for `sqltools.py`'s guard), a schema-introspection query in `schema.py` (MSSQL/Oracle have a normal
+`information_schema`-shaped or close-enough catalogue, same shape MongoDB's `fetch_schema()` branch proves
+out for a non-relational one; Redis has no schema concept at all - "list tables/columns" would need to be a
+no-op or something else entirely), a new admin-UI form field set if the dialect needs something the current
+form doesn't ask for, and a new optional dependency group in `pyproject.toml` (mirroring how
+`mysql-connector-python`, `psycopg2`, `pymongo` etc. are already optional extras, so installing QueryAPIGate
+never pulls in every driver for a dialect nobody uses). MSSQL and Oracle are the most natural next two (both
+relational); Redis (non-relational, no query language to speak of) and Snowflake/BigQuery (cloud warehouses
+with their own auth models - key pairs, service accounts) are each a bigger, more different-shaped addition
+and worth scoping separately rather than bundled into "add a driver."
 
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
 #34 are shipped; #21 is shipped as its cheaper slice only (operation-type granularity + streaming row
-ceiling), with table allow-listing - the pricier, riskier remainder - still open. Open: the table-allow-list
-half of #21, not started, and not recommended without a specific hard requirement (it needs real SQL
-parsing, not the lightweight guard this project deliberately uses); #25 (general API latency, connection
-pooling and cache performance benchmarks), #27 (real-world example APIs under `examples/`), and #36 (broader
-database backend support), none started. The "still open" note under #9 (confirming its CI changes on a real
+ceiling), with table allow-listing - the pricier, riskier remainder - still open; #36 is shipped as its
+MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mongo's own aggregation/write/
+schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
+still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
+requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
+(general API latency, connection pooling and cache performance benchmarks) and #27 (real-world example APIs
+under `examples/`), neither started. The "still open" note under #9 (confirming its CI changes on a real
 run) is a smaller follow-up on finished work, not an open capability gap.

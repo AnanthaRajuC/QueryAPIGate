@@ -121,6 +121,19 @@ def build_spec(version, saved_queries=None):
                                           'key, even one already granted this connection).'}},
                                      ['sql', 'connection_name']),
                 'responses': {'200': _ROWS, **_ERRORS}}},
+            '/execute_mongo': {'post': {
+                'summary': 'Run a Mongo find() query - read-only (BACKLOG #36: find-only for now)',
+                'tags': ['Query'],
+                'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
+                'requestBody': _body({'collection': {'type': 'string'}, 'connection_name': {'type': 'string'},
+                                      'filter': {'type': 'object', 'description':
+                                          'A find() filter document. ":name" string leaves are bound '
+                                          'parameters, filled from params.'},
+                                      'projection': {'type': 'object'}, 'sort': {'type': 'object'},
+                                      'params': {'type': 'object',
+                                                 'description': 'Values for :name bound parameters.'}},
+                                     ['collection', 'connection_name']),
+                'responses': {'200': _ROWS, **_ERRORS}}},
             '/q/{name}': {
                 'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
                 'get': {'summary': 'Run a saved query; extra query-string arguments become parameters',
@@ -144,18 +157,28 @@ def build_spec(version, saved_queries=None):
             '/save_sql_to_file': {'patch': {
                 'summary': 'Save a query (creates the next version)', 'tags': ['Saved queries'],
                 'requestBody': _body({
-                    'filename': {'type': 'string'}, 'sql_query': {'type': 'string'}, 'author': {'type': 'string'},
+                    'filename': {'type': 'string'},
+                    'query_type': {'type': 'string', 'enum': ['sql', 'mongo'], 'default': 'sql', 'description':
+                        "'sql' (the default) needs sql_query; 'mongo' needs mongo_collection and mongo_filter."},
+                    'sql_query': {'type': 'string', 'description': 'Required when query_type is sql.'},
+                    'mongo_collection': {'type': 'string', 'description': 'Required when query_type is mongo.'},
+                    'mongo_filter': {'type': 'object', 'description':
+                        'A find() filter document. ":name" string leaves are bound parameters, the JSON-'
+                        'document equivalent of :name in sql_query.'},
+                    'mongo_projection': {'type': 'object'}, 'mongo_sort': {'type': 'object'},
+                    'author': {'type': 'string'},
                     'description': {'type': 'string'}, 'tags': {'type': 'array', 'items': {'type': 'string'}},
                     'query_parameters': {'type': 'object', 'example': {'actor_id': 'int'}},
                     'connection_name': {'type': 'string', 'description': 'Default connection for /q/{name}.'},
                     'cache_ttl': {'type': 'integer', 'minimum': 0, 'description':
-                        'Seconds to cache a response for; never used for a query that writes.'},
+                        'Seconds to cache a response for; never used for a query that writes, and not yet '
+                        'supported for query_type mongo.'},
                     'collection': {'type': 'string', 'nullable': True, 'description':
                         'The collection to file this query under (lowercase letters, digits, ".", "_", "-"). '
                         'Belongs to the query, not the version: omitted keeps the current one, null removes '
                         'it. A key granted that collection reaches this query - see PUT '
                         '/saved_sql/{name}/collection.'}},
-                    ['filename', 'sql_query', 'author', 'description']),
+                    ['filename', 'author', 'description']),
                 'responses': {'200': {'description': 'Saved'}, **_ERRORS}}},
             '/list_files': {'get': {
                 'summary': 'List saved queries', 'tags': ['Saved queries'],

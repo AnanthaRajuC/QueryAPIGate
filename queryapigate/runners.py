@@ -793,3 +793,88 @@ STREAM_RUNNERS = {
     'jdbc': _stream_jdbc,
     'duckdb': _stream_duckdb,
 }
+
+# --------------------------------------------------------------------------------------
+# MongoDB: not in RUNNERS/STREAM_RUNNERS above - a find() filter is a JSON document, not a SQL string, so
+# it doesn't fit _Driver.query()'s (sql, params, limit, offset, ...) signature. It reuses connection
+# pooling (pool.checkout()/Session only need .connect()/.close()/.is_alive(), never the query() shape) and
+# the same "fetch limit + 1 rows" pagination trick, called directly by engine.execute_mongo() instead of
+# through _make_runner(). Read-only, full stop - there is no read_only parameter to flip, unlike every SQL
+# driver above (see BACKLOG #36: MongoDB support is find-only in this version).
+# --------------------------------------------------------------------------------------
+
+class _Mongo(_Driver):
+    DIALECT = 'mongo'
+
+    def connect(self, details, read_only):
+        import pymongo
+        args = _connect_args(details, user='username')
+        args.pop('database', None)  # MongoClient itself takes no default database; find() selects one per call
+        return pymongo.MongoClient(connectTimeoutMS=_millis(config.CONNECT_TIMEOUT),
+                                   serverSelectionTimeoutMS=_millis(config.CONNECT_TIMEOUT), **args)
+
+    def is_alive(self, session):
+        return True  # MongoClient manages its own pool/reconnection internally - nothing to check here
+
+
+_mongo_driver = _Mongo()
+
+
+def _mongo_database(details, client):
+    name = details.get('database')
+    if not name:
+        raise ApiError('Connection has no database configured')
+    return client[name]
+
+
+def _with_mongo_session(details, pool, read_only, body):
+    if pool is None:
+        session = Session(_mongo_driver.connect(details, read_only), _mongo_driver)
+        try:
+            return body(session)
+        finally:
+            session.close()
+    with pool.checkout(_mongo_driver, details, read_only) as session:
+        return body(session)
+
+
+def mongo_find(details, collection_name, filter_doc, projection, sort, limit, offset, timeout=None, pool=None):
+    """Run one find() and return (docs, has_more) - docs is a plain list of dicts (up to ``limit`` of them),
+    ``has_more`` says whether the fetched extra row means another page exists, same "fetch limit + 1" trick
+    every SQL runner above uses."""
+    from pymongo.errors import ExecutionTimeout
+
+    def body(session):
+        coll = _mongo_database(details, session.conn)[collection_name]
+        cursor = coll.find(filter_doc, projection)
+        if sort:
+            cursor = cursor.sort(list(sort.items()))
+        cursor = cursor.skip(offset).limit(limit + 1)
+        if timeout:
+            cursor = cursor.max_time_ms(_millis(timeout))
+        try:
+            return list(cursor)
+        except ExecutionTimeout:
+            raise _timed_out(timeout) from None
+
+    return _with_mongo_session(details, pool, True, body)
+
+
+def mongo_ping(details, pool=None):
+    """A connectivity probe - POST /connections/test's mongo case (see engine.test_connection)."""
+    _with_mongo_session(details, pool, True, lambda session: session.conn.admin.command('ping'))
+
+
+def mongo_list_databases(details, pool=None):
+    """Every database on the server - lights up the same "Default database"/"browse a different database on
+    this server" UI the SQL dialects in engine.LIST_DATABASES_QUERIES get, but natively rather than via a
+    SQL query (see engine.list_databases)."""
+    return _with_mongo_session(details, pool, True, lambda session: session.conn.list_database_names())
+
+
+def mongo_list_collections(details, pool=None):
+    """Collection names in this connection's configured database - schema.fetch_schema()'s mongo case."""
+    def body(session):
+        return sorted(_mongo_database(details, session.conn).list_collection_names())
+
+    return _with_mongo_session(details, pool, True, body)

@@ -18,7 +18,8 @@ FORMAT_VERSION = 1
 POLICIES = ('fail', 'skip', 'new-version')
 # Everything an entry may carry. Anything else is an error rather than silently dropped: a field the importer
 # ignores is a field whose loss nobody notices.
-ENTRY_FIELDS = {'name', 'sql_query', 'author', 'description', 'tags', 'query_parameters', 'connection_name',
+ENTRY_FIELDS = {'name', 'sql_query', 'query_type', 'mongo_collection', 'mongo_filter', 'mongo_projection',
+                'mongo_sort', 'author', 'description', 'tags', 'query_parameters', 'connection_name',
                 'cache_ttl'}
 
 

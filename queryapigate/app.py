@@ -21,6 +21,7 @@ from . import (
     examples,
     logging_setup,
     metrics,
+    mongotools,
     openapi,
     pool,
     postman,
@@ -430,6 +431,28 @@ def execute_sql_endpoint():
     return render(result, output_format, page, limit)
 
 
+@bp.route('/execute_mongo', methods=['POST'])
+def execute_mongo_endpoint():
+    """The Mongo sibling of /execute_sql - a find() query, ad-hoc, against a saved connection. Read-only,
+    full stop (BACKLOG #36: MongoDB support is find-only in this version) - unlike /execute_sql there is no
+    write permission to check."""
+    data = get_json_body()
+    if not data.get('collection'):
+        raise ApiError('Collection is missing')
+    if not data.get('connection_name'):
+        raise ApiError('Connection name is missing')
+    require_connection(data['connection_name'])
+    filter_doc = mongotools.validate_filter(get_object(data.get('filter'), 'filter'))
+    params = get_object(data.get('params'), 'params')
+    output_format = get_output_format(data)
+    timeout = get_timeout(data)
+    limit, offset, page = get_pagination()
+    result = engine.execute_mongo(data['collection'], filter_doc, data['connection_name'], limit, offset,
+                                  params, timeout, projection=data.get('projection'), sort=data.get('sort'),
+                                  key_name=caller_key_name())
+    return render(result, output_format, page, limit)
+
+
 def cache_lookup(cache_key, ttl):
     """A live entry rendered as a response (304 if the client already has it), or None on a cache miss."""
     hit = current_app.extensions['queryapigate_cache'].get(cache_key)
@@ -483,19 +506,24 @@ def run_saved(ref, body, url_params):
                        or apikeys.can_use_collection(g.permission, store.read_collection(content)))
     if not (granted_by_name and connection_name == saved.get('connection_name')):
         require_connection(connection_name)
+
+    raw = {**url_params, **get_object(body.get('params'), 'params'),
+           **get_object(body.get('placeholders'), 'placeholders')}
+    output_format = get_output_format(body)
+    timeout = get_timeout(body)
+
+    if saved.get('query_type') == 'mongo':
+        return run_saved_mongo(saved, path, number, ref, connection_name, raw, output_format, timeout)
+
     if not isinstance(saved.get('sql_query'), str):
         raise ApiError('Saved query has no SQL', 500)
     # Per-query write curation (apikeys.can_write_query()) only ever adds write reach for this one named
     # query on top of whatever the key's blanket allow_writes already grants - never the other way round.
     effective_allow_writes = g.permission.allow_writes or apikeys.can_write_query(g.permission, query_name)
 
-    raw = {**url_params, **get_object(body.get('params'), 'params'),
-           **get_object(body.get('placeholders'), 'placeholders')}
     used = set(sqltools.placeholder_names(saved['sql_query']))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     sql = sqltools.fill_placeholders(saved['sql_query'], values)
-    output_format = get_output_format(body)
-    timeout = get_timeout(body)
 
     if get_stream_flag():
         # No caching for a streamed export - caching would require materialising the whole body anyway,
@@ -532,6 +560,32 @@ def run_saved(ref, body, url_params):
                                           'duration_ms': elapsed_ms, 'serialization_ms': g.serialization_ms})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl)
+    return response
+
+
+def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_format, timeout):
+    """The mongo query_type branch of run_saved(): a find() query instead of SQL. No caching (cache_ttl is
+    not yet supported for a mongo saved query) and no streaming (?stream=true) in this version - see
+    BACKLOG #36. Always read-only, same as the ad-hoc /execute_mongo."""
+    if get_stream_flag():
+        raise ApiError('Streaming is not supported for Mongo queries yet', 400)
+    used = set(mongotools.placeholder_names(saved.get('mongo_filter') or {}))
+    values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
+    filter_doc = mongotools.fill_placeholders(saved.get('mongo_filter') or {}, values)
+    limit, offset, page = get_pagination()
+    entry = {'executed_at': store.now(), 'connection_name': connection_name,
+             'request_id': g.get('request_id'), 'key_name': caller_key_name()}
+    try:
+        result, elapsed_ms = engine.timed(engine.execute_mongo, saved['mongo_collection'], filter_doc,
+                                          connection_name, limit, offset, timeout=timeout,
+                                          projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
+                                          key_name=caller_key_name())
+    except ApiError as error:
+        store.record_execution(path, number, {**entry, 'status': 'error', 'error': error.message})
+        raise
+    response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
+    store.record_execution(path, number, {**entry, 'status': 'success', 'rows': len(result.rows),
+                                          'duration_ms': elapsed_ms, 'serialization_ms': g.serialization_ms})
     return response
 
 
@@ -940,6 +994,14 @@ def metrics_endpoint():
     return Response(metrics.render(), mimetype='text/plain; version=0.0.4; charset=utf-8')
 
 
+def _is_runnable(data):
+    """Whether a saved-query version has something to actually execute - a SQL string, or (query_type
+    'mongo') a Mongo collection - so a definition left mid-edit or otherwise malformed never gets listed
+    somewhere a caller might then try to run it."""
+    return isinstance(data.get('sql_query'), str) or (data.get('query_type') == 'mongo'
+                                                       and isinstance(data.get('mongo_collection'), str))
+
+
 def describe_saved_queries(permission):
     """What the OpenAPI document needs to know about each saved query (never its SQL text) that
     ``permission`` may actually call - the same test run_saved() applies, so a key scoped to specific
@@ -947,8 +1009,7 @@ def describe_saved_queries(permission):
     unrestricted (admin, or connection-wide) key sees everything, unchanged from before this filter."""
     described = []
     for name, number, data, collection in store.latest_versions():
-        sql = data.get('sql_query')
-        if not isinstance(sql, str):
+        if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
         if not apikeys.can_run_saved(permission, name, collection, connection_name):
@@ -979,8 +1040,7 @@ def describe_catalog(permission):
     caller* can write through it (apikeys.can_write_query() - independent of their blanket allow_writes)."""
     catalog = []
     for name, number, data, collection in store.latest_versions():
-        sql = data.get('sql_query')
-        if not isinstance(sql, str):
+        if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
         if not apikeys.can_run_saved(permission, name, collection, connection_name):

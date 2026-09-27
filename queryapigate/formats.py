@@ -60,6 +60,12 @@ def _cell(value):
         return value.replace(tzinfo=None) if value.tzinfo else value
     if isinstance(value, (date, time)):
         return value
+    if isinstance(value, (dict, list)):
+        # A Mongo document's nested subdocuments/arrays - JSON-encoded rather than left as a Python repr
+        # (which str() would produce and is not valid JSON), even though the exporter that ultimately uses
+        # this value may itself be JSON (nested JSON-in-a-string) or a flat format (CSV/XLSX) that has no
+        # better way to show a nested structure in one cell.
+        return json.dumps(value, default=json_default)
     return str(value)
 
 

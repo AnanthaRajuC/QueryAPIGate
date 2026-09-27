@@ -3,11 +3,11 @@ import hashlib
 import logging
 import time
 
-from . import config, metrics, store
+from . import config, metrics, mongotools, store
 from .errors import ApiError
 from .formats import ResultSetDTO
 from .pool import get_pool
-from .runners import RUNNERS, STREAM_RUNNERS
+from .runners import RUNNERS, STREAM_RUNNERS, mongo_find, mongo_list_collections, mongo_list_databases, mongo_ping
 from .sqltools import validate_sql
 
 log = logging.getLogger('queryapigate')
@@ -75,6 +75,62 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     return ResultSetDTO(result_rows, columns, has_more=has_more)
 
 
+def execute_mongo(collection, filter_doc, connection_name, limit, offset, params=None, timeout=None,
+                  projection=None, sort=None, key_name='-'):
+    """Run a Mongo find() on a named connection and return the requested page as a ResultSetDTO - the
+    non-SQL sibling of execute_sql(). Always read-only: MongoDB support is find-only in this version (see
+    mongotools.py and BACKLOG #36), so unlike execute_sql there is no allow_writes/allowed_write_ops
+    parameter at all - there is no write path to gate. ``params`` resolves any ``:name`` placeholders in
+    ``filter_doc`` via mongotools.fill_placeholders(), the JSON-document equivalent of execute_sql's bound
+    :name parameters.
+
+    Mongo documents are schemaless, so unlike execute_sql (whose driver already returns a fixed column
+    list) the (columns, rows) pair ResultSetDTO expects is built here: the union of keys across the fetched
+    page, in first-seen order, becomes ``columns``, and each document becomes a positionally-aligned row -
+    lossy for wildly different document shapes, but keeps every existing exporter (json/ndjson/csv/xlsx/
+    xml/yaml) working unmodified.
+    """
+    details = store.get_connection(connection_name)
+    if details['db'] != 'mongo':
+        raise ApiError(f"'{connection_name}' is not a mongo connection")
+    filter_doc = mongotools.validate_filter(filter_doc or {})
+    if params:
+        filter_doc = mongotools.fill_placeholders(filter_doc, params)
+    log.info('Finding on %s (mongo), collection=%s limit=%s offset=%s timeout=%s',
+             connection_name, collection, limit, offset, timeout,
+             extra={'connection': connection_name, 'dialect': 'mongo', 'limit': limit, 'offset': offset,
+                   'timeout': timeout})
+    started = time.monotonic()
+    status = 'error'
+    metrics.inc_active_query()
+    try:
+        docs = mongo_find(details, collection, filter_doc, projection, sort, limit, offset, timeout, get_pool())
+        status = 'success'
+    except ApiError:
+        raise
+    except ImportError as error:
+        log.exception('Missing database driver')
+        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+    except Exception as error:
+        log.exception('Find on %s failed', connection_name)
+        raise ApiError('An error occurred while executing the find query', 500, detail=str(error)) from error
+    finally:
+        metrics.dec_active_query()
+        elapsed = time.monotonic() - started
+        metrics.observe_query(connection_name, 'mongo', status, elapsed, key_name)
+        threshold = config.slow_query_threshold()
+        if threshold and elapsed >= threshold:
+            log.warning('Slow find on %s (mongo): %.1fms', connection_name, elapsed * 1000,
+                       extra={'connection': connection_name, 'dialect': 'mongo',
+                              'duration_ms': round(elapsed * 1000, 1)})
+    has_more = len(docs) > limit
+    result_docs = docs[:limit]
+    columns = list(dict.fromkeys(key for doc in result_docs for key in doc.keys()))
+    rows = [[doc.get(col) for col in columns] for doc in result_docs]
+    metrics.observe_rows(connection_name, 'mongo', key_name, len(result_docs))
+    return ResultSetDTO(rows, columns, has_more=has_more)
+
+
 def test_connection(details):
     """Try to actually connect to and query ``details`` - a connection's fields as an admin is about to save
     them, not yet written anywhere. Used by ``POST /connections/test`` so a typo'd host or a firewalled port
@@ -83,11 +139,14 @@ def test_connection(details):
     entirely - no metrics, no audit entry, no named connection to look up - this is a one-off, not a served
     request, but it does share the normal connection pool, so a passing test can leave behind a warm
     connection the first real query then reuses."""
-    if details.get('db') not in RUNNERS:
-        raise ApiError(f"'db' must be one of: {', '.join(RUNNERS)}")
+    if details.get('db') not in RUNNERS and details.get('db') != 'mongo':
+        raise ApiError(f"'db' must be one of: {', '.join((*RUNNERS, 'mongo'))}")
     started = time.monotonic()
     try:
-        RUNNERS[details['db']](details, 'SELECT 1', None, 1, 0, True, config.CONNECT_TIMEOUT, get_pool())
+        if details['db'] == 'mongo':
+            mongo_ping(details, get_pool())
+        else:
+            RUNNERS[details['db']](details, 'SELECT 1', None, 1, 0, True, config.CONNECT_TIMEOUT, get_pool())
     except ImportError as error:
         raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error)) from error
     except Exception as error:
@@ -125,6 +184,14 @@ def list_databases(details):
     schema.list_databases()). Bypasses execute_sql like test_connection() does, for the same reason: this is
     metadata about the server, not a governed query against one specific, already-chosen database."""
     dialect = details.get('db')
+    if dialect == 'mongo':
+        try:
+            return mongo_list_databases(details, get_pool())
+        except ImportError as error:
+            raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+        except Exception as error:
+            detail = _redact_password(str(error), details.get('password'))
+            raise ApiError('Could not list databases', 502, detail=detail) from error
     query = LIST_DATABASES_QUERIES.get(dialect)
     if not query:
         raise ApiError(f"Listing databases isn't supported for '{dialect}' connections")
@@ -137,6 +204,18 @@ def list_databases(details):
         detail = _redact_password(str(error), details.get('password'))
         raise ApiError('Could not list databases', 502, detail=detail) from error
     return [row[0] for row in rows]
+
+
+def list_collections(details):
+    """Collection names in the database ``details`` points at - schema.fetch_schema()'s mongo case, the
+    non-relational sibling of _QUERIES' information_schema-shaped catalogue queries in schema.py."""
+    try:
+        return mongo_list_collections(details, get_pool())
+    except ImportError as error:
+        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+    except Exception as error:
+        detail = _redact_password(str(error), details.get('password'))
+        raise ApiError('Could not list collections', 502, detail=detail) from error
 
 
 def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-'):
