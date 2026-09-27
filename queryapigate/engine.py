@@ -70,6 +70,33 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     return ResultSetDTO(result_rows, columns, has_more=has_more)
 
 
+def test_connection(details):
+    """Try to actually connect to and query ``details`` - a connection's fields as an admin is about to save
+    them, not yet written anywhere. Used by ``POST /connections/test`` so a typo'd host or a firewalled port
+    is found out before saving, not on the query that comes after. Always read-only, regardless of
+    QUERYAPIGATE_ALLOW_WRITES: a connectivity probe has no business writing anything. Bypasses execute_sql
+    entirely - no metrics, no audit entry, no named connection to look up - this is a one-off, not a served
+    request, but it does share the normal connection pool, so a passing test can leave behind a warm
+    connection the first real query then reuses."""
+    if details.get('db') not in RUNNERS:
+        raise ApiError(f"'db' must be one of: {', '.join(RUNNERS)}")
+    started = time.monotonic()
+    try:
+        RUNNERS[details['db']](details, 'SELECT 1', None, 1, 0, True, config.CONNECT_TIMEOUT, get_pool())
+    except ImportError as error:
+        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error)) from error
+    except Exception as error:
+        detail = _redact_password(str(error), details.get('password'))
+        raise ApiError('Could not connect', 502, detail=detail) from error
+    return {'elapsed_ms': round((time.monotonic() - started) * 1000, 1)}
+
+
+def _redact_password(message, password):
+    """A driver's own error text sometimes echoes back the connection string it tried - never let that hand
+    a real password back to whoever is testing the connection."""
+    return message.replace(str(password), '********') if password else message
+
+
 def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-'):
     """Like execute_sql, but for the whole result rather than one page - and, unlike execute_sql, always
     read-only regardless of QUERYAPIGATE_ALLOW_WRITES or the caller's own permission. A large export has no

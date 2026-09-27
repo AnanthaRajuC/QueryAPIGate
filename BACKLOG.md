@@ -971,6 +971,37 @@ heavy new dependency for a single format. #31 above gets the actual common case 
 schedule - without any of this: local filesystem only, no new daemon, scheduling/retry/alerting left to tools
 that already do it well.
 
+## 36. Broader database backend support
+
+**Status: not started.** Raised as "support MySQL Workbench, DBeaver, etc." - worth being precise about what
+that actually means: those are GUI *clients*, not protocols, and they already work today, because they talk
+to a real MySQL/PostgreSQL/etc. server over that database's own wire protocol - the same server a QueryAPIGate
+connection of that type points at. QueryAPIGate is never in that path at all: it is the thing being queried
+*through* (a REST API in front of a database), not a database a desktop client opens a session with. So there
+is nothing to add for those tools by name; the real, useful version of this request is **more of the seven
+already-supported dialects' cousins**: `SUPPORTED_DB_TYPES` today is `mysql, postgres, clickhouse, sqlite, h2,
+jdbc, duckdb` (`queryapigate/config.py`) - MariaDB rides in under `mysql` and any JDBC-reachable database
+already rides in under `jdbc`, but there is no native driver (its own runner in `queryapigate/runners.py`,
+its own `schema.py` catalogue query, its own connection-form fields) for **MSSQL/SQL Server, Oracle,
+MongoDB, Redis, Snowflake or BigQuery** - each a real, commonly-requested backend on its own merits.
+
+**Impact:** the project's pitch is "expose *your* database as a governed REST API" - every dialect it can't
+speak is a team it can't help at all, not a team that gets a worse experience.
+
+**Notes:** each dialect is a real, separately-scoped unit of work, not one ticket - a new `_Driver` subclass
+in `runners.py` (`connect`/`query`/`stream`, its own parameter style and literal-quoting rules for
+`sqltools.py`'s guard), a schema-introspection query in `schema.py` (most of these have an
+`information_schema`-shaped catalogue; MongoDB and Redis do not, since they are not relational and "list
+tables/columns" doesn't map onto them cleanly - collections/keys would need their own, differently-shaped
+introspection, or schema browsing could be a no-op for these), a new admin-UI form field set if the dialect
+needs something the current form doesn't ask for, and a new optional dependency group in `pyproject.toml`
+(mirroring how `mysql-connector-python`, `psycopg2`, `clickhouse-connect` etc. are already optional extras,
+so installing QueryAPIGate never pulls in every driver for a dialect nobody uses). MSSQL and Oracle are the
+most natural next two (both relational, both have a normal `information_schema`-shaped or close-enough
+catalogue); MongoDB/Redis (non-relational) and Snowflake/BigQuery (cloud warehouses with their own auth
+models - key pairs, service accounts) are each a bigger, more different-shaped addition and worth scoping
+separately rather than bundled into "add a driver."
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
@@ -978,6 +1009,6 @@ that already do it well.
 ceiling), with table allow-listing - the pricier, riskier remainder - still open. Open: the table-allow-list
 half of #21, not started, and not recommended without a specific hard requirement (it needs real SQL
 parsing, not the lightweight guard this project deliberately uses); #25 (general API latency, connection
-pooling and cache performance benchmarks) and #27 (real-world example APIs under `examples/`), none started.
-The "still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished
-work, not an open capability gap.
+pooling and cache performance benchmarks), #27 (real-world example APIs under `examples/`), and #36 (broader
+database backend support), none started. The "still open" note under #9 (confirming its CI changes on a real
+run) is a smaller follow-up on finished work, not an open capability gap.

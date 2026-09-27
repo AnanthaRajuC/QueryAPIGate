@@ -266,6 +266,69 @@ class ConnectionTests(ApiTestCase):
                     {'connections': {'x': 'nope'}}):
             self.assertEqual(self.client.patch('/connections', json=bad).status_code, 400, bad)
 
+    def test_create_and_update_set_created_and_updated_at(self):
+        fresh = {'db': 'sqlite', 'database': 'x.db', 'active': True}
+        res = self.client.patch('/connections', json={'connections': {'fresh': fresh}})
+        self.assertEqual(res.status_code, 200)
+        first = self.client.get('/connections').get_json()['connections']['fresh']
+        self.assertTrue(first['created_at'])
+        self.assertEqual(first['created_at'], first['updated_at'])
+
+        fresh = {'db': 'sqlite', 'database': 'y.db', 'active': True}
+        res = self.client.patch('/connections', json={'connections': {'fresh': fresh}})
+        self.assertEqual(res.status_code, 200)
+        second = self.client.get('/connections').get_json()['connections']['fresh']
+        self.assertEqual(second['created_at'], first['created_at'])  # unchanged by an update
+        self.assertGreaterEqual(second['updated_at'], first['updated_at'])
+
+    def test_a_client_cannot_fake_created_at(self):
+        res = self.client.patch('/connections', json={'connections': {'fresh': {
+            'db': 'sqlite', 'database': 'x.db', 'active': True, 'created_at': '2000-01-01 00:00:00'}}})
+        self.assertEqual(res.status_code, 200)
+        stored = self.client.get('/connections').get_json()['connections']['fresh']
+        self.assertNotEqual(stored['created_at'], '2000-01-01 00:00:00')
+
+
+class TestConnectionTests(ApiTestCase):
+    def test_succeeds_against_a_real_connection(self):
+        res = self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertIn('elapsed_ms', res.get_json())
+
+    def test_nothing_is_saved(self):
+        self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})
+        self.assertNotIn('test', self.client.get('/connections').get_json()['connections'])
+
+    def test_unreachable_host_is_502_with_the_password_redacted(self):
+        res = self.client.post('/connections/test', json={
+            'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd'})
+        self.assertEqual(res.status_code, 502)
+        self.assertNotIn('secret', res.get_data(as_text=True))
+
+    def test_a_masked_password_is_resolved_from_the_named_connection(self):
+        # 'pg' is stored with password 'secret' (see setUp); echoing the mask back, as the edit form does
+        # for a password the admin never retyped, must try the real one, not the literal mask string.
+        body = {'name': 'pg', 'db': 'postgres', 'host': 'h', 'user': 'u',
+                'password': config.PASSWORD_MASK, 'database': 'd'}
+        res = self.client.post('/connections/test', json=body)
+        self.assertEqual(res.status_code, 502)  # 'h' is unreachable; the point is it never 400s on the mask itself
+        self.assertNotIn('secret', res.get_data(as_text=True))
+
+    def test_unsupported_db_type_is_400(self):
+        self.assertEqual(self.client.post('/connections/test', json={'db': 'oracle'}).status_code, 400)
+        self.assertEqual(self.client.post('/connections/test', json={}).status_code, 400)
+
+    def test_requires_the_admin_key(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        body = {'db': 'sqlite', 'database': self.db_path}
+        self.assertEqual(self.client.post('/connections/test', json=body).status_code, 401)
+        admin = {'X-API-Key': 'admin-key'}
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=admin)
+        key = scoped.get_json()['key']
+        res = self.client.post('/connections/test', json=body, headers={'X-API-Key': key})
+        self.assertEqual(res.status_code, 403)
+
 
 class SchemaTests(ApiTestCase):
     def setUp(self):

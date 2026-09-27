@@ -237,6 +237,23 @@ def build_spec(version, saved_queries=None):
                                       "db: 'jdbc' only - the full JDBC connection URL."}}}}},
                               ['connections']),
                           'responses': {'200': {'description': 'Updated'}, **_ERRORS}}},
+            '/connections/test': {'post': {
+                'summary': "Try connecting with the given fields before saving them (admin only)",
+                'tags': ['Connections'],
+                'description': "The same fields PATCH /connections takes for one connection, but tried "
+                    "immediately rather than saved - so a typo'd host or a firewalled port is found out "
+                    "before it becomes a saved connection. A password equal to the masked placeholder "
+                    "GET /connections returns is resolved to that connection's real stored password first, "
+                    "by 'name' if one is given.",
+                'requestBody': _body({
+                    'name': {'type': 'string',
+                             'description': 'Only to resolve a masked password; not required otherwise.'},
+                    'db': {'type': 'string', 'enum': list(config.SUPPORTED_DB_TYPES)},
+                    'host': {'type': 'string'}, 'port': {'type': 'integer'},
+                    'user': {'type': 'string'}, 'password': {'type': 'string'}, 'database': {'type': 'string'},
+                    'jar': {'type': 'string'}, 'driver_class': {'type': 'string'}, 'jdbc_url': {'type': 'string'}},
+                    ['db']),
+                'responses': {'200': {'description': 'Connected'}, **_ERRORS}}},
             '/connections/{name}': {'delete': {
                 'summary': 'Delete a connection', 'tags': ['Connections'],
                 'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],

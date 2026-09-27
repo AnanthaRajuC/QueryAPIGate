@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A "Test connection" button** on the New/Edit connection form, and `POST /connections/test` (admin only):
+  tries to actually connect with the fields on screen - not yet saved - so a typo'd host or a firewalled port
+  is found out before saving, not on the query that comes after. Never touches the connection pool's saved
+  state or writes anything; a driver's own error text is redacted before being shown, so a real password can
+  never leak back through a connection error.
+- **Connections now record when they were created and last edited** (`created_at`/`updated_at`, shown as new
+  columns in the Connections table and in the Edit form). Server-controlled - a client cannot fake either one
+  by echoing them back. A connection saved before this existed shows `—` until its next edit.
+- **The Access map's UI improvements from this cycle**, listed together here: quick-glance Database/Created/
+  Last modified/Last used/Version columns, an info popup per query (with its pretty-printed SQL), sortable
+  columns, Database/Reach filters, a combined API-keys-and-roles matrix, and a Connection-to-table drill-down
+  that shows which tables a connection's saved queries actually expose (with a shortcut to draft a new saved
+  query on one that isn't exposed yet).
+- **Run SQL's connection picker is now Type → Host → Connection** instead of one flat name list - at more
+  than a handful of connections, "which of these is the one I want" is a type-and-host question first.
+
 ## [0.8.0] - 2026-09-26
 
 ### Added

@@ -161,6 +161,19 @@ def _decrypt_password(value):
                        'been rotated since it was encrypted', 500) from None
 
 
+def resolve_ad_hoc(details):
+    """Like get_connection(), but for connection fields given directly rather than a saved, named connection
+    - used only by ``POST /connections/test`` (the New/Edit connection form's "Test connection" button)
+    to try fields that may never be saved. Expands ${VAR} references and decrypts an already-encrypted
+    password the same way; a literal password already in ``details`` (the common case - a value just typed
+    into the form) passes through unchanged."""
+    resolved = {key: _expand_env(value) for key, value in details.items()}
+    password = resolved.get('password')
+    if password and _is_encrypted(password):
+        resolved['password'] = _decrypt_password(password)
+    return resolved
+
+
 def get_connection(connection_name):
     """Return the usable (active, env-expanded, password-decrypted) details of a named connection."""
     if not isinstance(connection_name, str) or not connection_name:
@@ -237,6 +250,7 @@ def update_connections(connections):
                            f"{', '.join(config.SUPPORTED_DB_TYPES)}")
     with lock:
         existing = read_connections()
+        timestamp = now()
         for name, details in connections.items():
             # GET masks passwords, so a client echoing the mask back means "keep the current one" - reused
             # exactly as stored (already encrypted, if it was), never re-encrypted.
@@ -246,6 +260,15 @@ def update_connections(connections):
                 # A genuinely new literal password (or ${VAR} reference, which _encrypt_password() passes
                 # through unchanged) - encrypted here if QUERYAPIGATE_SECRET_KEY is set, stored as given otherwise.
                 details = {**details, 'password': _encrypt_password(details['password'])}
+            # created_at/updated_at are server-controlled, never taken from the request (a client echoing back
+            # what GET /connections returned must not be able to fake either one). A connection that already
+            # existed keeps its created_at; one saved before this field existed is backfilled from its own
+            # updated_at (still better than nothing) or, failing that, from now.
+            was = existing.get(name, {})
+            created_at = was.get('created_at') or was.get('updated_at') or timestamp
+            details = {k: v for k, v in details.items() if k not in ('created_at', 'updated_at')}
+            details['created_at'] = created_at
+            details['updated_at'] = timestamp
             existing[name] = details
         config.home().mkdir(parents=True, exist_ok=True)
         write_json_atomic(config.connections_file(), {'connections': existing})

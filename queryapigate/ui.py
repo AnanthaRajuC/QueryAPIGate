@@ -371,6 +371,10 @@ UI_HTML = r"""<!doctype html>
   .form { display: flex; flex-direction: column; gap: 14px; padding: 18px; min-height: 100%; }
   .form-actions { position: sticky; bottom: 0; margin: auto -18px -18px; padding: 12px 18px; background: var(--surface); border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 12.5px; cursor: pointer; }
+  .test-row { display: flex; align-items: center; gap: 10px; }
+  .test-result { font-size: 12.5px; overflow-wrap: anywhere; }
+  .test-ok { color: var(--accent); }
+  .test-fail { color: var(--danger); }
 
   /* ---- toast ---- */
   #toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
@@ -709,6 +713,10 @@ UI_HTML = r"""<!doctype html>
     <form id="run-form" class="panel runner" novalidate>
       <div class="runner-main">
         <div class="runner-bar">
+          <span class="lbl">Type</span>
+          <select id="run-conn-type" aria-label="Database type"></select>
+          <span class="lbl">Host</span>
+          <select id="run-conn-host" aria-label="Host"></select>
           <span class="lbl">Connection</span>
           <select id="run-connection" required aria-label="Connection"></select>
           <span class="lbl">Format</span>
@@ -1274,19 +1282,38 @@ function openConnectionForm(name, existing) {
   if (existing.db) dbSelect.value = existing.db;
   var active = h('input', { id: 'c-active', type: 'checkbox' });
   active.checked = existing.active !== false;
-  var actions = formActions(isEdit ? 'Save' : 'Create', closeDrawer);
-  var form = h('form', { className: 'form', novalidate: true, onsubmit: function (e) {
-    e.preventDefault();
+  function collectDetails() {
     var port = $('c-port').value;
-    saveConnection(name, {
+    return {
       db: dbSelect.value,
       host: $('c-host').value || undefined,
       port: port ? Number(port) : undefined,
       user: $('c-user').value || undefined,
       password: $('c-password').value,
-      database: $('c-database').value || undefined,
-      active: active.checked
-    }, nameInput.value.trim(), actions.submit);
+      database: $('c-database').value || undefined
+    };
+  }
+  var testResult = h('span', { className: 'test-result' });
+  var testBtn = h('button', { type: 'button', className: 'btn', text: 'Test connection', onclick: async function () {
+    testBtn.disabled = true; testBtn.textContent = 'Testing…'; clear(testResult);
+    var details = collectDetails();
+    if (isEdit) details.name = name; // lets a still-masked password resolve to the real stored one, server-side
+    var res, body = null;
+    try { res = await apiFetch('connections/test', { method: 'POST', json: details }); body = await res.json().catch(function () { return null; }); }
+    catch (e) { res = null; }
+    testBtn.disabled = false; testBtn.textContent = 'Test connection';
+    if (res && res.ok) {
+      testResult.appendChild(h('span', { className: 'test-ok', text: '✓ Connected' + (body && body.elapsed_ms !== undefined ? ' (' + body.elapsed_ms + ' ms)' : '') }));
+    } else {
+      var msg = (body && body.error) || 'Network error';
+      if (body && body.detail) msg += ': ' + body.detail;
+      testResult.appendChild(h('span', { className: 'test-fail', text: '✗ ' + msg }));
+    }
+  } });
+  var actions = formActions(isEdit ? 'Save' : 'Create', closeDrawer);
+  var form = h('form', { className: 'form', novalidate: true, onsubmit: function (e) {
+    e.preventDefault();
+    saveConnection(name, Object.assign(collectDetails(), { active: active.checked }), nameInput.value.trim(), actions.submit);
   } },
     field('c-name', 'Name', nameInput, isEdit ? 'Renaming isn’t supported — create a new connection instead.' : 'Referenced as connection_name by queries and the API.'),
     field('c-db', 'Database type', dbSelect),
@@ -1297,6 +1324,9 @@ function openConnectionForm(name, existing) {
         isEdit ? 'Leave the mask to keep the stored password.' : '${ENV_VAR} references are resolved on the server.')),
     field('c-database', 'Database / file path', inp('c-database', 'text', existing.database, 'SQLite, DuckDB and H2 take a file path'), null),
     h('label', { className: 'switch' }, active, 'Active', h('span', { className: 'hint', text: '— inactive connections refuse queries' })),
+    h('div', { className: 'test-row' }, testBtn, testResult),
+    isEdit && existing.created_at ? h('div', { className: 'hint' },
+      'Created ' + existing.created_at + (existing.updated_at && existing.updated_at !== existing.created_at ? ' · last edited ' + existing.updated_at : '')) : null,
     actions.node);
   slot.appendChild(form);
   (isEdit ? $('c-host') : nameInput).focus();
@@ -1378,14 +1408,16 @@ function renderConnections() {
       h('td', { className: 'mono dim' }, c.user || '—'),
       h('td', {}, h('span', { className: 'pill ' + (c.active ? 'ok' : 'off') }, h('i'), c.active ? 'Active' : 'Inactive')),
       usageCell(c.usage),
+      h('td', { className: 'mono dim', style: 'white-space:nowrap', text: c.created_at || '—' }),
+      h('td', { className: 'mono dim', style: 'white-space:nowrap', text: c.updated_at || '—' }),
       h('td', {}, h('div', { className: 'actions' },
         h('button', { type: 'button', className: 'btn sm outlined', text: 'Query', disabled: !c.active, title: 'Open in Run SQL', onclick: function () {
-          $('run-connection').value = name; showTab('run'); $('run-sql').focus(); } }),
+          showTab('run'); selectRunConnection(name); $('run-sql').focus(); } }),
         h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openConnectionForm(name, c); } }),
         h('button', { type: 'button', className: 'btn ghost sm danger', text: 'Delete', onclick: function () { deleteConnection(name); } }))));
   });
   box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
-    h('thead', {}, h('tr', {}, ['Name', 'Type', 'Host', 'Database', 'User', 'Status', 'Usage', ''].map(function (t) { return h('th', { text: t }); }))),
+    h('thead', {}, h('tr', {}, ['Name', 'Type', 'Host', 'Database', 'User', 'Status', 'Usage', 'Created', 'Last modified', ''].map(function (t) { return h('th', { text: t }); }))),
     h('tbody', {}, rows))));
 }
 $('conn-filter').oninput = renderConnections;
@@ -1399,16 +1431,63 @@ function connectionOptions(select, includeBlank, blankText) {
   });
   if (current && connectionsCache[current]) select.value = current;
 }
-function populateConnectionSelect() {
-  var select = $('run-connection');
-  var had = select.value;
-  connectionOptions(select, false);
-  if (!had) {
-    var firstActive = Object.keys(connectionsCache).sort().filter(function (n) { return connectionsCache[n].active; })[0];
-    if (firstActive) select.value = firstActive;
-  }
-  runSchema.setConnection(select.value);
+// ---- Run SQL's connection picker: Type -> Host -> Connection (database), rather than one flat name list -
+// with tens of connections sharing a host, "which of these is the one I want" is a type+host question first. ----
+function runConnHostLabel(c) { return c.host ? c.host + (c.port ? ':' + c.port : '') : '(local file)'; }
+function paintRunConnType() {
+  var sel = $('run-conn-type');
+  var current = sel.value;
+  var types = Array.from(new Set(Object.keys(connectionsCache).map(function (n) { return connectionsCache[n].db; }))).sort();
+  clear(sel).appendChild(h('option', { value: '', text: 'All types' }));
+  types.forEach(function (t) { sel.appendChild(h('option', { value: t, text: t })); });
+  sel.value = types.indexOf(current) !== -1 ? current : '';
 }
+function paintRunConnHost() {
+  var sel = $('run-conn-host');
+  var current = sel.value;
+  var type = $('run-conn-type').value;
+  var hosts = Array.from(new Set(Object.keys(connectionsCache)
+    .filter(function (n) { return !type || connectionsCache[n].db === type; })
+    .map(function (n) { return runConnHostLabel(connectionsCache[n]); }))).sort();
+  clear(sel).appendChild(h('option', { value: '', text: 'All hosts' }));
+  hosts.forEach(function (host) { sel.appendChild(h('option', { value: host, text: host })); });
+  sel.value = hosts.indexOf(current) !== -1 ? current : '';
+}
+function paintRunConnection() {
+  var select = $('run-connection');
+  var current = select.value;
+  var type = $('run-conn-type').value, host = $('run-conn-host').value;
+  var names = Object.keys(connectionsCache).sort().filter(function (n) {
+    var c = connectionsCache[n];
+    return (!type || c.db === type) && (!host || runConnHostLabel(c) === host);
+  });
+  clear(select);
+  names.forEach(function (name) {
+    var c = connectionsCache[name];
+    select.appendChild(h('option', { value: name, text: name + ' · ' + (c.database || '?') + (c.active ? '' : ' (inactive)') }));
+  });
+  if (names.indexOf(current) !== -1) select.value = current;
+  else { var firstActive = names.filter(function (n) { return connectionsCache[n].active; })[0]; if (firstActive) select.value = firstActive; }
+  runSchema.setConnection(select.value || '');
+}
+function populateConnectionSelect() {
+  paintRunConnType();
+  paintRunConnHost();
+  paintRunConnection();
+}
+/** Jumps the Type/Host filters to wherever `name` actually lives, then selects it - so a shortcut into Run SQL
+ * from elsewhere (the Connections table's "Query" button, run history, a schema preview) always lands on the
+ * right connection instead of silently failing because the cascade happened to be filtered to something else. */
+function selectRunConnection(name) {
+  var c = connectionsCache[name];
+  if (!c) return;
+  $('run-conn-type').value = c.db; paintRunConnHost();
+  $('run-conn-host').value = runConnHostLabel(c); paintRunConnection();
+  $('run-connection').value = name;
+  runSchema.setConnection(name);
+}
+$('run-conn-type').onchange = function () { paintRunConnHost(); paintRunConnection(); };
+$('run-conn-host').onchange = function () { paintRunConnection(); };
 
 // ---- API keys ----
 // QUERYAPIGATE_API_KEY is a full-access admin key, unaffected by anything here. A scoped key created below is
@@ -3592,10 +3671,7 @@ function runSql(opts) {
 /** Jump to the Run SQL tab pre-filled with a preview of one table - from either schema browser. */
 function previewTable(connectionName, tableName) {
   showTab('run');
-  if (connectionName && connectionsCache[connectionName]) {
-    $('run-connection').value = connectionName;
-    runSchema.setConnection(connectionName);
-  }
+  if (connectionName && connectionsCache[connectionName]) selectRunConnection(connectionName);
   $('run-sql').value = 'SELECT * FROM ' + tableName;
   if ($('run-sql').repaint) $('run-sql').repaint();
   runPage = 1;
@@ -3627,7 +3703,7 @@ function renderRunHistory() {
     return h('button', { type: 'button', className: 'history-item', title: entry.sql, onclick: function () {
       $('run-sql').value = entry.sql;
       if ($('run-sql').repaint) $('run-sql').repaint();
-      if (entry.connection && connectionsCache[entry.connection]) { $('run-connection').value = entry.connection; runSchema.setConnection(entry.connection); }
+      if (entry.connection && connectionsCache[entry.connection]) selectRunConnection(entry.connection);
       if (entry.format) $('run-format').value = entry.format;
     } }, entry.sql.length > 64 ? entry.sql.slice(0, 64) + '…' : entry.sql);
   })));

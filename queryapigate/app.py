@@ -722,6 +722,23 @@ def update_connections():
     return jsonify({'message': 'Connections updated successfully'}), 200
 
 
+@bp.route('/connections/test', methods=['POST'])
+def test_connection_route():
+    """Try to connect with the given fields - not a saved connection's name, the fields themselves, exactly
+    as the New/Edit connection form has them right now. Nothing is written anywhere; a masked password
+    (unchanged from an existing connection's form) is resolved to the real stored value first, the same way
+    update_connections() already treats one."""
+    require_admin()
+    details = get_json_body()
+    if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
+        raise ApiError(f"'db' must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}")
+    if details.get('password') == config.PASSWORD_MASK:
+        existing = store.read_connections().get(details.get('name') or '', {})
+        details = {**details, 'password': existing.get('password', '')}
+    result = engine.test_connection(store.resolve_ad_hoc(details))
+    return jsonify({'message': 'Connected', **result}), 200
+
+
 @bp.route('/connections/<name>', methods=['DELETE'])
 def delete_connection(name):
     require_admin()
