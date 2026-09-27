@@ -763,6 +763,7 @@ UI_HTML = r"""<!doctype html>
           </select>
           <span class="spacer"></span>
           <span class="hint hide-sm"><kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
+          <button type="button" class="btn ghost md" id="run-save-as-api-button" title="Save this query as a new saved query">Save as New API</button>
           <button type="button" class="btn ghost md" id="run-explain-button" title="Run EXPLAIN on this query">Explain</button>
           <button type="submit" class="btn primary md" id="run-button" style="padding:0 16px">Run</button>
         </div>
@@ -4033,6 +4034,25 @@ $('run-explain-button').onclick = function () {
   if (!$('run-sql').value.trim()) { showError('Write some SQL to run.', { errors: { sql: 'This field is required' } }); $('run-sql').focus(); return; }
   runPage = 1;
   runSql({ explain: true, button: $('run-explain-button') });
+};
+/** "Save as New API": by the time someone reaches for this, the assumption is they've already tried the
+ * query here and it does what they want - so this opens the same "New saved query" form the Saved Queries
+ * screen's own button does (openQueryForm()), just pre-filled with what Run SQL already has: the query text
+ * itself (SQL, or - unchanged either way - the mongo JSON convention text), the connection, and an empty
+ * {name: {}} skeleton entry per detected bound parameter (mongoDocParams() for mongo, sqlParams() for SQL -
+ * the same two functions the form's own "Bound in the query" hint already uses) so query_parameters starts
+ * with every name ready to have a type/default added, not blank. */
+$('run-save-as-api-button').onclick = function () {
+  var connection = $('run-connection').value;
+  var text = $('run-sql').value;
+  if (!connection) { showError('Pick a connection first — add one on the Connections tab.'); return; }
+  if (!text.trim()) { showError('Write a query first.', { errors: { sql: 'This field is required' } }); $('run-sql').focus(); return; }
+  var isMongo = (connectionsCache[connection] || {}).db === 'mongo';
+  var names = isMongo ? mongoDocParams(text) : sqlParams(text);
+  var queryParameters = {};
+  names.forEach(function (n) { queryParameters[n] = {}; });
+  showTab('queries');
+  openQueryForm(null, { connection_name: connection, sql_query: text, query_parameters: queryParameters });
 };
 function runSql(opts) {
   var connection = $('run-connection').value;

@@ -1016,6 +1016,44 @@ relational); Redis (non-relational, no query language to speak of) and Snowflake
 with their own auth models - key pairs, service accounts) are each a bigger, more different-shaped addition
 and worth scoping separately rather than bundled into "add a driver."
 
+## 37. Primary/foreign key markers in the schema browser's Columns tab
+
+**Impact:** the Columns tab (`queryapigate/schema.py`'s `fetch_schema()`, rendered by `ui.py`'s
+`schemaBrowser()`) shows each column's name and data type, but not whether it's a primary key or a foreign
+key into another table - exactly the two facts that matter most when deciding how to `JOIN` against a table
+you're seeing for the first time. Today that means either already knowing the schema or going to look at the
+real database.
+
+**Notes:** cheap at *runtime* - it would still be one extra query per connection when the schema is fetched,
+the same caching `fetch_schema()`/`loadSchema()` already do, not a per-table round trip - but a real
+multi-dialect job to *build*, since the constraint catalogue varies far more across dialects than the table/
+column one `_QUERIES` already covers: MySQL/PostgreSQL/H2/DuckDB need a join through
+`information_schema.key_column_usage`/`constraint_column_usage` (or the equivalent) to find both "is this a
+PK" and, for a FK, which table/column it references; SQLite is the easy case - `pragma_table_info()` (already
+queried for the base column list) returns a `pk` flag directly, and `pragma_foreign_key_list()` gives FKs in
+one call; ClickHouse has no real foreign-key concept at all, only an ordering/primary-key string on the table
+itself, so it would always report "no FKs" there, not a gap this can close. UI-wise: a small badge next to a
+column's type in the Columns tab (e.g. "PK", or "FK → orders.id") - `ui.py`'s existing `.schema-col` row.
+
+## 38. A "show CREATE TABLE" icon in the schema browser
+
+**Impact:** the schema browser (`ui.py`'s `schemaBrowser()`, next to the existing copy-starter-query (⧉) and
+preview (👁) icons) tells you a table's columns and types, but not its actual DDL - indexes, defaults,
+constraints, storage/engine options - the things you'd need to recreate the table elsewhere or understand a
+performance characteristic the column list alone doesn't show.
+
+**Notes:** dialect cost varies sharply, unlike the columns/PK-FK work above. **Cheap:** MySQL and ClickHouse
+both have a single query that returns the exact DDL text - `SHOW CREATE TABLE <table>` - and SQLite is
+free: `sqlite_master.sql` already *is* the original `CREATE TABLE` statement, no reconstruction needed.
+**Expensive:** PostgreSQL has no built-in single-statement equivalent - real DDL has to be reconstructed by
+hand from `pg_catalog`/`information_schema` (columns, defaults, indexes, constraints each their own query),
+the well-known reason third-party tools/extensions like `pg_get_tabledef` exist; H2 and DuckDB would need
+similar reconstruction, of unverified completeness. **Not applicable:** a Mongo collection has no DDL at all
+(schemaless) - the icon would need to be hidden for `db === 'mongo'` connections, the same
+`DB_SWITCHABLE_TYPES`-style dialect gate other Run SQL features already use. Given the split, a first slice
+scoped to just MySQL/SQLite/ClickHouse (the "free" ones) - showing the icon only for those `db` values - gets
+most of the value without the Postgres reconstruction effort, which would be its own follow-up.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
@@ -1025,6 +1063,7 @@ MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mon
 schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
-(general API latency, connection pooling and cache performance benchmarks) and #27 (real-world example APIs
-under `examples/`), neither started. The "still open" note under #9 (confirming its CI changes on a real
-run) is a smaller follow-up on finished work, not an open capability gap.
+(general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
+under `examples/`), #37 (primary/foreign key markers in the schema browser) and #38 (a "show CREATE TABLE"
+icon), none started. The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
+follow-up on finished work, not an open capability gap.
