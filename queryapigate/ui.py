@@ -2361,9 +2361,41 @@ async function openQueryInfo(f) {
   if (!c) { sqlBox.appendChild(h('div', { className: 'hint', text: 'Could not load the SQL.' })); return; }
   var data = c.parsed && c.parsed[String(latest.version)];
   var sql = data && data.sql_query !== undefined && data.sql_query !== null ? String(data.sql_query) : c.raw;
-  sqlBox.appendChild(codeBox(sql));
+  // Several example queries (and anything else authored as one Python string) have no line breaks of their
+  // own; showing that verbatim is an unreadable, horizontally-scrolling wall of text. Reformat only when the
+  // author supplied no line breaks at all - a query someone hand-formatted keeps exactly the layout they gave it.
+  var display = sql.indexOf('\n') === -1 ? formatSql(sql) : sql;
+  sqlBox.appendChild(codeBox(display));
   sqlBox.appendChild(h('div', { style: 'margin-top:6px' },
-    h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(sql); } })));
+    h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(display); } })));
+}
+/** True clause keywords only - "BY", "JOIN", "INTO", "ALL" are deliberately left out so they stay glued to
+ * the word before them (GROUP BY, LEFT JOIN, INSERT INTO, UNION ALL land on one line, not split in two). */
+var SQL_CLAUSE_KW = { select: 1, from: 1, where: 1, having: 1, limit: 1, offset: 1, union: 1, with: 1, insert: 1,
+  update: 1, set: 1, values: 1, join: 1, on: 1, group: 1, order: 1, delete: 1,
+  left: 1, right: 1, inner: 1, outer: 1, full: 1, cross: 1 };
+var SQL_JOIN_PREFIX = { left: 1, right: 1, inner: 1, outer: 1, full: 1, cross: 1 };
+/** A light, best-effort pretty-printer for a SQL string with no line breaks of its own: puts each clause on
+ * its own line using the same tokenizer highlightInto() uses, so it can never break in the middle of a
+ * string, a quoted identifier or a comment. It has no real parser behind it - depth and precedence are not
+ * tracked - so a keyword inside a subquery or a window function's OVER (...) breaks onto its own line too;
+ * for a read-only "let me glance at this query" popup that is a fair trade for staying simple and safe. */
+function formatSql(sql) {
+  SQL_TOKEN.lastIndex = 0;
+  var pieces = [], pos = 0, lastWord = null, m;
+  while ((m = SQL_TOKEN.exec(sql))) {
+    var gap = sql.slice(pos, m.index).replace(/[ \t]{2,}/g, ' ');
+    var word = m[7] ? m[7].toLowerCase() : null;
+    // JOIN right after a LEFT/RIGHT/INNER/OUTER/FULL/CROSS prefix, and FROM right after DELETE, stay glued to
+    // that prefix instead of starting their own line - the pair reads as one clause, not two.
+    var glued = (word === 'join' && SQL_JOIN_PREFIX[lastWord]) || (word === 'from' && lastWord === 'delete');
+    if (word && SQL_CLAUSE_KW[word] && !glued) { pieces.push(gap, '\n', m[0]); } else { pieces.push(gap, m[0]); }
+    lastWord = word;
+    pos = SQL_TOKEN.lastIndex;
+  }
+  pieces.push(sql.slice(pos));
+  return pieces.join('').split('\n').map(function (line) { return line.trim(); })
+    .filter(function (line, i) { return line !== '' || i === 0; }).join('\n');
 }
 /** true once a key's expires_at date has passed - the same check renderApiKeys() makes, factored out so the
  * access map can grey out an expired key exactly like the API keys screen does. */
@@ -2372,6 +2404,20 @@ function isKeyExpired(k) {
   return !!(k.expires_at && k.expires_at < today);
 }
 var AMAP_CODE = { query: 'Q', collection: 'C', connection: 'W' };
+var AMAP_INFO_HEADERS = ['Database', 'Created', 'Last modified', 'Last used', 'Version'];
+/** The same five at-a-glance facts the info popup opens to show, as plain <td>s for the access map's rows -
+ * so the common case (what dialect, how stale, which version) never needs a click to see. */
+function amapInfoCells(f) {
+  var stats = queryStats(f);
+  var conn = connectionsCache[stats.connectionName];
+  return [
+    h('td', {}, conn ? h('span', { className: 'tag', text: conn.db }) : h('span', { className: 'dim', text: '—' })),
+    h('td', { className: 'mono dim', text: stats.created || '—' }),
+    h('td', { className: 'mono dim', text: stats.modified || '—' }),
+    h('td', { className: stats.lastUsed ? 'mono' : 'mono dim', text: stats.lastUsed || 'never' }),
+    h('td', { className: 'mono', text: 'v' + stats.latest.version })
+  ];
+}
 function renderAccessMap() {
   var box = clear($('accessmap-body'));
   if (!filesCache.length) { box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }))); return; }
@@ -2393,6 +2439,7 @@ function renderAccessMap() {
 
   var thead = h('thead', {}, h('tr', {},
     h('th', { className: 'amap-query', text: 'Query' }),
+    AMAP_INFO_HEADERS.map(function (t) { return h('th', { text: t }); }),
     h('th', { text: 'Connection' }),
     cols.map(function (name) {
       var k = apiKeysCache[name];
@@ -2425,13 +2472,15 @@ function renderAccessMap() {
           h('button', { type: 'button', className: 'amap-info', title: 'Details for ' + f.filename, 'aria-label': 'Details for ' + f.filename,
             onclick: function () { openQueryInfo(f); } }, 'i')),
         f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
+      amapInfoCells(f),
       h('td', { className: 'mono dim', text: l.connection_name || '—' }),
       cells,
       h('td', { className: 'num', text: rowReach ? String(rowReach) : '—' }));
   }));
 
   var tfoot = h('tfoot', {}, h('tr', {},
-    h('td', { className: 'amap-query', text: 'Reaches' }), h('td'),
+    h('td', { className: 'amap-query', text: 'Reaches' }),
+    AMAP_INFO_HEADERS.map(function () { return h('td'); }), h('td'),
     cols.map(function (name) { return h('td', { className: 'num', text: colTotals[name] + ' / ' + rows.length }); }),
     h('td')));
 
@@ -2439,12 +2488,14 @@ function renderAccessMap() {
 
   var roleNames = Object.keys(rolesCache).sort();
   if (roleNames.length) {
-    var rthead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }), h('th', { text: 'Connection' }),
+    var rthead = h('thead', {}, h('tr', {}, h('th', { className: 'amap-query', text: 'Query' }),
+      AMAP_INFO_HEADERS.map(function (t) { return h('th', { text: t }); }), h('th', { text: 'Connection' }),
       roleNames.map(function (name) { return h('th', { className: 'amap-key-head' }, name); })));
     var rtbody = h('tbody', {}, rows.map(function (f) {
       var l = latestOf(f);
       return h('tr', {},
         h('td', { className: 'amap-query' }, f.filename, f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
+        amapInfoCells(f),
         h('td', { className: 'mono dim', text: l.connection_name || '—' }),
         roleNames.map(function (name) {
           var via = reachVia(rolesCache[name], f.filename, f.collection, l.connection_name);
