@@ -1091,12 +1091,19 @@ panel (no new charting/graph library - matches this project's stance of bar rows
 Never touches `sqltools.validate_sql` or any execution path - a parse failure just shows an explanatory
 line, never blocks or raises.
 
-**Deferred, each its own separately-scoped unit of work:** replacing `computeTableMatches()`/the Access
-map's own table filter with real parsing; column-level lineage; real write-target detection (the #21 table-
-allow-list note above still applies - this v1 is read-only best-effort, not a security guard); parser-aware,
-table-scoped autocomplete (#39); a real node-graph diagram instead of the plain list. **H2/JDBC connections
-are permanently out of scope for this parser**, not a gap to fill later - those can point at any vendor's
-SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at.
+The Access map screen's own "which queries reference this table" filter now also uses real parsing where
+the connection's dialect supports it (the same `PARSEABLE_DIALECTS` list, client-side in `ui.py`):
+`computeTableMatches()` calls `GET /query_flow` per candidate query and matches against its real `tables`
+list, falling back to the original text-search heuristic per-query when parsing isn't available for the
+dialect or fails on that query's SQL - so h2/jdbc/mongo connections, and any unparseable query, keep working
+exactly as before. Shares `queryFlowCache` with the Access tab's own panel, so the two can never disagree.
+
+**Deferred, each its own separately-scoped unit of work:** column-level lineage; real write-target detection
+(the #21 table-allow-list note above still applies - this is read-only best-effort, not a security guard);
+parser-aware, table-scoped autocomplete (#39); a real node-graph diagram instead of the plain list. **H2/JDBC
+connections are permanently out of scope for real parsing**, not a gap to fill later - those can point at
+any vendor's SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at; both
+keep using the text-search fallback everywhere it applies.
 
 ---
 
@@ -1109,8 +1116,8 @@ still open. Open: the table-allow-list half of #21, not started, and not recomme
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
 under `examples/`), #37 (primary/foreign key markers in the schema browser), #38 (a "show CREATE TABLE" icon)
-and #39 (autocomplete columns while typing), none started; #40 is shipped as its table/join-extraction v1
-only, with the Access-map heuristic replacement, column lineage, write-target detection, table-scoped
-autocomplete and H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped follow-
-ups). The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
+and #39 (autocomplete columns while typing), none started; #40 is shipped as table/join extraction plus the
+Access map's table filter, with column lineage, write-target detection, table-scoped autocomplete and
+H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped follow-ups). The "still
+open" note under #9 (confirming its CI changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.

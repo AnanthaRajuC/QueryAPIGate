@@ -1506,6 +1506,7 @@ function schemaField(browser) {
 
 // ---- connections ----
 var DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo']; // mirrors config.SUPPORTED_DB_TYPES
+var PARSEABLE_DIALECTS = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'duckdb']; // mirrors sqlflow.py's _DIALECT_MAP keys
 // Dialects that support browsing/switching to a different database on the same server - the Load-databases
 // button on the connection form and the Database dropdown/tree override in Run SQL.
 var DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
@@ -3094,20 +3095,45 @@ function amapPaintTableOptions() {
   entry.tables.forEach(function (t) { sel.appendChild(h('option', { value: t.name, text: t.name + ' · ' + t.columns.length + (t.columns.length === 1 ? ' col' : ' cols') })); });
   sel.value = entry.tables.some(function (t) { return t.name === amapTableFilter; }) ? amapTableFilter : '';
 }
-/** Which of `connName`'s saved queries actually mention `tableName` in their (latest version's) SQL - a
- * plain word-boundary text search, not real parsing, same trade-off as formatSql(). Scoped to one
- * connection's queries, not every query on the server, so this stays cheap even with hundreds of endpoints
- * overall. getContent() caches per file, so re-picking the same table later costs nothing further. */
+/** Word-boundary text search over `f`'s (latest version's) SQL for `tableName` - not real parsing, same
+ * trade-off as formatSql(). The fallback computeTableMatches() uses when real parsing isn't available for
+ * a connection's dialect, or fails to parse a particular query. getContent() caches per file, so re-picking
+ * the same table later costs nothing further. */
+async function textMatchesTable(f, needle) {
+  var c = await getContent(f.filename);
+  if (!c) return false;
+  var latest = latestOf(f);
+  var data = c.parsed && c.parsed[String(latest.version)];
+  return needle.test(queryDisplayText(data, c.raw));
+}
+/** Whether `f`'s SQL touches `tableName`, via real parsing (sqlflow.py's GET /query_flow) when its
+ * dialect supports it, falling back to textMatchesTable() otherwise - an unparseable query (query_flow's
+ * `error`) falls back too, rather than being silently excluded. Shares queryFlowCache with the saved-query
+ * detail view's Access tab (same cache key, filename + version), so filtering here and opening that tab
+ * later can never disagree and never cost a second request. */
+async function queryTouchesTable(f, tableName, needle) {
+  var v = latestOf(f);
+  var key = f.filename + ':' + v.version;
+  var flow = queryFlowCache[key];
+  if (!flow) {
+    flow = await apiJson('query_flow?filename=' + enc(f.filename) + '&version=' + v.version);
+    if (flow) queryFlowCache[key] = flow;
+  }
+  if (!flow || flow.error) return textMatchesTable(f, needle);
+  return flow.tables.some(function (t) { return t.toLowerCase() === tableName.toLowerCase(); });
+}
+/** Which of `connName`'s saved queries actually touch `tableName` - real SQL parsing where the
+ * connection's dialect supports it (see queryTouchesTable()), the old text-search heuristic otherwise.
+ * Scoped to one connection's queries, not every query on the server, so this stays cheap even with
+ * hundreds of endpoints overall. */
 async function computeTableMatches(connName, tableName) {
   var candidates = filesCache.filter(function (f) { return latestOf(f).connection_name === connName; });
   var needle = new RegExp('\\b' + tableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  var dialect = connectionsCache[connName] && connectionsCache[connName].db;
+  var parseable = PARSEABLE_DIALECTS.indexOf(dialect) !== -1;
   var hits = await Promise.all(candidates.map(async function (f) {
-    var c = await getContent(f.filename);
-    if (!c) return null;
-    var latest = latestOf(f);
-    var data = c.parsed && c.parsed[String(latest.version)];
-    var sql = queryDisplayText(data, c.raw);
-    return needle.test(sql) ? f.filename : null;
+    var matched = parseable ? await queryTouchesTable(f, tableName, needle) : await textMatchesTable(f, needle);
+    return matched ? f.filename : null;
   }));
   return new Set(hits.filter(Boolean));
 }

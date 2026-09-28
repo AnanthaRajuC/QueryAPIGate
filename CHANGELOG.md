@@ -11,9 +11,11 @@ All notable changes to this project are documented here. The format follows
   tables and joins it touches, shown as a best-effort list on the saved-query detail view's Access tab
   (`GET /query_flow`). Supports `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb` connections;
   `h2`/`jdbc`/`mongo` (and any query sqlglot can't parse) get a plain explanatory message instead - this
-  never touches the execution or write-guard path, and a parse failure never blocks or raises. Independent
-  from, and more accurate than, the Access map's own `computeTableMatches()` text-search heuristic, which
-  is unchanged in this slice.
+  never touches the execution or write-guard path, and a parse failure never blocks or raises.
+- The Access map's own "which queries reference this table" filter now uses that same real parsing where
+  the connection's dialect supports it, falling back to the original text-search heuristic per-query when
+  it doesn't (h2/jdbc/mongo, or an unparseable query) - fixes false positives like a table name only
+  appearing in a SQL comment.
 
 ## [0.9.0] - 2026-09-28
 
