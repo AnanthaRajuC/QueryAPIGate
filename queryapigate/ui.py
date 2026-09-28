@@ -76,6 +76,16 @@ UI_HTML = r"""<!doctype html>
   .nav-text { flex: 1; }
   .nav-abbr { display: none; font: 600 11.5px var(--mono); letter-spacing: 0.02em; }
   #tabs .count { margin-left: auto; }
+  .star-cta { position: relative; flex: none; margin: 10px; padding: 12px 12px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+  .star-cta[hidden] { display: none; }
+  .star-cta-close { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border: 0; background: none; border-radius: 5px;
+    color: var(--ink-3); font-size: 15px; line-height: 1; cursor: pointer; }
+  .star-cta-close:hover { background: var(--surface-3); color: var(--ink); }
+  .star-cta-title { font: 600 12.5px var(--sans); color: var(--ink); padding-right: 16px; }
+  .star-cta-desc { margin: 3px 0 10px; font-size: 11.5px; line-height: 1.4; color: var(--ink-2); }
+  .star-cta-btn { display: inline-flex; }
+  .star-cta-btn img { display: block; }
+  body.side-collapsed .star-cta { display: none; }
   .side-foot { flex: none; padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; }
   .side-link { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; }
   .side-link:hover { background: var(--surface-2); }
@@ -442,7 +452,7 @@ UI_HTML = r"""<!doctype html>
   @media (max-width: 980px) {
     body { --side-w: 60px; }
     .side-head { justify-content: center; padding: 0; }
-    .wordmark, .health, .nav-label, .nav-text, #tabs .count, .side-link, #key-panel { display: none; }
+    .wordmark, .health, .nav-label, .nav-text, #tabs .count, .side-link, #key-panel, .star-cta { display: none; }
     .wordmark-short, .nav-rule { display: block; }
     .nav-abbr { display: inline; }
     .side-foot .key-dot-only { display: flex; }
@@ -508,9 +518,6 @@ UI_HTML = r"""<!doctype html>
   .subtabs button.on { color: var(--ink); }
   .subtabs button.on::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: var(--ink); }
   .d-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
-  .param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-  .param-grid .field > label { font: 500 12px var(--mono); color: var(--ink); }
-  .param-grid input { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border-color: var(--line-strong); }
   .get-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
   .get-row .method { font: 600 11px var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
   .get-row .endpoint { flex: 1; min-width: 160px; font: 12.5px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -668,6 +675,15 @@ UI_HTML = r"""<!doctype html>
       <button type="button" role="tab" data-tab="auditlog" data-group="Observability" data-label="Audit log" title="Audit log"><span class="nav-abbr">Au</span><span class="nav-text">Audit log</span></button>
     </div>
   </nav>
+  <div class="star-cta" id="star-cta">
+    <button type="button" class="star-cta-close" id="star-cta-close" aria-label="Dismiss">×</button>
+    <div class="star-cta-title">Star QueryAPIGate</div>
+    <div class="star-cta-desc">See the latest releases and help grow the community on GitHub.</div>
+    <a class="star-cta-btn" href="https://github.com/AnanthaRajuC/QueryAPIGate" target="_blank" rel="noopener">
+      <img src="https://img.shields.io/github/stars/AnanthaRajuC/QueryAPIGate?style=flat-square&amp;logo=github&amp;label=Stars&amp;labelColor=181717&amp;color=2ea44f"
+           height="20" alt="GitHub stars" loading="lazy">
+    </a>
+  </div>
   <div class="side-foot">
     <button type="button" role="tab" class="nav" data-tab="settings" data-group="System" data-label="Settings" id="nav-settings" title="Settings"><span class="nav-abbr">St</span><span class="nav-text">Settings</span></button>
     <button type="button" role="tab" class="nav" data-tab="help" data-group="System" data-label="Help" id="nav-help" title="Help"><span class="nav-abbr">Hp</span><span class="nav-text">Help</span></button>
@@ -1084,6 +1100,17 @@ document.addEventListener('keydown', function (e) {
   }
 });
 try { if (localStorage.getItem('queryapigate-ui-side-collapsed') === '1') setSideCollapsed(true); } catch (e) {}
+
+// ---- sidebar "Star on GitHub" card: dismissible; the star count itself is shields.io's own badge image,
+// not something this app fetches or caches. ----
+(function () {
+  var DISMISS_KEY = 'queryapigate-ui-star-cta-dismissed';
+  try { if (localStorage.getItem(DISMISS_KEY) === '1') { $('star-cta').hidden = true; return; } } catch (e) {}
+  $('star-cta-close').onclick = function () {
+    $('star-cta').hidden = true;
+    try { localStorage.setItem(DISMISS_KEY, '1'); } catch (e) {}
+  };
+})();
 
 // ---- global search (Ctrl/Cmd+K): jump to a connection, saved query, API key or role ----
 var palSel = 0, palItems = [];
@@ -2779,19 +2806,26 @@ async function getContent(name) {
 
 /** One name + its Q/C/W reach-type badge(s) - the same amap-dot the full Access map table's cells use,
  * mirrored here for just one query instead of a whole row of every query at once. */
-function accessPill(entry, roleClass) {
-  var codes = Array.from(new Set(entry.via.map(function (v) { return AMAP_CODE[v.kind]; })));
+/** The Q/C/W reach-type badge alone - the same amap-dot the full Access map table's cells use. Shared by
+ * accessPill() (name + dot, for the compact always-visible panel) and the API Keys/Roles tabs' own table
+ * rows (dot in its own column, alongside rate limit, expiry and the rest). */
+function reachDot(via, roleClass) {
+  var codes = Array.from(new Set(via.map(function (v) { return AMAP_CODE[v.kind]; })));
   var viaConnOnly = codes.length === 1 && codes[0] === 'W';
-  return h('span', { className: 'access-pill', title: entry.via.map(function (v) { return v.label; }).join(', ') },
+  return h('span', { className: 'amap-dot' + (roleClass ? ' role' : '') + (viaConnOnly ? ' conn' : ''),
+    title: via.map(function (v) { return v.label; }).join(', ') }, codes.join('·'));
+}
+function accessPill(entry, roleClass) {
+  return h('span', { className: 'access-pill' },
     h('span', { className: 'name', text: entry.name + (entry.active === false ? ' (revoked)' : '') }),
-    h('span', { className: 'amap-dot' + (roleClass ? ' role' : '') + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
+    reachDot(entry.via, roleClass));
 }
 /** The always-visible "who can reach this" panel on a saved query - the answer this app has and a plain
  * request client (Postman and friends) never will, so it sits beside the run panel, not behind a tab. Shows
  * the same Q/C/W reach detail the Access map screen would for this one query, right here, rather than a
- * link over to go find this same row there. */
-function accessBox(queryName, collection, connectionName) {
-  var reach = queryReach(queryName, collection, connectionName);
+ * link over to go find this same row there. `reach` is queryReach()'s result, computed once by the caller
+ * and shared with the API Keys/Roles tabs below so the three never disagree. */
+function accessBox(queryName, reach) {
   var summary = h('div', { className: 'access-summary' },
     h('b', { text: String(reach.keys.length) }), ' ' + (reach.keys.length === 1 ? 'API key' : 'API keys') + (reach.keys.length ? ' reach' : ' reaches') + ' this query',
     reach.keys.length ? h('span', { className: 'legend' }, h('span', { className: 'amap-dot' }, 'Q'), ' named query  ',
@@ -2808,6 +2842,60 @@ function accessBox(queryName, collection, connectionName) {
         ' - a key must be created from one of these to actually call it.')
     : null;
   return h('div', { className: 'access-box' }, summary, keyList, roleList);
+}
+/** The saved-query detail view's API Keys tab: every key reach() found for this one query, with the same
+ * columns the main API keys screen shows (minus Scope/IPs/Usage, which describe the key as a whole rather
+ * than this one query) plus the Q/C/W reach column reachDot() also gives the compact panel above. */
+function renderQueryKeysTab(body, reach) {
+  if (!reach.keys.length) {
+    body.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No API key reaches this query yet - only the admin key can run it.' })));
+    return;
+  }
+  var today = new Date().toISOString().slice(0, 10);
+  var rows = reach.keys.map(function (k) {
+    var full = apiKeysCache[k.name] || {};
+    var expired = full.expires_at && full.expires_at < today;
+    var expiry = full.expires_at
+      ? h('span', { style: expired ? 'color:var(--danger)' : '', text: full.expires_at + (expired ? ' (expired)' : '') })
+      : h('span', { className: 'dim', text: 'never' });
+    return h('tr', { 'data-name': k.name },
+      h('td', {}, h('div', { style: 'display:flex;align-items:center;gap:8px' },
+        h('span', { className: 'dot ' + (k.active && !expired ? 'ok' : 'off'), title: !k.active ? 'Revoked' : (expired ? 'Expired' : 'Active') }),
+        h('span', { className: 'name', text: k.name }))),
+      h('td', {}, reachDot(k.via, false)),
+      accessCell(full),
+      h('td', { className: full.rate_limit ? 'mono' : 'mono dim', style: 'white-space:nowrap', text: full.rate_limit || 'server default' }),
+      h('td', { style: 'white-space:nowrap' }, expiry),
+      h('td', { className: 'mono dim', style: 'white-space:nowrap', text: full.last_used_at || 'never' }),
+      h('td', {}, h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openApiKeyForm(k.name, full); } })));
+  });
+  body.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['Key', 'Reach', 'Access', 'Rate limit', 'Expires', 'Last used', ''].map(function (t) { return h('th', { text: t }); }))),
+    h('tbody', {}, rows))));
+}
+/** The saved-query detail view's Roles tab: every role reach() found for this one query - a role grants
+ * nothing by itself (see accessBox()'s own note), but shows here so it's clear which templates a new key
+ * could be created from to reach this query without hand-picking connections/collections again. */
+function renderQueryRolesTab(body, reach) {
+  if (!reach.roles.length) {
+    body.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No role grants reach to this query.' })));
+    return;
+  }
+  var keysFrom = {};
+  Object.keys(apiKeysCache).forEach(function (kn) { var from = apiKeysCache[kn].created_from_role; if (from) keysFrom[from] = (keysFrom[from] || 0) + 1; });
+  var rows = reach.roles.map(function (r) {
+    var full = rolesCache[r.name] || {};
+    return h('tr', { 'data-name': r.name },
+      h('td', {}, h('span', { className: 'name', text: r.name })),
+      h('td', {}, reachDot(r.via, true)),
+      accessCell(full),
+      h('td', { className: full.rate_limit ? 'mono' : 'mono dim', style: 'white-space:nowrap', text: full.rate_limit || 'server default' }),
+      h('td', { className: 'mono', text: String(keysFrom[r.name] || 0), title: 'Keys created from this role' }),
+      h('td', {}, h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openRoleForm(r.name, full); } })));
+  });
+  body.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['Role', 'Reach', 'Access', 'Rate limit', 'Keys', ''].map(function (t) { return h('th', { text: t }); }))),
+    h('tbody', {}, rows))));
 }
 /** The Access map screen: every saved query against every API key, so "which keys can call which endpoints"
  * is answered at a glance instead of by opening each query or each key in turn. */
@@ -2917,8 +3005,11 @@ function formatSql(sql) {
     pos = SQL_TOKEN.lastIndex;
   }
   pieces.push(sql.slice(pos));
+  // A leading clause keyword (SELECT, almost always) starts its own line same as any other, which left an
+  // empty first line ahead of it - drop every blank line this reflow produces, not just interior ones, so
+  // the query always starts on line 1.
   return pieces.join('').split('\n').map(function (line) { return line.trim(); })
-    .filter(function (line, i) { return line !== '' || i === 0; }).join('\n');
+    .filter(function (line) { return line !== ''; }).join('\n');
 }
 /** true once a key's expires_at date has passed - the same check renderApiKeys() makes, factored out so the
  * access map can grey out an expired key exactly like the API keys screen does. */
@@ -3243,6 +3334,7 @@ function renderDetail() {
     openMenu(deleteBtn, items);
   } });
   var tagsText = (v.tags || []).join(', ');
+  var reach = queryReach(f.filename, f.collection, v.connection_name);
   var head = h('div', { className: 'd-head' },
     h('div', { className: 'd-title' },
       h('h3', { text: f.filename }),
@@ -3256,17 +3348,21 @@ function renderDetail() {
     v.description ? h('p', { className: 'd-desc', text: v.description }) : null,
     h('dl', { className: 'meta' },
       metaItem('connection', v.connection_name || '—'), metaItem('collection', f.collection || '—'), metaItem('author', v.author || '—'),
-      metaItem('modified', v.last_modified_at || v.created_at || '—'), metaItem('status', v.status || '—'),
+      metaItem('modified', v.last_modified_at || v.created_at || '—'),
       tagsText ? metaItem('tags', tagsText) : null),
-    accessBox(f.filename, f.collection, v.connection_name),
+    accessBox(f.filename, reach),
     h('div', { className: 'subtabs', role: 'tablist' },
       subtab('run', 'Run'), subtab('sql', 'SQL'),
       subtab('history', 'History', h('span', { className: 'count', text: history.length ? String(history.length) : '' })),
-      subtab('curl', 'Curl')));
+      subtab('curl', 'Curl'),
+      subtab('keys', 'API Keys', h('span', { className: 'count', text: reach.keys.length ? String(reach.keys.length) : '' })),
+      subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' }))));
   var body = h('div', { className: 'd-body' });
   box.appendChild(head);
   box.appendChild(body);
   if (selected.tab === 'sql') renderSqlTab(body, f, v);
+  else if (selected.tab === 'keys') renderQueryKeysTab(body, reach);
+  else if (selected.tab === 'roles') renderQueryRolesTab(body, reach);
   else if (selected.tab === 'history') renderHistoryTab(body, v);
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
   else renderRunTab(body, f, v, isLatest);
@@ -3304,6 +3400,19 @@ function codeBox(sql) {
 function subtab(key, label, extra) {
   return h('button', { type: 'button', role: 'tab', 'data-subtab': key, className: selected.tab === key ? 'on' : '', onclick: function () { selected.tab = key; renderDetail(); } }, label, extra || null);
 }
+/** The Name/Type/Constraints/Description a saved version's raw query_parameters declaration shows for one
+ * parameter - shared by the SQL tab's read-only table and the Run tab's editable one (its Constraints column
+ * is an input instead of text, but shows exactly this string as its placeholder), so the two can never show
+ * it differently. A parameter used in the query but never explicitly declared (an implicit "required text"
+ * one - see param_rules.read_definition({})) has nothing here to show: type/constraints/description all
+ * come back blank, same as it does for query_parameters itself. */
+function paramDeclaredShape(queryParameters, name) {
+  var raw = (queryParameters || {})[name];
+  var s = typeof raw === 'string' ? { type: raw } : (raw || {});
+  var constraints = Object.keys(s).filter(function (x) { return x !== 'type' && x !== 'description'; })
+    .map(function (x) { return x + '=' + JSON.stringify(s[x]); }).join('  ');
+  return { type: String(s.type || ''), constraints: constraints, description: s.description ? String(s.description) : '' };
+}
 
 async function renderSqlTab(body, f, v) {
   body.appendChild(loadingNode());
@@ -3312,28 +3421,36 @@ async function renderSqlTab(body, f, v) {
   if (!c) return;
   var data = c.parsed && c.parsed[String(v.version)];
   var shown = queryDisplayText(data, c.raw);
+  // Reformat only when the author supplied no line breaks at all (e.g. an example authored as one Python
+  // string) - the same trade-off formatSql() itself documents; a query someone hand-formatted keeps exactly
+  // the layout they gave it.
+  if (shown.indexOf('\n') === -1) shown = formatSql(shown);
+
+  var qp = v.query_parameters || {};
+  var keys = Object.keys(qp);
+  body.appendChild(h('p', { className: 'sub-h', text: 'Parameters' }));
+  if (!keys.length) {
+    body.appendChild(h('div', { className: 'hint', text: 'This version declares no query_parameters.' }));
+  } else {
+    body.appendChild(h('div', { className: 'panel', style: 'overflow:auto' }, h('table', { className: 'grid' },
+      h('thead', {}, h('tr', {}, ['Name', 'Type', 'Constraints', 'Description'].map(function (t) { return h('th', { text: t }); }))),
+      h('tbody', {}, keys.map(function (k) {
+        var decl = paramDeclaredShape(qp, k);
+        return h('tr', {}, h('td', {}, h('span', { className: 'name', text: k })), h('td', { className: 'mono', text: decl.type }),
+          h('td', { className: 'mono dim', text: decl.constraints }), h('td', { text: decl.description }));
+      })))));
+  }
+
   var codeEl = codeBox(shown);
   var raw = h('pre', { className: 'code', text: c.raw });
   raw.hidden = true;
   var toggle = h('button', { type: 'button', className: 'btn sm ghost', text: 'Show raw file', onclick: function () {
     raw.hidden = !raw.hidden; toggle.textContent = raw.hidden ? 'Show raw file' : 'Hide raw file'; } });
+  body.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px', text: 'Query' }));
   body.appendChild(codeEl);
   body.appendChild(h('div', { className: 'toolbar', style: 'margin:-6px 0 0' },
     h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(shown); } }), toggle));
   body.appendChild(raw);
-  var qp = v.query_parameters || {};
-  var keys = Object.keys(qp);
-  body.appendChild(h('p', { className: 'sub-h', text: 'Parameters' }));
-  if (!keys.length) { body.appendChild(h('div', { className: 'hint', text: 'This version declares no query_parameters.' })); return; }
-  body.appendChild(h('div', { className: 'panel', style: 'overflow:auto' }, h('table', { className: 'grid' },
-    h('thead', {}, h('tr', {}, ['Name', 'Type', 'Constraints', 'Description'].map(function (t) { return h('th', { text: t }); }))),
-    h('tbody', {}, keys.map(function (k) {
-      var s = typeof qp[k] === 'string' ? { type: qp[k] } : (qp[k] || {});
-      var cons = Object.keys(s).filter(function (x) { return x !== 'type' && x !== 'description'; })
-        .map(function (x) { return x + '=' + JSON.stringify(s[x]); }).join('  ');
-      return h('tr', {}, h('td', {}, h('span', { className: 'name', text: k })), h('td', { className: 'mono', text: String(s.type || '') }),
-        h('td', { className: 'mono dim', text: cons }), h('td', { text: s.description ? String(s.description) : '' }));
-    })))));
 }
 
 function renderHistoryTab(body, v) {
@@ -3404,17 +3521,24 @@ async function renderRunTab(body, f, v, isLatest) {
   if (selected.name !== f.filename || selected.tab !== 'run') return;
   clear(body);
   var inputs = {};
-  var grid = h('div', { className: 'param-grid' }, params.map(function (p) {
-    var sch = p.schema || {};
-    var bounds = [sch.minimum !== undefined ? '≥ ' + sch.minimum : null, sch.maximum !== undefined ? '≤ ' + sch.maximum : null].filter(Boolean).join(' ');
-    var input = h('input', { id: 'run-q-' + p.name, spellcheck: 'false', autocomplete: 'off',
-      placeholder: sch.default !== undefined ? 'default: ' + sch.default : (p.required ? 'required' : ''),
-      required: p.required ? true : null, type: sch.type === 'integer' || sch.type === 'int' ? 'number' : 'text' });
-    inputs[p.name] = input;
-    return field('run-q-' + p.name, h('span', { className: 'mono', text: p.name }), input,
-      [p.description, bounds].filter(Boolean).join(' · ') || null,
-      [sch.type ? h('span', { className: 'type', text: String(sch.type) }) : null, p.required ? h('span', { className: 'req', text: '*' }) : null]);
-  }));
+  // The same Name/Type/Constraints/Description table the SQL tab shows, read from the same declaration
+  // (paramDeclaredShape) - except Constraints is an input here, not text, with that same constraints string
+  // as its placeholder (so a blank input still shows it, just greyed out) rather than replacing it.
+  var paramsTable = params.length ? h('div', { className: 'panel', style: 'overflow:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['Name', 'Type', 'Constraints', 'Description'].map(function (t) { return h('th', { text: t }); }))),
+    h('tbody', {}, params.map(function (p) {
+      var decl = paramDeclaredShape(v.query_parameters, p.name);
+      var sch = p.schema || {};
+      var input = h('input', { id: 'run-q-' + p.name, className: 'mono', spellcheck: 'false', autocomplete: 'off',
+        placeholder: decl.constraints, required: p.required ? true : null,
+        type: sch.type === 'integer' || sch.type === 'int' ? 'number' : 'text' });
+      inputs[p.name] = input;
+      return h('tr', {},
+        h('td', {}, h('span', { className: 'name', text: p.name }), p.required ? h('span', { className: 'req', text: ' *' }) : null),
+        h('td', { className: 'mono', text: decl.type || String(sch.type || '') }),
+        h('td', {}, input),
+        h('td', { text: decl.description || p.description || '' }));
+    })))) : null;
   var connSelect = h('select', { id: 'rq-connection', 'aria-label': 'Connection' });
   connectionOptions(connSelect, true, 'saved: ' + (v.connection_name || 'none'));
   var formatSelect = h('select', { id: 'rq-format', 'aria-label': 'Format' }, ['json', 'csv', 'tsv', 'xml', 'yaml', 'ndjson', 'xlsx'].map(function (x) { return h('option', { value: x, text: x }); }));
@@ -3444,7 +3568,7 @@ async function renderRunTab(body, f, v, isLatest) {
     refreshHistorySilently(f.filename);
   }
   var form = h('form', { novalidate: true, style: 'display:flex;flex-direction:column;gap:14px', onsubmit: function (e) { e.preventDefault(); page = 1; run(); } },
-    params.length ? grid : h('div', { className: 'hint', text: 'No parameters — this query runs as-is.' }),
+    paramsTable || h('div', { className: 'hint', text: 'No parameters — this query runs as-is.' }),
     h('div', { className: 'get-row' },
       h('span', { className: 'method', text: 'GET' }),
       h('span', { className: 'endpoint', title: '/' + url, text: '/' + url + (isLatest ? '' : '?version=' + v.version) }),
