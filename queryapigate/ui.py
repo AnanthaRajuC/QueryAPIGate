@@ -303,16 +303,19 @@ UI_HTML = r"""<!doctype html>
   .side-tab-panel[hidden] { display: none; }
   .refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 18px; }
 
+  /* A small "browse a list, drill into one" tab pair - two levels shown one at a time instead of an
+     expand/collapse tree. Used by the schema browser (Tables/Columns) and the Saved Queries list
+     (Collections/Queries). */
+  .minitabs { display: flex; gap: 2px; padding: 4px 4px 0; flex: none; }
+  .minitab { border: 0; background: none; padding: 4px 8px 6px; font: 600 11px var(--sans); color: var(--ink-3);
+    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+  .minitab:hover:not(:disabled) { color: var(--ink); }
+  .minitab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .minitab:disabled { color: var(--ink-3); opacity: 0.5; cursor: default; }
   /* ---- schema browser (click a table for its columns, a column to insert it into the nearest SQL editor) ---- */
   .schema-browser { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); display: flex; flex-direction: column; }
   /* The Tables/Columns switch stays put (never scrolls out of reach); only the list below it does - see
      .schema-content. */
-  .schema-subtabs { display: flex; gap: 2px; padding: 4px 4px 0; flex: none; }
-  .schema-subtab { border: 0; background: none; padding: 4px 8px 6px; font: 600 11px var(--sans); color: var(--ink-3);
-    cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
-  .schema-subtab:hover:not(:disabled) { color: var(--ink); }
-  .schema-subtab.active { color: var(--ink); border-bottom-color: var(--accent); }
-  .schema-subtab:disabled { color: var(--ink-3); opacity: 0.5; cursor: default; }
   /* A fixed cap with its own scrollbar - not unbounded - so a connection with a lot of tables, or a table
      with a lot of columns, scrolls inside its own box instead of growing the whole page. */
   .schema-content { max-height: 220px; overflow: auto; }
@@ -444,17 +447,16 @@ UI_HTML = r"""<!doctype html>
   #queries-panel { position: sticky; top: 76px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; }
   .qsearch { padding: 10px; border-bottom: 1px solid var(--line); }
   .qsearch .search { width: 100%; }
+  #queries-subtabs:not(:empty) { border-bottom: 1px solid var(--line); }
   #queries-table { overflow: auto; }
-  .qgroup { border-bottom: 1px solid var(--line); }
-  .qgroup:last-child { border-bottom: 0; }
-  .qg-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: 0; background: var(--surface-2); color: var(--ink-2); cursor: pointer; text-align: left; }
-  .qg-toggle:hover { color: var(--ink); }
-  .qg-toggle .caret { width: 10px; font-size: 9px; color: var(--ink-3); }
-  .qg-name { flex: 1; font: 600 11.5px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .qg-n { font: 11px var(--mono); color: var(--ink-3); }
+  .qcoll-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line);
+    background: none; color: var(--ink-2); cursor: pointer; text-align: left; }
+  .qcoll-row:hover { color: var(--ink); background: var(--surface-2); }
+  .qcoll-row .qg-name { flex: 1; font: 600 11.5px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qcoll-row .qg-n { font: 11px var(--mono); color: var(--ink-3); }
   .qitem { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 9px 14px 9px 30px; border: 0; border-top: 1px solid var(--line);
     border-left: 2px solid transparent; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
-  #queries-table > .qitem:first-child { border-top: 0; }
+  #queries-table > .qitem:first-child, .qg-foot + .qitem { border-top: 0; }
   .qitem:hover { background: var(--surface-2); }
   .qitem.sel { background: var(--accent-soft); border-left-color: var(--accent); }
   #queries-table > .qitem { padding-left: 14px; }
@@ -462,7 +464,7 @@ UI_HTML = r"""<!doctype html>
   .qi-top .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tag.v { font-size: 10.5px; padding: 0 5px; background: var(--bg); }
   .qi-desc { color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .qg-foot { display: flex; align-items: center; gap: 12px; padding: 7px 14px 8px 30px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+  .qg-foot { display: flex; align-items: center; gap: 12px; padding: 8px 14px 7px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
   .qg-foot a { font-size: 11.5px; }
   .tag.example { border-color: var(--accent); color: var(--accent); background: transparent; }
   #examples-strip { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 16px; font-size: 12.5px; color: var(--ink-2); }
@@ -679,6 +681,7 @@ UI_HTML = r"""<!doctype html>
     <div class="split">
       <div id="queries-panel" class="panel">
         <div class="qsearch"><input id="query-filter" class="search" type="search" placeholder="Filter by name, description, tag…"></div>
+        <div id="queries-subtabs"></div>
         <div id="queries-table"><div class="loading"><span class="spin"></span>Loading…</div></div>
       </div>
       <div id="query-detail" class="panel detail"><div class="empty"><strong>No query selected</strong><span>Pick a saved query to run it, read its SQL or see its history.</span></div></div>
@@ -1006,7 +1009,8 @@ function paletteEntries() {
     var l = latestOf(f);
     out.push({ group: 'Saved queries', name: f.filename, desc: l.description || '', extra: [f.collection, (l.tags || []).join(' ')].join(' '), go: function () {
       showTab('queries'); $('query-filter').value = ''; selected.name = f.filename; selected.version = l.version; selected.tab = 'run';
-      collapsedGroups[f.collection || ''] = false; renderQueryList(); renderDetail(); flashRow('queries-table', f.filename); } });
+      queriesView = 'queries'; queriesActiveCollection = f.collection || '';
+      renderQueryList(); renderDetail(); flashRow('queries-table', f.filename); } });
   });
   Object.keys(apiKeysCache).sort().forEach(function (n) {
     out.push({ group: 'API keys', name: n, desc: apiKeysCache[n].rate_limit || '', go: function () { showTab('apikeys'); flashRow('apikeys-table', n); } });
@@ -1357,9 +1361,9 @@ function schemaBrowser(insertFn, previewFn, selectFn) {
     if (entry.status === 'loading') { box.appendChild(loadingNode('Loading schema…')); return; }
     if (entry.status === 'error') { box.appendChild(h('div', { className: 'hint', text: entry.message })); return; }
     if (!entry.tables.length) { box.appendChild(h('div', { className: 'hint', text: 'No tables found.' })); return; }
-    box.appendChild(h('div', { className: 'schema-subtabs' },
-      h('button', { type: 'button', className: 'schema-subtab' + (view === 'tables' ? ' active' : ''), onclick: showTables }, 'Tables'),
-      h('button', { type: 'button', className: 'schema-subtab' + (view === 'columns' ? ' active' : ''), disabled: !activeTableName,
+    box.appendChild(h('div', { className: 'minitabs' },
+      h('button', { type: 'button', className: 'minitab' + (view === 'tables' ? ' active' : ''), onclick: showTables }, 'Tables'),
+      h('button', { type: 'button', className: 'minitab' + (view === 'columns' ? ' active' : ''), disabled: !activeTableName,
         onclick: function () { if (activeTableName) showColumns(activeTableName); } },
         'Columns' + (activeTableName ? ' · ' + activeTableName : ''))));
     var content = h('div', { className: 'schema-content' });
@@ -2411,7 +2415,9 @@ function revealApiKey(name, secret) {
 // whatever is filed there later - which is why moving a query shows who gains and loses access first.
 var collectionsCache = { collections: {}, uncollected: [] };
 var collectionsLoading = null;
-var collapsedGroups = {};
+// Saved Queries' own Collections/Queries split, same idea as schemaBrowser()'s Tables/Columns: browse
+// collections, drill into one to see its queries, rather than an expand/collapse tree per collection.
+var queriesView = 'collections', queriesActiveCollection = null;
 function loadCollections() {
   if (!collectionsLoading) {
     collectionsLoading = apiJson('collections').then(function (data) {
@@ -2572,12 +2578,12 @@ async function loadQueries(selectName) {
   paintQueriesSub();
   if (selectName !== undefined) selected.name = selectName;
   if (!queriesInitialised && filesCache.length) {
-    // First load: open the first query, with only its collection expanded (the rest are one click away).
+    // First load: land on the Queries tab of the first query's own collection (the rest are one click away).
     queriesInitialised = true;
     var ordered = filesCache.slice().sort(function (a, b) { return ((a.collection || '\uffff') + a.filename) < ((b.collection || '\uffff') + b.filename) ? -1 : 1; });
     if (!selected.name) { selected.name = ordered[0].filename; selected.version = latestOf(ordered[0]).version; }
     var chosen = findFile(selected.name);
-    filesCache.forEach(function (x) { if (x.collection) collapsedGroups[x.collection] = !(chosen && chosen.collection === x.collection); });
+    if (chosen) { queriesView = 'queries'; queriesActiveCollection = chosen.collection || ''; }
   }
   var f = selected.name && findFile(selected.name);
   if (!f) { selected.name = null; selected.version = null; }
@@ -2595,29 +2601,36 @@ function paintQueriesSub() {
   sub.appendChild(h('code', { text: '/q/<name>' }));
   sub.appendChild(document.createTextNode('.'));
 }
-function queryItem(f) {
+function queryItem(f, showCollectionTag) {
   var l = latestOf(f);
   return h('button', { type: 'button', 'data-name': f.filename, className: 'qitem' + (f.filename === selected.name ? ' sel' : ''), onclick: function () {
     selected.name = f.filename; selected.version = l.version; renderQueryList(); renderDetail(); } },
     h('div', { className: 'qi-top' },
       h('span', { className: 'name', text: f.filename }),
+      showCollectionTag && f.collection ? h('span', { className: 'tag', text: f.collection }) : null,
       h('span', { className: 'tag v', text: 'v' + l.version })),
     l.description ? h('div', { className: 'qi-desc', text: l.description }) : null);
 }
-function groupBlock(name, count, open, items) {
-  var known = name ? collectionsCache.collections[name] : null;
+function collectionRow(name, count) {
+  return h('button', { type: 'button', className: 'qcoll-row', onclick: function () {
+    queriesView = 'queries'; queriesActiveCollection = name; renderQueryList(); } },
+    h('span', { className: 'qg-name', text: name || 'No collection' }), h('span', { className: 'qg-n', text: String(count) }));
+}
+/** The reach/Postman/Rename line the old expand/collapse group's footer showed for a collection - now a
+ * header above its query list (queryItem() stays a direct #queries-table child either way, so it always
+ * gets that selector's flat, unindented padding - there is no tree level left to indent under). null for
+ * the "No collection" bucket, which has no collection identity to act on. */
+function collectionHeader(name) {
+  if (!name) return null;
+  var known = collectionsCache.collections[name];
   var reach = known ? known.keys.length : 0;
-  return h('div', { className: 'qgroup' },
-    h('button', { type: 'button', className: 'qg-toggle', 'aria-expanded': open ? 'true' : 'false', onclick: function () {
-      collapsedGroups[name] = open; renderQueryList(); } },
-      h('span', { className: 'caret', text: open ? '▾' : '▸' }), h('span', { className: 'qg-name', text: name || 'No collection' }), h('span', { className: 'qg-n', text: String(count) })),
-    open ? items : null,
-    open && name ? h('div', { className: 'qg-foot' },
-      h('span', { title: reach ? 'Keys granted this collection: ' + known.keys.join(', ') : 'No key is granted this collection', text: reach + (reach === 1 ? ' key' : ' keys') }),
-      h('a', { href: '#', title: 'Download this collection as a Postman Collection file (one request per query; holds no API key)', text: 'Postman', onclick: function (e) { e.preventDefault(); downloadPostman(name); } }),
-      h('a', { href: '#', title: 'Rename this collection, carrying every key and role grant with it', text: 'Rename', onclick: function (e) { e.preventDefault(); openRenameCollectionForm(name); } })) : null);
+  return h('div', { className: 'qg-foot' },
+    h('span', { title: reach ? 'Keys granted this collection: ' + known.keys.join(', ') : 'No key is granted this collection', text: reach + (reach === 1 ? ' key' : ' keys') }),
+    h('a', { href: '#', title: 'Download this collection as a Postman Collection file (one request per query; holds no API key)', text: 'Postman', onclick: function (e) { e.preventDefault(); downloadPostman(name); } }),
+    h('a', { href: '#', title: 'Rename this collection, carrying every key and role grant with it', text: 'Rename', onclick: function (e) { e.preventDefault(); openRenameCollectionForm(name); } }));
 }
 function renderQueryList() {
+  var subtabs = clear($('queries-subtabs'));
   var box = clear($('queries-table'));
   if (!filesCache.length) {
     box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }),
@@ -2632,16 +2645,32 @@ function renderQueryList() {
     return !q || [f.filename, f.collection, l.description, (l.tags || []).join(' '), l.connection_name, l.author].join(' ').toLowerCase().indexOf(q) !== -1;
   });
   if (!list.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
-  // Grouping is decided from the whole list, not the filtered one, so the layout does not flip while typing.
+  // A search in progress overrides Collections/Queries entirely - matches can span any number of
+  // collections, so a flat list (each item labelled with its own collection) beats a two-level drill-down.
+  if (q) { list.forEach(function (f) { box.appendChild(queryItem(f, true)); }); return; }
+  // Grouping is decided from the whole list, not the filtered one (moot here since q is empty, but keeps
+  // the collection tab list stable rather than recomputed from a possibly-filtered set).
   if (!filesCache.some(function (f) { return f.collection; })) { list.forEach(function (f) { box.appendChild(queryItem(f)); }); return; }
   var groups = {};
-  list.forEach(function (f) { var c = f.collection || ''; (groups[c] = groups[c] || []).push(f); });
+  filesCache.forEach(function (f) { var c = f.collection || ''; (groups[c] = groups[c] || []).push(f); });
   var names = Object.keys(groups).filter(Boolean).sort();
   if (groups['']) names.push('');
-  names.forEach(function (c) {
-    var open = !!q || !collapsedGroups[c];
-    box.appendChild(groupBlock(c, groups[c].length, open, groups[c].map(queryItem)));
-  });
+  // The active collection can vanish out from under this view (renamed, or its last query moved/deleted
+  // elsewhere) - fall back to Collections rather than an empty screen or a stale "Queries · <old name>" tab.
+  if (queriesActiveCollection !== null && !groups[queriesActiveCollection]) { queriesView = 'collections'; queriesActiveCollection = null; }
+  subtabs.appendChild(h('div', { className: 'minitabs' },
+    h('button', { type: 'button', className: 'minitab' + (queriesView === 'collections' ? ' active' : ''),
+      onclick: function () { queriesView = 'collections'; renderQueryList(); } }, 'Collections'),
+    h('button', { type: 'button', className: 'minitab' + (queriesView === 'queries' ? ' active' : ''), disabled: queriesActiveCollection === null,
+      onclick: function () { if (queriesActiveCollection !== null) { queriesView = 'queries'; renderQueryList(); } } },
+      'Queries' + (queriesActiveCollection !== null ? ' · ' + (queriesActiveCollection || 'No collection') : ''))));
+  if (queriesView === 'queries' && queriesActiveCollection !== null && groups[queriesActiveCollection]) {
+    var header = collectionHeader(queriesActiveCollection);
+    if (header) box.appendChild(header);
+    groups[queriesActiveCollection].forEach(function (f) { box.appendChild(queryItem(f)); });
+  } else {
+    names.forEach(function (c) { box.appendChild(collectionRow(c, groups[c].length)); });
+  }
 }
 $('query-filter').oninput = renderQueryList;
 
@@ -2741,7 +2770,7 @@ async function openQueryInfo(f) {
       h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer }),
       h('button', { type: 'button', className: 'btn primary', text: 'Open in Saved queries', onclick: function () {
         closeDrawer(); showTab('queries');
-        if (f.collection) collapsedGroups[f.collection] = false;
+        queriesView = 'queries'; queriesActiveCollection = f.collection || '';
         selected.name = f.filename; selected.version = latest.version; selected.tab = 'run';
         renderQueryList(); renderDetail();
       } }))));

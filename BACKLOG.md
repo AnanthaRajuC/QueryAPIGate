@@ -1054,6 +1054,28 @@ similar reconstruction, of unverified completeness. **Not applicable:** a Mongo 
 scoped to just MySQL/SQLite/ClickHouse (the "free" ones) - showing the icon only for those `db` values - gets
 most of the value without the Postgres reconstruction effort, which would be its own follow-up.
 
+## 39. Autocomplete columns while typing in the SQL editor
+
+**Impact:** today the editor only offers a column once you go looking for it (the Schema tab, or
+double-click-to-parameterize on something already typed) - there's no suggestion as you type a `WHERE`/
+`SELECT`/`JOIN ON` clause, the point where an autocomplete list is most useful.
+
+**Notes:** cheap on the data side, real but bounded cost on the editor side. **Cheap:** the full column list
+per connection/database is already cached client-side (`schemaCache`, the same one `schemaBrowser()`/the
+Schema tab already use) - no new backend or network work. **The real cost:** unlike double-click-to-
+parameterize (BACKLOG-adjacent work already shipped, which gets word boundaries for free via the browser's
+native double-click selection), a live "suggest as you type" popup needs the pixel position of the caret
+inside a plain `<textarea>` - there is no native API for that, so it needs the classic hidden-mirror-div
+technique (clone the textarea's font/padding, insert a marker at the cursor, measure its position) to place
+the popup correctly, plus keyboard handling (arrow keys to navigate, Enter/Tab to accept, Escape to dismiss)
+that has to coexist with the editor's existing Tab-key behaviour (`bindEditor()` currently inserts two spaces
+on Tab). **The bigger judgement call is scope, not mechanics:** a "dumb" first version suggesting every
+column across every table on the connection (simple, still useful) vs. a table-aware version that only
+suggests a given table's columns after its alias/name - the latter needs real parsing, not a prefix match,
+and would be its own follow-up. **Not applicable to mongo** in this version - there is no field-level data to
+suggest from at all (v1's Mongo schema is collection names only, see BACKLOG #36's deferred schema-sampling
+item), so this would need that groundwork first for mongo specifically.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
@@ -1064,6 +1086,7 @@ schema-sampling/caching/streaming/query-builder-UI remainder - each its own sepa
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
-under `examples/`), #37 (primary/foreign key markers in the schema browser) and #38 (a "show CREATE TABLE"
-icon), none started. The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
+under `examples/`), #37 (primary/foreign key markers in the schema browser), #38 (a "show CREATE TABLE" icon)
+and #39 (autocomplete columns while typing), none started. The "still open" note under #9 (confirming its CI
+changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.
