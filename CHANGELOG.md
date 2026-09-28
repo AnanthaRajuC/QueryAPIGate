@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A Home tab for the admin UI.** A new first tab (ahead of Connections) - an at-a-glance overview:
+  connection/saved-query/API-key/role counts, requests and error rate, the 5 most recent audit log entries
+  (click one to jump to its likely tab), and quick actions (Run SQL, New saved query, New connection, Help).
+  Built entirely from caches the other tabs already load - no new endpoint - and re-rendered from the tail
+  of each of those loaders so it's never stale regardless of load order. Becomes the default landing tab for
+  a fresh session; a returning user's last-used tab (remembered per browser tab) still takes over as before.
 - **Real SQL parsing for the Access tab's "Query flow" panel (BACKLOG #40).** A new `queryapigate/sqlflow.py`
   parses a saved query's SQL with `sqlglot` (new `flow` extra) and extracts the tables and joins it touches
   (`GET /query_flow`). Supports `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb` connections;

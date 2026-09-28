@@ -1128,22 +1128,42 @@ connections are permanently out of scope for real parsing**, not a gap to fill l
 any vendor's SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at; both
 keep using the text-search fallback everywhere it applies.
 
+## 41. A Home tab for the admin UI
+
+**Status: shipped.** Opening the admin UI dropped straight onto the Connections table (or wherever a
+returning session last was, via `sessionStorage`) with no at-a-glance sense of what's on the server or what
+happened recently. A new first tab, "Home" - stat tiles (connections active/total, saved queries, API keys,
+roles, requests, error rate), the 5 most recent audit log entries (click one to jump to its likely tab, via
+a plain substring match on the action name - `homeActivityTarget()`), and quick actions (Run SQL, New saved
+query, New connection, Help).
+
+No new backend endpoint: `refreshAll()` already loads connections, saved queries, API keys, roles, the
+audit log and metrics on every page load regardless of active tab, so `renderHome()` (`ui.py`) is purely a
+new view over caches those loaders already populate, plus one small addition - `loadMetrics()` now keeps
+its parsed series in a module-level `metricsSeries` rather than handing it straight to `renderMetrics()`
+and discarding it, so Home's requests/error-rate tiles cost no second fetch. `renderHome()` is called from
+the tail of each of the six loaders it depends on (the same cross-cutting-refresh pattern `loadAuditLog()`
+already used to keep the Connections screen's Deleted tab in sync), so it can never show stale numbers
+regardless of which loader finishes first. Becomes the default landing tab for a fresh session; a returning
+user's remembered last tab still takes over exactly as before.
+
 ---
 
-**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
+**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
 #34 are shipped; #21 is shipped as its cheaper slice only (operation-type granularity + streaming row
 ceiling), with table allow-listing - the pricier, riskier remainder - still open; #36 is shipped as its
 MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mongo's own aggregation/write/
 schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
-(general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
-under `examples/`) and #38 (a "show CREATE TABLE" icon), none started; #37 is shipped for
+(general API latency, connection pooling and cache performance benchmarks) and #38 (a "show CREATE TABLE"
+icon), none started; #27 is shipped, in a different shape than originally sketched - see the correction
+in its own entry; #37 is shipped for
 mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint model left as explicit gaps;
 #39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing. The "still open" note under #9 (confirming its CI changes on a real run) is
-a smaller
+out of scope for real parsing; #41 is shipped. The "still open" note under #9 (confirming its CI changes on
+a real run) is a smaller
 follow-up on finished work, not an open capability gap.

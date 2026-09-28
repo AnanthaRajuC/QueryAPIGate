@@ -620,6 +620,17 @@ UI_HTML = r"""<!doctype html>
   .stat-tile .value.warn { color: var(--danger); }
   .metrics-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }
   .chart-card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ---- home ---- */
+  .home-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .home-grid .panel { padding: 14px 16px; }
+  .home-grid h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+  .home-activity-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .home-activity-row:last-child { border-bottom: 0; }
+  .home-activity-row time { color: var(--ink-3); font: 11px var(--mono); white-space: nowrap; }
+  .home-activity-row .target { font-weight: 600; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+  .home-actions { display: flex; flex-direction: column; gap: 8px; }
+  @media (max-width: 980px) { .home-grid { grid-template-columns: minmax(0, 1fr); } }
   .chart-card h3 { font-size: 13px; font-weight: 600; }
   .bar-row { display: grid; grid-template-columns: 80px minmax(0, 1fr) 48px; align-items: center; gap: 10px; }
   .bar-row .bl { font: 11.5px var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -682,8 +693,11 @@ UI_HTML = r"""<!doctype html>
     <span class="health" id="health" title="GET /health"><span class="dot" id="health-dot"></span><span id="version">…</span></span>
   </div>
   <nav id="tabs" role="tablist" aria-label="Sections">
+    <div class="nav-group"><div class="nav-label">Overview</div><div class="nav-rule"></div>
+      <button type="button" role="tab" data-tab="home" data-group="Overview" data-label="Home" title="Home" class="active"><span class="nav-abbr">Hm</span><span class="nav-text">Home</span></button>
+    </div>
     <div class="nav-group"><div class="nav-label">Data</div><div class="nav-rule"></div>
-      <button type="button" role="tab" data-tab="connections" data-group="Data" data-label="Connections" title="Connections" class="active"><span class="nav-abbr">Cn</span><span class="nav-text">Connections</span><span class="count" id="count-connections"></span></button>
+      <button type="button" role="tab" data-tab="connections" data-group="Data" data-label="Connections" title="Connections"><span class="nav-abbr">Cn</span><span class="nav-text">Connections</span><span class="count" id="count-connections"></span></button>
       <button type="button" role="tab" data-tab="queries" data-group="Data" data-label="Saved queries" title="Saved queries"><span class="nav-abbr">Sq</span><span class="nav-text">Saved queries</span><span class="count" id="count-queries"></span></button>
       <button type="button" role="tab" data-tab="run" data-group="Data" data-label="Run SQL" title="Run SQL"><span class="nav-abbr">Rn</span><span class="nav-text">Run SQL</span></button>
     </div>
@@ -725,14 +739,24 @@ UI_HTML = r"""<!doctype html>
 <div class="content">
 <header class="top">
   <button type="button" id="side-toggle" title="Collapse sidebar (Ctrl B)" aria-label="Collapse sidebar" aria-expanded="true"><span><i></i></span></button>
-  <div class="crumbs" id="crumbs"><span class="g" id="crumb-group">Data</span><span class="sl">/</span><b id="crumb-page">Connections</b></div>
+  <div class="crumbs" id="crumbs"><span class="g" id="crumb-group">Overview</span><span class="sl">/</span><b id="crumb-page">Home</b></div>
   <div class="search-wrap"><button type="button" id="global-search" aria-label="Search queries, connections, keys"><span class="ph">Search queries, connections, keys…</span><kbd>Ctrl K</kbd></button></div>
   <span class="chip" id="rate" hidden title="X-RateLimit-Remaining / X-RateLimit-Limit"></span>
 </header>
 <div id="error-banner" role="alert" hidden></div>
 
 <main>
-  <section id="tab-connections" class="active">
+  <section id="tab-home" class="active">
+    <div class="page-head">
+      <div class="titles"><h1>Home</h1><span class="sub">An at-a-glance overview of this gateway.</span></div>
+    </div>
+    <div id="home-stats"></div>
+    <div class="home-grid">
+      <div class="panel" id="home-activity"></div>
+      <div class="panel" id="home-actions"></div>
+    </div>
+  </section>
+  <section id="tab-connections">
     <div class="page-head">
       <div class="titles"><h1>Connections</h1><span class="sub">Databases this gateway can run saved queries against.</span></div>
       <span class="spacer"></span>
@@ -1823,6 +1847,7 @@ async function loadConnections() {
   connectionsCache = data.connections || {};
   populateConnectionSelect();
   renderConnections();
+  renderHome();
 }
 // A key's usage has no avg_duration_ms (request/query latency isn't split by key - see metrics.py); a
 // connection's does, since a connection has exactly one dialect and its latency histogram is keyed by it.
@@ -2073,6 +2098,7 @@ async function loadApiKeys() {
   renderApiKeys();
   if (Object.keys(rolesCache).length) renderRoles(); // the Keys column counts keys created from each role
   renderAccessMap();
+  renderHome();
 }
 function renderApiKeys() {
   var box = clear($('apikeys-table'));
@@ -2151,6 +2177,7 @@ async function loadRoles() {
   rolesCache = data.roles || {};
   renderRoles();
   if (selected.name) renderDetail(); // the accessBox's "also granted to role X" line needs rolesCache too
+  renderHome();
 }
 function renderRoles() {
   var box = clear($('roles-table'));
@@ -2308,6 +2335,7 @@ async function loadAuditLog() {
   if (actions.indexOf(currentAction) !== -1) actionSelect.value = currentAction;
   renderAuditLog();
   renderConnections(); // the Connections screen's Deleted tab reads auditLogCache too
+  renderHome();
 }
 $('refresh-auditlog').onclick = loadAuditLog;
 $('auditlog-action-filter').onchange = renderAuditLog;
@@ -2446,9 +2474,11 @@ async function loadMetrics() {
       h('button', { type: 'button', className: 'btn sm', text: 'Retry', onclick: loadMetrics })));
     return;
   }
-  renderMetrics(parseMetricsText(await res.text()));
+  metricsSeries = parseMetricsText(await res.text());
+  renderMetrics(metricsSeries);
   metricsAt = Date.now();
   paintMetricsAge();
+  renderHome();
 }
 $('refresh-metrics').onclick = loadMetrics;
 
@@ -2468,12 +2498,69 @@ function barCard(title, rows, colorOf) {
   }));
 }
 var metricsAt = null;
+var metricsSeries = []; // the last loadMetrics() parse, kept around so Home's stat tiles don't need a second fetch
 function paintMetricsAge() {
   if (metricsAt === null) { $('metrics-updated').textContent = ''; return; }
   var secs = Math.round((Date.now() - metricsAt) / 1000);
   $('metrics-updated').textContent = secs < 5 ? 'Updated just now' : 'Updated ' + (secs < 90 ? secs + 's' : Math.round(secs / 60) + ' min') + ' ago';
 }
 setInterval(paintMetricsAge, 5000);
+
+// ---- home: an at-a-glance overview, built entirely from caches the other tabs' own loaders already
+// populate (connectionsCache, filesCache, apiKeysCache, rolesCache, auditLogCache, metricsSeries) - no
+// endpoint of its own. Re-rendered from the tail of each of those loaders, so it never goes stale
+// regardless of which one finishes first. ----
+/** Which tab an audit log action most likely belongs to - a plain substring match on the action name
+ * (e.g. 'create_connection', 'save_query', 'create_api_key'), good enough for "go look at what changed",
+ * not meant to be exhaustive. Falls back to the Audit log tab itself, which always has the full detail. */
+function homeActivityTarget(action) {
+  action = action || '';
+  if (action.indexOf('connection') !== -1) return 'connections';
+  if (action.indexOf('query') !== -1 || action.indexOf('sql') !== -1 || action.indexOf('collection') !== -1) return 'queries';
+  if (action.indexOf('key') !== -1) return 'apikeys';
+  if (action.indexOf('role') !== -1) return 'roles';
+  return 'auditlog';
+}
+function renderHome() {
+  if (!$('home-stats')) return; // the tab hasn't been painted into the page yet
+  var activeConns = Object.keys(connectionsCache).filter(function (n) { return connectionsCache[n].active; }).length;
+  var totalRequests = metricSum(metricsSeries, 'queryapigate_requests_total');
+  var errorCount = metricSum(metricsSeries, 'queryapigate_requests_total', function (l) { return (l.status || '')[0] === '4' || (l.status || '')[0] === '5'; });
+  var errorRate = totalRequests ? (100 * errorCount / totalRequests) : 0;
+
+  clear($('home-stats')).appendChild(h('div', { className: 'stat-tiles' },
+    statTile('Connections', activeConns + ' / ' + Object.keys(connectionsCache).length),
+    statTile('Saved queries', filesCache.length),
+    statTile('API keys', Object.keys(apiKeysCache).length),
+    statTile('Roles', Object.keys(rolesCache).length),
+    statTile('Requests', totalRequests),
+    statTile('Error rate', errorRate.toFixed(1) + '%', errorRate >= 5)));
+
+  var activityBox = clear($('home-activity'));
+  activityBox.appendChild(h('h2', { text: 'Recent activity' }));
+  var recent = auditLogCache.slice(-5).reverse();
+  if (!recent.length) {
+    activityBox.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No administrative changes recorded yet.' })));
+  } else {
+    recent.forEach(function (e) {
+      activityBox.appendChild(h('div', { className: 'home-activity-row' },
+        h('time', { text: e.timestamp || '' }),
+        h('span', { className: 'tag act ' + auditTone(e.action), text: e.action || '' }),
+        h('button', { type: 'button', className: 'target', text: e.target || '(unknown)',
+          onclick: function () { showTab(homeActivityTarget(e.action)); } })));
+    });
+  }
+  activityBox.appendChild(h('a', { className: 'side-link', style: 'margin-top:8px;display:inline-block', href: '#',
+    onclick: function (ev) { ev.preventDefault(); showTab('auditlog'); }, text: 'View audit log →' }));
+
+  var actionsBox = clear($('home-actions'));
+  actionsBox.appendChild(h('h2', { text: 'Quick actions' }));
+  actionsBox.appendChild(h('div', { className: 'home-actions' },
+    h('button', { type: 'button', className: 'btn', text: 'Run SQL', onclick: function () { showTab('run'); } }),
+    h('button', { type: 'button', className: 'btn', text: 'New saved query', onclick: function () { showTab('queries'); openQueryForm(); } }),
+    h('button', { type: 'button', className: 'btn', text: 'New connection', onclick: function () { showTab('connections'); openConnectionForm(null, {}); } }),
+    h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
+}
 
 function renderMetrics(series) {
   var box = clear($('metrics-body'));
@@ -2853,6 +2940,7 @@ async function loadQueries(selectName) {
   renderQueryList();
   renderDetail();
   renderAccessMap();
+  renderHome();
 }
 function paintQueriesSub() {
   var sub = clear($('queries-sub'));
