@@ -755,6 +755,7 @@ UI_HTML = r"""<!doctype html>
       <div class="panel" id="home-activity"></div>
       <div class="panel" id="home-actions"></div>
     </div>
+    <div class="panel" id="home-recent-requests" style="margin-top:16px"></div>
   </section>
   <section id="tab-connections">
     <div class="page-head">
@@ -2560,7 +2561,68 @@ function renderHome() {
     h('button', { type: 'button', className: 'btn', text: 'New saved query', onclick: function () { showTab('queries'); openQueryForm(); } }),
     h('button', { type: 'button', className: 'btn', text: 'New connection', onclick: function () { showTab('connections'); openConnectionForm(null, {}); } }),
     h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
+
+  renderRecentRequests();
 }
+/** Every execution_history entry across every saved query and version in filesCache, newest first - the
+ * same per-run data renderHistoryTab() already shows for one query, just flattened across all of them.
+ * Only saved-query runs through /q/<name> are recorded this way; ad-hoc Run SQL calls have nothing to
+ * attach a history entry to, so they never appear here. */
+function aggregateRecentExecutions(limit) {
+  var rows = [];
+  filesCache.forEach(function (f) {
+    f.versions.forEach(function (v) {
+      (v.execution_history || []).forEach(function (e) {
+        rows.push({ filename: f.filename, version: v.version, connection: v.connection_name, entry: e });
+      });
+    });
+  });
+  rows.sort(function (a, b) { return a.entry.executed_at < b.entry.executed_at ? 1 : -1; });
+  return rows.slice(0, limit || 20);
+}
+/** The Home tab's "Recent API requests" panel - a live-ish tail of saved-query runs, refreshed by
+ * pollRecentRequests() every 5s while Home is the visible tab. */
+function renderRecentRequests() {
+  var box = $('home-recent-requests');
+  if (!box) return;
+  clear(box);
+  box.appendChild(h('h2', { text: 'Recent API requests' }));
+  var rows = aggregateRecentExecutions(20);
+  if (!rows.length) {
+    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved-query runs recorded yet' }),
+      h('span', { text: 'Ad-hoc Run SQL calls aren’t tracked here - only runs of a saved query through /q/<name>.' })));
+    return;
+  }
+  box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['', 'Time', 'Query', 'Connection', 'Caller', 'Rows', 'Duration'].map(function (t, i) {
+      return h('th', { className: i === 5 || i === 6 ? 'num' : '', text: t });
+    }))),
+    h('tbody', {}, rows.map(function (r) {
+      var e = r.entry, good = e.status === 'success';
+      return h('tr', {},
+        h('td', { style: 'width:20px;padding-right:0' }, h('span', { className: 'dot ' + (good ? 'ok' : 'bad'), title: String(e.status || '') })),
+        h('td', { className: 'mono dim', style: 'white-space:nowrap', text: String(e.executed_at || '') }),
+        h('td', {}, h('button', { type: 'button', className: 'target', text: r.filename, onclick: function () {
+          showTab('queries'); selected.name = r.filename; selected.version = r.version; selected.tab = 'history'; renderQueryList(); renderDetail();
+        } })),
+        h('td', { className: 'mono dim', text: r.connection || '' }),
+        h('td', { className: 'mono', text: String(e.key_name || '') }),
+        h('td', { className: 'mono num', text: e.rows === undefined || e.rows === null ? '—' : String(e.rows) }),
+        h('td', { className: 'mono num', text: e.duration_ms === undefined ? '' : e.duration_ms + ' ms' }));
+    })))));
+}
+/** A lightweight 5s poll for the Home tab's recent-requests panel - a plain GET /list_files (the same
+ * endpoint loadQueries() already uses) rather than calling loadQueries() itself, which also drives the
+ * whole Saved Queries screen's own state/DOM even when nobody's looking at it. */
+async function pollRecentRequests() {
+  var data = await apiJson('list_files');
+  if (!data) return;
+  filesCache = (data.files || []).slice().sort(function (a, b) { return a.filename < b.filename ? -1 : 1; });
+  renderRecentRequests();
+}
+setInterval(function () {
+  if ($('tab-home') && $('tab-home').classList.contains('active')) pollRecentRequests();
+}, 5000);
 
 function renderMetrics(series) {
   var box = clear($('metrics-body'));

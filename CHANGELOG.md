@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A "Recent API requests" panel on the Home tab, auto-refreshing every 5 seconds.** A live-ish tail of
+  saved-query runs (newest first: time, query, connection, caller, rows, duration), built from the same
+  `execution_history` the per-query History tab already shows, just aggregated across every saved query.
+  Auto-refreshes only while Home is the visible tab, via a lightweight `GET /list_files` poll - not the
+  full Saved Queries screen's own load path. Click a query name to jump straight to its History tab. Only
+  saved-query runs through `/q/<name>` are recorded this way - ad-hoc Run SQL calls have no saved query to
+  attach a history entry to, so they don't appear here, and the panel says so plainly when empty.
 - **The example database grows from 3 tables to 8 (BACKLOG #27).** New `category`, `store`, `staff`,
   `address` and `payment` tables, each with a real foreign key (except `category`, a deliberate plain
   lookup table joined into nothing), generated purely additively - `film`/`customer`/`rental`'s own rows

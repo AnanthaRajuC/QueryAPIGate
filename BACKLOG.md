@@ -1166,6 +1166,17 @@ already used to keep the Connections screen's Deleted tab in sync), so it can ne
 regardless of which loader finishes first. Becomes the default landing tab for a fresh session; a returning
 user's remembered last tab still takes over exactly as before.
 
+**Strengthened afterward:** a "Recent API requests" panel, auto-refreshing every 5 seconds while Home is
+the visible tab (`pollRecentRequests()`, a lightweight `GET /list_files` poll - not the full `loadQueries()`
+pipeline, which also drives the Saved Queries screen's own state/DOM). Built entirely from
+`execution_history`, already returned in full by `GET /list_files` (`store.list_saved()`) and already used
+by the per-query History tab - `aggregateRecentExecutions()` just flattens it across every saved query and
+version. There is no true in-flight-request tracking anywhere in this app (metrics only exposes an
+aggregate *count*, `queryapigate_active_queries`, not per-request identity), so this is deliberately a
+recent-**completed**-requests tail, not a live in-flight view - and only saved-query runs through
+`/q/<name>` are recorded this way, not ad-hoc `/execute_sql` calls from Run SQL, which have no saved query
+to attach a history entry to.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
