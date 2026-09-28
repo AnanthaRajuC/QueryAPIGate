@@ -536,11 +536,14 @@ UI_HTML = r"""<!doctype html>
   .tag.act { border: 0; padding: 1px 6px; background: var(--surface-2); color: var(--ink-2); }
   .tag.act.ok { background: var(--accent-soft); color: var(--accent); }
   .tag.act.bad { background: var(--danger-soft); color: var(--danger); }
-  .access-box { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .access-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
   .access-summary { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
   .access-summary b { font: 600 12.5px var(--mono); }
-  .access-names { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: 4px; }
-  .access-names .name { font: 600 12px var(--mono); }
+  /* Access map details for just this one query - the same Q/C/W badges the full Access map screen uses,
+     inline here instead of a link away to go find this same row there. */
+  .access-reach { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .access-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+  .access-pill .name { font: 600 12px var(--mono); }
   .access-roles { margin: 0; }
   #accessmap-body { overflow: auto; }
   table.amap { border-collapse: separate; border-spacing: 0; font-size: 12.5px; margin-bottom: 4px; }
@@ -570,6 +573,9 @@ UI_HTML = r"""<!doctype html>
   .legend .amap-dot { min-width: 16px; height: 16px; font-size: 9px; vertical-align: middle; }
   .amap-q-row { display: flex; align-items: center; gap: 6px; }
   .amap-q-row span { overflow: hidden; text-overflow: ellipsis; }
+  .amap-q-name { border: 0; background: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .amap-q-name:hover { color: var(--accent); text-decoration: underline; }
   .amap-info { flex: none; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--ink-3); color: var(--ink-3);
     font: 600 10px/1 var(--mono); background: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .amap-info:hover { border-color: var(--accent); color: var(--accent); }
@@ -618,6 +624,23 @@ UI_HTML = r"""<!doctype html>
   .badge.env { border-color: var(--accent); color: var(--accent); }
   .set-row.pref { justify-content: space-between; }
   .set-row.pref .set-what { flex: 0 1 auto; }
+
+  /* ---- help ---- */
+  .help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+  .help-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .help-card h3 { font-size: 13.5px; font-weight: 600; }
+  .help-card ol, .help-card ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+  .help-card ol li, .help-card ul li { line-height: 1.5; }
+  .help-shortcuts { border-collapse: collapse; font-size: 12.5px; }
+  .help-shortcuts td { padding: 5px 0; vertical-align: top; }
+  .help-shortcuts td:first-child { padding-right: 14px; white-space: nowrap; }
+  .help-shortcuts td:last-child { color: var(--ink-2); }
+  .help-defs { margin: 0; font-size: 12.5px; }
+  .help-defs dt { font-weight: 600; margin-top: 8px; }
+  .help-defs dt:first-child { margin-top: 0; }
+  .help-defs dd { margin: 2px 0 0; color: var(--ink-2); line-height: 1.5; }
+  .help-links { list-style: none; }
+  .help-links li { padding-left: 0; }
   body.compact table.grid td { padding: 5px 14px; }
   body.compact table.rs td { padding: 2px 12px; }
   @media (max-width: 980px) { .split, .runner { grid-template-columns: minmax(0, 1fr); } #queries-panel { position: static; max-height: 320px; } .runner-splitter { display: none; } }
@@ -647,6 +670,7 @@ UI_HTML = r"""<!doctype html>
   </nav>
   <div class="side-foot">
     <button type="button" role="tab" class="nav" data-tab="settings" data-group="System" data-label="Settings" id="nav-settings" title="Settings"><span class="nav-abbr">St</span><span class="nav-text">Settings</span></button>
+    <button type="button" role="tab" class="nav" data-tab="help" data-group="System" data-label="Help" id="nav-help" title="Help"><span class="nav-abbr">Hp</span><span class="nav-text">Help</span></button>
     <div class="key-dot-only" title="API key applied to this tab"><span class="dot off" id="key-dot-narrow"></span></div>
     <a class="side-link" href="docs">API docs<span>/docs</span></a>
     <a class="side-link" href="openapi.json">OpenAPI<span>.json</span></a>
@@ -847,6 +871,56 @@ UI_HTML = r"""<!doctype html>
       <div id="settings-body"><div class="loading"><span class="spin"></span>Loading settings…</div></div>
     </div>
   </section>
+
+  <section id="tab-help">
+    <div class="page-head">
+      <div class="titles"><h1>Help</h1><span class="sub">Quick reference for this admin UI - concepts, shortcuts and where to go for more.</span></div>
+    </div>
+    <div class="help-grid">
+      <div class="panel help-card">
+        <h3>Getting started</h3>
+        <ol>
+          <li>Add a <b>connection</b> to your database on the <b>Connections</b> tab.</li>
+          <li>Try a query in <b>Run SQL</b> - browse its schema, then Run.</li>
+          <li>Click <b>Save as New API</b> to turn a working query into a saved endpoint.</li>
+          <li>Create a scoped <b>API key</b> (or a <b>role</b> to create several from) with only the access it needs.</li>
+          <li>Check the <b>Access map</b> any time to see exactly which keys can reach which queries.</li>
+        </ol>
+      </div>
+      <div class="panel help-card">
+        <h3>Keyboard shortcuts</h3>
+        <table class="help-shortcuts">
+          <tbody>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>K</kbd></td><td>Search queries, connections and keys</td></tr>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>B</kbd></td><td>Collapse or expand the sidebar</td></tr>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>Enter</kbd></td><td>Run the current query (Run SQL)</td></tr>
+            <tr><td>Double-click a column</td><td>Turn it into a bound parameter (Run SQL)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel help-card">
+        <h3>Concepts</h3>
+        <dl class="help-defs">
+          <dt>Saved query</dt><dd>A SQL (or Mongo find) query saved under a name, published as <code>/q/&lt;name&gt;</code>.</dd>
+          <dt>Collection</dt><dd>A named group of saved queries - the unit for granting access to many at once.</dd>
+          <dt>API key vs. role</dt><dd>A key is a real credential; a role is a template new keys can be created from - granting a role by itself grants nothing.</dd>
+          <dt>Reach: Q · C · W</dt><dd>How a key reaches a query - named <b>Q</b>uery, <b>C</b>ollection, or <b>W</b>hole connection.</dd>
+          <dt>Bound parameters</dt><dd>Write <code>:name</code> in a query; supply <code>name</code> as a request parameter at run time.</dd>
+        </dl>
+      </div>
+      <div class="panel help-card">
+        <h3>Resources</h3>
+        <ul class="help-links">
+          <li><a href="docs" target="_blank" rel="noopener">API docs</a> - every endpoint this server exposes, generated from its own OpenAPI spec.</li>
+          <li><a href="openapi.json" target="_blank" rel="noopener">OpenAPI spec</a> <span class="dim">(.json)</span></li>
+          <li><a href="https://AnanthaRajuC.github.io/QueryAPIGate/" target="_blank" rel="noopener">Documentation site</a></li>
+          <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate" target="_blank" rel="noopener">GitHub repository</a></li>
+          <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/issues" target="_blank" rel="noopener">Report an issue</a></li>
+          <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
 </main>
 </div>
 
@@ -977,7 +1051,7 @@ async function apiJson(path, opts) {
 }
 
 // ---- tabs (the sidebar) ----
-var NAV_BUTTONS = document.querySelectorAll('#tabs button, #nav-settings');
+var NAV_BUTTONS = document.querySelectorAll('#tabs button, #nav-settings, #nav-help');
 function showTab(name) {
   NAV_BUTTONS.forEach(function (b) {
     var on = b.dataset.tab === name;
@@ -2703,31 +2777,37 @@ async function getContent(name) {
   return contentCache[name];
 }
 
+/** One name + its Q/C/W reach-type badge(s) - the same amap-dot the full Access map table's cells use,
+ * mirrored here for just one query instead of a whole row of every query at once. */
+function accessPill(entry, roleClass) {
+  var codes = Array.from(new Set(entry.via.map(function (v) { return AMAP_CODE[v.kind]; })));
+  var viaConnOnly = codes.length === 1 && codes[0] === 'W';
+  return h('span', { className: 'access-pill', title: entry.via.map(function (v) { return v.label; }).join(', ') },
+    h('span', { className: 'name', text: entry.name + (entry.active === false ? ' (revoked)' : '') }),
+    h('span', { className: 'amap-dot' + (roleClass ? ' role' : '') + (viaConnOnly ? ' conn' : ''), text: codes.join('·') }));
+}
 /** The always-visible "who can reach this" panel on a saved query - the answer this app has and a plain
- * request client (Postman and friends) never will, so it sits beside the run panel, not behind a tab. */
+ * request client (Postman and friends) never will, so it sits beside the run panel, not behind a tab. Shows
+ * the same Q/C/W reach detail the Access map screen would for this one query, right here, rather than a
+ * link over to go find this same row there. */
 function accessBox(queryName, collection, connectionName) {
   var reach = queryReach(queryName, collection, connectionName);
   var summary = h('div', { className: 'access-summary' },
-    h('b', { text: String(reach.keys.length) }), ' ' + (reach.keys.length === 1 ? 'API key' : 'API keys') + (reach.keys.length ? ' reach' : ' reaches') + ' this query');
-  if (reach.keys.length) {
-    var names = h('div', { className: 'access-names' });
-    reach.keys.forEach(function (k, i) {
-      names.appendChild(h('span', { className: 'name', title: k.via.map(function (v) { return v.label; }).join(', '), text: k.name + (i < reach.keys.length - 1 ? ',' : '') }),
-        k.active ? null : h('span', { className: 'dim', text: ' (revoked)' }));
-    });
-    summary.appendChild(names);
-  } else {
-    summary.appendChild(h('span', { className: 'hint', text: 'Only the admin key can run it.' }));
-  }
-  summary.appendChild(h('button', { type: 'button', className: 'btn sm ghost', style: 'margin-left:auto', text: 'View access map', onclick: function () {
+    h('b', { text: String(reach.keys.length) }), ' ' + (reach.keys.length === 1 ? 'API key' : 'API keys') + (reach.keys.length ? ' reach' : ' reaches') + ' this query',
+    reach.keys.length ? h('span', { className: 'legend' }, h('span', { className: 'amap-dot' }, 'Q'), ' named query  ',
+      h('span', { className: 'amap-dot' }, 'C'), ' collection  ', h('span', { className: 'amap-dot conn' }, 'W'), ' whole connection') : null);
+  if (!reach.keys.length) summary.appendChild(h('span', { className: 'hint', text: 'Only the admin key can run it.' }));
+  summary.appendChild(h('button', { type: 'button', className: 'btn sm ghost', style: 'margin-left:auto', text: 'View in Access map', onclick: function () {
     showTab('accessmap'); $('accessmap-filter').value = queryName; renderAccessMap();
   } }));
-  var roleLine = reach.roles.length
-    ? h('div', { className: 'access-roles hint' }, 'Also granted to role' + (reach.roles.length > 1 ? 's' : '') + ' ',
-        h('span', { className: 'mono' }, reach.roles.map(function (r) { return r.name; }).join(', ')),
+  var keyList = reach.keys.length
+    ? h('div', { className: 'access-reach' }, reach.keys.map(function (k) { return accessPill(k, false); })) : null;
+  var roleList = reach.roles.length
+    ? h('div', { className: 'access-roles hint' }, 'Also granted to role' + (reach.roles.length > 1 ? 's' : '') + ': ',
+        h('div', { className: 'access-reach', style: 'display:inline-flex;margin-left:4px' }, reach.roles.map(function (r) { return accessPill(r, true); })),
         ' - a key must be created from one of these to actually call it.')
     : null;
-  return h('div', { className: 'access-box' }, summary, roleLine);
+  return h('div', { className: 'access-box' }, summary, keyList, roleList);
 }
 /** The Access map screen: every saved query against every API key, so "which keys can call which endpoints"
  * is answered at a glance instead of by opening each query or each key in turn. */
@@ -2754,6 +2834,14 @@ function queryStats(f) {
  * query, plus a per-version breakdown - the "tell me more about this one query" the access map's info icon
  * opens, so the matrix itself doesn't need three more columns per query to answer it. */
 var queryInfoToken = 0; // bumped on every open, so a slow getContent() from a previous popup can never paint over a newer one
+/** Jump to Saved Queries with `f` open, on its own Queries tab - the "Open in Saved queries" button in the
+ * query info popup, and (directly, no popup in between) clicking a query's name in the Access map. */
+function openSavedQuery(f) {
+  showTab('queries');
+  queriesView = 'queries'; queriesActiveCollection = f.collection || '';
+  selected.name = f.filename; selected.version = latestOf(f).version; selected.tab = 'run';
+  renderQueryList(); renderDetail();
+}
 async function openQueryInfo(f) {
   var token = ++queryInfoToken;
   var stats = queryStats(f);
@@ -2788,10 +2876,7 @@ async function openQueryInfo(f) {
     h('div', { className: 'form-actions' },
       h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer }),
       h('button', { type: 'button', className: 'btn primary', text: 'Open in Saved queries', onclick: function () {
-        closeDrawer(); showTab('queries');
-        queriesView = 'queries'; queriesActiveCollection = f.collection || '';
-        selected.name = f.filename; selected.version = latest.version; selected.tab = 'run';
-        renderQueryList(); renderDetail();
+        closeDrawer(); openSavedQuery(f);
       } }))));
   var c = await getContent(f.filename);
   if (token !== queryInfoToken) return; // the popup moved on (or closed) while this was in flight
@@ -3071,23 +3156,22 @@ function renderAccessMap() {
   }
   if (!enriched.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No queries match these filters.' }))); return; }
 
-  var leadCols = 2 + AMAP_INFO_HEADERS.length; // Query + Connection + the five at-a-glance columns
+  var leadCols = 3 + AMAP_INFO_HEADERS.length; // Query + Connection + Reach + the five at-a-glance columns
   var groupRow = h('tr', {},
     h('th', { colSpan: leadCols }),
     keyCols.length ? h('th', { colSpan: keyCols.length, className: 'amap-group', text: 'API KEYS' }) : null,
     roleCols.length ? h('th', { colSpan: roleCols.length, className: 'amap-group role',
-      title: 'What a key created from each role would reach - a role grants nothing on its own', text: 'ROLES' }) : null,
-    h('th'));
+      title: 'What a key created from each role would reach - a role grants nothing on its own', text: 'ROLES' }) : null);
   var thead = h('thead', {}, groupRow, h('tr', {},
     amapTh('Query', 'amap-query amap-sortable', 'query'),
     AMAP_INFO_FIELDS.map(function (field, i) { return amapTh(AMAP_INFO_HEADERS[i], 'amap-sortable', field); }),
     amapTh('Connection', 'amap-sortable', 'connection'),
+    amapTh('Reach', 'num amap-sortable', 'reach'),
     keyCols.map(function (name) {
       var k = apiKeysCache[name], expired = isKeyExpired(k);
       return amapColHead(name, k, !k.active ? ' (revoked)' : expired ? ' (expired ' + k.expires_at + ')' : '', 'key');
     }),
-    roleCols.map(function (name) { return amapColHead(name, rolesCache[name], '', 'role'); }),
-    amapTh('Reach', 'num amap-sortable', 'reach')));
+    roleCols.map(function (name) { return amapColHead(name, rolesCache[name], '', 'role'); })));
 
   var keyTotals = {}; keyCols.forEach(function (name) { keyTotals[name] = 0; });
   var roleTotals = {}; roleCols.forEach(function (name) { roleTotals[name] = 0; });
@@ -3105,22 +3189,23 @@ function renderAccessMap() {
     });
     return h('tr', {},
       h('td', { className: 'amap-query' },
-        h('div', { className: 'amap-q-row' }, h('span', { text: f.filename }),
+        h('div', { className: 'amap-q-row' },
+          h('button', { type: 'button', className: 'amap-q-name', title: 'Open ' + f.filename + ' in Saved queries', text: f.filename,
+            onclick: function () { openSavedQuery(f); } }),
           h('button', { type: 'button', className: 'amap-info', title: 'Details for ' + f.filename, 'aria-label': 'Details for ' + f.filename,
             onclick: function () { openQueryInfo(f); } }, 'i')),
         f.collection ? h('span', { className: 'amap-coll', text: f.collection }) : null),
       amapInfoCells(f),
       h('td', { className: 'mono dim', text: l.connection_name || '—' }),
-      keyCells, roleCells,
-      h('td', { className: 'num', title: 'Reachable by an actual API key (roles alone reach nothing)', text: item.reach ? String(item.reach) : '—' }));
+      h('td', { className: 'num', title: 'Reachable by an actual API key (roles alone reach nothing)', text: item.reach ? String(item.reach) : '—' }),
+      keyCells, roleCells);
   }));
 
   var tfoot = h('tfoot', {}, h('tr', {},
     h('td', { className: 'amap-query', text: 'Reaches' }),
-    AMAP_INFO_HEADERS.map(function () { return h('td'); }), h('td'),
+    AMAP_INFO_HEADERS.map(function () { return h('td'); }), h('td'), h('td'),
     keyCols.map(function (name) { return h('td', { className: 'num', text: keyTotals[name] + ' / ' + enriched.length }); }),
-    roleCols.map(function (name) { return h('td', { className: 'num', text: roleTotals[name] + ' / ' + enriched.length }); }),
-    h('td')));
+    roleCols.map(function (name) { return h('td', { className: 'num', text: roleTotals[name] + ' / ' + enriched.length }); })));
 
   box.appendChild(h('div', { style: 'overflow:auto' }, h('table', { className: 'amap' }, thead, tbody, tfoot)));
 }
