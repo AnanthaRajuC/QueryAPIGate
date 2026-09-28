@@ -136,6 +136,17 @@ class ManifestTests(ExamplesTestCase):
             for q in scenario['queries']:
                 self.assertEqual(bool(q.get('cache_ttl')), collection == 'examples-dashboard', q['name'])
 
+    def test_extra_roles_each_span_more_than_one_collection(self):
+        self.assertTrue(examples.EXTRA_ROLES)
+        for role in examples.EXTRA_ROLES:
+            self.assertTrue(role['name'].startswith('example-'), role['name'])
+            self.assertGreater(len(role['collections']), 1, role['name'])
+            for collection in role['collections']:
+                self.assertIn(collection, examples.SCENARIOS, role['name'])
+        self.assertEqual(examples.ROLE_NAMES,
+                         [s['role']['name'] for s in examples.SCENARIOS.values()] +
+                         [r['name'] for r in examples.EXTRA_ROLES])
+
 
 class LoadTests(ExamplesTestCase):
     def test_load_installs_everything_marked(self):
@@ -358,6 +369,21 @@ class RolesEndToEndTests(ExamplesTestCase):
             reach[role] = {q['name'] for q in catalog}
             expected = {q['name'] for q in examples.SCENARIOS[scenario]['queries']}
             self.assertEqual(reach[role], expected, role)
+
+    def test_the_executive_role_reaches_both_collections_and_nothing_else(self):
+        key = self.key_from('example-executive')
+        catalog = self.client.get('/catalog', headers=key).get_json()['queries']
+        reach = {q['name'] for q in catalog}
+        expected = {q['name'] for q in examples.SCENARIOS['examples-reporting']['queries']} | \
+            {q['name'] for q in examples.SCENARIOS['examples-dashboard']['queries']}
+        self.assertEqual(reach, expected)
+        excluded = examples.SCENARIOS['examples-export']['queries'] + examples.SCENARIOS['examples-partner']['queries']
+        for q in excluded:
+            self.assertNotIn(q['name'], reach)
+        role = apikeys.list_roles()['example-executive']
+        self.assertFalse(role['allow_writes'])
+        self.assertEqual(role['rate_limit'], '300/hour')
+        self.assertEqual(role['connections'], [])
 
     def test_the_roles_are_read_only_and_rate_limited(self):
         for scenario in examples.SCENARIOS.values():

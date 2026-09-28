@@ -647,6 +647,19 @@ third-party being shipped. The repo's `examples/` folder is unchanged and still 
 collection plus a role shaped like the key that fronts it (built from the collections work in #35); the walkthrough is
 `documentation/EXAMPLES.md`.
 
+**Strengthened afterward:** a fifth role, `example-executive` (`EXTRA_ROLES` in `examples.py`, deliberately
+separate from the four `SCENARIOS` - nothing iterates it 1:1 with a collection), read-only and granted both
+`examples-reporting` and `examples-dashboard` at once - the one access-model capability the four scenarios
+never demonstrated on their own (a role/key spanning more than one collection). Considered and deliberately
+left out: a Mongo scenario (needs a real running server, unlike the generated SQLite database, so it can't
+be a `load()`-and-it-just-works fixture the way the rest is); a richer schema or more queries (real
+multi-table joins with real foreign keys already exist - `rental.film_id`/`rental.customer_id`); a second
+version of an existing query (would need to change `load()`'s name-only idempotency tracking, real risk to
+a load-bearing invariant `tests/test_examples.py` heavily exercises, for a cosmetic History-tab demo).
+`documentation/EXAMPLES.md` also now points at the newer schema/parsing features using data that already
+exists: PK/FK badges on `rental`'s real foreign keys, the Access tab's Query flow diagram, table-scoped
+autocomplete, and real SQL pretty-printing.
+
 **Safety properties, each guarded by a test that was confirmed to fail when broken:** everything installed is marked
 `example` and removal deletes exactly that (never a query of yours that shares a name); loading refuses, changing
 nothing, if something unmarked holds an example's name (a query, role, connection *or* the database file); loading is

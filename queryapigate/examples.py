@@ -7,6 +7,10 @@ Four scenarios, each a *collection* of saved queries plus a role shaped like the
 * ``examples-export`` - a ~20,000-row table meant for ``?stream=true`` exports;
 * ``examples-partner`` - a narrow, parameter-validated surface for an external client's key.
 
+Plus a fifth role, ``example-executive``, granted both the reporting and dashboard collections at once - the
+one thing none of the four scenarios above shows on its own: a role (and so a key created from it) reaching
+several collections, not just one.
+
 They run against a small generated SQLite database (``examples.db``, connection name ``examples``): no third-party
 data is shipped, so there is nothing to license, and rentals are dated relative to the day it is generated so the
 "today" and "overdue" queries always have something to show.
@@ -213,7 +217,18 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 QUERY_NAMES = [q['name'] for scenario in SCENARIOS.values() for q in scenario['queries']]
-ROLE_NAMES = [scenario['role']['name'] for scenario in SCENARIOS.values()]
+
+# A fifth role, deliberately not tied to one collection like the four above - it demonstrates that a role
+# (and so a key created from it) can be granted several collections at once, not just one. Not part of
+# SCENARIOS since nothing here iterates it 1:1 with a collection to create queries for; status()/unload()/
+# _conflicts() already operate generically over "every role marked example: True", so they need no changes
+# to pick this up - only load()'s role-creation loop needs a matching one for EXTRA_ROLES.
+EXTRA_ROLES: list[dict[str, Any]] = [
+    {'name': 'example-executive', 'collections': ['examples-reporting', 'examples-dashboard'],
+     'rate_limit': '300/hour'},
+]
+
+ROLE_NAMES = [scenario['role']['name'] for scenario in SCENARIOS.values()] + [r['name'] for r in EXTRA_ROLES]
 
 
 def _bundle(collection):
@@ -294,6 +309,11 @@ def load(now=None):
             role = scenario['role']
             if role['name'] not in existing_roles:
                 apikeys.create_role(role['name'], connections=[], allow_writes=False, collections=[collection],
+                                    rate_limit=role['rate_limit'], example=True)
+                added['roles'].append(role['name'])
+        for role in EXTRA_ROLES:
+            if role['name'] not in existing_roles:
+                apikeys.create_role(role['name'], connections=[], allow_writes=False, collections=role['collections'],
                                     rate_limit=role['rate_limit'], example=True)
                 added['roles'].append(role['name'])
     return added

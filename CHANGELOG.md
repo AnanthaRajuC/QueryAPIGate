@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A fifth example role, `example-executive` (BACKLOG #27), spanning two collections at once.** Read-only,
+  `300/hour`, granted both `examples-reporting` and `examples-dashboard` - the one thing none of the four
+  existing example scenarios showed on its own: a role (and so a key created from it) reaching more than
+  one collection. `documentation/EXAMPLES.md` also now points at the newer schema/parsing features using
+  the existing example data - PK/FK badges on `rental`'s real foreign keys, the Access tab's Query flow
+  diagram on a real joined query, table-scoped autocomplete, and real SQL pretty-printing. Also fixes the
+  admin UI's "Example APIs are loaded" strip, which hardcoded "four roles" and was about to be wrong the
+  moment a fifth role existed.
 - **A Home tab for the admin UI.** A new first tab (ahead of Connections) - an at-a-glance overview:
   connection/saved-query/API-key/role counts, requests and error rate, the 5 most recent audit log entries
   (click one to jump to its likely tab), and quick actions (Run SQL, New saved query, New connection, Help).

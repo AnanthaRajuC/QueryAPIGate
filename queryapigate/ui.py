@@ -2886,7 +2886,8 @@ function renderExamplesStrip() {
   box.appendChild(exampleBadge());
   box.appendChild(h('span', { style: 'flex:1', text: st.partial
     ? 'The example APIs are only partly loaded (an interrupted load).'
-    : 'Example APIs are loaded: ' + st.queries.length + ' queries in ' + st.collections.length + ' collections, four roles and an “examples” connection. Removing them touches nothing else.' }));
+    : 'Example APIs are loaded: ' + st.queries.length + ' queries in ' + st.collections.length + ' collections, ' +
+      st.roles.length + (st.roles.length === 1 ? ' role' : ' roles') + ' and an “examples” connection. Removing them touches nothing else.' }));
   if (st.partial) box.appendChild(h('button', { type: 'button', className: 'btn sm outlined', text: 'Finish loading', onclick: loadExampleData }));
   box.appendChild(h('button', { type: 'button', className: 'btn sm outlined danger', text: 'Remove examples', onclick: removeExamples }));
 }
