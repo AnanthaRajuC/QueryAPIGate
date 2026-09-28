@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-28
+
 ### Added
 - **MongoDB support (find-only).** A new `mongo` connection type; ad-hoc `find()` queries from Run SQL and
   `POST /execute_mongo`; saved Mongo queries (`query_type: "mongo"`) exposed through `GET/POST /q/{name}`
@@ -39,6 +41,33 @@ All notable changes to this project are documented here. The format follows
   query on one that isn't exposed yet).
 - **Run SQL's connection picker is now Type → Host → Connection** instead of one flat name list - at more
   than a handful of connections, "which of these is the one I want" is a type-and-host question first.
+- **The schema browser is now Tables and Columns tabs** instead of an expand/collapse tree: clicking a
+  table jumps straight to its Columns (name and type, with its own scrollbar for a table with a lot of
+  them), and a copy icon per table builds a starter query into the editor without running it - a full
+  `SELECT` (every column by name, one per line, schema-qualified `FROM`, `ORDER BY` the first column,
+  `LIMIT 100`) for SQL, or the equivalent `find()` document for mongo. The editor grows to fit whatever it
+  pastes in instead of clipping it behind a scrollbar. The preview icon is now an eye rather than a play
+  triangle, next to the copy icon at the end of the row.
+- **A "Save as New API" button in Run SQL**: opens the same "New saved query" form the Saved Queries screen
+  has, pre-filled with the query you just tried there, its connection, and an empty entry per detected bound
+  parameter - test it first, then save it, rather than writing a saved query blind.
+- **Double-click a column (or its comparison value) in Run SQL to turn it into a bound parameter**: a
+  popover previews the exact edit (`customer_id = 5` → `customer_id = :customer_id`) before anything
+  changes, and confirming fills Bound Parameters with the real, correctly-typed value automatically.
+- **Saved Queries is now Collections and Queries tabs**, mirroring the schema browser, instead of one long
+  expand/collapse list per collection; the search box still spans every collection at once regardless of
+  which tab is open.
+- **Run SQL's Recent Queries/Settings/Schema tabs are a consistent size** regardless of which is open -
+  previously the whole row resized depending on which tab's own content happened to be tallest - and each
+  now scrolls internally for its own overflow, the way Schema already did. "Recent" is renamed "Recent
+  Queries", and Schema is now the tab shown by default.
+- **The Access map's Reach column moved next to Connection** instead of last; clicking a query's name there
+  now opens it directly in Saved Queries. A saved query's own "who can reach this" panel shows the same
+  Q/C/W reach badges inline per key and role now, instead of a plain comma-separated name list, with a
+  "View in Access map" link for the full cross-query matrix.
+- **A Help screen** (sidebar, below Settings): getting-started steps, keyboard shortcuts, a short concepts
+  glossary (saved query, collection, key vs. role, Q/C/W reach, bound parameters) and links to the docs
+  site, GitHub repo, issues and changelog.
 
 ## [0.8.0] - 2026-09-26
 
