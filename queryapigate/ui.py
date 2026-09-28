@@ -559,6 +559,18 @@ UI_HTML = r"""<!doctype html>
   .access-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
   .access-pill .name { font: 600 12px var(--mono); }
   .access-roles { margin: 0; }
+  /* ---- Query flow: a lightweight node-link diagram (tables -> this query -> keys/roles), no charting
+     library - HTML nodes (reusing .tag/.access-pill) with a thin SVG layer just for the connecting lines. */
+  .flow-diagram { position: relative; margin-top: 4px; padding: 8px 46px; }
+  .flow-cols { display: flex; justify-content: space-between; align-items: center; gap: 56px; position: relative; z-index: 1; }
+  .flow-col { display: flex; flex-direction: column; gap: 10px; min-width: 110px; }
+  .flow-col-mid { flex: 0 0 auto; min-width: 0; align-items: center; }
+  .flow-query { display: inline-block; padding: 6px 14px; border: 1.5px solid var(--accent); border-radius: 8px;
+    background: var(--surface); font: 600 12.5px var(--sans); color: var(--accent); white-space: nowrap; }
+  .flow-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+  .flow-edge { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+  .flow-edge.join { stroke: var(--warn); stroke-dasharray: 4 3; }
+  .flow-edge-label { font: 10px var(--mono); fill: var(--ink-2); text-anchor: middle; }
   #accessmap-body { overflow: auto; }
   table.amap { border-collapse: separate; border-spacing: 0; font-size: 12.5px; margin-bottom: 4px; }
   table.amap th, table.amap td { padding: 7px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; }
@@ -2989,32 +3001,109 @@ async function prettySql(filename, version, dialect, sql) {
   }
   return formatSql(sql);
 }
-function renderQueryFlowPanel(body, f, v) {
+function renderQueryFlowPanel(body, f, v, reach) {
   body.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Query flow',
     h('span', { className: 'hint', style: 'margin-left:8px;font-weight:400', text: 'best effort, detected from this query’s SQL' })));
   var panel = h('div', { className: 'access-box' });
   body.appendChild(panel);
   var key = f.filename + ':' + v.version;
-  if (queryFlowCache[key]) { paintQueryFlow(panel, queryFlowCache[key]); return; }
+  if (queryFlowCache[key]) { paintQueryFlow(panel, queryFlowCache[key], reach, f.filename); return; }
   panel.appendChild(h('div', { className: 'hint', text: 'Analyzing…' }));
   getQueryFlow(f.filename, v.version).then(function (data) {
     if (!data) return;
     if (selected.name === f.filename && selected.version === v.version && selected.tab === 'access') renderDetail();
   });
 }
-function paintQueryFlow(panel, data) {
+function paintQueryFlow(panel, data, reach, queryName) {
   clear(panel);
   if (data.error) { panel.appendChild(h('div', { className: 'hint', text: data.error })); return; }
   if (!data.tables.length) { panel.appendChild(h('div', { className: 'hint', text: 'No tables detected.' })); return; }
-  panel.appendChild(h('div', { className: 'access-reach' }, data.tables.map(function (t) { return h('span', { className: 'tag', text: t }); })));
-  if (data.joins.length) {
-    panel.appendChild(h('div', { className: 'hint', style: 'margin-top:10px', text: 'Joins' }));
-    data.joins.forEach(function (j) {
-      panel.appendChild(h('div', { className: 'mono', style: 'font-size:12px;margin-top:4px' },
-        j.left + '  —  ' + j.type + '  —  ' + j.right,
-        j.on ? h('span', { className: 'dim', text: '  ON ' + j.on }) : null));
-    });
+  renderFlowDiagram(panel, data, reach, queryName);
+}
+var FLOW_MAX_PER_COL = 10;
+/** A three-column node-link diagram: this query's tables (with join edges between them) on the left,
+ * flowing into the query itself, flowing out to the keys/roles that can call it (queryReach()'s result,
+ * shared with accessBox()/the API Keys/Roles tabs so this can never disagree with them). Table nodes reuse
+ * the plain `.tag` look; key/role nodes reuse accessPill() exactly, so a key's Q/C/W badge and revoked/
+ * active styling look identical here and there. Node boxes are ordinary HTML (so they get that styling and
+ * text layout for free); only the connecting lines are SVG, drawn from each node's real getBoundingClientRect()
+ * after layout - no hand-rolled position math, the same "measure the real DOM" approach
+ * attachColumnAutocomplete()'s caret mirror already uses. Rebuilt fresh on every repaint, so it doesn't
+ * track a live window resize while open - an accepted trade-off, not a bug. */
+function renderFlowDiagram(container, data, reach, queryName) {
+  var wrap = h('div', { className: 'flow-diagram' });
+  container.appendChild(wrap);
+  var cols = h('div', { className: 'flow-cols' });
+  wrap.appendChild(cols);
+
+  var tables = data.tables.slice(0, FLOW_MAX_PER_COL);
+  var tableCol = h('div', { className: 'flow-col' });
+  var tableNodes = {};
+  tables.forEach(function (t) {
+    var node = h('span', { className: 'tag flow-node', text: t });
+    tableNodes[t] = node;
+    tableCol.appendChild(node);
+  });
+  if (data.tables.length > tables.length) {
+    tableCol.appendChild(h('div', { className: 'hint', text: '+' + (data.tables.length - tables.length) + ' more' }));
   }
+
+  var queryCol = h('div', { className: 'flow-col flow-col-mid' });
+  var queryNode = h('span', { className: 'flow-node flow-query', text: queryName });
+  queryCol.appendChild(queryNode);
+
+  var keys = reach.keys.slice(0, FLOW_MAX_PER_COL);
+  var roles = reach.roles.slice(0, Math.max(0, FLOW_MAX_PER_COL - keys.length));
+  var reachCol = h('div', { className: 'flow-col' });
+  var reachNodes = [];
+  keys.forEach(function (k) { var node = accessPill(k, false); reachCol.appendChild(node); reachNodes.push(node); });
+  roles.forEach(function (r) { var node = accessPill(r, true); reachCol.appendChild(node); reachNodes.push(node); });
+  var reachOmitted = (reach.keys.length - keys.length) + (reach.roles.length - roles.length);
+  if (!keys.length && !roles.length) reachCol.appendChild(h('div', { className: 'hint', text: 'Only the admin key can run it.' }));
+  else if (reachOmitted > 0) reachCol.appendChild(h('div', { className: 'hint', text: '+' + reachOmitted + ' more — see above' }));
+
+  cols.appendChild(tableCol); cols.appendChild(queryCol); cols.appendChild(reachCol);
+
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'flow-edges');
+  wrap.appendChild(svg);
+
+  function anchor(el, side) {
+    var a = el.getBoundingClientRect(), b = wrap.getBoundingClientRect();
+    var y = a.top - b.top + a.height / 2;
+    return { x: side === 'right' ? a.left - b.left + a.width : a.left - b.left, y: y };
+  }
+  function curve(p1, p2) {
+    var mx = (p1.x + p2.x) / 2;
+    return 'M ' + p1.x + ' ' + p1.y + ' C ' + mx + ' ' + p1.y + ', ' + mx + ' ' + p2.y + ', ' + p2.x + ' ' + p2.y;
+  }
+  function edge(p1, p2, dashed) {
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', curve(p1, p2));
+    path.setAttribute('class', 'flow-edge' + (dashed ? ' join' : ''));
+    svg.appendChild(path);
+    return path;
+  }
+  function label(p1, p2, text) {
+    var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', (p1.x + p2.x) / 2); t.setAttribute('y', (p1.y + p2.y) / 2 - 4);
+    t.setAttribute('class', 'flow-edge-label'); t.textContent = text;
+    svg.appendChild(t);
+  }
+
+  data.joins.forEach(function (j) {
+    if (!tableNodes[j.left] || !tableNodes[j.right]) return; // an endpoint got truncated out of the capped column
+    var p1 = anchor(tableNodes[j.left], 'left'), p2 = anchor(tableNodes[j.right], 'left');
+    p1.x -= 32; p2.x -= 32; // bow the join curve out to the left of the table column, into the diagram's own side padding
+    edge(p1, p2, true);
+    label(p1, p2, j.type);
+  });
+  tables.forEach(function (t) { edge(anchor(tableNodes[t], 'right'), anchor(queryNode, 'left'), false); });
+  reachNodes.forEach(function (node) { edge(anchor(queryNode, 'right'), anchor(node, 'left'), false); });
+
+  var b = wrap.getBoundingClientRect();
+  svg.setAttribute('width', b.width); svg.setAttribute('height', b.height);
+  svg.setAttribute('viewBox', '0 0 ' + b.width + ' ' + b.height);
 }
 /** The saved-query detail view's API Keys tab: every key reach() found for this one query, with the same
  * columns the main API keys screen shows (minus Scope/IPs/Usage, which describe the key as a whole rather
@@ -3557,7 +3646,7 @@ function renderDetail() {
   if (selected.tab === 'sql') renderSqlTab(body, f, v);
   else if (selected.tab === 'keys') renderQueryKeysTab(body, reach);
   else if (selected.tab === 'roles') renderQueryRolesTab(body, reach);
-  else if (selected.tab === 'access') { body.appendChild(accessBox(f.filename, reach)); renderQueryFlowPanel(body, f, v); }
+  else if (selected.tab === 'access') { body.appendChild(accessBox(f.filename, reach)); renderQueryFlowPanel(body, f, v, reach); }
   else if (selected.tab === 'history') renderHistoryTab(body, v);
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
   else renderRunTab(body, f, v, isLatest);

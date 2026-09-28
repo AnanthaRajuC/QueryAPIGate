@@ -1083,10 +1083,18 @@ visualization on the saved-query detail view's Access tab (shipped in 0.9.0); th
 function for finally adding a real parser rather than building more UI on top of the heuristic.
 
 New `queryapigate/sqlflow.py` parses a saved query's SQL with `sqlglot` (new `flow` extra) and extracts its
-tables and joins; `GET /query_flow` serves it; the Access tab shows it as a plain best-effort list/badge
-panel (no new charting/graph library - matches this project's stance of bar rows over charts elsewhere).
-Never touches `sqltools.validate_sql` or any execution path - a parse failure just shows an explanatory
-line, never blocks or raises.
+tables and joins; `GET /query_flow` serves it. Never touches `sqltools.validate_sql` or any execution path -
+a parse failure just shows an explanatory line, never blocks or raises.
+
+The Access tab's Query flow panel shows this as a real node-link diagram - tables (with join edges between
+them) flowing into the query, flowing out to the keys/roles that can call it (`queryReach()`, already shared
+with `accessBox()`/the API Keys/Roles tabs, so this can never disagree with them) - the detailed per-query
+visualization originally asked for. Still no new charting/graph-rendering dependency, per the user's explicit
+choice: `renderFlowDiagram()` (`ui.py`) renders the node boxes as ordinary HTML (reusing `.tag`/`accessPill()`
+exactly, so styling matches everywhere else) with a single thin SVG layer just for the connecting lines,
+positioned from each node's real `getBoundingClientRect()` after layout rather than hand-rolled position math
+- matches this project's stance of bar rows over charts elsewhere. Capped at 10 nodes per column with a
+"+N more" hint pointing at the full lists already on this same tab, rather than an unbounded diagram.
 
 The Access map screen's own "which queries reference this table" filter now also uses real parsing where
 the connection's dialect supports it (the same `PARSEABLE_DIALECTS` list, client-side in `ui.py`):
@@ -1103,10 +1111,9 @@ token-based reflow remains the fallback for everything else. `sqlglot` parses th
 parameters natively, so they round-trip unchanged in the pretty-printed output.
 
 **Deferred, each its own separately-scoped unit of work:** column-level lineage; real write-target detection
-(the #21 table-allow-list note above still applies - this is read-only best-effort, not a security guard);
-a real node-graph diagram instead of the plain list. (Table-scoped autocomplete, once flagged here as a
-possible use of this parser, shipped instead via a lightweight regex - see #39 - not this module; `sqlflow.py`
-stays scoped to finished, saved SQL.) **H2/JDBC
+(the #21 table-allow-list note above still applies - this is read-only best-effort, not a security guard).
+(Table-scoped autocomplete, once flagged here as a possible use of this parser, shipped instead via a
+lightweight regex - see #39 - not this module; `sqlflow.py` stays scoped to finished, saved SQL.) **H2/JDBC
 connections are permanently out of scope for real parsing**, not a gap to fill later - those can point at
 any vendor's SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at; both
 keep using the text-search fallback everywhere it applies.
@@ -1123,8 +1130,9 @@ requirement (it needs real SQL parsing, not the lightweight guard this project d
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
 under `examples/`), #37 (primary/foreign key markers in the schema browser) and #38 (a "show CREATE TABLE"
 icon), none started; #39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
-"every column, suggested anywhere" version still open; #40 is shipped as table/join extraction, the Access
-map's table filter, and real pretty-printing for `formatSql()`'s call sites, with column lineage, write-
-target detection and H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped
-follow-ups). The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
+"every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
+Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
+on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
+out of scope for real parsing. The "still open" note under #9 (confirming its CI changes on a real run) is
+a smaller
 follow-up on finished work, not an open capability gap.
