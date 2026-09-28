@@ -275,7 +275,9 @@ UI_HTML = r"""<!doctype html>
   .c { color: var(--syn-cmt); font-style: italic; }
 
   /* ---- run SQL tab ---- */
-  .runner { display: grid; grid-template-columns: minmax(0, 1fr) 7px var(--runner-side-w, 280px); overflow: hidden; }
+  /* min-height, not height: a query that needs more room (a tall editor, a deep results panel below) still
+     grows past this: it's a floor for the sidebar's tab box (roughly half the viewport), not a ceiling. */
+  .runner { display: grid; grid-template-columns: minmax(0, 1fr) 7px var(--runner-side-w, 280px); overflow: hidden; min-height: 50vh; }
   .runner-main { display: flex; flex-direction: column; min-width: 0; }
   .runner-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
   .runner-bar select { width: auto; height: 28px; font-size: 12.5px; }
@@ -295,12 +297,25 @@ UI_HTML = r"""<!doctype html>
   /* Recent queries, query settings and the schema browser are three tabs rather than one long scroll - the
      sidebar is narrow, and only one of the three needs to be visible at once. */
   .side-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 2px; flex: none; }
-  .side-tab { flex: 1; min-width: 0; border: 0; background: none; padding: 0 2px 8px; font: 600 11.5px var(--sans); color: var(--ink-3);
+  .side-tab { flex: 1; min-width: 0; border: 0; background: none; padding: 0 1px 8px; font: 600 10.5px var(--sans); color: var(--ink-3);
     cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .side-tab:hover { color: var(--ink); }
   .side-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-  .side-tab-panel { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+  /* The active panel is absolutely positioned to fill this - not a normal-flow flex child sized to its own
+     content - so switching tabs can never change how much vertical room the sidebar (and so the whole Run
+     SQL row, editor included) asks for: that space is set once, by whichever panel happens to need the
+     most, not by whichever one is currently showing. Each panel gets that same fixed box and its own
+     scrollbar for whatever doesn't fit, the same standard size and scroll behaviour on every tab. */
+  .side-panels { position: relative; flex: 1; min-height: 0; }
+  .side-tab-panel { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
   .side-tab-panel[hidden] { display: none; }
+  /* Schema already manages its own internal scroll (the Tables/Columns switch stays put; only the list
+     below it scrolls - see .schema-content) - scrolling the panel around that too would just be a second,
+     redundant scrollbar. */
+  .side-tab-panel[data-side-panel="schema"] { overflow: hidden; }
+  #run-schema-slot { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #run-schema-slot .field { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #run-schema-slot .schema-browser { flex: 1; min-height: 0; }
   .refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; min-height: 18px; }
 
   /* A small "browse a list, drill into one" tab pair - two levels shown one at a time instead of an
@@ -319,7 +334,9 @@ UI_HTML = r"""<!doctype html>
   /* A fixed cap with its own scrollbar - not unbounded - so a connection with a lot of tables, or a table
      with a lot of columns, scrolls inside its own box instead of growing the whole page. */
   .schema-content { max-height: 220px; overflow: auto; }
-  #run-schema-slot .schema-content { max-height: 460px; }
+  /* Inside Run SQL's Schema tab the browser fills a fixed-size box already (see .side-panels above), so the
+     content list flexes to that exact height instead of capping at its own separately-tuned number. */
+  #run-schema-slot .schema-content { max-height: none; flex: 1; min-height: 0; }
   .schema-browser .hint, .schema-browser .loading { padding: 9px 10px; }
   .schema-row { display: flex; align-items: center; gap: 0; }
   .schema-select { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 11px; cursor: pointer; }
@@ -787,27 +804,29 @@ UI_HTML = r"""<!doctype html>
       <div class="runner-splitter" id="run-splitter" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
       <div class="runner-side">
         <div class="side-tabs" role="tablist">
-          <button type="button" class="side-tab" data-side-tab="recent" role="tab" aria-selected="false">Recent</button>
+          <button type="button" class="side-tab" data-side-tab="recent" role="tab" aria-selected="false">Recent Queries</button>
           <button type="button" class="side-tab" data-side-tab="settings" role="tab" aria-selected="false">Settings</button>
           <button type="button" class="side-tab" data-side-tab="schema" role="tab" aria-selected="false">Schema</button>
         </div>
-        <div class="side-tab-panel" data-side-panel="recent" hidden>
-          <div id="run-history-slot"></div>
-        </div>
-        <div class="side-tab-panel" data-side-panel="settings" hidden>
-          <div class="field">
-            <label for="run-params">Bound parameters <span class="type">JSON</span></label>
-            <textarea id="run-params" spellcheck="false" placeholder='{"id": 1}'></textarea>
-            <div class="refs" id="run-refs"></div>
+        <div class="side-panels">
+          <div class="side-tab-panel" data-side-panel="recent" hidden>
+            <div id="run-history-slot"></div>
           </div>
-          <div class="grid2">
-            <div class="field"><label for="run-page">Page</label><input id="run-page" type="number" min="1" value="1"></div>
-            <div class="field"><label for="run-page-size">Page size</label><input id="run-page-size" type="number" min="1" value="10"></div>
+          <div class="side-tab-panel" data-side-panel="settings" hidden>
+            <div class="field">
+              <label for="run-params">Bound parameters <span class="type">JSON</span></label>
+              <textarea id="run-params" spellcheck="false" placeholder='{"id": 1}'></textarea>
+              <div class="refs" id="run-refs"></div>
+            </div>
+            <div class="grid2">
+              <div class="field"><label for="run-page">Page</label><input id="run-page" type="number" min="1" value="1"></div>
+              <div class="field"><label for="run-page-size">Page size</label><input id="run-page-size" type="number" min="1" value="10"></div>
+            </div>
+            <div class="field"><label for="run-timeout">Timeout <span class="type">seconds, optional</span></label><input id="run-timeout" type="number" min="0" step="any" placeholder="server default"></div>
           </div>
-          <div class="field"><label for="run-timeout">Timeout <span class="type">seconds, optional</span></label><input id="run-timeout" type="number" min="0" step="any" placeholder="server default"></div>
-        </div>
-        <div class="side-tab-panel" data-side-panel="schema" hidden>
-          <div id="run-schema-slot"></div>
+          <div class="side-tab-panel" data-side-panel="schema" hidden>
+            <div id="run-schema-slot"></div>
+          </div>
         </div>
       </div>
     </form>
@@ -4088,7 +4107,7 @@ $('run-sql').addEventListener('dblclick', function (e) {
   tabs.forEach(function (t) { t.onclick = function () { selectSideTab(t.dataset.sideTab); }; });
   var saved = null;
   try { saved = localStorage.getItem(SIDE_TAB_KEY); } catch (e) {}
-  selectSideTab(saved && panels[saved] ? saved : 'recent');
+  selectSideTab(saved && panels[saved] ? saved : 'schema');
 })();
 
 // ---- Run SQL: draggable splitter between the editor and the sidebar (recent queries, params, schema) ----
