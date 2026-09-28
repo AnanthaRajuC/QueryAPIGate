@@ -30,6 +30,12 @@ All notable changes to this project are documented here. The format follows
   `FROM`/`JOIN` regex to resolve the alias (not `sqlflow.py`'s real parser, which needs finished SQL, not
   text that's routinely mid-keystroke) and the existing schema cache for columns - no new backend work.
   No suggestion for an alias that doesn't resolve, and none at all for a Mongo connection's JSON editor.
+- **Primary/foreign key markers in the schema browser's Columns tab (BACKLOG #37).** A column now shows a
+  "PK" badge and a "FK → table.column" badge when it's part of one, for `mysql`, `postgres`, `sqlite` and
+  `duckdb` connections. A new, additive `_KEY_QUERIES` per dialect (`schema.py`) merges onto the existing
+  schema fetch and degrades gracefully - a permissions error or unexpected catalogue shape just means no
+  badges, never a broken schema fetch. `h2` (unverifiable in this environment) and `clickhouse` (no real
+  foreign-key concept) are explicit gaps, not bugs; a composite key reports only its first column.
 
 ## [0.9.0] - 2026-09-28
 

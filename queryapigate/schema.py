@@ -49,9 +49,10 @@ _QUERIES = {
     'sqlite': """
         SELECT 'main' AS table_schema, m.name AS table_name, m.type AS table_type, ti.name AS column_name,
                ti.type AS data_type, CASE ti."notnull" WHEN 0 THEN 'YES' ELSE 'NO' END AS is_nullable,
-               ti.cid + 1 AS ordinal_position
+               ti.cid + 1 AS ordinal_position, ti.pk AS pk_position, fk."table" AS fk_table, fk."to" AS fk_column
         FROM sqlite_master m
         JOIN pragma_table_info(m.name) ti
+        LEFT JOIN pragma_foreign_key_list(m.name) fk ON fk."from" = ti.name
         WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%'
         ORDER BY m.name, ti.cid
     """,
@@ -74,6 +75,42 @@ _QUERIES = {
           ON c.table_schema = t.table_schema AND c.table_name = t.table_name
         WHERE t.table_schema = 'main'
         ORDER BY t.table_name, c.ordinal_position
+    """,
+}
+
+# Primary/foreign key markers for the schema browser's Columns tab - a second, additive query per dialect
+# (SQLite's is cheap enough to fold into _QUERIES['sqlite'] above instead). Deliberately absent: 'h2' (its
+# information_schema constraint shape isn't verifiable without a real JVM/JDBC server, and a guessed query
+# risks a silently-wrong badge, a worse failure than no badge) and 'clickhouse' (no real foreign-key concept,
+# and its primary key is an informational ORDER BY-style clause on the table, not a per-column constraint
+# the other dialects report the same way). A composite (multi-column) key only reports its first column -
+# noted, not silently wrong.
+_KEY_QUERIES = {
+    'mysql': """
+        SELECT tc.table_name AS table_name, kcu.column_name AS column_name, tc.constraint_type AS constraint_type,
+               kcu.referenced_table_name AS referenced_table_name, kcu.referenced_column_name AS referenced_column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        WHERE tc.table_schema = DATABASE() AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
+    """,
+    'postgres': """
+        SELECT tc.table_name AS table_name, kcu.column_name AS column_name, tc.constraint_type AS constraint_type,
+               ccu.table_name AS referenced_table_name, ccu.column_name AS referenced_column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
+        LEFT JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name AND tc.constraint_type = 'FOREIGN KEY'
+        WHERE tc.table_schema NOT IN ('pg_catalog', 'information_schema')
+          AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
+    """,
+    'duckdb': """
+        SELECT table_name AS table_name, constraint_type AS constraint_type,
+               constraint_column_names[1] AS column_name,
+               referenced_table AS referenced_table_name, referenced_column_names[1] AS referenced_column_name
+        FROM duckdb_constraints()
+        WHERE schema_name = 'main' AND constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
     """,
 }
 
@@ -127,8 +164,39 @@ def fetch_schema(connection_name, database=None):
             tables[name] = {'name': name, 'schema': record['table_schema'],
                             'type': _normalize_table_type(record['table_type']), 'columns': []}
             order.append(name)
-        tables[name]['columns'].append({
-            'name': record['column_name'], 'type': record['data_type'],
-            'nullable': str(record['is_nullable']).upper() == 'YES', 'position': record['ordinal_position'],
-        })
+        column = {'name': record['column_name'], 'type': record['data_type'],
+                  'nullable': str(record['is_nullable']).upper() == 'YES', 'position': record['ordinal_position'],
+                  'primary_key': False, 'foreign_key': None}
+        if dialect == 'sqlite':
+            if record.get('pk_position'):
+                column['primary_key'] = True
+            if record.get('fk_table'):
+                column['foreign_key'] = {'table': record['fk_table'], 'column': record['fk_column']}
+        tables[name]['columns'].append(column)
+    if dialect in _KEY_QUERIES:
+        _merge_keys(tables, connection_name, dialect, database)
     return {'tables': [tables[name] for name in order], 'truncated': result.has_more}
+
+
+def _merge_keys(tables, connection_name, dialect, database):
+    """Merge primary_key/foreign_key onto columns schema.fetch_schema() already built, from _KEY_QUERIES[dialect]
+    - best-effort, never raises. An unexpected constraint-catalogue shape or a permissions error just means no
+    PK/FK badges for this connection, not a broken schema fetch (the same discipline sqlflow.py uses)."""
+    try:
+        result = engine.execute_sql(_KEY_QUERIES[dialect], connection_name, ROW_CAP, 0, database=database)
+        lower_columns = [str(c).lower() for c in result.columns]
+        for row in result.rows:
+            record = dict(zip(lower_columns, row))
+            table = tables.get(record['table_name'])
+            if not table:
+                continue
+            column = next((c for c in table['columns'] if c['name'] == record['column_name']), None)
+            if not column:
+                continue
+            if record['constraint_type'] == 'PRIMARY KEY':
+                column['primary_key'] = True
+            elif record['constraint_type'] == 'FOREIGN KEY' and record.get('referenced_table_name'):
+                column['foreign_key'] = {'table': record['referenced_table_name'],
+                                         'column': record['referenced_column_name']}
+    except Exception:
+        pass

@@ -10,6 +10,8 @@ import time
 import unittest
 from unittest import mock
 
+import duckdb
+
 from queryapigate import config, create_app, engine, metrics, pool, runners, schema, sqltools
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
@@ -458,8 +460,30 @@ class SchemaTests(ApiTestCase):
         super().setUp()
         conn = sqlite3.connect(self.db_path)
         conn.execute('CREATE VIEW young_actor AS SELECT actor_id, name FROM actor WHERE born > "1910"')
+        conn.execute('CREATE TABLE studio (id INTEGER PRIMARY KEY, name TEXT)')
+        conn.execute('CREATE TABLE film (id INTEGER PRIMARY KEY, studio_id INTEGER REFERENCES studio(id), title TEXT)')
         conn.commit()
         conn.close()
+
+    def test_primary_and_foreign_keys_are_marked(self):
+        body = self.client.get('/connections/lite/schema').get_json()
+        tables = {t['name']: t for t in body['tables']}
+        film_columns = {c['name']: c for c in tables['film']['columns']}
+        studio_columns = {c['name']: c for c in tables['studio']['columns']}
+        self.assertTrue(studio_columns['id']['primary_key'])
+        self.assertIsNone(studio_columns['id']['foreign_key'])
+        self.assertTrue(film_columns['id']['primary_key'])
+        self.assertFalse(film_columns['studio_id']['primary_key'])
+        self.assertEqual(film_columns['studio_id']['foreign_key'], {'table': 'studio', 'column': 'id'})
+        self.assertFalse(film_columns['title']['primary_key'])
+        self.assertIsNone(film_columns['title']['foreign_key'])
+
+    def test_a_table_with_no_keys_reports_false_and_none(self):
+        body = self.client.get('/connections/lite/schema').get_json()
+        tables = {t['name']: t for t in body['tables']}
+        columns = {c['name']: c for c in tables['actor']['columns']}
+        self.assertEqual([c['primary_key'] for c in columns.values()], [False, False, False])
+        self.assertEqual([c['foreign_key'] for c in columns.values()], [None, None, None])
 
     def test_lists_tables_and_views_with_their_columns(self):
         body = self.client.get('/connections/lite/schema').get_json()
@@ -494,6 +518,48 @@ class SchemaTests(ApiTestCase):
             body = self.client.get('/connections/lite/schema').get_json()
         self.assertTrue(body['truncated'])
         self.assertEqual(sum(len(t['columns']) for t in body['tables']), 2)
+
+
+class DuckDBSchemaTests(ApiTestCase):
+    """schema.py's PK/FK detection for duckdb goes through _KEY_QUERIES (unlike sqlite, folded into its base
+    query above) - a real duckdb file, not mocks, since duckdb is embedded and needs no server."""
+    def setUp(self):
+        super().setUp()
+        self.duckdb_path = os.path.join(self.tmp.name, 'ducks.duckdb')
+        con = duckdb.connect(self.duckdb_path)
+        con.execute('CREATE TABLE studio (id INTEGER PRIMARY KEY, name VARCHAR)')
+        con.execute('CREATE TABLE film (id INTEGER PRIMARY KEY, studio_id INTEGER '
+                    'REFERENCES studio(id), title VARCHAR)')
+        con.close()
+        conns = self.client.get('/connections').get_json()['connections']
+        conns['dk'] = {'db': 'duckdb', 'database': self.duckdb_path, 'active': True}
+        self.client.patch('/connections', json={'connections': conns})
+
+    def test_primary_and_foreign_keys_are_marked(self):
+        body = self.client.get('/connections/dk/schema').get_json()
+        tables = {t['name']: t for t in body['tables']}
+        film_columns = {c['name']: c for c in tables['film']['columns']}
+        studio_columns = {c['name']: c for c in tables['studio']['columns']}
+        self.assertTrue(studio_columns['id']['primary_key'])
+        self.assertTrue(film_columns['id']['primary_key'])
+        self.assertEqual(film_columns['studio_id']['foreign_key'], {'table': 'studio', 'column': 'id'})
+        self.assertFalse(film_columns['title']['primary_key'])
+        self.assertIsNone(film_columns['title']['foreign_key'])
+
+    def test_a_broken_key_query_degrades_to_no_badges_not_an_error(self):
+        real_execute = engine.execute_sql
+
+        def flaky(sql, *a, **kw):
+            if 'duckdb_constraints' in sql:
+                raise RuntimeError('simulated permissions failure reading the constraint catalogue')
+            return real_execute(sql, *a, **kw)
+
+        with mock.patch.object(engine, 'execute_sql', side_effect=flaky):
+            res = self.client.get('/connections/dk/schema')
+        self.assertEqual(res.status_code, 200)
+        tables = {t['name']: t for t in res.get_json()['tables']}
+        self.assertEqual({c['primary_key'] for c in tables['studio']['columns']}, {False})
+        self.assertEqual({c['foreign_key'] for c in tables['film']['columns']}, {None})
 
 
 class ApiKeyTests(ApiTestCase):

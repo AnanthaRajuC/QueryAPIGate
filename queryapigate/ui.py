@@ -360,6 +360,9 @@ UI_HTML = r"""<!doctype html>
   .schema-col { display: flex; justify-content: space-between; gap: 8px; width: 100%; border: 0; background: none; color: inherit; font: 12px var(--mono);
     text-align: left; padding: 6px 10px; cursor: pointer; }
   .schema-col:hover { background: var(--surface-2); }
+  .schema-col .tag { padding: 1px 6px; font-size: 10.5px; white-space: nowrap; }
+  .key-pk { border-color: var(--accent); color: var(--accent); }
+  .key-fk { color: var(--ink-2); }
 
   /* ---- results ---- */
   .results { margin-top: 14px; }
@@ -1486,10 +1489,17 @@ function schemaBrowser(insertFn, previewFn, selectFn) {
     if (!t) { showTables(); return; } // the table it was showing is gone (e.g. a refresh) - nothing sane to show
     if (!t.columns.length) { content.appendChild(h('div', { className: 'hint', text: 'No columns to show.' })); return; }
     t.columns.forEach(function (c) {
+      var title = c.type + (c.nullable ? ' · nullable' : ' · not null');
+      if (c.primary_key) title += ' · primary key';
+      if (c.foreign_key) title += ' · FK → ' + c.foreign_key.table + '.' + c.foreign_key.column;
       content.appendChild(h('button', {
-        type: 'button', className: 'schema-col', title: c.type + (c.nullable ? ' · nullable' : ' · not null'),
+        type: 'button', className: 'schema-col', title: title,
         onclick: function () { insertFn(c.name); }
-      }, h('span', { text: c.name }), h('span', { className: 'dim', text: c.type })));
+      }, h('span', { text: c.name }),
+        h('span', { style: 'display:flex;align-items:center;gap:6px' },
+          h('span', { className: 'dim', text: c.type }),
+          c.primary_key ? h('span', { className: 'tag key-pk', text: 'PK' }) : null,
+          c.foreign_key ? h('span', { className: 'tag key-fk', text: 'FK → ' + c.foreign_key.table + '.' + c.foreign_key.column }) : null)));
     });
   }
   function paint() {

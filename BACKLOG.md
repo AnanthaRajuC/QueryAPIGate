@@ -1018,22 +1018,32 @@ and worth scoping separately rather than bundled into "add a driver."
 
 ## 37. Primary/foreign key markers in the schema browser's Columns tab
 
-**Impact:** the Columns tab (`queryapigate/schema.py`'s `fetch_schema()`, rendered by `ui.py`'s
-`schemaBrowser()`) shows each column's name and data type, but not whether it's a primary key or a foreign
-key into another table - exactly the two facts that matter most when deciding how to `JOIN` against a table
-you're seeing for the first time. Today that means either already knowing the schema or going to look at the
-real database.
+**Status: shipped for `mysql`/`postgres`/`sqlite`/`duckdb`.** The Columns tab (`schema.py`'s `fetch_schema()`,
+rendered by `ui.py`'s `schemaBrowser()`) now shows a "PK" badge and a "FK → table.column" badge next to a
+column's type - exactly the two facts that matter most when deciding how to `JOIN` against a table you're
+seeing for the first time.
 
-**Notes:** cheap at *runtime* - it would still be one extra query per connection when the schema is fetched,
-the same caching `fetch_schema()`/`loadSchema()` already do, not a per-table round trip - but a real
-multi-dialect job to *build*, since the constraint catalogue varies far more across dialects than the table/
-column one `_QUERIES` already covers: MySQL/PostgreSQL/H2/DuckDB need a join through
-`information_schema.key_column_usage`/`constraint_column_usage` (or the equivalent) to find both "is this a
-PK" and, for a FK, which table/column it references; SQLite is the easy case - `pragma_table_info()` (already
-queried for the base column list) returns a `pk` flag directly, and `pragma_foreign_key_list()` gives FKs in
-one call; ClickHouse has no real foreign-key concept at all, only an ordering/primary-key string on the table
-itself, so it would always report "no FKs" there, not a gap this can close. UI-wise: a small badge next to a
-column's type in the Columns tab (e.g. "PK", or "FK → orders.id") - `ui.py`'s existing `.schema-col` row.
+A new `_KEY_QUERIES` per dialect (`schema.py`), run as a second, additive query and merged onto the columns
+the base `_QUERIES` already built - wrapped in a `try/except` so a permissions error or an unexpected
+catalogue shape degrades to "no badges" for that connection, never breaks schema browsing that already
+worked (the same discipline `sqlflow.py` established). SQLite folds straight into its *existing* query
+instead (`pragma_table_info()` already returns a `pk` flag, `pragma_foreign_key_list()` joins cleanly) -
+verified for real against `sqlite3`. DuckDB is also verified for real, against an actual `duckdb` file
+through this project's own `engine.execute_sql` pipeline - worth noting since a first attempt exposed a real
+gotcha: `duckdb_constraints()`'s `LIST`-typed columns get stringified by this project's pipeline rather than
+passed through as Python lists, so the query indexes the first array element in SQL itself
+(`constraint_column_names[1]`) rather than post-processing a string. MySQL and Postgres use standard,
+well-documented `information_schema` patterns but are **not independently verified against a live server in
+this environment** (no embedded/pure-Python path the way SQLite/DuckDB have) - worth a real smoke test
+before leaning on them hard.
+
+**Deferred, explicit gaps, not bugs:** **H2** is left out entirely - its `information_schema` constraint
+shape isn't verifiable here (no JVM/JDBC access), and a guessed query risks a silently-wrong badge, a worse
+failure than no badge. **ClickHouse** still reports neither - no real foreign-key concept, and its primary
+key is an informational `ORDER BY`-style table clause, not a per-column constraint the others report the
+same way. **Composite (multi-column) keys** report only their first column (Postgres's `constraint_column_usage`
+join and DuckDB's `constraint_column_names[1]` both have this limitation) - a composite key still gets a
+badge, just not a fully accurate multi-column one.
 
 ## 38. A "show CREATE TABLE" icon in the schema browser
 
@@ -1128,8 +1138,9 @@ schema-sampling/caching/streaming/query-builder-UI remainder - each its own sepa
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
-under `examples/`), #37 (primary/foreign key markers in the schema browser) and #38 (a "show CREATE TABLE"
-icon), none started; #39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
+under `examples/`) and #38 (a "show CREATE TABLE" icon), none started; #37 is shipped for
+mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint model left as explicit gaps;
+#39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
