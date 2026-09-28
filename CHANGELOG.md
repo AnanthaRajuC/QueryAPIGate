@@ -16,6 +16,18 @@ All notable changes to this project are documented here. The format follows
   the connection's dialect supports it, falling back to the original text-search heuristic per-query when
   it doesn't (h2/jdbc/mongo, or an unparseable query) - fixes false positives like a table name only
   appearing in a SQL comment.
+- The SQL tab and the Access map's query info popup now show a real `sqlglot` pretty-print of a one-line
+  saved query when the dialect supports it, in place of `formatSql()`'s naive token reflow (still the
+  fallback for unsupported dialects, unparseable queries, and any query using the legacy `{name}` brace
+  placeholder, which `sqlglot` doesn't understand). Note this can cosmetically normalize the SQL text
+  itself, not just its layout - e.g. an implicit `orders o` alias becomes explicit `orders AS o`, and a
+  `--` line comment becomes `/* */` - both still exactly equivalent, valid SQL.
+- **Table-scoped column autocomplete (BACKLOG #39, table-scoped slice).** Typing `alias.` or `table.` in
+  either SQL editor (Run SQL, or the saved-query form) now pops up that table's columns, filtered as you
+  keep typing, accepted with Enter/Tab/click, dismissed with Escape/click-away. Uses a lightweight
+  `FROM`/`JOIN` regex to resolve the alias (not `sqlflow.py`'s real parser, which needs finished SQL, not
+  text that's routinely mid-keystroke) and the existing schema cache for columns - no new backend work.
+  No suggestion for an alias that doesn't resolve, and none at all for a Mongo connection's JSON editor.
 
 ## [0.9.0] - 2026-09-28
 

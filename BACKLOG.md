@@ -1056,25 +1056,22 @@ most of the value without the Postgres reconstruction effort, which would be its
 
 ## 39. Autocomplete columns while typing in the SQL editor
 
-**Impact:** today the editor only offers a column once you go looking for it (the Schema tab, or
-double-click-to-parameterize on something already typed) - there's no suggestion as you type a `WHERE`/
-`SELECT`/`JOIN ON` clause, the point where an autocomplete list is most useful.
+**Status: shipped as its table-scoped slice only.** Typing `alias.` or `table.` (a table already named in a
+`FROM`/`JOIN`) in either SQL editor (`$('run-sql')` in Run SQL, `$('q-sql')` in the saved-query form) now
+pops up that table's columns, filtered as more letters are typed, accepted via Enter/Tab/click, dismissed
+via Escape/click-away. `extractTableAliases()`/`attachColumnAutocomplete()` (`ui.py`) resolve the alias with
+a lightweight `FROM`/`JOIN` regex - not `sqlflow.py`'s real parser, which is scoped to finished, saved SQL
+and would fail constantly against text that's routinely mid-keystroke - filtered against `SQL_KW` so a bare
+`FROM t WHERE` doesn't misread `WHERE` as an alias. Columns come from the existing `schemaCache` (no new
+backend work); caret placement uses the classic hidden-mirror-div technique; the popup's keydown handler
+runs in the capture phase so it can `stopImmediatePropagation()` and safely pre-empt `bindEditor()`'s
+existing Tab-inserts-two-spaces behaviour while it's open. No popup at all for a Mongo connection's JSON
+editor, and no popup when the alias doesn't resolve (never falls back to an unscoped "every column" dump).
 
-**Notes:** cheap on the data side, real but bounded cost on the editor side. **Cheap:** the full column list
-per connection/database is already cached client-side (`schemaCache`, the same one `schemaBrowser()`/the
-Schema tab already use) - no new backend or network work. **The real cost:** unlike double-click-to-
-parameterize (BACKLOG-adjacent work already shipped, which gets word boundaries for free via the browser's
-native double-click selection), a live "suggest as you type" popup needs the pixel position of the caret
-inside a plain `<textarea>` - there is no native API for that, so it needs the classic hidden-mirror-div
-technique (clone the textarea's font/padding, insert a marker at the cursor, measure its position) to place
-the popup correctly, plus keyboard handling (arrow keys to navigate, Enter/Tab to accept, Escape to dismiss)
-that has to coexist with the editor's existing Tab-key behaviour (`bindEditor()` currently inserts two spaces
-on Tab). **The bigger judgement call is scope, not mechanics:** a "dumb" first version suggesting every
-column across every table on the connection (simple, still useful) vs. a table-aware version that only
-suggests a given table's columns after its alias/name - the latter needs real parsing, not a prefix match,
-and would be its own follow-up. **Not applicable to mongo** in this version - there is no field-level data to
-suggest from at all (v1's Mongo schema is collection names only, see BACKLOG #36's deferred schema-sampling
-item), so this would need that groundwork first for mongo specifically.
+**Deferred:** the "dumb" flat suggestion (every column across every table, suggested anywhere while typing,
+not just after `alias.`) - still a distinct, separately-scoped trigger design, and still blocked for Mongo
+specifically on the same schema-sampling gap BACKLOG #36 already notes (v1's Mongo schema is collection
+names only).
 
 ## 40. Real SQL parsing for the Access tab's "Query flow" panel
 
@@ -1098,9 +1095,18 @@ list, falling back to the original text-search heuristic per-query when parsing 
 dialect or fails on that query's SQL - so h2/jdbc/mongo connections, and any unparseable query, keep working
 exactly as before. Shares `queryFlowCache` with the Access tab's own panel, so the two can never disagree.
 
+`formatSql()` (the SQL tab and the Access map's query info popup, used whenever a saved query's stored SQL
+has no line breaks of its own) now also prefers a real `sqlglot` pretty-print, via the same `GET
+/query_flow`'s new `formatted` field, when the dialect supports it and the query has no legacy `{name}`
+brace placeholder (`sqlglot` has no notion of that convention and misparses it) - `formatSql()`'s original
+token-based reflow remains the fallback for everything else. `sqlglot` parses this project's `:name` bound
+parameters natively, so they round-trip unchanged in the pretty-printed output.
+
 **Deferred, each its own separately-scoped unit of work:** column-level lineage; real write-target detection
 (the #21 table-allow-list note above still applies - this is read-only best-effort, not a security guard);
-parser-aware, table-scoped autocomplete (#39); a real node-graph diagram instead of the plain list. **H2/JDBC
+a real node-graph diagram instead of the plain list. (Table-scoped autocomplete, once flagged here as a
+possible use of this parser, shipped instead via a lightweight regex - see #39 - not this module; `sqlflow.py`
+stays scoped to finished, saved SQL.) **H2/JDBC
 connections are permanently out of scope for real parsing**, not a gap to fill later - those can point at
 any vendor's SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at; both
 keep using the text-search fallback everywhere it applies.
@@ -1115,9 +1121,10 @@ schema-sampling/caching/streaming/query-builder-UI remainder - each its own sepa
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
-under `examples/`), #37 (primary/foreign key markers in the schema browser), #38 (a "show CREATE TABLE" icon)
-and #39 (autocomplete columns while typing), none started; #40 is shipped as table/join extraction plus the
-Access map's table filter, with column lineage, write-target detection, table-scoped autocomplete and
-H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped follow-ups). The "still
-open" note under #9 (confirming its CI changes on a real run) is a smaller
+under `examples/`), #37 (primary/foreign key markers in the schema browser) and #38 (a "show CREATE TABLE"
+icon), none started; #39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
+"every column, suggested anywhere" version still open; #40 is shipped as table/join extraction, the Access
+map's table filter, and real pretty-printing for `formatSql()`'s call sites, with column lineage, write-
+target detection and H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped
+follow-ups). The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.

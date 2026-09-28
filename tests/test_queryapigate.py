@@ -253,6 +253,8 @@ class SavedQueryTests(ApiTestCase):
         self.assertEqual(data['joins'], [{'left': 'actor', 'right': 'film_actor', 'type': 'JOIN',
                                           'on': 'a.actor_id = fa.actor_id'}])
         self.assertIsNone(data['error'])
+        self.assertIsInstance(data['formatted'], str)
+        self.assertTrue(data['formatted'])
 
     def test_query_flow_on_a_mongo_saved_query_is_gracefully_unavailable(self):
         self.client.patch('/connections', json={'connections': {
@@ -263,7 +265,8 @@ class SavedQueryTests(ApiTestCase):
         res = self.client.get('/query_flow', query_string={'filename': 'm'})
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
-        self.assertEqual(data, {'tables': [], 'joins': [], 'error': "SQL analysis isn't available for this query"})
+        self.assertEqual(data, {'tables': [], 'joins': [], 'formatted': None,
+                                'error': "SQL analysis isn't available for this query"})
 
     def test_query_flow_requires_admin(self):
         self.save('q')

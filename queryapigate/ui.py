@@ -537,6 +537,13 @@ UI_HTML = r"""<!doctype html>
   .paramize-popover button { width: 100%; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
     text-align: center; padding: 6px 10px; border-radius: 5px; font: 600 12.5px var(--sans); cursor: pointer; }
   .paramize-popover button:hover { filter: brightness(1.06); }
+  /* ---- table-scoped column autocomplete: typing "alias." in the SQL editor ---- */
+  .autocol-popover { position: fixed; z-index: 65; width: 220px; max-height: 220px; overflow: auto; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+  .autocol-popover .row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 8px; border-radius: 5px;
+    font: 12.5px var(--mono); cursor: pointer; }
+  .autocol-popover .row .t { color: var(--ink-2); }
+  .autocol-popover .row.on { background: var(--accent-soft, var(--bg)); }
   .tags.scope .tag { border-style: dashed; }
   .panel-bar select { width: auto; height: 30px; padding: 0 8px; background: var(--bg); border-color: var(--line-strong); font-size: 12.5px; }
   .results:has(.resbar:empty):has(.res-body:empty) { display: none; }
@@ -1502,6 +1509,118 @@ function schemaBrowser(insertFn, previewFn, selectFn) {
 function schemaField(browser) {
   return field(null, 'Schema', browser.node, null,
     h('button', { type: 'button', className: 'btn ghost sm', text: '↻', title: 'Refresh', onclick: function () { browser.refresh(); } }));
+}
+
+// ---- table-scoped column autocomplete: type "alias." (or "table.") in a SQL editor to see that table's
+// columns. A lightweight FROM/JOIN regex, not real parsing - sqlflow.py's real parser is for finished,
+// saved SQL, not text that's routinely mid-keystroke (an unclosed string, an incomplete clause), which
+// would fail constantly under a strict parser. Deliberately narrow: no popup for an unresolved alias
+// (falls back to nothing, not an unscoped "every column" dump - that's a separate, still-open BACKLOG #39
+// slice), and no relevance to a Mongo connection's JSON editor. ----
+var AUTOCOL_ALIAS_RE = /\b(?:FROM|JOIN)\s+([\w.]+)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi;
+var AUTOCOL_TRIGGER_RE = /([A-Za-z_]\w*)\.(\w*)$/;
+/** {alias-or-table (lowercased): real table name}, from every FROM/JOIN in `sql` - later occurrences win,
+ * close enough to how a real re-aliased subquery would shadow an outer one for this purpose. A schema-
+ * qualified reference (myschema.orders o) resolves by its last "."-segment. */
+function extractTableAliases(sql) {
+  var map = {};
+  AUTOCOL_ALIAS_RE.lastIndex = 0;
+  var m;
+  while ((m = AUTOCOL_ALIAS_RE.exec(sql))) {
+    var segments = m[1].split('.');
+    var table = segments[segments.length - 1];
+    map[table.toLowerCase()] = table;
+    // A bare "FROM t WHERE ..." (no real alias) reads identically to "FROM t alias" to this regex - SQL_KW
+    // (the same keyword set highlightInto() uses) tells a clause keyword like WHERE/GROUP/ORDER apart from
+    // an actual alias, so it's never mistaken for one.
+    if (m[2] && !SQL_KW[m[2].toLowerCase()]) map[m[2].toLowerCase()] = table;
+  }
+  return map;
+}
+/** Wires "type alias. to see that table's columns" onto `textarea` - shared by Run SQL's editor and the
+ * saved-query form's editor. `getConnName`/`getDatabase` resolve which schemaCache entry to read from
+ * (getDatabase may be omitted when the caller has no database picker of its own). */
+function attachColumnAutocomplete(textarea, getConnName, getDatabase) {
+  var popover = null, rows = [], activeIndex = 0, fragStart = 0, fragEnd = 0;
+  function schemaKey() {
+    var db = getDatabase && getDatabase();
+    return db ? getConnName() + '::' + db : getConnName();
+  }
+  function close() {
+    if (popover) { popover.remove(); popover = null; }
+  }
+  function paintRows() {
+    clear(popover);
+    rows.forEach(function (c, i) {
+      popover.appendChild(h('div', { className: 'row' + (i === activeIndex ? ' on' : ''),
+        onmousedown: function (e) { e.preventDefault(); accept(i); } },
+        h('span', { text: c.name }), h('span', { className: 't', text: c.type })));
+    });
+  }
+  function accept(i) {
+    var col = rows[i];
+    if (!col) return;
+    textarea.value = textarea.value.slice(0, fragStart) + col.name + textarea.value.slice(fragEnd);
+    var caret = fragStart + col.name.length;
+    textarea.selectionStart = textarea.selectionEnd = caret;
+    if (textarea.repaint) textarea.repaint();
+    close();
+  }
+  function position() {
+    var mirror = document.createElement('div');
+    var cs = getComputedStyle(textarea);
+    ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight',
+      'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderLeftWidth', 'boxSizing', 'whiteSpace', 'wordWrap']
+      .forEach(function (p) { mirror.style[p] = cs[p]; });
+    mirror.style.position = 'absolute'; mirror.style.visibility = 'hidden'; mirror.style.top = '0';
+    mirror.style.left = '-9999px'; mirror.style.width = textarea.clientWidth + 'px';
+    mirror.textContent = textarea.value.slice(0, textarea.selectionStart);
+    var marker = document.createElement('span');
+    marker.textContent = '.';
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    var rect = textarea.getBoundingClientRect();
+    var top = rect.top + marker.offsetTop - textarea.scrollTop + parseInt(cs.lineHeight || '16', 10);
+    var left = rect.left + marker.offsetLeft - textarea.scrollLeft;
+    document.body.removeChild(mirror);
+    return { top: top, left: left };
+  }
+  function recompute() {
+    if (getConnName() && connectionsCache[getConnName()] && connectionsCache[getConnName()].db === 'mongo') { close(); return; }
+    var before = textarea.value.slice(0, textarea.selectionStart);
+    var m = AUTOCOL_TRIGGER_RE.exec(before);
+    if (!m) { close(); return; }
+    var entry = schemaCache[schemaKey()];
+    if (!entry || entry.status === 'loading') {
+      loadSchema(getConnName(), recompute, getDatabase && getDatabase());
+      close();
+      return;
+    }
+    if (entry.status !== 'ready') { close(); return; }
+    var aliases = extractTableAliases(textarea.value);
+    var tableName = aliases[m[1].toLowerCase()];
+    var table = tableName && entry.tables.filter(function (t) { return t.name.toLowerCase() === tableName.toLowerCase(); })[0];
+    if (!table) { close(); return; }
+    var frag = m[2].toLowerCase();
+    var matches = table.columns.filter(function (c) { return c.name.toLowerCase().indexOf(frag) === 0; });
+    if (!matches.length) { close(); return; }
+    fragStart = textarea.selectionStart - m[2].length; fragEnd = textarea.selectionStart;
+    rows = matches.slice(0, 50); activeIndex = 0;
+    if (!popover) { popover = h('div', { className: 'autocol-popover' }); document.body.appendChild(popover); }
+    var pos = position();
+    popover.style.top = pos.top + 'px'; popover.style.left = pos.left + 'px';
+    paintRows();
+  }
+  textarea.addEventListener('input', recompute);
+  textarea.addEventListener('click', recompute);
+  textarea.addEventListener('blur', close);
+  textarea.addEventListener('keydown', function (e) {
+    if (!popover) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); activeIndex = Math.min(activeIndex + 1, rows.length - 1); paintRows(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); activeIndex = Math.max(activeIndex - 1, 0); paintRows(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); accept(activeIndex); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+  }, { capture: true });
 }
 
 // ---- connections ----
@@ -2850,17 +2969,36 @@ var queryFlowCache = {};
  * Access map's own computeTableMatches() text-search heuristic, but only for the dialects sqlglot
  * understands (h2/jdbc/mongo come back with an explanatory `error` instead). Cached per file+version,
  * same pattern as getContent(). */
+/** Fetch-and-cache wrapper around GET /query_flow, shared by the Access tab panel, the Access map's table
+ * filter (queryTouchesTable()) and real SQL formatting (prettySql()) - one parse per file+version serves
+ * all three, and they can never disagree about what a query's SQL contains. */
+async function getQueryFlow(filename, version) {
+  var key = filename + ':' + version;
+  if (queryFlowCache[key]) return queryFlowCache[key];
+  var flow = await apiJson('query_flow?filename=' + enc(filename) + '&version=' + version);
+  if (flow) queryFlowCache[key] = flow;
+  return flow;
+}
+/** Real, sqlglot-formatted SQL (via GET /query_flow's `formatted`) when `dialect` is one it can parse and
+ * this particular query produced one - formatSql()'s naive best-effort reflow otherwise, exactly as
+ * before. Shared by the SQL tab and the Access map's query info popup. */
+async function prettySql(filename, version, dialect, sql) {
+  if (PARSEABLE_DIALECTS.indexOf(dialect) !== -1) {
+    var flow = await getQueryFlow(filename, version);
+    if (flow && flow.formatted) return flow.formatted;
+  }
+  return formatSql(sql);
+}
 function renderQueryFlowPanel(body, f, v) {
-  var key = f.filename + ':' + v.version;
   body.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Query flow',
     h('span', { className: 'hint', style: 'margin-left:8px;font-weight:400', text: 'best effort, detected from this query’s SQL' })));
   var panel = h('div', { className: 'access-box' });
   body.appendChild(panel);
+  var key = f.filename + ':' + v.version;
   if (queryFlowCache[key]) { paintQueryFlow(panel, queryFlowCache[key]); return; }
   panel.appendChild(h('div', { className: 'hint', text: 'Analyzing…' }));
-  apiJson('query_flow?filename=' + enc(f.filename) + '&version=' + v.version).then(function (data) {
+  getQueryFlow(f.filename, v.version).then(function (data) {
     if (!data) return;
-    queryFlowCache[key] = data;
     if (selected.name === f.filename && selected.version === v.version && selected.tab === 'access') renderDetail();
   });
 }
@@ -3010,7 +3148,8 @@ async function openQueryInfo(f) {
   // Several example queries (and anything else authored as one Python string) have no line breaks of their
   // own; showing that verbatim is an unreadable, horizontally-scrolling wall of text. Reformat only when the
   // author supplied no line breaks at all - a query someone hand-formatted keeps exactly the layout they gave it.
-  var display = sql.indexOf('\n') === -1 ? formatSql(sql) : sql;
+  var display = sql.indexOf('\n') === -1 ? await prettySql(f.filename, latest.version, conn && conn.db, sql) : sql;
+  if (token !== queryInfoToken) return; // the popup moved on again while prettySql() was in flight
   sqlBox.appendChild(codeBox(display));
   sqlBox.appendChild(h('div', { style: 'margin-top:6px' },
     h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(display); } })));
@@ -3113,12 +3252,7 @@ async function textMatchesTable(f, needle) {
  * later can never disagree and never cost a second request. */
 async function queryTouchesTable(f, tableName, needle) {
   var v = latestOf(f);
-  var key = f.filename + ':' + v.version;
-  var flow = queryFlowCache[key];
-  if (!flow) {
-    flow = await apiJson('query_flow?filename=' + enc(f.filename) + '&version=' + v.version);
-    if (flow) queryFlowCache[key] = flow;
-  }
+  var flow = await getQueryFlow(f.filename, v.version);
   if (!flow || flow.error) return textMatchesTable(f, needle);
   return flow.tables.some(function (t) { return t.toLowerCase() === tableName.toLowerCase(); });
 }
@@ -3484,8 +3618,12 @@ async function renderSqlTab(body, f, v) {
   var shown = queryDisplayText(data, c.raw);
   // Reformat only when the author supplied no line breaks at all (e.g. an example authored as one Python
   // string) - the same trade-off formatSql() itself documents; a query someone hand-formatted keeps exactly
-  // the layout they gave it.
-  if (shown.indexOf('\n') === -1) shown = formatSql(shown);
+  // the layout they gave it. prettySql() prefers a real sqlglot pretty-print when the connection's dialect
+  // supports it, falling back to formatSql()'s naive reflow otherwise.
+  if (shown.indexOf('\n') === -1) {
+    var dialect = connectionsCache[v.connection_name] && connectionsCache[v.connection_name].db;
+    shown = await prettySql(f.filename, v.version, dialect, shown);
+  }
 
   var qp = v.query_parameters || {};
   var keys = Object.keys(qp);
@@ -3689,6 +3827,7 @@ async function openQueryForm(baseName, baseVersion) {
   var detected = h('div', { className: 'refs' });
   var editor = makeEditor({ id: 'q-sql', required: true, placeholder: 'SELECT * FROM t WHERE id = :id' }, sql);
   var sqlTa = editor.querySelector('textarea');
+  attachColumnAutocomplete(sqlTa, function () { return connSelect.value; });
   var sqlLabel = h('label', { for: 'q-sql' }, 'SQL', h('span', { className: 'type', text: 'use :name for bound parameters' }));
   function isFormMongo() { return (connectionsCache[connSelect.value] || {}).db === 'mongo'; }
   function paintFormMode() {
@@ -4281,6 +4420,10 @@ function paintRunRefs(sql) {
   names.forEach(function (n) { box.appendChild(h('span', { className: 'tag', text: ':' + n })); });
 }
 bindEditor($('run-sql'), $('run-sql-hl'), paintRunRefs, $('run-sql-gutter'));
+attachColumnAutocomplete($('run-sql'), function () { return $('run-connection').value; }, function () {
+  var c = connectionsCache[$('run-connection').value];
+  return c && $('run-database').value !== c.database ? $('run-database').value : null;
+});
 
 // ---- Run SQL: double-click a column (or its value) in the SQL editor to turn it into a bound parameter ----
 // col = 'literal', col = 123, col = NULL/TRUE/FALSE, and the comparison operators <>/<=/>=/!=/</> as well as

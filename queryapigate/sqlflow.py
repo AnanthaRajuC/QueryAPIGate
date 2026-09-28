@@ -22,26 +22,48 @@ def _substitute_placeholders(sql, dialect):
     return sqltools._BRACE_RE.sub('1', sql)
 
 
-def extract_flow(sql, dialect):
-    """Return {'tables': [name, ...], 'joins': [{'left', 'right', 'type', 'on'}, ...], 'error'}.
+def pretty_print(sql, dialect):
+    """A real, sqlglot-formatted rendering of `sql`, or None when that isn't possible - an
+    unsupported dialect, a legacy `{name}` placeholder (sqlglot has no notion of this project's
+    own text-substitution convention and misparses it as a struct literal - a bound `:name`
+    parameter needs no such care, since sqlglot parses and round-trips it natively), or a query
+    sqlglot can't parse or print. Never raises."""
+    if dialect not in _DIALECT_MAP or sqltools._BRACE_RE.search(sql):
+        return None
+    try:
+        import sqlglot
+    except ImportError:
+        return None
+    sqlglot_dialect = _DIALECT_MAP[dialect]
+    try:
+        return sqlglot.parse_one(sql, read=sqlglot_dialect).sql(dialect=sqlglot_dialect, pretty=True)
+    except Exception:
+        return None
 
-    `error` is set (and tables/joins are empty) whenever real analysis isn't possible - an
-    unsupported dialect, sqlglot missing, or a query sqlglot can't parse - and is meant to be
-    shown to the user as a plain explanatory line, never as a failure.
+
+def extract_flow(sql, dialect):
+    """Return {'tables': [name, ...], 'joins': [{'left', 'right', 'type', 'on'}, ...],
+    'formatted', 'error'}.
+
+    `error` is set (and tables/joins/formatted are empty/None) whenever real analysis isn't
+    possible - an unsupported dialect, sqlglot missing, or a query sqlglot can't parse - and is
+    meant to be shown to the user as a plain explanatory line, never as a failure. `formatted` can
+    independently be None even when tables/joins succeeded - see pretty_print().
     """
     if dialect not in _DIALECT_MAP:
-        return {'tables': [], 'joins': [], 'error': f"SQL analysis isn't available for '{dialect}' connections"}
+        return {'tables': [], 'joins': [], 'formatted': None,
+                'error': f"SQL analysis isn't available for '{dialect}' connections"}
     try:
         import sqlglot
         from sqlglot import exp
     except ImportError:
-        return {'tables': [], 'joins': [], 'error': 'sqlglot is not installed'}
+        return {'tables': [], 'joins': [], 'formatted': None, 'error': 'sqlglot is not installed'}
 
     sqlglot_dialect = _DIALECT_MAP[dialect]
     try:
         parsed = sqlglot.parse_one(_substitute_placeholders(sql, dialect), read=sqlglot_dialect)
     except Exception:
-        return {'tables': [], 'joins': [], 'error': 'Could not analyze this query'}
+        return {'tables': [], 'joins': [], 'formatted': None, 'error': 'Could not analyze this query'}
 
     tables = []
     seen = set()
@@ -66,4 +88,4 @@ def extract_flow(sql, dialect):
                           'on': on.sql(dialect=sqlglot_dialect)[:200] if on else ''})
             prev = right
 
-    return {'tables': tables, 'joins': joins, 'error': None}
+    return {'tables': tables, 'joins': joins, 'formatted': pretty_print(sql, dialect), 'error': None}
