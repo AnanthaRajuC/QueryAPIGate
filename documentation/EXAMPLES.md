@@ -12,9 +12,12 @@ queryapigate serve                  # then open http://127.0.0.1:5000/ui
 queryapigate examples unload        # removes exactly what `load` installed - nothing else
 ~~~
 
-The data is a small SQLite database generated on your machine (`examples.db`, about 2 MB: 60 films, 200 customers and
-20,000 rentals over the last 120 days, dated relative to the day you load them so the "today" and "overdue" numbers
-always have something to show). Nothing third-party is shipped. The connection is called `examples`.
+The data is a small SQLite database generated on your machine (`examples.db`, about 3 MB, 8 tables: 60 films,
+200 customers, 20,000 rentals over the last 120 days (dated relative to the day you load them so the "today" and
+"overdue" numbers always have something to show), plus `category`, `store`, `staff`, `address` and `payment` -
+every rental has a real payment record, processed by a real staff member at a real store, so the schema has real
+foreign keys to explore, not just `film`/`customer`/`rental`. Nothing third-party is shipped. The connection is
+called `examples`.
 
 ## Loading, hiding and removing them
 
@@ -85,8 +88,10 @@ curl -i 'http://127.0.0.1:5000/q/example_kpi_active_rentals'    # X-Cache: HIT, 
 
 ## 3. Data export API - `examples-export`
 
-A ~20,000-row table meant for [streaming exports](API.md#streaming-exports): constant memory on the server however
-large the result. Role `example-export`, `20/hour`.
+A ~20,000-row export meant for [streaming exports](API.md#streaming-exports): constant memory on the server however
+large the result. `example_all_rentals` joins six tables - `rental`, `film`, `customer`, `payment`, `staff` and
+`store` - so it doubles as a real, joined dataset to try the [Access tab's Query flow diagram](#things-to-try-next)
+on. Role `example-export`, `20/hour`.
 
 ~~~bash
 curl 'http://127.0.0.1:5000/q/example_all_rentals?stream=true&format=csv' -o rentals.csv
@@ -143,11 +148,13 @@ Granting a second collection to any role - yours or this one - works the same wa
 - **Admin UI** (`/ui`): the Saved Queries tab groups these by collection; **Move…** shows which keys would gain or lose
   access before anything changes; the Audit Log records every change.
 - **Docs and OpenAPI**: `/docs` lists exactly the queries the key you paste in can run - try it with the partner key.
-- **Schema browser** (Run SQL → Schema → Columns, `rental`): PK/FK badges - `rental.film_id` and
-  `rental.customer_id` are real foreign keys into `film` and `customer`, not just similarly-named columns.
-- **Query flow diagram** (Saved Queries → `example_top_films` or `example_all_rentals` → Access tab): a real
-  node-link diagram of the tables and joins that query's SQL actually touches, built from real SQL parsing, not
-  a text-search guess.
+- **Schema browser** (Run SQL → Schema → Columns): PK/FK badges throughout - `rental.film_id`/`customer_id`,
+  `payment.rental_id`/`staff_id`, `staff.store_id` and `address.customer_id` are all real foreign keys, not just
+  similarly-named columns. `category` has a primary key and no foreign key into it from anywhere - a deliberate
+  contrast, a plain lookup table rather than something joined into the example queries.
+- **Query flow diagram** (Saved Queries → `example_all_rentals` → Access tab): a real node-link diagram of all
+  six tables and five joins that query's SQL actually touches (`rental` → `film`/`customer`/`payment` →
+  `staff` → `store`), built from real SQL parsing, not a text-search guess.
 - **Table-scoped autocomplete**: in Run SQL against the `examples` connection, type `r.` or `f.` after
   `FROM rental r JOIN film f ON f.film_id = r.film_id` - a popup of that table's real columns.
 - **Real SQL pretty-printing**: the SQL tab of any of these queries shows a real, `sqlglot`-formatted rendering,

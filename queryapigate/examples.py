@@ -13,7 +13,10 @@ several collections, not just one.
 
 They run against a small generated SQLite database (``examples.db``, connection name ``examples``): no third-party
 data is shipped, so there is nothing to license, and rentals are dated relative to the day it is generated so the
-"today" and "overdue" queries always have something to show.
+"today" and "overdue" queries always have something to show. Eight tables - ``film``, ``customer`` and ``rental``
+plus ``category``, ``store``, ``staff``, ``address`` and ``payment`` - with real foreign keys throughout;
+``example_all_rentals`` (the export scenario) joins six of them (``rental``, ``film``, ``customer``, ``payment``,
+``staff``, ``store``).
 
 Everything installed is *marked* ``example`` (a top-level ``"example": true`` on a query file, and on the role and
 connection entries), and removal deletes exactly what is marked - never something of yours that merely shares a
@@ -46,6 +49,10 @@ _NOUNS = ['Harbor', 'Garden', 'Signal', 'Voyage', 'Mirror', 'Orchard', 'Citadel'
 _FIRST = ['Ava', 'Ben', 'Chloe', 'Dev', 'Elena', 'Farid', 'Grace', 'Hiro', 'Isla', 'Jonas', 'Kira', 'Liam']
 _LAST = ['Adams', 'Brooks', 'Chen', 'Diaz', 'Evans', 'Fischer', 'Gupta', 'Hughes', 'Ito', 'Jensen', 'Khan', 'Lopez']
 _COUNTRIES = ['Australia', 'Brazil', 'Canada', 'Germany', 'India', 'Japan', 'Kenya', 'Norway', 'Spain', 'USA']
+# One representative city per _COUNTRIES entry, same index - used for `address` and `store` so a country's
+# city is consistent rather than a random, unrelated pairing.
+_CITIES = ['Sydney', 'Sao Paulo', 'Toronto', 'Berlin', 'Mumbai', 'Osaka', 'Nairobi', 'Oslo', 'Madrid', 'Austin']
+_STORE_COUNTRY_INDEXES = [2, 3, 9]  # Toronto/Canada, Berlin/Germany, Austin/USA - the 3 example stores
 
 # --------------------------------------------------------------------------------------
 # The database
@@ -77,6 +84,38 @@ CREATE TABLE rental (
 );
 CREATE INDEX rental_date_idx ON rental(rental_date);
 CREATE INDEX rental_film_idx ON rental(film_id);
+CREATE TABLE category (
+    category_id INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL
+);
+CREATE TABLE store (
+    store_id    INTEGER PRIMARY KEY,
+    city        TEXT NOT NULL,
+    country     TEXT NOT NULL
+);
+CREATE TABLE staff (
+    staff_id    INTEGER PRIMARY KEY,
+    first_name  TEXT NOT NULL,
+    last_name   TEXT NOT NULL,
+    store_id    INTEGER NOT NULL REFERENCES store(store_id)
+);
+CREATE TABLE address (
+    address_id  INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customer(customer_id),
+    city        TEXT NOT NULL,
+    country     TEXT NOT NULL
+);
+CREATE TABLE payment (
+    payment_id   INTEGER PRIMARY KEY,
+    rental_id    INTEGER NOT NULL REFERENCES rental(rental_id),
+    staff_id     INTEGER NOT NULL REFERENCES staff(staff_id),
+    amount       REAL NOT NULL,
+    payment_date TEXT NOT NULL
+);
+CREATE INDEX staff_store_idx ON staff(store_id);
+CREATE INDEX address_customer_idx ON address(customer_id);
+CREATE INDEX payment_rental_idx ON payment(rental_id);
+CREATE INDEX payment_staff_idx ON payment(staff_id);
 '''
 
 
@@ -103,6 +142,23 @@ def build_database(path, now=None, seed=42):
         returned = None if (due_back > now or rng.random() < 0.01) else due_back
         rentals.append((rental_id, film[0], rng.randint(1, CUSTOMER_COUNT), rented.strftime('%Y-%m-%d %H:%M:%S'),
                         returned.strftime('%Y-%m-%d %H:%M:%S') if returned else None, film[5]))
+
+    # Five more tables, purely additive - film/customer/rental's own rows (and the rng draws that produced
+    # them, above) are untouched, so this must only ever append new rng consumption after this point, never
+    # interleave with it, or the rental rows a reseed would produce could silently change.
+    categories = [(i, name) for i, name in enumerate(CATEGORIES, start=1)]
+    stores = [(i, _CITIES[idx], _COUNTRIES[idx]) for i, idx in enumerate(_STORE_COUNTRY_INDEXES, start=1)]
+    staff = []
+    for store_id, _city, _country in stores:
+        for _ in range(2):
+            first, last = rng.choice(_FIRST), rng.choice(_LAST)
+            staff.append((len(staff) + 1, first, last, store_id))
+    addresses = []
+    for i in range(1, CUSTOMER_COUNT + 1):
+        idx = rng.randrange(len(_COUNTRIES))
+        addresses.append((i, i, _CITIES[idx], _COUNTRIES[idx]))
+    payments = [(rental[0], rental[0], rng.choice(staff)[0], rental[5], rental[3]) for rental in rentals]
+
     tmp_path = f'{path}.tmp'
     conn = sqlite3.connect(tmp_path)
     try:
@@ -110,6 +166,11 @@ def build_database(path, now=None, seed=42):
         conn.executemany('INSERT INTO film VALUES (?, ?, ?, ?, ?, ?)', films)
         conn.executemany('INSERT INTO customer VALUES (?, ?, ?, ?, ?)', customers)
         conn.executemany('INSERT INTO rental VALUES (?, ?, ?, ?, ?, ?)', rentals)
+        conn.executemany('INSERT INTO category VALUES (?, ?)', categories)
+        conn.executemany('INSERT INTO store VALUES (?, ?, ?)', stores)
+        conn.executemany('INSERT INTO staff VALUES (?, ?, ?, ?)', staff)
+        conn.executemany('INSERT INTO address VALUES (?, ?, ?, ?)', addresses)
+        conn.executemany('INSERT INTO payment VALUES (?, ?, ?, ?, ?)', payments)
         conn.commit()
     finally:
         conn.close()
@@ -184,11 +245,14 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     'examples-export': {
         'title': 'Data export API',
         'queries': [
-            _query('example_all_rentals', f'Every rental - about {RENTAL_COUNT:,} rows. Run it with '
-                   '?stream=true&format=csv to export it in constant memory',
+            _query('example_all_rentals', 'Every rental with its payment, staff and store - about '
+                   f'{RENTAL_COUNT:,} rows. Run it with ?stream=true&format=csv to export it in constant memory',
                    'SELECT r.rental_id, r.rental_date, r.return_date, r.amount, f.title, f.category, '
-                   "c.first_name || ' ' || c.last_name AS customer, c.country "
-                   f'{_FILM_JOIN} JOIN customer c ON c.customer_id = r.customer_id ORDER BY r.rental_id'),
+                   "c.first_name || ' ' || c.last_name AS customer, c.country, "
+                   "s.first_name || ' ' || s.last_name AS staff, st.city AS store_city "
+                   f'{_FILM_JOIN} JOIN customer c ON c.customer_id = r.customer_id '
+                   'JOIN payment p ON p.rental_id = r.rental_id JOIN staff s ON s.staff_id = p.staff_id '
+                   'JOIN store st ON st.store_id = s.store_id ORDER BY r.rental_id'),
             _query('example_rentals_since', 'Rentals from a date onward - for incremental exports',
                    "SELECT r.rental_id, r.rental_date, r.amount, f.title "
                    f'{_FILM_JOIN} WHERE date(r.rental_date) >= :since ORDER BY r.rental_id',

@@ -69,9 +69,27 @@ class DatabaseTests(ExamplesTestCase):
 
     def test_shape_and_size(self):
         conn = self.build()
-        counts = {t: conn.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in ('film', 'customer', 'rental')}
+        tables = ('film', 'customer', 'rental', 'category', 'store', 'staff', 'address', 'payment')
+        counts = {t: conn.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0] for t in tables}
         self.assertEqual(counts, {'film': examples.FILM_COUNT, 'customer': examples.CUSTOMER_COUNT,
-                                  'rental': examples.RENTAL_COUNT})
+                                  'rental': examples.RENTAL_COUNT, 'category': len(examples.CATEGORIES),
+                                  'store': 3, 'staff': 6, 'address': examples.CUSTOMER_COUNT,
+                                  'payment': examples.RENTAL_COUNT})
+
+    def test_the_new_tables_have_real_foreign_keys_with_no_orphans_or_duplicates(self):
+        conn = self.build()
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM payment WHERE rental_id NOT IN (SELECT rental_id FROM rental)').fetchone()[0], 0)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM payment WHERE staff_id NOT IN (SELECT staff_id FROM staff)').fetchone()[0], 0)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM (SELECT rental_id, COUNT(*) c FROM payment GROUP BY rental_id HAVING c > 1)'
+        ).fetchone()[0], 0, 'payment must be exactly 1:1 with rental, or example_all_rentals\' row count would drift')
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM staff WHERE store_id NOT IN (SELECT store_id FROM store)').fetchone()[0], 0)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM address WHERE customer_id NOT IN (SELECT customer_id FROM customer)'
+        ).fetchone()[0], 0)
 
     def test_the_shipped_size_is_about_twenty_thousand_rentals(self):
         with mock.patch.object(examples, 'RENTAL_COUNT', 20000):

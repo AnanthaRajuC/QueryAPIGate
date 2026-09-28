@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **The example database grows from 3 tables to 8 (BACKLOG #27).** New `category`, `store`, `staff`,
+  `address` and `payment` tables, each with a real foreign key (except `category`, a deliberate plain
+  lookup table joined into nothing), generated purely additively - `film`/`customer`/`rental`'s own rows
+  are untouched, and their generation order is unchanged, so this doesn't affect anything already built on
+  them. `example_all_rentals` (the export scenario) now joins six tables - `rental`, `film`, `customer`,
+  `payment`, `staff`, `store` - `payment` is exactly 1:1 with `rental` by construction, so the row count
+  stays exactly `RENTAL_COUNT`, same as before. Gives the schema browser's PK/FK badges and the Access
+  tab's Query flow diagram real, richer data to show.
 - **A fifth example role, `example-executive` (BACKLOG #27), spanning two collections at once.** Read-only,
   `300/hour`, granted both `examples-reporting` and `examples-dashboard` - the one thing none of the four
   existing example scenarios showed on its own: a role (and so a key created from it) reaching more than

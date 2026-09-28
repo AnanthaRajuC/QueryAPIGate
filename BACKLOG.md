@@ -650,14 +650,20 @@ collection plus a role shaped like the key that fronts it (built from the collec
 **Strengthened afterward:** a fifth role, `example-executive` (`EXTRA_ROLES` in `examples.py`, deliberately
 separate from the four `SCENARIOS` - nothing iterates it 1:1 with a collection), read-only and granted both
 `examples-reporting` and `examples-dashboard` at once - the one access-model capability the four scenarios
-never demonstrated on their own (a role/key spanning more than one collection). Considered and deliberately
-left out: a Mongo scenario (needs a real running server, unlike the generated SQLite database, so it can't
-be a `load()`-and-it-just-works fixture the way the rest is); a richer schema or more queries (real
-multi-table joins with real foreign keys already exist - `rental.film_id`/`rental.customer_id`); a second
-version of an existing query (would need to change `load()`'s name-only idempotency tracking, real risk to
-a load-bearing invariant `tests/test_examples.py` heavily exercises, for a cosmetic History-tab demo).
-`documentation/EXAMPLES.md` also now points at the newer schema/parsing features using data that already
-exists: PK/FK badges on `rental`'s real foreign keys, the Access tab's Query flow diagram, table-scoped
+never demonstrated on their own (a role/key spanning more than one collection).
+
+The example database also grew from 3 tables to 8, at explicit follow-up request: `category`, `store`,
+`staff`, `address` and `payment` (each with a real foreign key, except `category` - a deliberate plain
+lookup table, joined into nothing, a contrast case), added purely additively so `film`/`customer`/`rental`'s
+own rows and the `rng` sequence that produces them are byte-for-byte unchanged. `example_all_rentals` (the
+export scenario) now joins six tables - `rental`, `film`, `customer`, `payment`, `staff`, `store` -
+`payment` is exactly 1:1 with `rental` by construction, so its row count is still exactly `RENTAL_COUNT`,
+unchanged. Still deliberately left out: a Mongo scenario (needs a real running server, unlike the generated
+SQLite database, so it can't be a `load()`-and-it-just-works fixture the way the rest is); a second version
+of an existing query (would need to change `load()`'s name-only idempotency tracking, real risk to a
+load-bearing invariant `tests/test_examples.py` heavily exercises, for a cosmetic History-tab demo).
+`documentation/EXAMPLES.md` points at the newer schema/parsing features using this real data: PK/FK badges
+throughout the new tables, the Access tab's Query flow diagram on the new 6-table join, table-scoped
 autocomplete, and real SQL pretty-printing.
 
 **Safety properties, each guarded by a test that was confirmed to fail when broken:** everything installed is marked
