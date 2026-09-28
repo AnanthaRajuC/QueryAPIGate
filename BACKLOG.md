@@ -1076,6 +1076,28 @@ and would be its own follow-up. **Not applicable to mongo** in this version - th
 suggest from at all (v1's Mongo schema is collection names only, see BACKLOG #36's deferred schema-sampling
 item), so this would need that groundwork first for mongo specifically.
 
+## 40. Real SQL parsing for the Access tab's "Query flow" panel
+
+**Status: shipped as a table/join-extraction v1 only.** Until now the only "which tables does this query
+touch" signal anywhere in the app was `computeTableMatches()` (`ui.py`), a client-side word-boundary text
+search over the raw SQL - explicitly documented in its own comment as "not real parsing," with known false-
+positive/negative risk from aliases, comments and string literals. The user wanted a detailed per-query
+visualization on the saved-query detail view's Access tab (shipped in 0.9.0); that need was the forcing
+function for finally adding a real parser rather than building more UI on top of the heuristic.
+
+New `queryapigate/sqlflow.py` parses a saved query's SQL with `sqlglot` (new `flow` extra) and extracts its
+tables and joins; `GET /query_flow` serves it; the Access tab shows it as a plain best-effort list/badge
+panel (no new charting/graph library - matches this project's stance of bar rows over charts elsewhere).
+Never touches `sqltools.validate_sql` or any execution path - a parse failure just shows an explanatory
+line, never blocks or raises.
+
+**Deferred, each its own separately-scoped unit of work:** replacing `computeTableMatches()`/the Access
+map's own table filter with real parsing; column-level lineage; real write-target detection (the #21 table-
+allow-list note above still applies - this v1 is read-only best-effort, not a security guard); parser-aware,
+table-scoped autocomplete (#39); a real node-graph diagram instead of the plain list. **H2/JDBC connections
+are permanently out of scope for this parser**, not a gap to fill later - those can point at any vendor's
+SQL over a generic bridge, and there is no "generic JDBC" sqlglot dialect to guess at.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #28, #29, #30, #31, #32, #33 and
@@ -1087,6 +1109,8 @@ still open. Open: the table-allow-list half of #21, not started, and not recomme
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
 (general API latency, connection pooling and cache performance benchmarks), #27 (real-world example APIs
 under `examples/`), #37 (primary/foreign key markers in the schema browser), #38 (a "show CREATE TABLE" icon)
-and #39 (autocomplete columns while typing), none started. The "still open" note under #9 (confirming its CI
-changes on a real run) is a smaller
+and #39 (autocomplete columns while typing), none started; #40 is shipped as its table/join-extraction v1
+only, with the Access-map heuristic replacement, column lineage, write-target detection, table-scoped
+autocomplete and H2/JDBC coverage all deferred (H2/JDBC permanently, the rest as separately-scoped follow-
+ups). The "still open" note under #9 (confirming its CI changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.

@@ -243,6 +243,37 @@ class SavedQueryTests(ApiTestCase):
         self.assertEqual(self.client.get('/view_file_content').status_code, 400)
         self.assertEqual(self.client.get('/view_file_content?filename=nope').status_code, 404)
 
+    def test_query_flow_extracts_tables_and_joins(self):
+        self.save('q', sql='SELECT a.name FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id',
+                  connection_name='lite')
+        res = self.client.get('/query_flow', query_string={'filename': 'q'})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['tables'], ['actor', 'film_actor'])
+        self.assertEqual(data['joins'], [{'left': 'actor', 'right': 'film_actor', 'type': 'JOIN',
+                                          'on': 'a.actor_id = fa.actor_id'}])
+        self.assertIsNone(data['error'])
+
+    def test_query_flow_on_a_mongo_saved_query_is_gracefully_unavailable(self):
+        self.client.patch('/connections', json={'connections': {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
+        self.client.patch('/save_sql_to_file', json={
+            'filename': 'm', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'users', 'mongo_filter': {}, 'connection_name': 'mg'})
+        res = self.client.get('/query_flow', query_string={'filename': 'm'})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data, {'tables': [], 'joins': [], 'error': "SQL analysis isn't available for this query"})
+
+    def test_query_flow_requires_admin(self):
+        self.save('q')
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
+        self.addCleanup(os.environ.pop, 'QUERYAPIGATE_API_KEY', None)
+        res = self.client.get('/query_flow', query_string={'filename': 'q'})
+        self.assertEqual(res.status_code, 401)
+        ok = self.client.get('/query_flow', query_string={'filename': 'q'}, headers={'X-API-Key': 'k3y'})
+        self.assertEqual(ok.status_code, 200)
+
 
 class ConnectionTests(ApiTestCase):
     def test_get_masks_passwords(self):

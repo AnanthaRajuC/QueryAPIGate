@@ -26,6 +26,7 @@ from . import (
     pool,
     postman,
     schema,
+    sqlflow,
     sqltools,
     store,
     ui,
@@ -613,6 +614,22 @@ def view_file_content():
     path = store.resolve_saved_file(request.args.get('filename'))
     with open(path, 'r') as f:
         return jsonify({'content': f.read()}), 200
+
+
+@bp.route('/query_flow', methods=['GET'])
+def query_flow():
+    """Best-effort tables/joins a saved query's SQL touches - see sqlflow.py. Never raises: a query this
+    can't analyze (unsupported dialect, a Mongo query, a parse failure) comes back with an `error` string
+    and empty tables/joins for the UI to show as a plain hint, not a broken panel."""
+    require_admin()
+    path = store.resolve_saved_file(request.args.get('filename'))
+    content = store.load_versions(path)
+    _, saved = store.select_version(content, get_int(request.args.get('version'), 'version'))
+    if saved.get('query_type') == 'mongo' or not isinstance(saved.get('sql_query'), str):
+        return jsonify({'tables': [], 'joins': [], 'error': "SQL analysis isn't available for this query"}), 200
+    connection_name = saved.get('connection_name')
+    dialect = store.get_connection(connection_name)['db'] if connection_name else None
+    return jsonify(sqlflow.extract_flow(saved['sql_query'], dialect)), 200
 
 
 @bp.route('/save_sql_to_file', methods=['PATCH'])

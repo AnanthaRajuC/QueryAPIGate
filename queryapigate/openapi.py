@@ -190,6 +190,15 @@ def build_spec(version, saved_queries=None):
                 'summary': 'Raw content of a saved query file', 'tags': ['Saved queries'],
                 'parameters': [{'name': 'filename', 'in': 'query', 'required': True, 'schema': {'type': 'string'}}],
                 'responses': {'200': {'description': 'File content'}, **_ERRORS}}},
+            '/query_flow': {'get': {
+                'summary': "Best-effort tables/joins a saved query's SQL touches", 'tags': ['Saved queries'],
+                'description': 'Real SQL parsing (via sqlglot) for the Access tab\'s query-flow panel; not '
+                    'available for h2, jdbc or mongo connections, or a query sqlglot cannot parse - those '
+                    'come back with an explanatory "error" and empty tables/joins rather than failing.',
+                'parameters': [{'name': 'filename', 'in': 'query', 'required': True, 'schema': {'type': 'string'}},
+                               {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'}}],
+                'responses': {'200': {'description': 'Detected tables and joins, or an explanatory error'},
+                             **_ERRORS}}},
             '/saved_sql/{name}': {'delete': {
                 'summary': 'Delete a saved query, or one version with ?version=', 'tags': ['Saved queries'],
                 'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}},

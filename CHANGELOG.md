@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Real SQL parsing for the Access tab's "Query flow" panel (BACKLOG #40, v1: tables and joins).** A new
+  `queryapigate/sqlflow.py` parses a saved query's SQL with `sqlglot` (new `flow` extra) and extracts the
+  tables and joins it touches, shown as a best-effort list on the saved-query detail view's Access tab
+  (`GET /query_flow`). Supports `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb` connections;
+  `h2`/`jdbc`/`mongo` (and any query sqlglot can't parse) get a plain explanatory message instead - this
+  never touches the execution or write-guard path, and a parse failure never blocks or raises. Independent
+  from, and more accurate than, the Access map's own `computeTableMatches()` text-search heuristic, which
+  is unchanged in this slice.
+
 ## [0.9.0] - 2026-09-28
 
 ### Added

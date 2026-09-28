@@ -2843,6 +2843,40 @@ function accessBox(queryName, reach) {
     : null;
   return h('div', { className: 'access-box' }, summary, keyList, roleList);
 }
+var queryFlowCache = {};
+/** The Access tab's "Query flow" panel: the tables and joins this query's SQL actually touches, per real
+ * SQL parsing on the server (sqlflow.py, via sqlglot) - more accurate than, and independent from, the
+ * Access map's own computeTableMatches() text-search heuristic, but only for the dialects sqlglot
+ * understands (h2/jdbc/mongo come back with an explanatory `error` instead). Cached per file+version,
+ * same pattern as getContent(). */
+function renderQueryFlowPanel(body, f, v) {
+  var key = f.filename + ':' + v.version;
+  body.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Query flow',
+    h('span', { className: 'hint', style: 'margin-left:8px;font-weight:400', text: 'best effort, detected from this query’s SQL' })));
+  var panel = h('div', { className: 'access-box' });
+  body.appendChild(panel);
+  if (queryFlowCache[key]) { paintQueryFlow(panel, queryFlowCache[key]); return; }
+  panel.appendChild(h('div', { className: 'hint', text: 'Analyzing…' }));
+  apiJson('query_flow?filename=' + enc(f.filename) + '&version=' + v.version).then(function (data) {
+    if (!data) return;
+    queryFlowCache[key] = data;
+    if (selected.name === f.filename && selected.version === v.version && selected.tab === 'access') renderDetail();
+  });
+}
+function paintQueryFlow(panel, data) {
+  clear(panel);
+  if (data.error) { panel.appendChild(h('div', { className: 'hint', text: data.error })); return; }
+  if (!data.tables.length) { panel.appendChild(h('div', { className: 'hint', text: 'No tables detected.' })); return; }
+  panel.appendChild(h('div', { className: 'access-reach' }, data.tables.map(function (t) { return h('span', { className: 'tag', text: t }); })));
+  if (data.joins.length) {
+    panel.appendChild(h('div', { className: 'hint', style: 'margin-top:10px', text: 'Joins' }));
+    data.joins.forEach(function (j) {
+      panel.appendChild(h('div', { className: 'mono', style: 'font-size:12px;margin-top:4px' },
+        j.left + '  —  ' + j.type + '  —  ' + j.right,
+        j.on ? h('span', { className: 'dim', text: '  ON ' + j.on }) : null));
+    });
+  }
+}
 /** The saved-query detail view's API Keys tab: every key reach() found for this one query, with the same
  * columns the main API keys screen shows (minus Scope/IPs/Usage, which describe the key as a whole rather
  * than this one query) plus the Q/C/W reach column reachDot() also gives the compact panel above. */
@@ -3350,19 +3384,20 @@ function renderDetail() {
       metaItem('connection', v.connection_name || '—'), metaItem('collection', f.collection || '—'), metaItem('author', v.author || '—'),
       metaItem('modified', v.last_modified_at || v.created_at || '—'),
       tagsText ? metaItem('tags', tagsText) : null),
-    accessBox(f.filename, reach),
     h('div', { className: 'subtabs', role: 'tablist' },
       subtab('run', 'Run'), subtab('sql', 'SQL'),
       subtab('history', 'History', h('span', { className: 'count', text: history.length ? String(history.length) : '' })),
       subtab('curl', 'Curl'),
       subtab('keys', 'API Keys', h('span', { className: 'count', text: reach.keys.length ? String(reach.keys.length) : '' })),
-      subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' }))));
+      subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' })),
+      subtab('access', 'Access')));
   var body = h('div', { className: 'd-body' });
   box.appendChild(head);
   box.appendChild(body);
   if (selected.tab === 'sql') renderSqlTab(body, f, v);
   else if (selected.tab === 'keys') renderQueryKeysTab(body, reach);
   else if (selected.tab === 'roles') renderQueryRolesTab(body, reach);
+  else if (selected.tab === 'access') { body.appendChild(accessBox(f.filename, reach)); renderQueryFlowPanel(body, f, v); }
   else if (selected.tab === 'history') renderHistoryTab(body, v);
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
   else renderRunTab(body, f, v, isLatest);
