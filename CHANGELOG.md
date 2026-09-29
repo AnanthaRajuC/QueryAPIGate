@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-29
+
 ### Added
 - **A "requests per day" chart below the meta row (BACKLOG #52).** The saved-query detail view now shows a
   daily request-count column chart right under the connection/collection/author/modified row, visible on
