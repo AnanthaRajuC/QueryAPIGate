@@ -1445,6 +1445,18 @@ right after Access) closes that gap:
   it. Saving reloads `filesCache`, so the existing "Cached · Ns" header chip (#48) and the Caching tab's own
   table both stay in sync immediately, with no page reload.
 
+## 50. A tables/joins flow diagram on the SQL tab
+
+**Status: shipped.** The Access tab's "Query flow" diagram (tables with join edges, flowing into the query,
+flowing out to the keys/roles that reach it) is now also shown on the SQL tab - scoped down to just the
+query's own structure, since that tab isn't about reach. `renderFlowDiagram()` gained a nullable `reach`
+parameter: `null` renders only the tables/query columns and skips the reach column and its edges, sharing
+every other line of the existing diagram/edge-drawing code (`anchor()`/`curve()`/`edge()`/`label()`, the
+table↔query edges) rather than duplicating it into a second function. A new `renderSqlQueryFlowPanel()`
+mirrors `renderQueryFlowPanel()`'s exact fetch-then-paint shape and shares the same `queryFlowCache` (keyed
+by filename:version) every other flow consumer already uses - free if the Access tab already loaded this
+query's flow, one `/query_flow` call otherwise.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1462,7 +1474,7 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47, #48 and #49 are shipped (#45's "empty collections" item
+out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49 and #50 are shipped (#45's "empty collections" item
 excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
 queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
 "still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A tables/joins flow diagram on the SQL tab (BACKLOG #50).** The saved-query SQL tab now shows the same
+  "Query flow" diagram the Access tab does - tables and their join edges, flowing into the query - minus
+  the keys/roles column, since this tab is about the query's own structure, not who can reach it. Shares
+  the same cached `/query_flow` fetch, so it's instant if the Access tab already loaded it.
 - **A per-query Cache tab (BACKLOG #49).** The saved-query detail view gets a new "Cache" tab, right after
   Access, showing and editing that version's `cache_ttl` - an on/off toggle plus a TTL field, saved via a
   new `PUT /saved_sql/<name>/cache_ttl` (admin only). Editing it is not a new version, the same way moving

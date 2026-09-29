@@ -3455,16 +3455,34 @@ function paintQueryFlow(panel, data, reach, queryName) {
   if (!data.tables.length) { panel.appendChild(h('div', { className: 'hint', text: 'No tables detected.' })); return; }
   renderFlowDiagram(panel, data, reach, queryName);
 }
+/** The SQL tab's own "Query flow" panel - the same diagram the Access tab shows, minus the reach column,
+ * since this tab is about the query's own structure, not who can reach it. Mirrors
+ * renderQueryFlowPanel()'s fetch-then-paint shape exactly, sharing the same queryFlowCache (keyed by
+ * filename:version) - free if the Access tab already loaded this query's flow, one call otherwise. */
+function renderSqlQueryFlowPanel(body, f, v) {
+  body.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Query flow',
+    h('span', { className: 'hint', style: 'margin-left:8px;font-weight:400', text: 'best effort, detected from this query’s SQL' })));
+  var panel = h('div', { className: 'access-box' });
+  body.appendChild(panel);
+  var key = f.filename + ':' + v.version;
+  if (queryFlowCache[key]) { paintQueryFlow(panel, queryFlowCache[key], null, f.filename); return; }
+  panel.appendChild(h('div', { className: 'hint', text: 'Analyzing…' }));
+  getQueryFlow(f.filename, v.version).then(function (data) {
+    if (!data) return;
+    if (selected.name === f.filename && selected.version === v.version && selected.tab === 'sql') renderDetail();
+  });
+}
 var FLOW_MAX_PER_COL = 10;
-/** A three-column node-link diagram: this query's tables (with join edges between them) on the left,
- * flowing into the query itself, flowing out to the keys/roles that can call it (queryReach()'s result,
- * shared with accessBox()/the API Keys/Roles tabs so this can never disagree with them). Table nodes reuse
- * the plain `.tag` look; key/role nodes reuse accessPill() exactly, so a key's Q/C/W badge and revoked/
- * active styling look identical here and there. Node boxes are ordinary HTML (so they get that styling and
- * text layout for free); only the connecting lines are SVG, drawn from each node's real getBoundingClientRect()
- * after layout - no hand-rolled position math, the same "measure the real DOM" approach
- * attachColumnAutocomplete()'s caret mirror already uses. Rebuilt fresh on every repaint, so it doesn't
- * track a live window resize while open - an accepted trade-off, not a bug. */
+/** A node-link diagram: this query's tables (with join edges between them) on the left, flowing into the
+ * query itself - and, when `reach` is given, flowing out to the keys/roles that can call it (queryReach()'s
+ * result, shared with accessBox()/the API Keys/Roles tabs so this can never disagree with them). `reach`
+ * null (the SQL tab's own, reach-less flow panel) renders just the two table/query columns. Table nodes
+ * reuse the plain `.tag` look; key/role nodes reuse accessPill() exactly, so a key's Q/C/W badge and
+ * revoked/active styling look identical here and there. Node boxes are ordinary HTML (so they get that
+ * styling and text layout for free); only the connecting lines are SVG, drawn from each node's real
+ * getBoundingClientRect() after layout - no hand-rolled position math, the same "measure the real DOM"
+ * approach attachColumnAutocomplete()'s caret mirror already uses. Rebuilt fresh on every repaint, so it
+ * doesn't track a live window resize while open - an accepted trade-off, not a bug. */
 function renderFlowDiagram(container, data, reach, queryName) {
   var wrap = h('div', { className: 'flow-diagram' });
   container.appendChild(wrap);
@@ -3487,17 +3505,20 @@ function renderFlowDiagram(container, data, reach, queryName) {
   var queryNode = h('span', { className: 'flow-node flow-query', text: queryName });
   queryCol.appendChild(queryNode);
 
-  var keys = reach.keys.slice(0, FLOW_MAX_PER_COL);
-  var roles = reach.roles.slice(0, Math.max(0, FLOW_MAX_PER_COL - keys.length));
-  var reachCol = h('div', { className: 'flow-col' });
   var reachNodes = [];
-  keys.forEach(function (k) { var node = accessPill(k, false); reachCol.appendChild(node); reachNodes.push(node); });
-  roles.forEach(function (r) { var node = accessPill(r, true); reachCol.appendChild(node); reachNodes.push(node); });
-  var reachOmitted = (reach.keys.length - keys.length) + (reach.roles.length - roles.length);
-  if (!keys.length && !roles.length) reachCol.appendChild(h('div', { className: 'hint', text: 'Only the admin key can run it.' }));
-  else if (reachOmitted > 0) reachCol.appendChild(h('div', { className: 'hint', text: '+' + reachOmitted + ' more — see above' }));
+  if (reach) {
+    var keys = reach.keys.slice(0, FLOW_MAX_PER_COL);
+    var roles = reach.roles.slice(0, Math.max(0, FLOW_MAX_PER_COL - keys.length));
+    var reachCol = h('div', { className: 'flow-col' });
+    keys.forEach(function (k) { var node = accessPill(k, false); reachCol.appendChild(node); reachNodes.push(node); });
+    roles.forEach(function (r) { var node = accessPill(r, true); reachCol.appendChild(node); reachNodes.push(node); });
+    var reachOmitted = (reach.keys.length - keys.length) + (reach.roles.length - roles.length);
+    if (!keys.length && !roles.length) reachCol.appendChild(h('div', { className: 'hint', text: 'Only the admin key can run it.' }));
+    else if (reachOmitted > 0) reachCol.appendChild(h('div', { className: 'hint', text: '+' + reachOmitted + ' more — see above' }));
+  }
 
-  cols.appendChild(tableCol); cols.appendChild(queryCol); cols.appendChild(reachCol);
+  cols.appendChild(tableCol); cols.appendChild(queryCol);
+  if (reach) cols.appendChild(reachCol);
 
   var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'flow-edges');
@@ -4177,6 +4198,7 @@ async function renderSqlTab(body, f, v) {
   body.appendChild(h('div', { className: 'toolbar', style: 'margin:-6px 0 0' },
     h('button', { type: 'button', className: 'btn sm ghost', text: 'Copy SQL', onclick: function () { copyText(shown); } }), toggle));
   body.appendChild(raw);
+  renderSqlQueryFlowPanel(body, f, v);
 }
 
 function renderHistoryTab(body, v) {
