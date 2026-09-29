@@ -1177,6 +1177,134 @@ recent-**completed**-requests tail, not a live in-flight view - and only saved-q
 `/q/<name>` are recorded this way, not ad-hoc `/execute_sql` calls from Run SQL, which have no saved query
 to attach a history entry to.
 
+## 42. An MCP server exposing saved queries as tools
+
+**Impact:** every saved query is already a named, permission-scoped, parameter-validated unit of work - the
+same shape an MCP tool wants. An MCP server would let an AI agent call a saved query directly (list what
+it's allowed to run, see its parameter schema, invoke it) instead of an agent having to shell out to `curl`
+against the REST API, the way `/catalog`/`/openapi.json` already let a human or a REST client discover the
+same thing.
+
+**Notes:** the discovery and validation work already exists and should be reused, not rebuilt - the same
+parameter-schema logic `openapi.py`/`postman.py` already use to describe a saved query's `query_parameters`
+becomes an MCP tool's input schema; tool listing should honor exactly the same per-key/collection scoping
+`apikeys.can_use_query`/`can_use_collection` already enforce for `/catalog`, so an agent's key can never see
+or call more than the identical REST key could; execution should go through the exact same
+`engine.execute_sql`/`run_saved` path (caching, rate limiting, audit logging all stay unified, no parallel
+code path to keep in sync). The real design decision is transport: MCP supports both `stdio` (for an agent
+embedding the server as a local subprocess) and a remote HTTP transport (the current spec's "Streamable
+HTTP") - since this is a self-hosted server people expose over a network, not a local CLI tool, the HTTP
+transport is almost certainly the right one, authenticated the same way as everything else here
+(`X-API-Key`). Not started.
+
+**Making a saved query a genuinely first-class MCP tool, not just a REST endpoint wrapped in MCP's shape:**
+real MCP tool concepts, and what each needs from a saved query's current definition -
+
+- **`description`** - already exists, but written for the wrong audience. Today's descriptions are admin
+  documentation ("Most-rented films, optionally within one category"); an MCP tool description is what the
+  *model* uses to decide whether to call the tool. No new field - a writing discipline for saved-query
+  descriptions going forward, maybe a reminder in the save form.
+- **`inputSchema`** - already derivable, not yet built. `query_parameters`' `type`/`min`/`max`/`enum`/
+  `pattern`/`required`/`default` shape already gets turned into JSON Schema for `/openapi.json` - the same
+  translation produces a tool's `inputSchema`. Zero new data.
+- **`outputSchema`** - a real mismatch, not just missing code. A saved query's result columns aren't
+  statically known (arbitrary, admin-editable SQL) - either skip it (the spec allows a tool with no
+  declared output shape) or add a genuinely new field where the admin declares the expected result shape.
+  Not free either way.
+- **Annotations (`readOnlyHint`/`destructiveHint`/`idempotentHint`)** - partially free. `readOnlyHint` and
+  `idempotentHint` map directly from `sqltools.first_keyword()`'s existing statement classification (already
+  used for the write-guard). `destructiveHint` is genuinely new - today's model only distinguishes read-only
+  vs. `allow_writes`, not "does this delete/overwrite," so a real destructive query and a safe upsert would
+  look identical under the current classification.
+- **Structured tool errors** - a real protocol difference, not a saved-query change. MCP wants a failed
+  tool call returned as a normal result with `isError: true` so the model can see and reason about the
+  failure, not a transport-level error the way `ApiError`/HTTP status codes work today. Needs a translation
+  layer at the MCP boundary.
+- **Result size** - no REST equivalent to reuse. `?page_size=`/`?stream=true` don't translate to a tool
+  call - an LLM's context can't hold a 20,000-row result. The MCP layer needs its own sane default cap,
+  independent of what a saved query's caller might request over REST.
+- **Elicitation for writes** - worth a deliberate decision, not required by the spec. Newer MCP supports
+  the server asking the client to get human confirmation mid-call - worth considering for any
+  `allow_writes` saved query, given an LLM autonomously running a write is a different risk profile than a
+  human clicking Run in the admin UI.
+
+Net: `inputSchema`, the read-only/idempotent hints and the name/description fields are close-to-free reuse
+of data that already exists; `outputSchema` and `destructiveHint` are real new design decisions; structured
+errors and result-size capping are protocol-boundary work, not changes to the saved-query definition itself.
+
+## 43. Server-Sent Events (SSE) for live updates, instead of polling
+
+**Impact:** several places in the admin UI already poll on a fixed interval - Home's "Recent API requests"
+panel (every 5s, #41), the example dashboard scenario's own KPI queries (meant to be polled every few
+seconds, `documentation/EXAMPLES.md`), Metrics' manual refresh. A push-based feed would show a new query run
+the moment it happens instead of up to 5 seconds later, and stop paying for a request that comes back with
+nothing new most of the time.
+
+**Notes:** Flask can serve an SSE stream the same way `formats.py`'s streaming exports already stream a
+response body - mechanically straightforward. The real cost is fan-out, not the wire format:
+`store.record_execution()` would need to publish each new entry to something every connected SSE client can
+read from, which for a single-process dev server is a trivial in-memory broadcast, but **this project
+explicitly supports a multi-worker `gunicorn` deployment** (the `server` extra) - an event published in one
+worker process never reaches a client whose SSE connection landed on a different worker, so a naive
+in-memory implementation would silently miss updates for some clients in that (likely common, production)
+deployment shape. That needs either a shared broker (Redis pub/sub - a new required dependency for anyone
+wanting this feature) or scoping the v1 to single-worker deployments only, clearly documented as such. Worth
+picking one specific consumer to build first (most likely Home's recent-requests panel) rather than a
+generic "replace every poll with SSE" rewrite. Not started.
+
+## 44. Home tab: surface real health signals, not just counts
+
+**Impact:** Home (#41) currently shows counts (connections, saved queries, keys, roles, requests, error
+rate) but nothing that flags "something needs attention" - the whole point of a health-focused landing tab.
+Several genuinely useful signals already exist elsewhere in the app and just aren't surfaced there yet.
+
+**Notes, cheapest first:**
+- **Three more stat tiles from data already being fetched.** `renderHome()` already parses `metricsSeries`
+  for its Requests/Error rate tiles - `queryapigate_active_queries` (queries genuinely running right now,
+  the one truly live signal available), `queryapigate_pool_idle_connections` and
+  `queryapigate_rate_limit_rejections_total` are already computed by `renderMetrics()` for the Metrics tab
+  from that same series and just need adding to Home's tile row. No new fetch, no new metric.
+- **Keys expiring soon / already expired.** `apiKeysCache` and the existing `isKeyExpired()` helper
+  already answer this; nothing today surfaces it anywhere outside individually opening each key.
+- **Connections with recent errors.** `connectionsCache[name].usage.errors` is already tracked per
+  connection (`metrics.summary_for_connection`) - flagging any connection with errors > 0 is a real signal,
+  and costs nothing new to compute.
+- **Deferred, heavier:** a true live reachability check per connection (an actual round-trip via
+  `/connections/<name>/test` on every Home load, not a usage-history heuristic) - more honest but a real
+  per-connection cost paid on every visit, worth scoping deliberately rather than bundling in; p95/avg
+  query latency from the existing `queryapigate_query_duration_seconds`/`_request_duration_seconds`
+  histograms - real value, but needs histogram bucket math client-side that the three stat tiles above
+  don't. Not started.
+
+## 45. More zero-cost improvements: data already loaded, just not reused yet
+
+**Impact:** a handful of small wins, each surfacing data the app already fetches/tracks somewhere, just not
+in the place it would actually be useful - no new endpoint, no new metric, no new dependency for any of
+them.
+
+**Notes:**
+- **Slowest recent queries.** The same `execution_history` data Home's Recent API requests panel (#41)
+  already aggregates has `duration_ms` on every entry - sorting by that instead of by time surfaces "what's
+  actually slow" for free, on Home or Metrics.
+- **Unused roles.** Every API key already records `created_from_role` when made from one
+  (`apikeys.list_keys()`) - cross-referencing that against the role list gives "N roles have never had a
+  key created from them" (a dead permission template), zero new fetch.
+- **Keys expiring soon, not just already-expired.** The API Keys table already color-codes an *expired*
+  key (and #44 proposes the same for Home); neither flags one expiring soon (e.g. within 7 days) - same
+  `expires_at` field, just a second threshold alongside the existing one.
+- **Empty collections.** `collectionsCache` already tracks collection → query membership - flagging a
+  collection with zero queries in it is free.
+- **FK-aware "copy starter query."** Since #37, a table's columns already carry `primary_key`/
+  `foreign_key` in the schema cache the browser already holds - the schema browser's starter-query button
+  (`schemaBrowser()`'s `selectFn`/⧉ icon) could generate the real `JOIN` when a table has foreign keys,
+  instead of always a bare `SELECT * FROM table`. A real capability upgrade, not just a display tweak, and
+  zero new backend work.
+- **FK hints in table-scoped autocomplete.** The autocomplete popup (#39) already has each column's full
+  schema row (including `foreign_key`) available when it builds its rows - it just doesn't show
+  `→ table.column` next to a foreign key column the way the schema browser's own badges (#37) do.
+
+Not started.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1194,6 +1322,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41 is shipped. The "still open" note under #9 (confirming its CI changes on
-a real run) is a smaller
+out of scope for real parsing; #41 is shipped. #42 (an MCP server exposing saved queries as tools), #43
+(SSE for live updates instead of polling), #44 (Home tab health signals) and #45 (further zero-cost reuse
+of already-loaded data) are queued up next, not started. The "still open" note under #9 (confirming its CI
+changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.
