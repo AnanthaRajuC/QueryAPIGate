@@ -356,6 +356,8 @@ UI_HTML = r"""<!doctype html>
   .schema-table:hover { background: var(--surface-2); }
   .schema-preview { flex: none; width: 22px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 9px; cursor: pointer; }
   .schema-preview:hover { color: var(--accent); }
+  .schema-ddl { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; cursor: pointer; }
+  .schema-ddl:hover { color: var(--accent); }
   .schema-table .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .schema-col { display: flex; justify-content: space-between; gap: 8px; width: 100%; border: 0; background: none; color: inherit; font: 12px var(--mono);
     text-align: left; padding: 6px 10px; cursor: pointer; }
@@ -1011,6 +1013,7 @@ UI_HTML = r"""<!doctype html>
     <div id="apikey-form-slot"></div>
     <div id="role-form-slot"></div>
     <div id="query-info-slot"></div>
+    <div id="table-ddl-slot"></div>
   </div>
 </aside>
 <div id="palette" hidden role="dialog" aria-label="Search">
@@ -1329,7 +1332,7 @@ $('key-bar').onsubmit = function (e) {
 
 // ---- drawer (hosts the connection and saved-query forms) ----
 function openDrawer(slotId, title, kicker) {
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
   $('drawer').classList.add('open');
@@ -1341,7 +1344,7 @@ function closeDrawer() {
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   $('drawer-backdrop').hidden = true;
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot'));
 }
 $('drawer-close').onclick = closeDrawer;
 $('drawer-backdrop').onclick = closeDrawer;
@@ -1500,7 +1503,7 @@ function finishSchemaFetch(key, onDone) {
  * own Database dropdown) point this same tree at that database instead of the connection's configured
  * default - the exact schema-cache key loadSchema() and the access map's table filter also use, so they
  * all agree on the same fetch and never disagree with each other about what's in a given database. */
-function schemaBrowser(insertFn, previewFn, selectFn) {
+function schemaBrowser(insertFn, previewFn, selectFn, ddlFn) {
   var box = h('div', { className: 'schema-browser' });
   var current = null, currentDb = null;
   var view = 'tables', activeTableName = null; // 'tables' or 'columns' - which one activeTableName is showing
@@ -1508,6 +1511,7 @@ function schemaBrowser(insertFn, previewFn, selectFn) {
   function showTables() { view = 'tables'; paint(); }
   function showColumns(name) { view = 'columns'; activeTableName = name; paint(); }
   function paintTables(content, entry) {
+    var showDdl = ddlFn && DDL_DIALECTS.indexOf((connectionsCache[current] || {}).db) !== -1;
     entry.tables.forEach(function (t) {
       content.appendChild(h('div', { className: 'schema-row' },
         h('button', { type: 'button', className: 'schema-table', title: 'Columns of ' + t.name, onclick: function () { showColumns(t.name); } },
@@ -1515,7 +1519,9 @@ function schemaBrowser(insertFn, previewFn, selectFn) {
         selectFn ? h('button', { type: 'button', className: 'schema-select', title: 'Copy a starter query for ' + t.name + ' into the editor', 'aria-label': 'Copy a starter query for ' + t.name,
           onclick: function () { selectFn(t); } }, '⧉') : null,
         previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in Run SQL', 'aria-label': 'Preview ' + t.name,
-          onclick: function () { previewFn(t.name); } }, '👁') : null));
+          onclick: function () { previewFn(t.name); } }, '👁') : null,
+        showDdl ? h('button', { type: 'button', className: 'schema-ddl', title: 'Show ' + t.name + '’s CREATE TABLE statement', 'aria-label': 'Show ' + t.name + '’s CREATE TABLE statement',
+          onclick: function () { ddlFn(t.name); } }, '⌸') : null));
     });
     if (entry.truncated) content.appendChild(h('div', { className: 'hint', text: 'Showing the first 5000 columns.' }));
   }
@@ -1686,6 +1692,7 @@ function attachColumnAutocomplete(textarea, getConnName, getDatabase) {
 // ---- connections ----
 var DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo']; // mirrors config.SUPPORTED_DB_TYPES
 var PARSEABLE_DIALECTS = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'duckdb']; // mirrors sqlflow.py's _DIALECT_MAP keys
+var DDL_DIALECTS = ['mysql', 'sqlite', 'clickhouse']; // mirrors schema.py's _DDL_DIALECTS
 // Dialects that support browsing/switching to a different database on the same server - the Load-databases
 // button on the connection form and the Database dropdown/tree override in Run SQL.
 var DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
@@ -4930,7 +4937,8 @@ $('run-sql').addEventListener('dblclick', function (e) {
 })();
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); },
-  function (table) { applySelectQuery($('run-sql'), $('run-connection').value, table); });
+  function (table) { applySelectQuery($('run-sql'), $('run-connection').value, table); },
+  function (tableName) { showTableDdl($('run-connection').value, tableName); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
 $('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
@@ -5119,6 +5127,22 @@ function previewTable(connectionName, tableName) {
   runPage = 1;
   recordRunHistory();
   runSql({});
+}
+/** The schema browser's ⌸ icon (BACKLOG #38) - a table's real CREATE TABLE text, only offered for
+ * mysql/sqlite/clickhouse connections (DDL_DIALECTS; paintTables() already hides the icon for any other
+ * dialect, this is what actually fetches it). Opens the shared drawer, so it's only wired to Run SQL's own
+ * schema browser - the query-form drawer's embedded one would clobber the very form it's shown inside. */
+async function showTableDdl(connectionName, tableName) {
+  var slot = openDrawer('table-ddl-slot', tableName, connectionName + ' · CREATE TABLE');
+  slot.appendChild(loadingNode());
+  var data = await apiJson('connections/' + enc(connectionName) + '/table_ddl?table=' + enc(tableName));
+  clear(slot);
+  if (!data) { slot.appendChild(h('div', { className: 'hint', text: 'Could not load this table’s DDL - see the error above.' })); return; }
+  var box = codeBox(data.ddl);
+  slot.appendChild(box);
+  slot.appendChild(h('div', { className: 'form-actions' },
+    h('button', { type: 'button', className: 'btn', text: 'Copy', onclick: function () { copyText(data.ddl); } }),
+    h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer })));
 }
 
 // ---- client-side ad-hoc query history (this browser tab only; not the saved-query execution_history) ----

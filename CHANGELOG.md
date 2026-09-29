@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A "show CREATE TABLE" icon in the schema browser (BACKLOG #38).** A new ⌸ icon next to the existing
+  ⧉/👁 ones shows a table's real DDL (`GET /connections/{name}/table_ddl`) for `mysql`, `sqlite` and
+  `clickhouse` connections - SQLite's is free (`sqlite_master.sql` already *is* the CREATE TABLE text),
+  MySQL/ClickHouse each have a single `SHOW CREATE TABLE` statement. Postgres has no single-statement DDL
+  dump (real reconstruction from `pg_catalog` would be its own follow-up); H2/DuckDB are left out the same
+  way they were for the PK/FK work (#37) - unverified completeness in this environment; Mongo has no DDL at
+  all. Safe against a malicious table name by construction: the requested name must already be a table the
+  connection's own schema listing reported before any DDL query is ever built, since no driver supports
+  parameter-binding for an identifier the way it does for a value. Only wired into Run SQL's schema
+  browser, not the saved-query form's embedded one, since that one already lives inside the shared drawer
+  this feature also needs.
 - **BACKLOG #45 finished: three more zero-cost reuses of already-loaded data, and one corrected note.**
   A new "Slowest queries" panel on Home, ranking the same `execution_history` data Recent API requests
   already shows by `duration_ms` instead of time. A role with zero keys created from it now renders dimmed

@@ -10,6 +10,8 @@ Drivers disagree on the case of unaliased and even aliased result column names (
 catalogue columns in upper case; PostgreSQL, ClickHouse and SQLite report them as written), so rows are
 matched up case-insensitively rather than by relying on any one driver's convention.
 """
+import re
+
 from . import engine, store
 from .errors import ApiError
 
@@ -200,3 +202,43 @@ def _merge_keys(tables, connection_name, dialect, database):
                                          'column': record['referenced_column_name']}
     except Exception:
         pass
+
+
+# A table's real DDL (BACKLOG #38). SQLite is free - sqlite_master.sql already *is* the original CREATE
+# TABLE text. MySQL and ClickHouse each have a single SHOW CREATE TABLE statement. Postgres has no
+# single-statement equivalent (real reconstruction from pg_catalog is a separate, bigger piece of work);
+# H2/DuckDB are left out the same way they were for the PK/FK work above - unverified completeness in this
+# environment; Mongo has no DDL at all (schemaless).
+_DDL_DIALECTS = frozenset({'mysql', 'sqlite', 'clickhouse'})
+# A plain SQL identifier - letters, digits, underscore, not starting with a digit. SHOW CREATE TABLE has no
+# bound-parameter form for a table name in any driver (binding only ever covers values, never identifiers),
+# so this is defense-in-depth *after* the real safety mechanism below: only a name the connection's own
+# catalogue already reported ever reaches this far.
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z_]\w*$')
+
+
+def fetch_table_ddl(connection_name, table_name, database=None):
+    """Return {'ddl': the real CREATE TABLE text} for `table_name` on `connection_name` - not available for
+    every dialect (see _DDL_DIALECTS)."""
+    details = store.get_connection(connection_name)
+    dialect = details['db']
+    if dialect not in _DDL_DIALECTS:
+        raise ApiError(f"Showing a table's DDL isn't supported for '{dialect}' connections")
+    # The one real safety mechanism: only a table this connection's own schema actually has can ever reach
+    # a DDL query - table_name is never trusted as a safe SQL identifier just because it arrived on a
+    # request.
+    tables = fetch_schema(connection_name, database=database)['tables']
+    if not any(t['name'] == table_name for t in tables):
+        raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404)
+    if dialect == 'sqlite':
+        result = engine.execute_sql("SELECT sql FROM sqlite_master WHERE type = :type AND name = :name",
+                                    connection_name, 1, 0, params={'type': 'table', 'name': table_name},
+                                    database=database)
+    else:
+        if not _IDENTIFIER_RE.match(table_name):
+            raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404)
+        quoted = f'`{table_name}`' if dialect == 'mysql' else table_name
+        result = engine.execute_sql(f'SHOW CREATE TABLE {quoted}', connection_name, 1, 0, database=database)
+    if not result.rows:
+        raise ApiError(f"Could not fetch DDL for '{table_name}'", 500)
+    return {'ddl': str(result.rows[0][-1])}

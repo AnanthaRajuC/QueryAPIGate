@@ -329,6 +329,18 @@ def build_spec(version, saved_queries=None):
                         'truncated': {'type': 'boolean', 'description':
                             f'True if the schema has more than {schema.ROW_CAP} columns and was cut off.'}}}}}},
                     **_ERRORS}}},
+            '/connections/{name}/table_ddl': {'get': {
+                'summary': "A table's real CREATE TABLE text", 'tags': ['Connections'],
+                'description': "Only 'mysql', 'sqlite' and 'clickhouse' connections support this - "
+                    "Postgres has no single-statement DDL dump, H2/DuckDB are unverified here, and Mongo "
+                    "has no DDL at all. 'database' is the same admin-only database-override as the schema "
+                    "endpoint above.",
+                'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}},
+                               {'name': 'table', 'in': 'query', 'required': True, 'schema': {'type': 'string'}},
+                               {'name': 'database', 'in': 'query', 'required': False, 'schema': {'type': 'string'}}],
+                'responses': {'200': {'description': 'The real CREATE TABLE text', 'content': {'application/json': {
+                    'schema': {'type': 'object', 'properties': {'ddl': {'type': 'string'}}}}}},
+                    **_ERRORS}}},
             '/api_keys': {
                 'get': {'summary': 'List API keys (admin only; never the key itself)', 'tags': ['API keys'],
                         'responses': {'200': {'description': 'API keys'}, **_ERRORS}},

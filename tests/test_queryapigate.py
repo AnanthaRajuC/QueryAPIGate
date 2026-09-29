@@ -520,6 +520,42 @@ class SchemaTests(ApiTestCase):
         self.assertEqual(sum(len(t['columns']) for t in body['tables']), 2)
 
 
+class TableDdlTests(ApiTestCase):
+    """BACKLOG #38: a table's real CREATE TABLE text, for the dialects that support it (mysql/sqlite/
+    clickhouse) - real sqlite here, since it needs no server."""
+    def setUp(self):
+        super().setUp()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute('CREATE TABLE studio (id INTEGER PRIMARY KEY, name TEXT)')
+        conn.commit()
+        conn.close()
+
+    def test_returns_the_real_ddl(self):
+        res = self.client.get('/connections/lite/table_ddl', query_string={'table': 'studio'})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json(), {'ddl': 'CREATE TABLE studio (id INTEGER PRIMARY KEY, name TEXT)'})
+
+    def test_a_nonexistent_table_is_404_not_a_raw_sql_error(self):
+        res = self.client.get('/connections/lite/table_ddl', query_string={'table': 'nope'})
+        self.assertEqual(res.status_code, 404)
+
+    def test_a_sql_injection_attempt_is_rejected_as_a_nonexistent_table(self):
+        res = self.client.get('/connections/lite/table_ddl',
+                              query_string={'table': "studio'; DROP TABLE studio; --"})
+        self.assertEqual(res.status_code, 404)
+        # the table must still be there - the attempt never reached a SQL string
+        still_there = self.client.get('/connections/lite/table_ddl', query_string={'table': 'studio'})
+        self.assertEqual(still_there.status_code, 200)
+
+    def test_table_is_required(self):
+        self.assertEqual(self.client.get('/connections/lite/table_ddl').status_code, 400)
+
+    def test_an_unsupported_dialect_is_a_clear_error_not_a_crash(self):
+        res = self.client.get('/connections/pg/table_ddl', query_string={'table': 'whatever'})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('postgres', res.get_json()['error'])
+
+
 class DuckDBSchemaTests(ApiTestCase):
     """schema.py's PK/FK detection for duckdb goes through _KEY_QUERIES (unlike sqlite, folded into its base
     query above) - a real duckdb file, not mocks, since duckdb is embedded and needs no server."""

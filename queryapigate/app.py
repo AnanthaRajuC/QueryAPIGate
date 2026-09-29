@@ -870,6 +870,20 @@ def connection_schema(name):
     return jsonify(schema.fetch_schema(name, database=database)), 200
 
 
+@bp.route('/connections/<name>/table_ddl', methods=['GET'])
+def connection_table_ddl(name):
+    """A table's real CREATE TABLE text (BACKLOG #38) - not available for every dialect, see
+    schema.fetch_table_ddl(). Same permission level as browsing the schema itself."""
+    require_connection(name)
+    table = request.args.get('table')
+    if not table:
+        raise ApiError('table is required')
+    database = request.args.get('database') or None
+    if database and not g.permission.admin:
+        raise ApiError('Only the admin key may browse a different database on this connection', 403)
+    return jsonify(schema.fetch_table_ddl(name, table, database=database)), 200
+
+
 # --------------------------------------------------------------------------------------
 # API keys
 # --------------------------------------------------------------------------------------

@@ -1066,22 +1066,33 @@ badge, just not a fully accurate multi-column one.
 
 ## 38. A "show CREATE TABLE" icon in the schema browser
 
-**Impact:** the schema browser (`ui.py`'s `schemaBrowser()`, next to the existing copy-starter-query (⧉) and
-preview (👁) icons) tells you a table's columns and types, but not its actual DDL - indexes, defaults,
-constraints, storage/engine options - the things you'd need to recreate the table elsewhere or understand a
-performance characteristic the column list alone doesn't show.
+**Status: shipped for `mysql`/`sqlite`/`clickhouse`**, exactly the split this entry originally scoped -
+Postgres/H2/DuckDB/Mongo remain the documented, deliberate remainder below. A new ⌸ icon next to the
+existing copy-starter-query (⧉) and preview (👁) icons in Run SQL's schema browser shows a table's real
+`CREATE TABLE` text (`GET /connections/{name}/table_ddl`, `schema.fetch_table_ddl()`).
 
-**Notes:** dialect cost varies sharply, unlike the columns/PK-FK work above. **Cheap:** MySQL and ClickHouse
-both have a single query that returns the exact DDL text - `SHOW CREATE TABLE <table>` - and SQLite is
-free: `sqlite_master.sql` already *is* the original `CREATE TABLE` statement, no reconstruction needed.
-**Expensive:** PostgreSQL has no built-in single-statement equivalent - real DDL has to be reconstructed by
-hand from `pg_catalog`/`information_schema` (columns, defaults, indexes, constraints each their own query),
-the well-known reason third-party tools/extensions like `pg_get_tabledef` exist; H2 and DuckDB would need
-similar reconstruction, of unverified completeness. **Not applicable:** a Mongo collection has no DDL at all
-(schemaless) - the icon would need to be hidden for `db === 'mongo'` connections, the same
-`DB_SWITCHABLE_TYPES`-style dialect gate other Run SQL features already use. Given the split, a first slice
-scoped to just MySQL/SQLite/ClickHouse (the "free" ones) - showing the icon only for those `db` values - gets
-most of the value without the Postgres reconstruction effort, which would be its own follow-up.
+SQLite is free - `sqlite_master.sql` already *is* the original DDL text, fetched with this project's own
+`:name` bound-parameter convention (`table_name` is a genuine bound value, never interpolated). MySQL and
+ClickHouse each have a single `SHOW CREATE TABLE` statement, verified as real syntax but **not
+independently tested against a live server in this environment** (no embedded path for either, the same
+honesty note #37's MySQL/Postgres key-query work already carries). Since no driver supports parameter-
+binding for an identifier the way it does for a value, the real safety mechanism is an existence check:
+`table_name` (arriving on the request) must already be a table `fetch_schema()` itself reported before any
+DDL query is ever built - a plain identifier-character regex runs as defense-in-depth after that, not
+instead of it. Verified directly: a real SQLite table's DDL comes back correctly, a nonexistent table name
+and a SQL-injection attempt both get rejected as 404 before reaching a SQL string (confirmed the target
+table is untouched afterward), and an unsupported dialect gets a clear 400, not a crash.
+
+Only wired into Run SQL's own schema browser, not the saved-query form's embedded one - that one already
+lives inside the shared drawer this feature also needs, and opening it there would clobber the very form
+it's shown inside.
+
+**Deferred, not a gap:** PostgreSQL has no built-in single-statement equivalent - real DDL needs
+reconstruction from `pg_catalog`/`information_schema` (columns, defaults, indexes, constraints each their
+own query), the well-known reason third-party tools like `pg_get_tabledef` exist - a real follow-up, not
+this slice. H2/DuckDB are left out the same way they were for #37 - unverified completeness in this
+environment. Mongo has no DDL at all (schemaless) - the icon is already hidden for it, along with every
+other unsupported dialect.
 
 ## 39. Autocomplete columns while typing in the SQL editor
 
@@ -1316,9 +1327,9 @@ MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mon
 schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
 still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
 requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
-(general API latency, connection pooling and cache performance benchmarks) and #38 (a "show CREATE TABLE"
-icon), none started; #27 is shipped, in a different shape than originally sketched - see the correction
-in its own entry; #37 is shipped for
+(general API latency, connection pooling and cache performance benchmarks), not started; #27 is shipped,
+in a different shape than originally sketched - see the correction in its own entry; #38 is shipped for
+mysql/sqlite/clickhouse, with Postgres/H2/DuckDB the documented remainder; #37 is shipped for
 mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint model left as explicit gaps;
 #39 is shipped as its table-scoped `alias.` autocomplete slice only, with the flat
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
