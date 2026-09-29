@@ -1318,6 +1318,33 @@ useful - no new endpoint, no new metric, no new dependency for any of them.
   moment a collection's last query leaves it, the collection itself stops existing - there is no empty-
   collection state to flag.
 
+## 46. A per-table reach indicator in Run SQL's Schema browser
+
+**Status: shipped.** The Access map already answers "which queries touch this table, and which keys/roles
+reach them" - but only one table at a time, via its own connection+table filter
+(`computeTableMatches()`/`queryTouchesTable()`), and only if you already knew to go looking there. Each
+table row in Run SQL's Schema browser now shows the same Q/C/W badge inline: green with the real reach
+codes when at least one key/role can reach a query touching that table, a muted dot when the table is
+touched but only the admin key can run anything against it, and no badge at all when no saved query
+touches the table - nothing to say.
+
+Reuses the exact reach machinery already built for the Access map and the Access tab, not a new
+computation: `getQueryFlow()` (real per-query SQL parsing, cached), the same text-match fallback for
+unparseable dialects/queries, and `queryReach()` (which keys/roles reach a query and how). The one new
+piece is `buildTableUsageIndex()` - a single pass over the connection's saved queries building a full
+table→queries index at once (each parseable query's real touched-tables already comes back in one
+`GET /query_flow` call), instead of the Access map's own one-table-at-a-time lookup repeated per row -
+so badging every table costs about what checking one table already cost, computed once per Schema-tab
+paint and shared across every row. `tableReachSummary()` unions `queryReach()`'s answer across every
+query a table is touched by, so a table reachable via more than one query still shows one combined badge.
+
+Clicking a badge opens a panel (query list + `accessPill()` reach, the same shape `accessBox()` already
+uses for one query) with a "View in Access map" link that reuses the exact already-computed matched-query
+set instead of recomputing it - the two screens can never disagree about which queries touch a table.
+Scoped to Run SQL's own schema browser only, same reason as the DDL icon (#38): the saved-query form's
+embedded schema browser already lives inside the shared drawer this feature also needs, and opening it
+there would clobber the form it's shown inside.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1335,8 +1362,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44 and #45 are shipped (#45's "empty collections" item excepted - it
-doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved queries as
+out of scope for real parsing; #41, #44, #45 and #46 are shipped (#45's "empty collections" item excepted -
+it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved queries as
 tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The "still open"
 note under #9 (confirming its CI changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.

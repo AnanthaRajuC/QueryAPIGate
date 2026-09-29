@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A per-table reach indicator in Run SQL's Schema browser (BACKLOG #46).** Each table now shows the same
+  Q/C/W badge the Access map uses - green means at least one API key or role can reach a query touching
+  this table, a muted dot means only the admin key can, and no badge at all means no saved query touches it.
+  Clicking it opens a panel listing which queries touch the table and who can reach them, with a "View in
+  Access map" link straight into the fuller screen. Built entirely by reusing the Access map's own
+  machinery (`getQueryFlow()`, `queryReach()`) - one pass over the connection's queries per Schema-tab
+  paint, not one lookup per table, so browsing a connection's schema now costs about what clicking one
+  table in the Access map already cost today, computed once and shared across every table shown. Only
+  wired into Run SQL's own schema browser, same reason as the DDL icon (#38) - the saved-query form's
+  embedded schema browser already lives inside the shared drawer this needs.
 - **A "show CREATE TABLE" icon in the schema browser (BACKLOG #38).** A new ⌸ icon next to the existing
   ⧉/👁 ones shows a table's real DDL (`GET /connections/{name}/table_ddl`) for `mysql`, `sqlite` and
   `clickhouse` connections - SQLite's is free (`sqlite_master.sql` already *is* the CREATE TABLE text),

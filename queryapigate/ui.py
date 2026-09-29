@@ -358,6 +358,8 @@ UI_HTML = r"""<!doctype html>
   .schema-preview:hover { color: var(--accent); }
   .schema-ddl { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; cursor: pointer; }
   .schema-ddl:hover { color: var(--accent); }
+  .schema-usage { flex: none; width: 26px; height: 26px; padding: 0; border: 0; background: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .schema-usage:hover .amap-dot { filter: brightness(1.15); }
   .schema-table .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .schema-col { display: flex; justify-content: space-between; gap: 8px; width: 100%; border: 0; background: none; color: inherit; font: 12px var(--mono);
     text-align: left; padding: 6px 10px; cursor: pointer; }
@@ -597,6 +599,7 @@ UI_HTML = r"""<!doctype html>
   .amap-dot.conn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .amap-dot.role { background: var(--surface-3); color: var(--ink-2); }
   .amap-dot.role.conn { background: color-mix(in oklab, var(--warn) 12%, var(--surface-3)); color: var(--warn); }
+  .amap-dot.muted { background: var(--surface-3); min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; }
   table.amap th.amap-group { background: var(--bg); border-bottom: 1px solid var(--line); text-align: center; font: 600 10.5px var(--sans); letter-spacing: 0.06em; color: var(--ink-3); }
   table.amap th.amap-group.role { color: var(--ink-2); }
   table.amap th.amap-sortable { cursor: pointer; user-select: none; }
@@ -1014,6 +1017,7 @@ UI_HTML = r"""<!doctype html>
     <div id="role-form-slot"></div>
     <div id="query-info-slot"></div>
     <div id="table-ddl-slot"></div>
+    <div id="table-usage-slot"></div>
   </div>
 </aside>
 <div id="palette" hidden role="dialog" aria-label="Search">
@@ -1332,7 +1336,7 @@ $('key-bar').onsubmit = function (e) {
 
 // ---- drawer (hosts the connection and saved-query forms) ----
 function openDrawer(slotId, title, kicker) {
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
   $('drawer').classList.add('open');
@@ -1344,7 +1348,7 @@ function closeDrawer() {
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   $('drawer-backdrop').hidden = true;
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot'));
 }
 $('drawer-close').onclick = closeDrawer;
 $('drawer-backdrop').onclick = closeDrawer;
@@ -1503,16 +1507,38 @@ function finishSchemaFetch(key, onDone) {
  * own Database dropdown) point this same tree at that database instead of the connection's configured
  * default - the exact schema-cache key loadSchema() and the access map's table filter also use, so they
  * all agree on the same fetch and never disagree with each other about what's in a given database. */
-function schemaBrowser(insertFn, previewFn, selectFn, ddlFn) {
+function schemaBrowser(insertFn, previewFn, selectFn, ddlFn, usageFn) {
   var box = h('div', { className: 'schema-browser' });
   var current = null, currentDb = null;
   var view = 'tables', activeTableName = null; // 'tables' or 'columns' - which one activeTableName is showing
+  var usageIndexCache = {}; // key() -> 'loading' | {tableName: Set<filename>} - see buildTableUsageIndex()
   function key() { return currentDb ? current + '::' + currentDb : current; }
   function showTables() { view = 'tables'; paint(); }
   function showColumns(name) { view = 'columns'; activeTableName = name; paint(); }
   function paintTables(content, entry) {
     var showDdl = ddlFn && DDL_DIALECTS.indexOf((connectionsCache[current] || {}).db) !== -1;
+    var cacheKey = key();
+    var usage = usageFn ? usageIndexCache[cacheKey] : null;
+    if (usageFn && !usage) {
+      usageIndexCache[cacheKey] = 'loading';
+      buildTableUsageIndex(current, entry.tables.map(function (t) { return t.name; })).then(function (index) {
+        if (usageIndexCache[cacheKey] !== 'loading') return; // the connection/database moved on while this was in flight
+        usageIndexCache[cacheKey] = index;
+        paint();
+      });
+    }
     entry.tables.forEach(function (t) {
+      var filenames = usage && usage !== 'loading' ? Array.from(usage[t.name] || []) : null;
+      var usageBadge = null;
+      if (filenames && filenames.length) {
+        var summary = tableReachSummary(filenames);
+        var allVia = summary.keys.concat(summary.roles).reduce(function (acc, e) { return acc.concat(e.via); }, []);
+        var count = filenames.length + (filenames.length === 1 ? ' query' : ' queries');
+        var title = 'Used by ' + count + (allVia.length ? ' - click for who can reach ' + (filenames.length === 1 ? 'it' : 'them') : ' - only the admin key can run ' + (filenames.length === 1 ? 'it' : 'them'));
+        usageBadge = h('button', { type: 'button', className: 'schema-usage', title: title, 'aria-label': title,
+          onclick: function () { usageFn(t.name, filenames); } },
+          allVia.length ? reachDot(allVia, false) : h('span', { className: 'amap-dot muted' }));
+      }
       content.appendChild(h('div', { className: 'schema-row' },
         h('button', { type: 'button', className: 'schema-table', title: 'Columns of ' + t.name, onclick: function () { showColumns(t.name); } },
           h('span', { className: 'name', text: t.name }), h('span', { className: 'tag', text: t.type })),
@@ -1521,7 +1547,8 @@ function schemaBrowser(insertFn, previewFn, selectFn, ddlFn) {
         previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in Run SQL', 'aria-label': 'Preview ' + t.name,
           onclick: function () { previewFn(t.name); } }, '👁') : null,
         showDdl ? h('button', { type: 'button', className: 'schema-ddl', title: 'Show ' + t.name + '’s CREATE TABLE statement', 'aria-label': 'Show ' + t.name + '’s CREATE TABLE statement',
-          onclick: function () { ddlFn(t.name); } }, '⌸') : null));
+          onclick: function () { ddlFn(t.name); } }, '⌸') : null,
+        usageBadge));
     });
     if (entry.truncated) content.appendChild(h('div', { className: 'hint', text: 'Showing the first 5000 columns.' }));
   }
@@ -1566,7 +1593,7 @@ function schemaBrowser(insertFn, previewFn, selectFn, ddlFn) {
     node: box,
     setConnection: function (name) { current = name || null; currentDb = null; view = 'tables'; activeTableName = null; paint(); },
     setDatabase: function (database) { currentDb = database || null; view = 'tables'; activeTableName = null; paint(); },
-    refresh: function () { delete schemaCache[key()]; paint(); }
+    refresh: function () { delete schemaCache[key()]; delete usageIndexCache[key()]; paint(); }
   };
 }
 function schemaField(browser) {
@@ -3036,6 +3063,59 @@ function queryReach(queryName, collection, connectionName) {
     return { name: name, via: reachVia(rolesCache[name], queryName, collection, connectionName) };
   }).filter(function (r) { return r.via.length; });
   return { keys: keys, roles: roles };
+}
+/** Every key/role that reaches ANY of `filenames`, `.via` unioned across every one of those queries it
+ * reaches - the same {keys, roles} shape queryReach() itself returns (so accessPill()/reachDot() need no
+ * changes to consume it), for the Schema browser's per-table usage badge/panel (which can be touched by
+ * more than one saved query). */
+function tableReachSummary(filenames) {
+  var keys = {}, roles = {};
+  function merge(bucket, entry) {
+    if (!bucket[entry.name]) bucket[entry.name] = { name: entry.name, active: entry.active, via: [] };
+    bucket[entry.name].via = bucket[entry.name].via.concat(entry.via);
+  }
+  filenames.forEach(function (fname) {
+    var f = findFile(fname);
+    if (!f) return;
+    var v = latestOf(f);
+    var reach = queryReach(fname, f.collection, v.connection_name);
+    reach.keys.forEach(function (k) { merge(keys, k); });
+    reach.roles.forEach(function (r) { merge(roles, r); });
+  });
+  return { keys: Object.keys(keys).sort().map(function (n) { return keys[n]; }),
+          roles: Object.keys(roles).sort().map(function (n) { return roles[n]; }) };
+}
+/** For every saved query on `connName`, which of `tableNames` its SQL actually touches - real parsing
+ * (getQueryFlow()) where the dialect supports it, the same text-match fallback computeTableMatches()
+ * already uses otherwise (or when one query's own parse fails). One pass over the connection's queries,
+ * not one per table - this is what lets the Schema browser badge every table at once for close to what
+ * computeTableMatches() already costs to check just one. */
+async function buildTableUsageIndex(connName, tableNames) {
+  var index = {};
+  tableNames.forEach(function (t) { index[t] = new Set(); });
+  var candidates = filesCache.filter(function (f) { return latestOf(f).connection_name === connName; });
+  var dialect = connectionsCache[connName] && connectionsCache[connName].db;
+  var parseable = PARSEABLE_DIALECTS.indexOf(dialect) !== -1;
+  await Promise.all(candidates.map(async function (f) {
+    var v = latestOf(f);
+    var flow = parseable ? await getQueryFlow(f.filename, v.version) : null;
+    if (flow && !flow.error) {
+      flow.tables.forEach(function (flowTable) {
+        var match = tableNames.filter(function (t) { return t.toLowerCase() === flowTable.toLowerCase(); })[0];
+        if (match) index[match].add(f.filename);
+      });
+      return;
+    }
+    var c = await getContent(f.filename);
+    if (!c) return;
+    var data = c.parsed && c.parsed[String(v.version)];
+    var sql = queryDisplayText(data, c.raw);
+    tableNames.forEach(function (t) {
+      var needle = new RegExp('\\b' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+      if (needle.test(sql)) index[t].add(f.filename);
+    });
+  }));
+  return index;
 }
 
 /** Checkboxes over the existing collections for a key/role form; a name the entry already holds stays listed even when it has emptied. */
@@ -4942,7 +5022,8 @@ var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), tex
     var c = connectionsCache[$('run-connection').value];
     var database = c && $('run-database').value !== c.database ? $('run-database').value : null;
     showTableDdl($('run-connection').value, tableName, database);
-  });
+  },
+  function (tableName, filenames) { showTableUsage($('run-connection').value, tableName, filenames); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
 $('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
@@ -5148,6 +5229,43 @@ async function showTableDdl(connectionName, tableName, database) {
   slot.appendChild(box);
   slot.appendChild(h('div', { className: 'form-actions' },
     h('button', { type: 'button', className: 'btn', text: 'Copy', onclick: function () { copyText(data.ddl); } }),
+    h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer })));
+}
+/** The schema browser's per-table usage badge - which saved queries touch this table, and who can reach
+ * them (queryReach(), unioned across every one of `filenames` by tableReachSummary()). Same drawer-only
+ * scoping as showTableDdl() and the same reason - only wired to Run SQL's own schema browser. "View in
+ * Access map" reuses the exact matched-filename set already computed here instead of recomputing it, so
+ * the two screens can never disagree about which queries touch this table. */
+function showTableUsage(connectionName, tableName, filenames) {
+  var slot = openDrawer('table-usage-slot', tableName,
+    connectionName + ' · used by ' + filenames.length + (filenames.length === 1 ? ' query' : ' queries'));
+  var summary = tableReachSummary(filenames);
+  slot.appendChild(h('p', { className: 'sub-h' }, 'Queries'));
+  slot.appendChild(h('div', { className: 'access-reach', style: 'flex-direction:column;align-items:flex-start' },
+    filenames.slice().sort().map(function (fname) {
+      return h('button', { type: 'button', className: 'target', text: fname, onclick: function () {
+        closeDrawer(); openSavedQuery(findFile(fname));
+      } });
+    })));
+  slot.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Access'));
+  if (!summary.keys.length && !summary.roles.length) {
+    slot.appendChild(h('div', { className: 'hint', text: 'Only the admin key can run queries touching this table.' }));
+  } else {
+    if (summary.keys.length) slot.appendChild(h('div', { className: 'access-reach' }, summary.keys.map(function (k) { return accessPill(k, false); })));
+    if (summary.roles.length) slot.appendChild(h('div', { className: 'access-roles hint', style: 'margin-top:8px' },
+      'Also granted to role' + (summary.roles.length > 1 ? 's' : '') + ': ',
+      h('div', { className: 'access-reach', style: 'display:inline-flex;margin-left:4px' }, summary.roles.map(function (r) { return accessPill(r, true); }))));
+  }
+  slot.appendChild(h('div', { className: 'form-actions' },
+    h('button', { type: 'button', className: 'btn', text: 'View in Access map', onclick: function () {
+      closeDrawer();
+      showTab('accessmap');
+      $('accessmap-filter').value = '';
+      amapConnFilter = connectionName;
+      amapTableFilter = tableName;
+      amapTableMatches = new Set(filenames); // already computed here - no need to ask computeTableMatches() again
+      renderAccessMap();
+    } }),
     h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer })));
 }
 
