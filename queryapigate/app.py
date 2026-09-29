@@ -2,6 +2,7 @@
 import json
 import logging
 import math
+import queue
 import re
 import time
 import uuid
@@ -13,6 +14,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import (
     apikeys,
+    broadcast,
     cache,
     collection_admin,
     config,
@@ -103,6 +105,7 @@ def create_app():
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
     app.extensions['queryapigate_limiter'] = RateLimiter()
     app.extensions['queryapigate_key_limiter'] = KeyRateLimiters()
+    app.extensions['queryapigate_broadcaster'] = broadcast.Broadcaster()
     redis_url = config.redis_url()
     if redis_url:
         from .rediscache import RedisResponseCache
@@ -389,13 +392,29 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
         path, number = saved
         # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the
         # response streams out - by then the request/app context this view function runs in is long gone
-        # (no flask.stream_with_context() wrapping is used), so g and caller_key_name() are only safe to
-        # read up front, while still inside the request that's actually issuing the query.
-        rows = _record_stream_history(rows, path, number, connection_name, g.get('request_id'), key_name)
+        # (no flask.stream_with_context() wrapping is used), so g, caller_key_name() and current_app are
+        # only safe to read up front, while still inside the request that's actually issuing the query -
+        # this is why the broadcaster instance itself is captured here too, not looked up inside the
+        # generator the way _record_and_broadcast()'s other callers do.
+        broadcaster = current_app.extensions['queryapigate_broadcaster']
+        rows = _record_stream_history(rows, path, number, connection_name, g.get('request_id'), key_name,
+                                      broadcaster)
     return stream_response(output_format, columns, rows, filename)
 
 
-def _record_stream_history(rows, path, number, connection_name, request_id, key_name):
+def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None):
+    """store.record_execution(), plus a live event for the admin UI's Home tab (BACKLOG #43) - every call
+    site that used to call record_execution() directly calls this instead. ``broadcaster`` defaults to the
+    current request's extension (the normal case); a caller running outside request/app context (see
+    _record_stream_history() below) must pass it in explicitly instead."""
+    store.record_execution(path, number, entry)
+    if broadcaster is None:
+        broadcaster = current_app.extensions['queryapigate_broadcaster']
+    broadcaster.publish({'type': 'execution', 'filename': path, 'version': number,
+                        'connection_name': connection_name, 'entry': entry})
+
+
+def _record_stream_history(rows, path, number, connection_name, request_id, key_name, broadcaster):
     """Records a saved query's streamed run in its execution_history once fully drained or failed partway
     through (not on a client disconnect, GeneratorExit) - counting rows as they pass through, since the
     total is not known up front, the same trade-off engine._drain() makes for the streaming metric."""
@@ -409,13 +428,16 @@ def _record_stream_history(rows, path, number, connection_name, request_id, key_
     except GeneratorExit:
         raise
     except ApiError as error:
-        store.record_execution(path, number, {**entry, 'status': 'error', 'error': error.message, 'rows': count})
+        _record_and_broadcast(path, number, connection_name,
+                              {**entry, 'status': 'error', 'error': error.message, 'rows': count}, broadcaster)
         raise
     except Exception as error:
-        store.record_execution(path, number, {**entry, 'status': 'error', 'error': str(error), 'rows': count})
+        _record_and_broadcast(path, number, connection_name,
+                              {**entry, 'status': 'error', 'error': str(error), 'rows': count}, broadcaster)
         raise
     else:
-        store.record_execution(path, number, {**entry, 'status': 'success', 'rows': count})
+        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': count},
+                              broadcaster)
 
 
 # --------------------------------------------------------------------------------------
@@ -571,11 +593,12 @@ def run_saved(ref, body, url_params):
                                           allow_writes=effective_allow_writes, key_name=caller_key_name(),
                                           allowed_write_ops=g.permission.allowed_write_ops)
     except ApiError as error:
-        store.record_execution(path, number, {**entry, 'status': 'error', 'error': error.message})
+        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'error', 'error': error.message})
         raise
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
-    store.record_execution(path, number, {**entry, 'status': 'success', 'rows': len(result.rows),
-                                          'duration_ms': elapsed_ms, 'serialization_ms': g.serialization_ms})
+    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
+                                                          'duration_ms': elapsed_ms,
+                                                          'serialization_ms': g.serialization_ms})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl)
     return response
@@ -599,11 +622,12 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
                                           key_name=caller_key_name())
     except ApiError as error:
-        store.record_execution(path, number, {**entry, 'status': 'error', 'error': error.message})
+        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'error', 'error': error.message})
         raise
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
-    store.record_execution(path, number, {**entry, 'status': 'success', 'rows': len(result.rows),
-                                          'duration_ms': elapsed_ms, 'serialization_ms': g.serialization_ms})
+    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
+                                                          'duration_ms': elapsed_ms,
+                                                          'serialization_ms': g.serialization_ms})
     return response
 
 
@@ -805,6 +829,42 @@ def list_files():
             return (f['versions'][-1].get('last_modified_at') or '') if f['versions'] else ''
     files.sort(key=key, reverse=sort_order == 'desc')
     return jsonify({'files': files}), 200
+
+
+_SSE_HEARTBEAT_SECONDS = 15  # module constant so tests can shrink it
+
+
+@bp.route('/events', methods=['GET'])
+def stream_events():
+    """Server-Sent Events: one `data: {...}` line per live event (today: a saved-query execution, as
+    it's recorded - see _record_and_broadcast()) for the admin UI's Home tab (BACKLOG #43) - replaces
+    polling /list_files every 5s for that one panel. Admin only, matching /list_files itself.
+
+    The client reads this with fetch()'s streamed response body rather than a plain `new EventSource(...)`:
+    EventSource cannot set custom request headers, and this app has no cookie-based auth to fall back on -
+    every other admin request already authenticates via X-API-Key (see ui.py's apiFetch()). Putting the key
+    in the URL instead would put a secret in server access logs and browser history, which nothing else in
+    this app does. Same wire format either way, just read manually so header-based auth keeps working."""
+    require_admin()
+    broadcaster = current_app.extensions['queryapigate_broadcaster']
+    subscriber = broadcaster.subscribe()
+
+    def events():
+        try:
+            while True:
+                try:
+                    event = subscriber.get(timeout=_SSE_HEARTBEAT_SECONDS)
+                except queue.Empty:
+                    yield ': keepalive\n\n'
+                    continue
+                yield f'data: {json.dumps(event, default=json_default)}\n\n'
+        finally:
+            broadcaster.unsubscribe(subscriber)
+
+    response = Response(events(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'  # disable reverse-proxy response buffering (nginx, etc.)
+    return response
 
 
 # --------------------------------------------------------------------------------------

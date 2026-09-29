@@ -1245,29 +1245,38 @@ errors and result-size capping are protocol-boundary work, not changes to the sa
 
 ## 43. Server-Sent Events (SSE) for live updates, instead of polling
 
-**Impact:** several places in the admin UI already poll on a fixed interval - Home's "Recent API requests"
-panel (every 5s, #41), the example dashboard scenario's own KPI queries (meant to be polled every few
-seconds, `documentation/EXAMPLES.md`), Metrics' manual refresh. A push-based feed would show a new query run
-the moment it happens instead of up to 5 seconds later, and stop paying for a request that comes back with
-nothing new most of the time.
+**Status: shipped**, for exactly the one consumer this entry's own note flagged as the place to start: Home's
+"Recent API requests"/"Slowest queries" panels, which used to poll `GET /list_files` (the whole saved-queries
+catalog) every 5 seconds. A new `GET /events` (admin only) streams one `data: {...}` line per saved-query
+execution as `store.record_execution()` records it (see the new `app._record_and_broadcast()` wrapper around
+every one of its call sites - `run_saved`, `run_saved_mongo`, and the streamed-export history recorder), and
+the client patches the change straight into its already-loaded `filesCache` instead of refetching - a new row
+now appears in well under a second instead of up to 5. Falls back to the old poll if the stream can't be
+reached or drops (fail-open, matching this app's usual treatment of a side channel failing).
 
-**Notes:** Flask can serve an SSE stream the same way `formats.py`'s streaming exports already stream a
-response body - mechanically straightforward. The real cost is fan-out, not the wire format:
-`store.record_execution()` would need to publish each new entry to something every connected SSE client can
-read from, which for a single-process dev server is a trivial in-memory broadcast.
+Built exactly per this entry's own prior correction: a new in-process `Broadcaster`
+(`queryapigate/broadcast.py`, one instance per Flask app in `app.extensions`, a bounded `queue.Queue` per
+subscriber that drops rather than blocks a stuck client) - correct for the documented single-process
+deployment, no Redis needed for correctness. Given the same swappable-backend shape `cache.py`/`rediscache.py`
+already established for the response cache (`subscribe()`/`unsubscribe()`/`publish()`), so a future
+Redis-pub/sub variant is a clean addition if QueryAPIGate is ever scaled to several *instances* behind a load
+balancer - not built now, since nothing needs it yet.
 
-**Correction (found while scoping #47's Redis cache):** this entry previously claimed "this project
-explicitly supports a multi-worker `gunicorn` deployment" - that's wrong. The Dockerfile pins `--workers 1`
-and `documentation/INSTALLATION_AND_SETUP.md` explicitly recommends one worker, both because `store.py`'s
-connection/saved-query/API-key files are protected only by an in-process `threading.RLock`, not something
-safe across processes - the actual constraint is real, it's just enforced by the file store, not documented
-as a deliberate limit the way this entry implied. Under that documented single-worker shape, a naive
-in-process broadcast for SSE would actually work correctly for every client, every time - no Redis needed
-for correctness. Redis pub/sub would only start to matter if QueryAPIGate is ever horizontally scaled to
-several *instances* (not workers) behind a load balancer, same shape #47's shared cache already targets -
-worth building on top of #47's `QUERYAPIGATE_REDIS_URL` if/when that becomes real, rather than inventing a
-separate Redis dependency for it. Worth picking one specific consumer to build first (most likely Home's
-recent-requests panel) rather than a generic "replace every poll with SSE" rewrite. Not started.
+One real blocking bug found and fixed along the way, not previously known: the Dockerfile's gunicorn command
+was `--workers 1 --threads 8` with no `--worker-class` set, so it silently ran gunicorn's default `sync`
+class - `--threads` only takes effect under `gthread` (or another threaded/async class), so the existing
+`--threads 8` flag had never actually been doing anything. Under `sync`, a long-lived SSE connection would
+have blocked every other request to the single worker for as long as that one client stayed connected -
+`--worker-class gthread` was added to close this before shipping SSE at all, verified against a real
+container (a held-open `/events` connection no longer delays a concurrent `/health` request).
+
+The browser's native `EventSource` API cannot set the `X-API-Key` header every other admin request already
+uses (and this app has no cookie-based auth to fall back on), so the client reads the stream with `fetch()`'s
+streamed response body instead - same wire format, just read manually, so header-based auth keeps working
+unchanged rather than putting the key in the URL. Every other item this entry originally listed as a future
+consumer (the example dashboard's KPI queries, Metrics' manual refresh) is still poll/manual-refresh-based,
+not converted - the event's own shape (`{'type': 'execution', ...}`) leaves room for a future `'type': 'audit'`
+or similar to reuse the same connection, but nothing beyond saved-query executions is wired up yet.
 
 ## 44. Home tab: surface real health signals, not just counts
 
@@ -1566,9 +1575,11 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped (#45's
-"empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53
+out of scope for real parsing; #41, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped
+(#45's "empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53
 shipped in full, both phases - every persistent store this app owns now lives in `queryapigate.db`, see its
-own entry). #42 (an MCP server exposing saved queries as tools) and #43 (SSE for live updates instead of
-polling) are queued up next, not started. The "still open" note under #9 (confirming its CI changes on a
-real run) is a smaller follow-up on finished work, not an open capability gap.
+own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel, with the example
+dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
+own entry). #42 (an MCP server exposing saved queries as tools) is queued up next, not started. The "still
+open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished work, not an
+open capability gap.

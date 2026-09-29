@@ -70,7 +70,8 @@ workers instead of shared) and several threads, behind a TLS-terminating reverse
 
 ~~~bash
 pip install "queryapigate[server]"
-QUERYAPIGATE_API_KEY=change-me gunicorn --bind 127.0.0.1:5000 --workers 1 --threads 8 --timeout 120 "queryapigate.app:create_app()"
+QUERYAPIGATE_API_KEY=change-me gunicorn --bind 127.0.0.1:5000 --workers 1 --worker-class gthread --threads 8 \
+  --timeout 120 "queryapigate.app:create_app()"
 ~~~
 
 Behind a reverse proxy or load balancer, also set `QUERYAPIGATE_TRUST_PROXY=1` (the number of proxies) so rate limits and

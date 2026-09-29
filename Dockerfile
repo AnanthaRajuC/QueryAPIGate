@@ -34,8 +34,11 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=3)"]
 
-# One worker: saved-query and connection files are protected by an in-process lock.
+# One worker: the built-in rate limiter and in-memory /metrics are per-process state with no cross-worker
+# aggregation. --worker-class gthread makes --threads actually take effect (gunicorn's default "sync" class
+# ignores it, handling one connection at a time) - required so a long-lived /events SSE connection (BACKLOG
+# #43) never blocks every other request to the single worker for as long as that one client stays connected.
 # The worker timeout must stay above QUERYAPIGATE_QUERY_TIMEOUT (30 s by default), or gunicorn would kill the worker
 # at the same moment the database cancels a slow query.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8", \
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", "--threads", "8", \
      "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "queryapigate.app:create_app()"]

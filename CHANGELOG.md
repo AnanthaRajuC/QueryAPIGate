@@ -5,6 +5,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Live updates for the admin UI's Home tab via Server-Sent Events (BACKLOG #43).** The "Recent API
+  requests"/"Slowest queries" panels used to poll `GET /list_files` (the whole saved-queries catalog) every
+  5 seconds while Home was visible. A new `GET /events` (admin only) now pushes one `data: {...}` line per
+  saved-query execution as it's recorded, and the panels patch themselves in place instead of refetching -
+  updates now arrive in well under a second instead of up to 5. Backed by a new in-process `Broadcaster`
+  (`queryapigate/broadcast.py`), one instance per Flask app, with the same swappable-backend shape
+  `cache.py`/`rediscache.py` already established for the response cache, so a future Redis-pub/sub variant
+  (for a multi-*instance* deployment) is a clean addition later, not a rewrite - not built yet, since nothing
+  needs it under the documented single-process deployment. The client reads the stream with `fetch()`'s
+  streamed response body rather than a plain `new EventSource(...)`, since `EventSource` cannot set the
+  `X-API-Key` header every other admin request already uses, and putting the key in the URL instead would
+  leak it into logs and browser history. Falls back to the old 5s poll if the stream can't be reached or
+  drops, so a live-feed failure never means the panel just stops updating.
+- **`--worker-class gthread` added to the Dockerfile's gunicorn command** (and the example command in
+  `documentation/INSTALLATION_AND_SETUP.md`), found necessary while building the above: gunicorn's default
+  `sync` worker class ignores `--threads` entirely, so the image's existing `--threads 8` was silently inert -
+  under `sync`, the single worker handles one connection at a time, and a long-lived `/events` connection
+  would have blocked every other request to the server for as long as that one client stayed connected.
+  Verified against a real container: a held-open `/events` connection no longer delays a concurrent `/health`
+  request.
+
 ### Changed
 - **API keys, roles and the audit log now live in `queryapigate.db` (SQLite), not `api_keys.json`/
   `roles.json`/`audit_log.json`** (BACKLOG #53, Phase 2 - completes the JSON-to-SQLite migration Phase 1

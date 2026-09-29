@@ -398,10 +398,15 @@ def describe_settings():
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
-        {'id': 'cache', 'title': 'Response cache',
-         'description': 'Where cache_ttl-carrying saved queries store their cached responses.', 'rows': [
+        {'id': 'cache', 'title': 'Response cache & live updates',
+         'description': 'Where cache_ttl-carrying saved queries store their cached responses, and how the '
+             'admin UI\'s Home tab is notified of new query runs.', 'rows': [
             row('Cache backend', 'In-process (default) or a shared Redis, surviving restarts and shared '
                 'across instances.', 'QUERYAPIGATE_REDIS_URL',
                 'in-process' if redis_val is None else f'Redis ({redact_redis_url(redis_val)})',
-                secret=True)]},
+                secret=True),
+            row('Live updates', 'How GET /events (BACKLOG #43) fans a new query run out to connected admin '
+                'UI clients. In-process only for now - correct for the documented single-process deployment; '
+                'would need a Redis-pub/sub backend (not built yet) to work across several instances behind '
+                'a load balancer, same constraint the cache backend above already has.', '', 'in-process')]},
     ]

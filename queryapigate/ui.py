@@ -1137,7 +1137,7 @@ async function apiFetch(path, opts) {
   if (key) headers['X-API-Key'] = key;
   var body = opts.body;
   if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(opts.json); }
-  var res = await fetch(path, { method: opts.method || 'GET', headers: headers, body: body });
+  var res = await fetch(path, { method: opts.method || 'GET', headers: headers, body: body, signal: opts.signal });
   noteRate(res);
   return res;
 }
@@ -1355,6 +1355,13 @@ $('key-bar').onsubmit = function (e) {
   showError('');
   toast($('key').value ? 'API key applied to this tab' : 'API key cleared');
   refreshAll();
+  // A live GET /events connection attempted before a key existed (Home is the default-active tab on a
+  // fresh page load, so the 1s ticker below can fire before this form ever runs) fails once and falls
+  // back to polling - it does not retry on its own. Resetting this state lets the very next tick reconnect
+  // with the key that's now actually set, instead of being stuck on the fallback for the rest of the tab's
+  // visit. See startEventStream()/homeLiveActive.
+  homeLiveActive = false;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 };
 
 // ---- drawer (hosts the connection and saved-query forms) ----
@@ -2787,9 +2794,10 @@ function renderSlowestQueries() {
         h('td', { className: 'mono num', text: e.duration_ms + ' ms' }));
     })))));
 }
-/** A lightweight 5s poll for the Home tab's recent-requests/slowest-queries panels - a plain GET
- * /list_files (the same endpoint loadQueries() already uses) rather than calling loadQueries() itself,
- * which also drives the whole Saved Queries screen's own state/DOM even when nobody's looking at it. */
+/** A one-shot GET /list_files - a plain fetch (the same endpoint loadQueries() already uses) rather than
+ * calling loadQueries() itself, which also drives the whole Saved Queries screen's own state/DOM even when
+ * nobody's looking at it. Seeds filesCache when the Home tab activates, and doubles as the fallback if the
+ * live event stream (below) can't be reached at all. */
 async function pollRecentRequests() {
   var data = await apiJson('list_files');
   if (!data) return;
@@ -2797,9 +2805,76 @@ async function pollRecentRequests() {
   renderRecentRequests();
   renderSlowestQueries();
 }
+/** Applies one live execution event (from startEventStream() below) straight onto the already-loaded
+ * filesCache and re-renders, instead of re-fetching /list_files - BACKLOG #43's whole point. An execution
+ * for a query/version not yet in filesCache (created after the last full load) is silently skipped; the
+ * next tab visit's pollRecentRequests() picks it up, same as any other cache staleness in this app. */
+function handleLiveEvent(event) {
+  if (event.type !== 'execution') return;
+  var f = filesCache.find(function (x) { return x.filename === event.filename; });
+  var v = f && f.versions.find(function (x) { return x.version === event.version; });
+  if (!v) return;
+  v.execution_history = [event.entry].concat(v.execution_history || []).slice(0, 50);
+  renderRecentRequests();
+  renderSlowestQueries();
+}
+var pollTimer = null;
+/** The polling fallback (today's pre-SSE behavior, unchanged) - used only when GET /events can't be
+ * reached at all, so the panels still update rather than going silent. */
+function startPollingFallback() {
+  if (pollTimer) return;
+  pollTimer = setInterval(function () {
+    if ($('tab-home') && $('tab-home').classList.contains('active')) pollRecentRequests();
+    else { clearInterval(pollTimer); pollTimer = null; }
+  }, 5000);
+}
+var eventsAbort = null;
+/** GET /events (BACKLOG #43): reads with fetch()'s streamed response body rather than a plain
+ * `new EventSource(...)` - EventSource cannot set custom request headers, and this app has no cookie-based
+ * auth to fall back on, so the X-API-Key header apiFetch() already attaches everywhere else keeps working
+ * unchanged. Falls back to the old 5s poll if the stream can't be reached or drops - a live feed failing
+ * should never mean the panel just stops updating. */
+async function startEventStream() {
+  if (eventsAbort) return;
+  var controller = new AbortController();
+  eventsAbort = controller;
+  try {
+    var res = await apiFetch('events', { signal: controller.signal });
+    if (!res.ok || !res.body) throw new Error('stream unavailable');
+    var reader = res.body.getReader(), decoder = new TextDecoder(), buffer = '';
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      var parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      parts.forEach(function (part) {
+        if (part.indexOf('data: ') !== 0) return; // a keepalive comment line, or a partial frame
+        handleLiveEvent(JSON.parse(part.slice(6)));
+      });
+    }
+  } catch (e) {
+    // falls through to the polling fallback below, whatever the failure was
+  }
+  eventsAbort = null;
+  if ($('tab-home') && $('tab-home').classList.contains('active')) startPollingFallback();
+}
+var homeLiveActive = false;
+/** Starts the live feed (seeded by one pollRecentRequests() call) the moment Home becomes the visible tab,
+ * and tears it down the moment it isn't - checked on the same cheap 1s tick paintMetricsAge() already uses
+ * for a local-only recompute, so this adds one more classList check, not a new polling mechanism. */
 setInterval(function () {
-  if ($('tab-home') && $('tab-home').classList.contains('active')) pollRecentRequests();
-}, 5000);
+  var isActive = !!($('tab-home') && $('tab-home').classList.contains('active'));
+  if (isActive && !homeLiveActive) {
+    homeLiveActive = true;
+    pollRecentRequests();
+    startEventStream();
+  } else if (!isActive && homeLiveActive) {
+    homeLiveActive = false;
+    if (eventsAbort) { eventsAbort.abort(); eventsAbort = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+}, 1000);
 
 function renderMetrics(series) {
   var box = clear($('metrics-body'));

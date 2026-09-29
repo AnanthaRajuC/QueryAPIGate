@@ -186,6 +186,13 @@ def build_spec(version, saved_queries=None):
                     {'name': 'sort_by', 'in': 'query', 'schema': {'type': 'string', 'enum': ['name', 'modified']}},
                     {'name': 'sort_order', 'in': 'query', 'schema': {'type': 'string', 'enum': ['asc', 'desc']}}],
                 'responses': {'200': {'description': 'Saved queries with version metadata'}, **_ERRORS}}},
+            '/events': {'get': {
+                'summary': 'Live saved-query execution events (Server-Sent Events)', 'tags': ['Saved queries'],
+                'description': 'One `data: {...}` line per saved-query execution as it happens - feeds the '
+                    'admin UI\'s Home tab instead of it polling /list_files. Admin only.',
+                'responses': {'200': {'description': 'text/event-stream of execution events',
+                                      'content': {'text/event-stream': {'schema': {'type': 'string'}}}},
+                             **_ERRORS}}},
             '/view_file_content': {'get': {
                 'summary': 'Raw content of a saved query file', 'tags': ['Saved queries'],
                 'parameters': [{'name': 'filename', 'in': 'query', 'required': True, 'schema': {'type': 'string'}}],
