@@ -630,6 +630,13 @@ UI_HTML = r"""<!doctype html>
   .home-activity-row time { color: var(--ink-3); font: 11px var(--mono); white-space: nowrap; }
   .home-activity-row .target { font-weight: 600; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
   .home-actions { display: flex; flex-direction: column; gap: 8px; }
+  #home-health, #home-recent-requests { padding: 14px 16px; }
+  #home-health h2, #home-recent-requests h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+  .health-ok { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
+  .health-warn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
+  .health-danger { background: color-mix(in oklab, var(--danger) 16%, transparent); color: var(--danger); }
+  .home-activity-row .health-text-warn { color: var(--warn); }
+  .home-activity-row .health-text-danger { color: var(--danger); }
   @media (max-width: 980px) { .home-grid { grid-template-columns: minmax(0, 1fr); } }
   .chart-card h3 { font-size: 13px; font-weight: 600; }
   .bar-row { display: grid; grid-template-columns: 80px minmax(0, 1fr) 48px; align-items: center; gap: 10px; }
@@ -751,6 +758,7 @@ UI_HTML = r"""<!doctype html>
       <div class="titles"><h1>Home</h1><span class="sub">An at-a-glance overview of this gateway.</span></div>
     </div>
     <div id="home-stats"></div>
+    <div class="panel" id="home-health" style="margin-bottom:16px"></div>
     <div class="home-grid">
       <div class="panel" id="home-activity"></div>
       <div class="panel" id="home-actions"></div>
@@ -2529,13 +2537,19 @@ function renderHome() {
   var errorCount = metricSum(metricsSeries, 'queryapigate_requests_total', function (l) { return (l.status || '')[0] === '4' || (l.status || '')[0] === '5'; });
   var errorRate = totalRequests ? (100 * errorCount / totalRequests) : 0;
 
+  var rateLimitRejections = metricSum(metricsSeries, 'queryapigate_rate_limit_rejections_total');
   clear($('home-stats')).appendChild(h('div', { className: 'stat-tiles' },
     statTile('Connections', activeConns + ' / ' + Object.keys(connectionsCache).length),
     statTile('Saved queries', filesCache.length),
     statTile('API keys', Object.keys(apiKeysCache).length),
     statTile('Roles', Object.keys(rolesCache).length),
     statTile('Requests', totalRequests),
-    statTile('Error rate', errorRate.toFixed(1) + '%', errorRate >= 5)));
+    statTile('Error rate', errorRate.toFixed(1) + '%', errorRate >= 5),
+    statTile('Active queries', metricGauge(metricsSeries, 'queryapigate_active_queries')),
+    statTile('Pool idle connections', metricGauge(metricsSeries, 'queryapigate_pool_idle_connections')),
+    statTile('Rate limit rejections', rateLimitRejections, rateLimitRejections > 0)));
+
+  renderHomeHealth();
 
   var activityBox = clear($('home-activity'));
   activityBox.appendChild(h('h2', { text: 'Recent activity' }));
@@ -2563,6 +2577,52 @@ function renderHome() {
     h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
 
   renderRecentRequests();
+}
+/** true once a key's expires_at date is within the next 7 days but hasn't passed yet - isKeyExpired()'s
+ * "already gone" counterpart, so Home's health panel can tell "act now" apart from "act soon." */
+function isKeyExpiringSoon(k) {
+  var today = new Date().toISOString().slice(0, 10);
+  var soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return !!(k.expires_at && k.expires_at >= today && k.expires_at <= soon);
+}
+/** Home's "System health" panel - callouts built entirely from caches already loaded elsewhere
+ * (apiKeysCache, connectionsCache), never a new fetch: expired/soon-to-expire API keys
+ * (isKeyExpired()/isKeyExpiringSoon()) and connections with recorded errors
+ * (connectionsCache[name].usage.errors, the same figure the Connections tab already shows per row). Always
+ * renders something, even when clean - a plain "all clear" is itself a health signal, not just alarms. */
+function renderHomeHealth() {
+  var box = $('home-health');
+  if (!box) return;
+  clear(box);
+  box.appendChild(h('h2', { text: 'System health' }));
+
+  var expired = 0, expiringSoon = 0;
+  Object.keys(apiKeysCache).forEach(function (name) {
+    var k = apiKeysCache[name];
+    if (isKeyExpired(k)) expired++;
+    else if (isKeyExpiringSoon(k)) expiringSoon++;
+  });
+  var erroredConnections = Object.keys(connectionsCache).filter(function (n) {
+    return ((connectionsCache[n].usage || {}).errors || 0) > 0;
+  });
+
+  var issues = [];
+  if (expired) issues.push({ tone: 'danger', text: expired + ' API key' + (expired === 1 ? '' : 's') + ' expired', tab: 'apikeys' });
+  if (expiringSoon) issues.push({ tone: 'warn', text: expiringSoon + ' API key' + (expiringSoon === 1 ? '' : 's') + ' expiring within 7 days', tab: 'apikeys' });
+  if (erroredConnections.length) issues.push({ tone: 'danger',
+    text: erroredConnections.length + ' connection' + (erroredConnections.length === 1 ? '' : 's') + ' with recorded errors: ' + erroredConnections.join(', '),
+    tab: 'connections' });
+
+  if (!issues.length) {
+    box.appendChild(h('div', { className: 'home-activity-row' }, h('span', { className: 'tag health-ok', text: 'OK' }),
+      h('span', { text: 'No issues detected.' })));
+    return;
+  }
+  issues.forEach(function (issue) {
+    box.appendChild(h('div', { className: 'home-activity-row' },
+      h('span', { className: 'tag health-' + issue.tone, text: issue.tone === 'danger' ? '!' : '·' }),
+      h('button', { type: 'button', className: 'target health-text-' + issue.tone, text: issue.text, onclick: function () { showTab(issue.tab); } })));
+  });
 }
 /** Every execution_history entry across every saved query and version in filesCache, newest first - the
  * same per-run data renderHistoryTab() already shows for one query, just flattened across all of them.

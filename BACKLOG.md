@@ -1254,21 +1254,21 @@ generic "replace every poll with SSE" rewrite. Not started.
 
 ## 44. Home tab: surface real health signals, not just counts
 
-**Impact:** Home (#41) currently shows counts (connections, saved queries, keys, roles, requests, error
-rate) but nothing that flags "something needs attention" - the whole point of a health-focused landing tab.
-Several genuinely useful signals already exist elsewhere in the app and just aren't surfaced there yet.
+**Status: shipped**, exactly the cheap slice this entry scoped - see below for what's still deferred.
+Home (#41) showed counts (connections, saved queries, keys, roles, requests, error rate) but nothing that
+flagged "something needs attention" - the whole point of a health-focused landing tab. Every signal below
+was already computed or loaded somewhere else in the app; this only needed reusing it on Home.
 
-**Notes, cheapest first:**
-- **Three more stat tiles from data already being fetched.** `renderHome()` already parses `metricsSeries`
-  for its Requests/Error rate tiles - `queryapigate_active_queries` (queries genuinely running right now,
-  the one truly live signal available), `queryapigate_pool_idle_connections` and
-  `queryapigate_rate_limit_rejections_total` are already computed by `renderMetrics()` for the Metrics tab
-  from that same series and just need adding to Home's tile row. No new fetch, no new metric.
-- **Keys expiring soon / already expired.** `apiKeysCache` and the existing `isKeyExpired()` helper
-  already answer this; nothing today surfaces it anywhere outside individually opening each key.
-- **Connections with recent errors.** `connectionsCache[name].usage.errors` is already tracked per
-  connection (`metrics.summary_for_connection`) - flagging any connection with errors > 0 is a real signal,
-  and costs nothing new to compute.
+- **Three more stat tiles, zero new fetch.** `renderHome()` already parsed `metricsSeries` for its
+  Requests/Error rate tiles - `queryapigate_active_queries` (queries genuinely running right now, the one
+  truly live signal available), `queryapigate_pool_idle_connections` and
+  `queryapigate_rate_limit_rejections_total` were already computed by `renderMetrics()` for the Metrics tab
+  from that same series, just not read by Home yet.
+- **A "System health" panel**, placed right after the stat tiles (before Recent activity/Quick actions) -
+  flags expired API keys (`isKeyExpired()`) and ones expiring within 7 days (new `isKeyExpiringSoon()`,
+  same shape), plus any connection with `usage.errors > 0` (`connectionsCache`, already populated by
+  `metrics.summary_for_connection`). Always renders something, even "No issues detected" when clean -
+  reassurance is a health signal too, not just alarms. Each issue links straight to the relevant tab.
 - **Deferred, heavier:** a true live reachability check per connection (an actual round-trip via
   `/connections/<name>/test` on every Home load, not a usage-history heuristic) - more honest but a real
   per-connection cost paid on every visit, worth scoping deliberately rather than bundling in; p95/avg
@@ -1322,8 +1322,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41 is shipped. #42 (an MCP server exposing saved queries as tools), #43
-(SSE for live updates instead of polling), #44 (Home tab health signals) and #45 (further zero-cost reuse
-of already-loaded data) are queued up next, not started. The "still open" note under #9 (confirming its CI
-changes on a real run) is a smaller
+out of scope for real parsing; #41 and #44 are shipped. #42 (an MCP server exposing saved queries as tools),
+#43 (SSE for live updates instead of polling) and #45 (further zero-cost reuse of already-loaded data) are
+queued up next, not started. The "still open" note under #9 (confirming its CI changes on a real run) is a
+smaller
 follow-up on finished work, not an open capability gap.

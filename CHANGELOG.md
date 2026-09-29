@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A "System health" panel and three more stat tiles on the Home tab (BACKLOG #44).** Active queries,
+  pool idle connections and rate-limit rejections join the existing stat tiles - the same numbers the
+  Metrics tab already computes, just not previously shown on Home. The new health panel flags expired and
+  soon-to-expire (within 7 days) API keys and any connection with recorded errors, each clickable straight
+  to the relevant tab; shows "No issues detected" when clean, since that's a real health signal too. No new
+  fetch, no new metric - every figure was already loaded somewhere on the page.
 - **A "Recent API requests" panel on the Home tab, auto-refreshing every 5 seconds.** A live-ish tail of
   saved-query runs (newest first: time, query, connection, caller, rows, duration), built from the same
   `execution_history` the per-query History tab already shows, just aggregated across every saved query.
