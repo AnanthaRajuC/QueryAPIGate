@@ -26,7 +26,7 @@ RUN pip install ".[mysql,postgres,clickhouse,server]" \
 RUN useradd --create-home app && mkdir /data && chown app /data
 USER app
 
-# db_connections.json and saved_sql/ live here - mount a volume to keep them.
+# queryapigate.db lives here (connections, saved queries, API keys, roles, audit log) - mount a volume to keep it.
 ENV QUERYAPIGATE_HOME=/data
 VOLUME /data
 EXPOSE 5000

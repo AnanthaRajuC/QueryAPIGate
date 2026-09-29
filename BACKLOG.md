@@ -1485,10 +1485,9 @@ horizontal bars already use, just vertical. Only the tallest bar is direct-label
 layer, matching how `reachDot()` and others already do this. Omitted entirely (returns `null`) when there's
 no history, same as every other conditional chart in this file.
 
-## 53. Move connections and saved queries off JSON files onto SQLite (Phase 1)
+## 53. Move connections, saved queries, API keys, roles and the audit log off JSON files onto SQLite
 
-**Status: shipped**, for connections and saved queries only - `api_keys.json`/`roles.json`/`audit_log.json`
-stay JSON-backed for a later, separately-scoped phase. Every store used to be a plain JSON file, serialized
+**Status: shipped, both phases.** Every store used to be a plain JSON file, serialized
 through one process-local `threading.RLock` - exactly why the Dockerfile and docs pin `--workers 1`, since
 that lock protects concurrent *threads* in one process, not concurrent *processes* (surfaced while scoping
 #47's Redis cache). New `queryapigate/db.py` owns a `queryapigate.db` SQLite file (one connection per thread,
@@ -1515,10 +1514,40 @@ and `/view_file_content` reconstructs the identical JSON text a saved-query file
 `load_versions()`'s output. Verified against the full test suite, a real `docker compose up -d --build --wait`
 run, the CLI's `init`/`examples load`/`export`/`collection export|import` commands, and a real browser check
 that History, the per-query Metrics tab and the requests-per-day chart all still read correctly from
-`execution_history` now living in SQLite. `--workers > 1` is still not recommended - `collection_admin.rename_collection()`
-and `examples.load()`/`unload()` each span the new SQLite tables and the still-JSON `api_keys.json`/
-`roles.json` in one logical operation, so they stay serialized behind the existing process-local lock until
-a later phase migrates the remaining three stores too.
+`execution_history` now living in SQLite. (Phase 1.)
+
+**Phase 2** moved the three stores Phase 1 deliberately deferred - `api_keys.json`, `roles.json` and
+`audit_log.json` (all owned by `apikeys.py`, roles included - not a separate module) - onto the same
+`queryapigate.db`, following the identical contract-preservation and hybrid-schema design Phase 1
+established: `api_keys`/`roles` get real columns for what `authenticate()`'s per-row scan and `is_expired()`
+need (`hash`, `active`, `expires_at`, `created_at`) plus a `details_json` blob for everything else;
+`audit_log` mirrors `execution_history`'s own shape (`entry_json` verbatim, `timestamp` as a real column),
+and its "keep the newest N" cap became the identical per-insert indexed `DELETE ... LIMIT -1 OFFSET ?` trim
+`execution_history` already used, replacing a whole-file read/append/rewrite. Every `apikeys.py` function
+(`create_key`, `update_key`, `delete_key`, `create_role`, `update_role`, `delete_role`, `authenticate`,
+`collection_grants`, `rewrite_collection_grants`, ...) and `store.record_audit()`/`read_audit_log()` kept
+their exact name, signature and return shape - `authenticate()` in particular still fetches every key row and
+compares each one in Python with `hmac.compare_digest()`, deliberately not "optimized" into an indexed
+lookup, since that per-row scan is what makes a wrong-key guess and a right-key-for-someone-else guess take
+the same time. One deliberate design choice, decided explicitly rather than defaulted into: `rename_collection()`
+and `examples.load()`/`unload()` were **not** wrapped in one bigger atomic transaction even though every store
+they touch is now SQLite - both are explicitly documented and tested as resumable/idempotent-by-design, not
+atomic (`rename_collection()`'s own docstring: "an interruption at any point leaves grants that are a
+superset of the intended result... running the same rename again completes it" - a real, load-bearing
+mid-flight state a wrapping transaction would silently roll back and break); `examples.load()` also writes a
+real on-disk SQLite file (the bundled example database) mid-sequence, a side effect no `queryapigate.db`
+transaction could ever undo anyway. So `store.lock` still wraps the same call sequences it always did - only
+what happens *inside* each call changed, from a JSON rewrite to a SQL transaction. The same
+`import_legacy_*_if_empty()` first-boot bootstrap pattern Phase 1 proved out covers all three new stores too.
+Verified against the full test suite (802 tests), a real dev server (create a key and role, generate audit
+entries, restart, confirm everything persisted and the key still authenticates), a hand-built legacy home
+with all five old JSON files and no `queryapigate.db` (every entry round-tripped, originals left untouched),
+a real `examples load`/`unload` CLI cycle, direct `sqlite3` inspection of every new table, and a real browser
+check of the API Keys/Roles/Audit log admin UI tabs. Every persistent store this app owns is now SQLite-backed
+with real cross-process transactions - `--workers 1` is still the recommendation, but the reason changed: not
+because any file needs an in-process lock (that's gone), but because the built-in rate limiter and in-memory
+`/metrics` are still per-process state with no cross-worker aggregation, a distinct, separately-scoped gap
+this migration doesn't touch.
 
 ---
 
@@ -1538,8 +1567,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
 out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped (#45's
-"empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53 shipped
-for connections and saved queries only, with `api_keys.json`/`roles.json`/`audit_log.json` deferred to a
-later phase, see its own entry). #42 (an MCP server exposing saved queries as tools) and #43 (SSE for live
-updates instead of polling) are queued up next, not started. The "still open" note under #9 (confirming its
-CI changes on a real run) is a smaller follow-up on finished work, not an open capability gap.
+"empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53
+shipped in full, both phases - every persistent store this app owns now lives in `queryapigate.db`, see its
+own entry). #42 (an MCP server exposing saved queries as tools) and #43 (SSE for live updates instead of
+polling) are queued up next, not started. The "still open" note under #9 (confirming its CI changes on a
+real run) is a smaller follow-up on finished work, not an open capability gap.

@@ -56,9 +56,12 @@ def connections_file():
 
 
 def db_file():
-    """queryapigate.db - the SQLite store for connections and saved queries (db.py, store.py). Created by
-    `queryapigate init` on a fresh home, or `queryapigate migrate-to-sqlite` when upgrading a home that
-    still has the legacy db_connections.json/saved_sql/ files."""
+    """queryapigate.db - the SQLite store for everything this app persists: connections, saved queries, API
+    keys, roles and the audit log (db.py, store.py, apikeys.py). Created by `queryapigate init` on a fresh
+    home; on an existing home with legacy db_connections.json/saved_sql/api_keys.json/roles.json/
+    audit_log.json, those are imported automatically, once, the first time the server or CLI runs against
+    it - see store.import_legacy_data_if_empty()/apikeys.import_legacy_keys_if_empty()/
+    import_legacy_roles_if_empty()."""
     return home() / 'queryapigate.db'
 
 
@@ -75,22 +78,22 @@ def audit_log_file():
 
 
 def audit_log_limit():
-    """Administrative-action entries remembered in audit_log.json (QUERYAPIGATE_AUDIT_LOG_LIMIT), default
-    AUDIT_LOG_LIMIT (500). Always a positive count, never "unbounded" like stream_max_rows() can be: unlike
-    a streaming export, audit_log.json is read and rewritten in full on every single audit event (see
-    store.record_audit()), so letting it grow without bound would turn every administrative action into an
-    ever-slower disk read/write. Raise this for longer retention, or set QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE for
-    retention this cap can never roll off. Validated at startup (check_settings()), the same "fail loudly on
-    a typo" treatment stream_max_rows() gets."""
+    """Administrative-action entries remembered in queryapigate.db's audit_log table
+    (QUERYAPIGATE_AUDIT_LOG_LIMIT), default AUDIT_LOG_LIMIT (500). Always a positive count, never "unbounded"
+    like stream_max_rows() can be: each audit event trims the table back down to this cap in the same
+    transaction as its own insert (see store.record_audit()), so letting it grow without bound would mean an
+    ever-larger table and index, not a slower write. Raise this for longer retention, or set
+    QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE for retention this cap can never roll off. Validated at startup
+    (check_settings()), the same "fail loudly on a typo" treatment stream_max_rows() gets."""
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_LIMIT', '').strip()
     return int(raw) if raw else AUDIT_LOG_LIMIT
 
 
 def audit_log_export_file():
     """Optional path (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE) to also append every audit entry to, one JSON object per
-    line, appended only - never capped or rewritten like audit_log.json itself, so retention here doesn't
+    line, appended only - never capped or rewritten like the audit_log table itself, so retention here doesn't
     depend on audit_log_limit() being sized generously enough. None when unset (today's behaviour,
-    unchanged): nothing exported beyond audit_log.json's own rolling window."""
+    unchanged): nothing exported beyond the audit_log table's own rolling window."""
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', '').strip()
     return Path(raw) if raw else None
 
@@ -348,8 +351,8 @@ def describe_settings():
     return [
         {'id': 'general', 'title': 'General',
          'description': 'Where this server keeps its files and what it loads at startup.', 'rows': [
-            row('Home directory', 'Folder holding db_connections.json, api_keys.json, roles.json and saved_sql/.',
-                'QUERYAPIGATE_HOME', str(home())),
+            row('Home directory', 'Folder holding queryapigate.db (connections, saved queries, API keys, '
+                'roles and the audit log).', 'QUERYAPIGATE_HOME', str(home())),
             row('Load examples', 'Load the example APIs at startup. Idempotent.',
                 'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples())),
             row('H2 driver', 'JAR used for h2 connections.', 'QUERYAPIGATE_H2_JAR',
@@ -389,7 +392,7 @@ def describe_settings():
                 'off' if cors is None else '*' if cors == '*' else ', '.join(sorted(cors)))]},
         {'id': 'audit', 'title': 'Audit & logging',
          'description': 'Retention of administrative actions and log format.', 'rows': [
-            row('Audit log limit', 'Entries kept in audit_log.json.', 'QUERYAPIGATE_AUDIT_LOG_LIMIT',
+            row('Audit log limit', 'Entries kept in queryapigate.db.', 'QUERYAPIGATE_AUDIT_LOG_LIMIT',
                 str(audit_log_limit())),
             row('Audit export file', 'Append-only JSON-lines copy of every audit entry, never rolled off.',
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),

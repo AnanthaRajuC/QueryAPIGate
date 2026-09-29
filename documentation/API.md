@@ -461,7 +461,7 @@ immediately, even without `QUERYAPIGATE_API_KEY` set - and since only the admin 
 that without also setting `QUERYAPIGATE_API_KEY` locks configuration changes out until you do (the server logs a
 warning at startup in that state).
 
-A key's secret is never stored - only its SHA-256 hash, in `api_keys.json` (`QUERYAPIGATE_HOME`). It is generated
+A key's secret is never stored - only its SHA-256 hash, in `queryapigate.db` (`QUERYAPIGATE_HOME`). It is generated
 by the server and returned exactly once, when the key is created; there is no way to recover it afterwards,
 only to revoke it (`DELETE /api_keys/<name>`) and create a new one.
 
@@ -758,8 +758,8 @@ omits. Capped at 500 most recent entries by default; older ones roll off, the sa
 `execution_history` is capped per version. Set `QUERYAPIGATE_AUDIT_LOG_LIMIT` to raise or lower that cap for a
 busier server or a longer compliance-driven retention window - validated at startup, so a malformed value
 fails loudly rather than silently keeping the default. Unlike the streaming row cap, this one is always a
-positive count: `audit_log.json` is read and rewritten in full on every single audit event, so letting it
-grow without bound would make every administrative action progressively slower, not just use more disk.
+positive count: each audit event trims the table back down to the cap in the same transaction as its own
+insert, so letting it grow without bound would mean an ever-larger table and index, not just more disk.
 
 For retention a cap can never satisfy - keeping every entry indefinitely rather than a rolling window of
 however many - set `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` to a path; every entry is also appended there, one JSON

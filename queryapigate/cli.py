@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import datetime
 
-from . import __version__, bundle, config, db, examples, postman, store
+from . import __version__, apikeys, bundle, config, db, examples, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -338,4 +338,6 @@ def main(argv=None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
     db.init_schema()
     store.import_legacy_data_if_empty()
+    apikeys.import_legacy_keys_if_empty()
+    apikeys.import_legacy_roles_if_empty()
     return args.func(args)

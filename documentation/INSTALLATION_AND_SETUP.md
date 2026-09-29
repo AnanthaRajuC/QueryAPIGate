@@ -39,10 +39,7 @@ pip install -e ".[dev]"
 QueryAPIGate keeps its state in one folder - `QUERYAPIGATE_HOME`, by default the current directory:
 
 ~~~
-queryapigate.db      connections and saved queries (SQLite)
-api_keys.json        scoped API keys
-roles.json           named permission templates
-audit_log.json       a durable record of administrative changes
+queryapigate.db      connections, saved queries, API keys, roles and the audit log (SQLite)
 ~~~
 
 ~~~bash
@@ -66,8 +63,10 @@ Behaviour is controlled by environment variables - see the table in the
 
 ## Running in production
 
-`queryapigate serve` uses Flask's development server. For production use gunicorn with **one worker** (saved-query and
-connection files are protected by an in-process lock) and several threads, behind a TLS-terminating reverse proxy:
+`queryapigate serve` uses Flask's development server. For production use gunicorn with **one worker** (the built-in
+rate limiter and in-memory `/metrics` are per-process state with no cross-worker aggregation - every persistent
+store is SQLite-backed and safe across processes, but a rate limit or `/metrics` count would be split across
+workers instead of shared) and several threads, behind a TLS-terminating reverse proxy:
 
 ~~~bash
 pip install "queryapigate[server]"
@@ -164,10 +163,10 @@ changes before it upgrades:
 | Docker image | `ghcr.io/anantharajuc/sql2api` | `ghcr.io/anantharajuc/queryapigate` |
 | JSON log `logger` field | `sql2api` | `queryapigate` |
 
-Your data folder needs no manual change: `api_keys.json`, `roles.json` and `audit_log.json` are read exactly
-as before. `db_connections.json`/`saved_sql/` (if you're upgrading from before connections and saved
-queries moved to `queryapigate.db`) are imported automatically, once, the first time the server or CLI runs
-against that home - nothing to run by hand, and the original files are left untouched, never deleted.
+Your data folder needs no manual change: `db_connections.json`, `saved_sql/`, `api_keys.json`, `roles.json`
+and `audit_log.json` (if you're upgrading from before everything moved into `queryapigate.db`) are imported
+automatically, once, the first time the server or CLI runs against that home - nothing to run by hand, and
+the original files are left untouched, never deleted.
 
 **Rename every environment variable, especially `SQL2API_API_KEY`.** The old names are not read at all, and
 an unset API key means an open server - so a server that still finds any `SQL2API_*` variable in its

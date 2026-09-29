@@ -266,10 +266,11 @@ class GrantTests(AppTestCase):
 
     def test_a_key_stored_before_the_field_existed_still_works(self):
         secret = 'sk_legacy'
-        keys_file = os.path.join(self.tmp.name, 'api_keys.json')
-        with open(keys_file, 'w') as f:
-            json.dump({'keys': {'old': {'hash': apikeys._hash(secret), 'connections': ['a'], 'allow_writes': False,
-                                        'queries': [], 'active': True, 'created_at': '2026-01-01 00:00:00'}}}, f)
+        with db.transaction() as conn:
+            conn.execute("""
+                INSERT INTO api_keys (name, hash, active, expires_at, created_at, details_json)
+                VALUES ('old', ?, 1, NULL, '2026-01-01 00:00:00', ?)
+            """, (apikeys._hash(secret), json.dumps({'connections': ['a'], 'allow_writes': False, 'queries': []})))
         self.assertEqual(self.call('rep1', {'X-API-Key': secret}), 200)  # via its connection grant, unchanged
         listed = self.client.get('/api_keys', headers=self.admin).get_json()['keys']['old']
         self.assertEqual(listed['collections'], [])

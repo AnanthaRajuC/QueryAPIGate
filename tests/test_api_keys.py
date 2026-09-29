@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import apikeys, create_app
+from queryapigate import apikeys, create_app, db
 from tests.helpers import write_connections
 
 
@@ -90,10 +90,11 @@ class ApiKeyCrudTests(AppTestCase):
 
     def test_stored_file_never_holds_the_plaintext_key(self):
         key = self.create_key('reporting')
-        with open(os.path.join(self.tmp.name, 'api_keys.json')) as f:
-            raw = f.read()
-        self.assertNotIn(key, raw)
-        self.assertIn('hash', raw)
+        row = db.connection().execute('SELECT hash, details_json FROM api_keys WHERE name = ?',
+                                      ('reporting',)).fetchone()
+        self.assertNotIn(key, row['hash'])
+        self.assertNotIn(key, row['details_json'])
+        self.assertNotEqual(row['hash'], '')
 
     def test_unknown_endpoints_require_admin_not_just_any_key(self):
         scoped = self.create_key('scoped', connections=['a'])
@@ -200,15 +201,15 @@ class QueryScopingTests(AppTestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_a_key_created_before_this_field_existed_keeps_working_unchanged(self):
-        # Simulates a key stored on disk with no 'queries' entry at all, predating this feature.
+        # Simulates a key stored with no 'queries' entry at all, predating this feature.
         self.save_query('legacy_query', connection_name='a')
         key = self.create_key('legacy', connections=['a'])
-        path = os.path.join(self.tmp.name, 'api_keys.json')
-        with open(path) as f:
-            data = json.load(f)
-        del data['keys']['legacy']['queries']
-        with open(path, 'w') as f:
-            json.dump(data, f)
+        with db.transaction() as conn:
+            row = conn.execute('SELECT details_json FROM api_keys WHERE name = ?', ('legacy',)).fetchone()
+            details = json.loads(row['details_json'])
+            del details['queries']
+            conn.execute('UPDATE api_keys SET details_json = ? WHERE name = ?',
+                        (json.dumps(details), 'legacy'))
         # unchanged: still works via its connection grant, and gains no extra reach from the missing field
         self.assertEqual(self.client.get('/q/legacy_query', headers={'X-API-Key': key}).status_code, 200)
 
@@ -422,7 +423,7 @@ class LastUsedTests(AppTestCase):
             self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                              headers={'X-API-Key': key})
             self.assertIn('last_used_at', self.listed())
-            with mock.patch.object(apikeys, '_write') as spy:  # and the throttle still holds on that clock
+            with mock.patch.object(apikeys, '_upsert') as spy:  # and the throttle still holds on that clock
                 for _ in range(3):
                     self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                      headers={'X-API-Key': key})
@@ -430,7 +431,7 @@ class LastUsedTests(AppTestCase):
 
     def test_rapid_reuse_is_throttled_to_one_write(self):
         key = self.create_key('reporting', connections=['a'])
-        with mock.patch.object(apikeys, '_write') as spy:
+        with mock.patch.object(apikeys, '_upsert') as spy:
             for _ in range(5):
                 self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                  headers={'X-API-Key': key})
@@ -443,7 +444,7 @@ class LastUsedTests(AppTestCase):
         first = self.listed()['last_used_at']
         # simulate the throttle window having elapsed, rather than sleeping the test for real
         apikeys._last_recorded_use['reporting'] = time.monotonic() - apikeys._USE_RECORD_INTERVAL - 1
-        with mock.patch.object(apikeys, '_write', wraps=apikeys._write) as spy:
+        with mock.patch.object(apikeys, '_upsert', wraps=apikeys._upsert) as spy:
             self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                              headers={'X-API-Key': key})
             self.assertEqual(spy.call_count, 1)
@@ -454,7 +455,7 @@ class LastUsedTests(AppTestCase):
         key_b = self.create_key('key-b', connections=['a'])
         self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                          headers={'X-API-Key': key_a})
-        with mock.patch.object(apikeys, '_write', wraps=apikeys._write) as spy:
+        with mock.patch.object(apikeys, '_upsert', wraps=apikeys._upsert) as spy:
             self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                              headers={'X-API-Key': key_b})
             self.assertEqual(spy.call_count, 1)
@@ -711,7 +712,9 @@ class ApiKeysModuleTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(db.close)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        db.init_schema()
 
     def test_authenticate_returns_none_for_an_unknown_key(self):
         self.assertIsNone(apikeys.authenticate('nope'))

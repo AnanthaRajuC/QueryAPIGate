@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import apikeys, create_app
+from queryapigate import apikeys, create_app, db
 from tests.helpers import write_connections
 
 
@@ -199,7 +199,9 @@ class ModuleLevelTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(db.close)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        db.init_schema()
 
     def test_list_roles_is_empty_by_default(self):
         self.assertEqual(apikeys.list_roles(), {})

@@ -373,6 +373,62 @@ class LegacyConnectionsImportTests(unittest.TestCase):
         self.assertNotIn('from_json', conns)
 
 
+class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
+    """Same first-boot bootstrap as LegacyConnectionsImportTests above, for the three files Phase 2 of the
+    SQLite migration (BACKLOG #53) moved: api_keys.json, roles.json, audit_log.json."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = self.tmp.name
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home, 'QUERYAPIGATE_API_KEY': 'admin-key'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write_legacy_files(self):
+        with open(os.path.join(self.home, 'api_keys.json'), 'w') as f:
+            json.dump({'keys': {'legacy-key': {
+                'hash': 'a' * 64, 'connections': ['a'], 'allow_writes': False, 'queries': [], 'collections': [],
+                'expires_at': None, 'rate_limit': None, 'allowed_ips': None, 'allowed_write_ops': None,
+                'created_from_role': None, 'active': True, 'created_at': '2026-01-01 00:00:00'}}}, f)
+        with open(os.path.join(self.home, 'roles.json'), 'w') as f:
+            json.dump({'roles': {'legacy-role': {
+                'connections': ['a'], 'allow_writes': False, 'queries': [], 'collections': [], 'rate_limit': None,
+                'allowed_ips': None, 'allowed_write_ops': None, 'created_at': '2026-01-01 00:00:00'}}}, f)
+        with open(os.path.join(self.home, 'audit_log.json'), 'w') as f:
+            json.dump({'entries': [{'timestamp': '2026-01-01 00:00:00', 'actor': 'admin', 'action': 'create_key',
+                                    'target': 'legacy-key', 'changes': {'connections': ['a']}}]}, f)
+
+    def test_every_entry_round_trips_and_the_source_files_are_left_alone(self):
+        self.write_legacy_files()
+        client = create_app().test_client()
+        headers = {'X-API-Key': 'admin-key'}
+        self.assertIn('legacy-key', client.get('/api_keys', headers=headers).get_json()['keys'])
+        self.assertIn('legacy-role', client.get('/roles', headers=headers).get_json()['roles'])
+        entries = client.get('/audit_log', headers=headers).get_json()['entries']
+        self.assertEqual([e['target'] for e in entries], ['legacy-key'])
+        for filename in ('api_keys.json', 'roles.json', 'audit_log.json'):
+            self.assertTrue(os.path.exists(os.path.join(self.home, filename)))
+
+    def test_missing_legacy_files_are_a_no_op_not_an_error(self):
+        client = create_app().test_client()
+        headers = {'X-API-Key': 'admin-key'}
+        self.assertEqual(client.get('/api_keys', headers=headers).get_json()['keys'], {})
+        self.assertEqual(client.get('/roles', headers=headers).get_json()['roles'], {})
+        self.assertEqual(client.get('/audit_log', headers=headers).get_json()['entries'], [])
+
+    def test_import_only_happens_once(self):
+        self.write_legacy_files()
+        create_app()
+        with open(os.path.join(self.home, 'api_keys.json'), 'w') as f:
+            json.dump({'keys': {'legacy-key': {'hash': 'a' * 64, 'connections': ['a'], 'allow_writes': False,
+                                                'queries': [], 'active': True, 'created_at': 'now'},
+                                'second-key': {'hash': 'b' * 64, 'connections': [], 'allow_writes': False,
+                                              'queries': [], 'active': True, 'created_at': 'now'}}}, f)
+        client = create_app().test_client()  # second boot: api_keys table is no longer empty
+        self.assertNotIn('second-key', client.get('/api_keys', headers={'X-API-Key': 'admin-key'}).get_json()['keys'])
+
+
 class TestConnectionTests(ApiTestCase):
     def test_succeeds_against_a_real_connection(self):
         res = self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})

@@ -94,6 +94,8 @@ def create_app():
     config.check_settings()
     db.init_schema()
     store.import_legacy_data_if_empty()
+    apikeys.import_legacy_keys_if_empty()
+    apikeys.import_legacy_roles_if_empty()
     logging_setup.configure(log)
     app = Flask(__name__)
     hops = config.proxy_hops()
@@ -286,7 +288,7 @@ def _dict_diff(before, after):
 def _connection_audit_changes(before, after):
     """Like _dict_diff(), but for a connection's raw (unmasked) stored fields specifically: 'password' is
     reported only as the literal string 'changed' when it differs, in either direction - never the actual
-    value, before or after masking, since this is what gets persisted to audit_log.json. Every other field
+    value, before or after masking, since this is what gets persisted to the audit log. Every other field
     (host, port, user, db, database, active, ...) is not a secret and is shown as given. `before=None`
     means the connection didn't exist yet - the caller records that as a 'create_connection' snapshot
     instead of calling this."""

@@ -1,10 +1,10 @@
-"""Persistence: the connection registry and saved queries (SQLite, via db.py - see db.py's own docstring
-for why), plus the audit log (still plain JSON on disk, capped and rewritten in full on every event).
+"""Persistence: the connection registry, saved queries, and the audit log - all SQLite, via db.py (see
+db.py's own docstring for why). API keys and roles live in the same queryapigate.db but are owned by
+apikeys.py, which has its own read/write functions against the same db.py connection.
 
 Every saved-query function still speaks in terms of a "path" for backward compatibility with every
 caller - resolve_saved_file()'s own docstring explains why that's now just the query's name, not a real
-filesystem path. api_keys.json/roles.json (apikeys.py) also reuse `lock`/`write_json_atomic` from here for
-their own, still-JSON storage - only connections and saved queries have moved to SQLite so far.
+filesystem path.
 """
 import json
 import os
@@ -29,13 +29,6 @@ _COLLECTION_RE = re.compile(r'^[a-z0-9][a-z0-9._-]{0,62}$')
 _UNSET = object()  # "argument not passed" - distinct from an explicit None, which clears a collection
 
 
-def write_json_atomic(path, data):
-    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp'
-    with open(tmp_path, 'w') as f:
-        json.dump(data, f, indent=4)
-    os.replace(tmp_path, path)
-
-
 def now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -48,26 +41,24 @@ def now():
 # --------------------------------------------------------------------------------------
 
 def record_audit(actor, action, target, changes=None):
-    """Append one entry (newest last, capped at config.audit_log_limit() - same shape as execution_history
-    below) and, when QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE is set, also append it there - a second, never-capped
-    copy for retention beyond audit_log.json's own rolling window. Never raises: an audit-log write failing
-    should not block the action it's recording, the same trade-off record_execution() already makes for
-    query-run history; the two writes are independently fault-tolerant so a problem with one (e.g. the
-    export path's directory missing) never suppresses the other."""
+    """Append one entry (oldest first, capped at config.audit_log_limit() - same per-insert SQL trim
+    record_execution() below uses for execution_history) and, when QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE is
+    set, also append it to that plain file - a second, never-capped copy for retention beyond the SQLite
+    table's own rolling window, independent of where the primary log lives. Never raises: an audit-log
+    write failing should not block the action it's recording, the same trade-off record_execution() already
+    makes for query-run history; the two writes are independently fault-tolerant so a problem with one
+    (e.g. the export path's directory missing) never suppresses the other."""
     entry = {'timestamp': now(), 'actor': actor, 'action': action, 'target': target, 'changes': changes}
     try:
-        with lock:
-            path = config.audit_log_file()
-            try:
-                with open(path, 'r') as f:
-                    entries = json.load(f).get('entries', [])
-            except (FileNotFoundError, json.JSONDecodeError):
-                entries = []
-            entries.append(entry)
-            del entries[:-config.audit_log_limit()]
-            config.home().mkdir(parents=True, exist_ok=True)
-            write_json_atomic(path, {'entries': entries})
-    except OSError:
+        with db.transaction() as conn:
+            conn.execute('INSERT INTO audit_log (timestamp, entry_json) VALUES (?, ?)',
+                        (entry['timestamp'], json.dumps(entry, default=str)))
+            conn.execute("""
+                DELETE FROM audit_log WHERE rowid IN (
+                    SELECT rowid FROM audit_log ORDER BY timestamp DESC, rowid DESC LIMIT -1 OFFSET ?
+                )
+            """, (config.audit_log_limit(),))
+    except (OSError, sqlite3.Error):
         pass
     export_path = config.audit_log_export_file()
     if export_path is not None:
@@ -79,11 +70,10 @@ def record_audit(actor, action, target, changes=None):
 
 
 def read_audit_log():
-    try:
-        with open(config.audit_log_file(), 'r') as f:
-            return json.load(f).get('entries', [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    """Every stored entry, oldest first (the same order the JSON file's list was always in) - app.py's
+    /audit_log route reverses this to present newest first."""
+    rows = db.connection().execute('SELECT entry_json FROM audit_log ORDER BY id').fetchall()
+    return [json.loads(row['entry_json']) for row in rows]
 
 
 # --------------------------------------------------------------------------------------
@@ -686,11 +676,35 @@ def import_legacy_saved_queries_if_empty():
                         (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
 
 
+def import_legacy_audit_log_if_empty():
+    """First-boot bootstrap for audit_log.json, same shape as the two above: only runs while audit_log is
+    completely empty, reads the legacy file directly, and never touches it again afterward. A straight
+    one-time copy of whatever entries are already there (already capped as of the file's last write) - the
+    normal per-insert cap in record_audit() takes over from the next write onward."""
+    if db.connection().execute('SELECT 1 FROM audit_log LIMIT 1').fetchone() is not None:
+        return
+    try:
+        with open(config.audit_log_file(), 'r') as f:
+            entries = json.load(f).get('entries', [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    with db.transaction() as conn:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            conn.execute('INSERT INTO audit_log (timestamp, entry_json) VALUES (?, ?)',
+                        (entry.get('timestamp') or now(), json.dumps(entry, default=str)))
+
+
 def import_legacy_data_if_empty():
-    """Called once at startup (app.create_app(), cli.main()): the single entry point for both first-boot
-    bootstraps above, so every caller only needs to remember one name."""
+    """Called once at startup (app.create_app(), cli.main()): the single entry point for every first-boot
+    bootstrap this module owns, so every caller only needs to remember one name. apikeys.py's own
+    import_legacy_keys_if_empty()/import_legacy_roles_if_empty() are called separately by the same
+    callers - store.py cannot import apikeys here without creating an import cycle (apikeys.py already
+    imports store)."""
     import_legacy_connections_if_empty()
     import_legacy_saved_queries_if_empty()
+    import_legacy_audit_log_if_empty()
 
 
 def latest_versions():

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import config, create_app, store
+from queryapigate import config, create_app, db, store
 
 
 class AppTestCase(unittest.TestCase):
@@ -180,9 +180,23 @@ class OrderingAndCapTests(AppTestCase):
 
     def test_a_write_failure_never_raises(self):
         # record_audit() is called after the action it's recording has already succeeded (see app.py's
-        # route handlers) - a disk error writing audit_log.json specifically must not surface as a 500,
-        # the same trade-off store.record_execution() already makes for query-run history.
-        with mock.patch.object(store, 'write_json_atomic', side_effect=OSError('disk full')):
+        # route handlers) - a disk error writing the audit_log table specifically must not surface as a
+        # 500, the same trade-off store.record_execution() already makes for query-run history.
+        # sqlite3.Connection is a C type (its methods can't be monkeypatched directly), so this wraps it in
+        # a thin proxy instead - transparent for everything except the one statement being made flaky, the
+        # same technique test_collections.py's move_collection() interruption test already established.
+        real_conn = db.connection()
+
+        class FlakyConn:
+            def execute(self, sql, *args, **kwargs):
+                if sql.strip().startswith('INSERT INTO audit_log'):
+                    raise sqlite3.OperationalError('disk full')
+                return real_conn.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, attr):
+                return getattr(real_conn, attr)
+
+        with mock.patch.object(db, 'connection', return_value=FlakyConn()):
             store.record_audit('admin', 'create_key', 'reporting', {'connections': ['a']})
 
 
@@ -244,8 +258,19 @@ class ExportFileTests(AppTestCase):
 
     def test_a_broken_primary_write_does_not_stop_the_export(self):
         export_path = os.path.join(self.tmp.name, 'audit-export.jsonl')
+        real_conn = db.connection()
+
+        class FlakyConn:
+            def execute(self, sql, *args, **kwargs):
+                if sql.strip().startswith('INSERT INTO audit_log'):
+                    raise sqlite3.OperationalError('disk full')
+                return real_conn.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, attr):
+                return getattr(real_conn, attr)
+
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE': export_path}), \
-             mock.patch.object(store, 'write_json_atomic', side_effect=OSError('disk full')):
+             mock.patch.object(db, 'connection', return_value=FlakyConn()):
             store.record_audit('admin', 'create_key', 'reporting', {'connections': ['a']})
         with open(export_path) as f:
             self.assertEqual(len(f.read().splitlines()), 1)

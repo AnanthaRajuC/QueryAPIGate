@@ -165,7 +165,7 @@ formats apply regardless of which database is behind a given connection.
 
 QueryAPIGate is built to expose specific query results, not database credentials:
 
-- API key authentication, with hashed key storage (SHA-256, never the raw secret) in `api_keys.json`.
+- API key authentication, with hashed key storage (SHA-256, never the raw secret) in `queryapigate.db`.
 - Database connection passwords encrypted at rest (`QUERYAPIGATE_SECRET_KEY`), decrypted only in memory at the
   moment a connection is opened; a literal password on disk is never returned to a client either way.
 - Scoped API keys: restrict a key to a set of connections, and/or to a specific allow-list of saved queries,
@@ -487,7 +487,7 @@ Everything is configured through environment variables (all optional):
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries), `api_keys.json`, `roles.json` and `audit_log.json`. |
+| `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
 | `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api_keys`), every request except `/health`, `/docs`, `/ui`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
@@ -504,7 +504,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_SECRET_KEY` | unset | A Fernet key encrypting connection passwords at rest. Off by default (stored as given); needs `queryapigate[encryption]`. A malformed value stops startup. |
 | `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |
 | `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` | `1` | Seconds a query may take before it is logged as a warning. `0` disables it. |
-| `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `audit_log.json`; older ones roll off. Always a positive count; a malformed value stops startup. |
+| `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
 | `QUERYAPIGATE_LOAD_EXAMPLES` | unset | `yes` loads the [example APIs](documentation/EXAMPLES.md) (reporting, dashboard, export, partner) at startup - idempotent; a malformed value stops startup. Never removes anything: use `queryapigate examples unload`. |
 | `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` | unset | Path to also append every audit entry to, one JSON object per line, never capped - for retention beyond the rolling window above. |
 
@@ -528,9 +528,8 @@ QueryAPIGate runs whatever SQL it is given against your databases, so it ships l
   other credential; there is no way to recover an encrypted password without it.
 - Set query timeouts and result-size expectations deliberately (`QUERYAPIGATE_QUERY_TIMEOUT`, `QUERYAPIGATE_MAX_PAGE_SIZE`),
   enable rate limiting, and route logs and `/metrics` into your existing monitoring.
-- Plan for backup and recovery of `queryapigate.db`, `api_keys.json`, `roles.json` and `audit_log.json`
-  (`QUERYAPIGATE_HOME`), and put QueryAPIGate behind your normal reverse-proxy/TLS-termination setup rather
-  than exposing it directly.
+- Plan for backup and recovery of `queryapigate.db` (`QUERYAPIGATE_HOME`), and put QueryAPIGate behind your
+  normal reverse-proxy/TLS-termination setup rather than exposing it directly.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
@@ -571,13 +570,13 @@ docker run -p 5000:5000 -v queryapigate-data:/data -e QUERYAPIGATE_API_KEY=chang
 | `X.Y.Z`, `latest` | QueryAPIGate with the MySQL, PostgreSQL and ClickHouse drivers (SQLite is built in) |
 | `X.Y.Z-h2`, `latest-h2` | The same plus Java and the H2 driver - also the variant to use for a generic `jdbc` connection (mount your vendor's jar) |
 
-The container keeps `queryapigate.db`, `api_keys.json`, `roles.json` and `audit_log.json` in `/data` (create
-a starter with `docker run --rm -v queryapigate-data:/data ghcr.io/anantharajuc/queryapigate queryapigate init`).
-The named volume above works
+The container keeps `queryapigate.db` in `/data` (create a starter with `docker run --rm -v queryapigate-data:/data
+ghcr.io/anantharajuc/queryapigate queryapigate init`). The named volume above works
 out of the box. To use a folder on the host instead (`-v "$PWD/data:/data"`), create it yourself first (`mkdir data`) and make sure
 it is writable by uid 1000, the container's user - a folder that Docker creates for you is owned by root, which the container
 cannot write to (or run with `--user "$(id -u):$(id -g)"`). It runs as a non-root user under
-gunicorn with one worker (the files are protected by an in-process lock) and a health check on `/health`. Behind a
+gunicorn with one worker (the built-in rate limiter and in-memory `/metrics` are per-process state with no
+cross-worker aggregation) and a health check on `/health`. Behind a
 reverse proxy or load balancer, set `QUERYAPIGATE_TRUST_PROXY=1`. To build it yourself:
 `docker build -t queryapigate .` (add `--build-arg WITH_H2=true` for H2).
 

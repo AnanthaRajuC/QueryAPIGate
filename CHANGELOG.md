@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **API keys, roles and the audit log now live in `queryapigate.db` (SQLite), not `api_keys.json`/
+  `roles.json`/`audit_log.json`** (BACKLOG #53, Phase 2 - completes the JSON-to-SQLite migration Phase 1
+  started for connections and saved queries). Every public `apikeys.py`/`store.record_audit()`/
+  `read_audit_log()` function kept its exact name, signature and return shape, so no other module needed to
+  change. `create_key`/`update_key`/`delete_key`/`create_role`/`update_role`/`delete_role` now read-check-
+  write against real SQL rows inside a transaction instead of rewriting a whole JSON file; the audit log's
+  "keep the newest N entries" cap is now a per-insert indexed trim (the same technique Phase 1 already gave
+  `execution_history`) instead of a whole-file read/append/rewrite. `rename_collection()` and
+  `examples load`/`unload` keep their existing resumable-not-atomic design exactly as before (both are
+  explicitly documented and tested that way, and `examples load` also writes a real on-disk SQLite file
+  mid-sequence that no transaction could roll back anyway) - what changed is only that each step inside them
+  now writes to SQLite instead of a JSON file. Pre-existing `api_keys.json`/`roles.json`/`audit_log.json` are
+  imported automatically, once, the first time their table is empty - nothing to run by hand, and the JSON
+  files are never consulted again afterward. Every persistent store this app owns is now SQLite-backed with
+  real cross-process transactions; `--workers 1` is still the recommendation, now because the built-in rate
+  limiter and in-memory `/metrics` are per-process state, not because any file needs an in-process lock.
+
 ## [0.10.0] - 2026-09-29
 
 ### Added

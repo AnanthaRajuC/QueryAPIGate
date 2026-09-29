@@ -24,13 +24,22 @@ class DbTests(unittest.TestCase):
         conn = db.connection()
         names = {row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
-        self.assertEqual({'schema_version', 'connections', 'saved_queries',
-                          'saved_query_versions', 'execution_history'} - names, set())
+        self.assertEqual({'schema_version', 'connections', 'saved_queries', 'saved_query_versions',
+                          'execution_history', 'api_keys', 'roles', 'audit_log'} - names, set())
 
     def test_init_schema_is_idempotent(self):
         db.init_schema()
         db.init_schema()  # must not raise, must not duplicate the schema_version row
         conn = db.connection()
+        rows = conn.execute('SELECT version FROM schema_version').fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], db.SCHEMA_VERSION)
+
+    def test_init_schema_bumps_an_older_stored_version(self):
+        db.init_schema()
+        conn = db.connection()
+        conn.execute('UPDATE schema_version SET version = 1')
+        db.init_schema()
         rows = conn.execute('SELECT version FROM schema_version').fetchall()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], db.SCHEMA_VERSION)

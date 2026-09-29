@@ -1,6 +1,5 @@
-"""queryapigate.db - the SQLite store for connections and saved queries (Phase 1 of moving off the JSON
-files store.py used to own alone; see BACKLOG for the roadmap. api_keys.json/roles.json/audit_log.json are
-untouched by this module and stay JSON-backed for a later phase).
+"""queryapigate.db - the SQLite store for every persistent thing this app owns: connections and saved
+queries (Phase 1), and API keys, roles and the audit log (Phase 2) - see BACKLOG #53 for the roadmap.
 
 One sqlite3.Connection per thread (threading.local), in WAL mode with a busy_timeout - SQLite's own file
 locking is what actually makes this safe across threads *and* processes, replacing what store.py's
@@ -15,7 +14,7 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _local = threading.local()
 
@@ -62,6 +61,37 @@ CREATE TABLE IF NOT EXISTS execution_history (
   FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  name TEXT PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,  -- read by authenticate()'s per-row hmac.compare_digest() scan (apikeys.py) -
+                              -- a real column so that scan is a plain SELECT; UNIQUE is a free integrity
+                              -- bonus, never used to short-circuit the scan itself
+  active INTEGER NOT NULL DEFAULT 1,
+  expires_at TEXT,           -- checked in Python (apikeys.is_expired()), kept a real column anyway to match
+                              -- active/created_at as a plausible future "keys expiring soon" filter target
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL  -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+                               -- allowed_write_ops, created_from_role, last_used_at - everything else
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+  name TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL  -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+                               -- allowed_write_ops, example - a role has no hash/active/expires_at/
+                               -- created_from_role/last_used_at, so none of those become columns
+);
+
+-- Mirrors execution_history's own shape: entry_json holds actor/action/target/changes verbatim, for the
+-- same "absent vs. present-but-null" reason execution_history documents. `timestamp` is a real column
+-- since it's what every ordering/capping query needs.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,
+  entry_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 """
 
 
@@ -107,6 +137,8 @@ def init_schema():
     row = conn.execute('SELECT version FROM schema_version').fetchone()
     if row is None:
         conn.execute('INSERT INTO schema_version (version) VALUES (?)', (SCHEMA_VERSION,))
+    elif row[0] != SCHEMA_VERSION:
+        conn.execute('UPDATE schema_version SET version = ?', (SCHEMA_VERSION,))
 
 
 @contextlib.contextmanager
