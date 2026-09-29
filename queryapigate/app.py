@@ -378,7 +378,8 @@ def get_stream_flag():
     return (request.args.get('stream') or '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
-def stream_sql_response(sql, connection_name, params, timeout, output_format, filename, saved=None):
+def stream_sql_response(sql, connection_name, params, timeout, output_format, filename, saved=None,
+                        allowed_tables=None):
     """Shared by execute_sql_endpoint() and run_saved(): validates the stream=true-specific constraints
     (format, no pagination) and returns the chunked Response. ``saved``, when given, is (path, version) for
     a saved query whose run should still be recorded in its execution_history once the stream finishes."""
@@ -387,7 +388,8 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
     if request.args.get('page') or request.args.get('page_size'):
         raise ApiError('stream=true exports the whole result and does not accept page/page_size')
     key_name = caller_key_name()
-    columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name)
+    columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
+                                      allowed_tables=allowed_tables)
     if saved is not None:
         path, number = saved
         # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the
@@ -463,11 +465,12 @@ def execute_sql_endpoint():
     timeout = get_timeout(data)
     if get_stream_flag():
         return stream_sql_response(data['sql'], data['connection_name'], params, timeout, output_format,
-                                   filename=data['connection_name'])
+                                   filename=data['connection_name'], allowed_tables=g.permission.allowed_tables)
     limit, offset, page = get_pagination()
     result = engine.execute_sql(data['sql'], data['connection_name'], limit, offset, params, timeout,
                                 allow_writes=g.permission.allow_writes, key_name=caller_key_name(),
-                                allowed_write_ops=g.permission.allowed_write_ops, database=database)
+                                allowed_write_ops=g.permission.allowed_write_ops, database=database,
+                                allowed_tables=g.permission.allowed_tables)
     return render(result, output_format, page, limit)
 
 
@@ -569,7 +572,7 @@ def run_saved(ref, body, url_params):
         # No caching for a streamed export - caching would require materialising the whole body anyway,
         # defeating the point - but the run is still recorded once the stream finishes, same as any other.
         return stream_sql_response(sql, connection_name, values, timeout, output_format, filename=ref,
-                                   saved=(path, number))
+                                   saved=(path, number), allowed_tables=g.permission.allowed_tables)
 
     limit, offset, page = get_pagination()
 
@@ -591,7 +594,8 @@ def run_saved(ref, body, url_params):
     try:
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, limit, offset, values, timeout,
                                           allow_writes=effective_allow_writes, key_name=caller_key_name(),
-                                          allowed_write_ops=g.permission.allowed_write_ops)
+                                          allowed_write_ops=g.permission.allowed_write_ops,
+                                          allowed_tables=g.permission.allowed_tables)
     except ApiError as error:
         _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'error', 'error': error.message})
         raise
@@ -1007,7 +1011,7 @@ def create_api_key():
                                 expires_at=data.get('expires_at'), rate_limit=data.get('rate_limit'),
                                 allowed_ips=data.get('allowed_ips'),
                                 allowed_write_ops=data.get('allowed_write_ops'), role=data.get('role'),
-                                collections=data.get('collections'))
+                                collections=data.get('collections'), allowed_tables=data.get('allowed_tables'))
     store.record_audit(caller_key_name(), 'create_key', data.get('name'), apikeys.list_keys().get(data.get('name')))
     return jsonify({'name': data.get('name'), 'key': secret,
                     'message': "Store this key now - it can't be shown again."}), 200
@@ -1021,7 +1025,8 @@ def update_api_key(name):
     # expires_at, rate_limit, allowed_ips and allowed_write_ops all need a real presence check, not .get():
     # an explicit null in the request body means "clear it", which must be distinguishable from the field
     # being absent ("leave it alone") - see apikeys.update_key's _UNSET sentinel.
-    unset_kwargs = {k: data[k] for k in ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops')
+    unset_kwargs = {k: data[k] for k in
+                    ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables')
                     if k in data}
     apikeys.update_key(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
                        active=data.get('active'), queries=data.get('queries'),
@@ -1054,7 +1059,8 @@ def create_role_endpoint():
     apikeys.create_role(data.get('name'), connections=data.get('connections'),
                         allow_writes=bool(data.get('allow_writes', False)), queries=data.get('queries'),
                         rate_limit=data.get('rate_limit'), allowed_ips=data.get('allowed_ips'),
-                        allowed_write_ops=data.get('allowed_write_ops'), collections=data.get('collections'))
+                        allowed_write_ops=data.get('allowed_write_ops'), collections=data.get('collections'),
+                        allowed_tables=data.get('allowed_tables'))
     store.record_audit(caller_key_name(), 'create_role', data.get('name'), apikeys.list_roles().get(data.get('name')))
     return jsonify({'message': f"Role '{data.get('name')}' created"}), 200
 
@@ -1065,7 +1071,8 @@ def update_role_endpoint(name):
     data = get_json_body()
     before = apikeys.list_roles().get(name)
     # Same _UNSET-sentinel presence check update_api_key() already uses for these three fields.
-    unset_kwargs = {k: data[k] for k in ('rate_limit', 'allowed_ips', 'allowed_write_ops') if k in data}
+    unset_kwargs = {k: data[k] for k in ('rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables')
+                    if k in data}
     apikeys.update_role(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
                         queries=data.get('queries'), collections=data.get('collections'), **unset_kwargs)
     changes = _dict_diff(before, apikeys.list_roles().get(name))
@@ -1202,6 +1209,7 @@ def catalog():
             'admin': permission.admin,
             'allow_writes': permission.allow_writes,
             'allowed_write_ops': permission.allowed_write_ops,
+            'allowed_tables': sorted(permission.allowed_tables) if permission.allowed_tables is not None else None,
             'rate_limit': config.format_rate_limit(permission.rate_limit),
             'server_rate_limit': config.format_rate_limit(config.rate_limit()),
         },

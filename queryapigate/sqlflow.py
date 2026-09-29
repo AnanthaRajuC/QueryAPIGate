@@ -14,14 +14,6 @@ _DIALECT_MAP = {'mysql': 'mysql', 'postgres': 'postgres', 'clickhouse': 'clickho
                 'sqlite': 'sqlite', 'duckdb': 'duckdb'}
 
 
-def _substitute_placeholders(sql, dialect):
-    """Replace this project's own `:name`/`{name}` parameter markers with a harmless literal
-    before handing the text to a strict parser - only the query's structure matters here, not
-    the values, and sqlglot does not understand either marker convention."""
-    sql = sqltools._param_re(dialect).sub(lambda m: '1' if m.group('name') else m.group(0), sql)
-    return sqltools._BRACE_RE.sub('1', sql)
-
-
 def pretty_print(sql, dialect):
     """A real, sqlglot-formatted rendering of `sql`, or None when that isn't possible - an
     unsupported dialect, a legacy `{name}` placeholder (sqlglot has no notion of this project's
@@ -61,7 +53,7 @@ def extract_flow(sql, dialect):
 
     sqlglot_dialect = _DIALECT_MAP[dialect]
     try:
-        parsed = sqlglot.parse_one(_substitute_placeholders(sql, dialect), read=sqlglot_dialect)
+        parsed = sqlglot.parse_one(sqltools.substitute_placeholders(sql, dialect), read=sqlglot_dialect)
     except Exception:
         return {'tables': [], 'joins': [], 'formatted': None, 'error': 'Could not analyze this query'}
 

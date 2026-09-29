@@ -41,11 +41,12 @@ class AppTestCase(unittest.TestCase):
         apikeys._last_recorded_use.clear()
 
     def create_key(self, name='scoped', connections=None, allow_writes=False, queries=None, expires_at=None,
-                   allowed_ips=None, allowed_write_ops=None):
+                   allowed_ips=None, allowed_write_ops=None, allowed_tables=None):
         res = self.client.post('/api_keys', json={'name': name, 'connections': connections,
                                                    'allow_writes': allow_writes, 'queries': queries,
                                                    'expires_at': expires_at, 'allowed_ips': allowed_ips,
-                                                   'allowed_write_ops': allowed_write_ops},
+                                                   'allowed_write_ops': allowed_write_ops,
+                                                   'allowed_tables': allowed_tables},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         return res.get_json()['key']
@@ -603,6 +604,92 @@ class AllowedWriteOpsTests(AppTestCase):
         self.assertEqual(res.status_code, 200)
 
 
+class AllowedTablesTests(AppTestCase):
+    """A key's optional allowed_tables (BACKLOG #21's remaining gap) - restricts *every* statement, read or
+    write, to a named set of tables; checked in sqltools.validate_sql()/tableguard.py."""
+
+    def setUp(self):
+        super().setUp()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute('CREATE TABLE secret (id INTEGER)')
+        conn.execute('INSERT INTO secret VALUES (1)')
+        conn.commit()
+        conn.close()
+        write_connections({
+            'a': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+            'h2conn': {'db': 'h2', 'host': 'localhost', 'database': 'unused', 'active': True},
+        })
+
+    def run_as(self, key, sql, connection_name='a'):
+        return self.client.post('/execute_sql', json={'sql': sql, 'connection_name': connection_name},
+                                headers={'X-API-Key': key})
+
+    def test_a_query_touching_only_allowed_tables_is_permitted(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
+        self.assertEqual(self.run_as(key, 'SELECT * FROM t').status_code, 200)
+
+    def test_a_query_touching_a_forbidden_table_is_rejected(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
+        res = self.run_as(key, 'SELECT * FROM secret')
+        self.assertEqual(res.status_code, 403)
+        self.assertIn('secret', res.get_json()['error'])
+
+    def test_this_restricts_writes_too_not_just_reads(self):
+        os.environ['QUERYAPIGATE_ALLOW_WRITES'] = '1'
+        key = self.create_key('writer', connections=['a'], allow_writes=True, allowed_tables=['t'])
+        self.assertEqual(self.run_as(key, 'DELETE FROM secret').status_code, 403)
+        self.assertEqual(self.run_as(key, 'DELETE FROM t').status_code, 200)
+
+    def test_unset_means_no_restriction(self):
+        key = self.create_key('reader', connections=['a'])
+        self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 200)
+
+    def test_table_names_are_normalised_to_lowercase(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['T'])
+        self.assertEqual(self.run_as(key, 'SELECT * FROM t').status_code, 200)
+
+    def test_malformed_allowed_tables_is_rejected(self):
+        for bad in ('t', 123, [1, 2], ['']):
+            res = self.client.post('/api_keys', json={'name': 'x', 'allowed_tables': bad},
+                                   headers=self.admin_headers)
+            self.assertEqual(res.status_code, 400, bad)
+
+    def test_allowed_tables_appears_in_the_listing(self):
+        self.create_key('reader', connections=['a'], allowed_tables=['b_table', 'a_table'])
+        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['reader']
+        self.assertEqual(listed['allowed_tables'], ['a_table', 'b_table'])
+
+    def test_clearing_via_explicit_null_removes_the_restriction(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
+        self.assertEqual(self.client.patch('/api_keys/reader', json={'allowed_tables': None},
+                                           headers=self.admin_headers).status_code, 200)
+        self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 200)
+
+    def test_patch_without_allowed_tables_leaves_it_unchanged(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
+        self.client.patch('/api_keys/reader', json={'active': True}, headers=self.admin_headers)
+        self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 403)
+
+    def test_the_admin_key_is_never_restricted_by_this(self):
+        res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM secret', 'connection_name': 'a'},
+                               headers=self.admin_headers)
+        self.assertEqual(res.status_code, 200)
+
+    def test_a_restricted_key_against_an_unsupported_dialect_is_always_rejected_not_silently_open(self):
+        key = self.create_key('reader', connections=['h2conn'], allowed_tables=['t'])
+        res = self.run_as(key, 'SELECT 1', connection_name='h2conn')
+        self.assertEqual(res.status_code, 403)
+        self.assertIn('h2', res.get_json()['error'])
+
+    def test_a_role_copies_allowed_tables_onto_a_key_created_from_it(self):
+        self.client.post('/roles', json={'name': 'reader-role', 'connections': ['a'], 'allowed_tables': ['t']},
+                         headers=self.admin_headers)
+        secret = self.client.post('/api_keys', json={'name': 'from-role', 'role': 'reader-role'},
+                                  headers=self.admin_headers).get_json()['key']
+        self.assertEqual(self.run_as(secret, 'SELECT * FROM secret').status_code, 403)
+        self.assertEqual(self.run_as(secret, 'SELECT * FROM t').status_code, 200)
+
+
 class WritePermissionTests(AppTestCase):
     def test_scoped_key_without_allow_writes_is_forced_read_only(self):
         os.environ['QUERYAPIGATE_ALLOW_WRITES'] = '1'
@@ -826,14 +913,21 @@ class CatalogTests(AppTestCase):
         self.assertFalse(entries['read_only']['can_write'])
 
     def test_caller_reflects_the_calling_keys_own_terms(self):
-        key = self.create_key('scoped', connections=['a'], allow_writes=True, allowed_write_ops=['insert'])
+        key = self.create_key('scoped', connections=['a'], allow_writes=True, allowed_write_ops=['insert'],
+                              allowed_tables=['orders'])
         self.client.patch('/api_keys/scoped', json={'rate_limit': '50/minute'}, headers=self.admin_headers)
         caller = self.client.get('/catalog', headers={'X-API-Key': key}).get_json()['caller']
         self.assertEqual(caller['name'], 'scoped')
         self.assertFalse(caller['admin'])
         self.assertTrue(caller['allow_writes'])
         self.assertEqual(caller['allowed_write_ops'], ['insert'])
+        self.assertEqual(caller['allowed_tables'], ['orders'])
         self.assertEqual(caller['rate_limit'], '50/minute')
+
+    def test_caller_allowed_tables_is_null_when_the_key_has_no_restriction(self):
+        key = self.create_key('scoped', connections=['a'])
+        caller = self.client.get('/catalog', headers={'X-API-Key': key}).get_json()['caller']
+        self.assertIsNone(caller['allowed_tables'])
 
     def test_caller_rate_limit_is_null_when_the_key_has_none_of_its_own(self):
         key = self.create_key('scoped', connections=['a'])

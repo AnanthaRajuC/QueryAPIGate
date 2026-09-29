@@ -23,7 +23,7 @@ def _sql_hash(sql):
 
 
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
-                allowed_write_ops=None, database=None):
+                allowed_write_ops=None, database=None, allowed_tables=None):
     """Run ``sql`` on a named connection and return the requested page as a ResultSetDTO.
 
     ``allow_writes`` is the caller's own permission (e.g. a scoped API key); the connection is only ever
@@ -31,16 +31,18 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     server's setting, never widen it. ``key_name`` is only for the query counter in ``/metrics`` (audit: which
     key touched which connection); it plays no part in what the query is allowed to do. ``allowed_write_ops``
     is a key's own narrower allow-list of write keywords, if it has one - see ``sqltools.validate_sql()``.
-    ``database`` overrides the connection's own configured database for just this call - Run SQL's "browse a
-    different database on this same server" picker (see schema.fetch_schema()); a stored, scoped API key can
-    never send this itself (there is no request field for it), only the admin UI's own ad-hoc calls do.
+    ``allowed_tables`` is a key's own narrower allow-list of tables it may query, if it has one - see
+    ``sqltools.validate_sql()``/``tableguard.py``. ``database`` overrides the connection's own configured
+    database for just this call - Run SQL's "browse a different database on this same server" picker (see
+    schema.fetch_schema()); a stored, scoped API key can never send this itself (there is no request field
+    for it), only the admin UI's own ad-hoc calls do.
     """
     details = store.get_connection(connection_name)
     if database:
         details = {**details, 'database': database}
     effective_allow_writes = config.allow_writes() and allow_writes
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,
-                       allowed_write_ops=allowed_write_ops)
+                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables)
     log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
              connection_name, details['db'], limit, offset, timeout, sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
@@ -218,12 +220,15 @@ def list_collections(details):
         raise ApiError('Could not list collections', 502, detail=detail) from error
 
 
-def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-'):
+def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None):
     """Like execute_sql, but for the whole result rather than one page - and, unlike execute_sql, always
     read-only regardless of QUERYAPIGATE_ALLOW_WRITES or the caller's own permission. A large export has no
     business mutating data, and forcing this sidesteps a lot of incidental complexity around commit timing
     on a connection that may stay checked out for a long time - see runners.py's "Streaming" section for
     what that already involves per dialect without adding writes into the mix too.
+
+    ``allowed_tables`` is a key's own narrower allow-list of tables it may query, if it has one - see
+    ``sqltools.validate_sql()``/``tableguard.py``.
 
     Returns (columns, rows): ``columns`` is available immediately (the underlying generator is primed once
     to get it, surfacing a connection or SQL error here just like execute_sql does), ``rows`` is a lazy
@@ -231,7 +236,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-'):
     is exhausted, errors, or a client disconnect closes it early (see runners._make_stream_runner).
     """
     details = store.get_connection(connection_name)
-    sql = validate_sql(sql, dialect=details['db'], allow_writes=False)
+    sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables)
     log.info('Streaming from %s (%s): %s', connection_name, details['db'], sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     status = 'error'

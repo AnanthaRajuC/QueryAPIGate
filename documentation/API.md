@@ -612,14 +612,40 @@ the key *is* permitted. Omitted (or `null`) means every write keyword is equally
 behaviour. `PATCH /api_keys/<name>` with an explicit `{"allowed_write_ops": null}` clears an existing
 restriction, the same pattern `expires_at`/`rate_limit`/`allowed_ips` use.
 
+### Table access restrictions
+
+A key can be narrowed to a specific set of tables it may query, `allowed_tables` - unlike
+`allowed_write_ops`, this restricts *every* statement, read or write, since a table a caller shouldn't see is
+forbidden regardless of what's being done to it:
+
+~~~json
+{"name": "reporting-narrow", "connections": ["reporting-db"], "allowed_tables": ["orders", "customers"]}
+~~~
+
+Needs the `sqlglot` package to parse SQL (`pip install "queryapigate[flow]"` - the same optional extra the
+Access tab's "Query flow" diagram already uses; a query is rejected with `500` if it's missing while a key
+has `allowed_tables` set, rather than silently letting the query through unchecked). Checked against every
+table a statement actually touches - joins, subqueries and CTEs are all resolved correctly (a CTE's own name
+is never mistaken for a real table), including the target table of a bare `DELETE`/`UPDATE`/`INSERT`. Only
+supported for `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb`
+connections, the dialects QueryAPIGate can actually parse for this - **a table-restricted key used against an
+`h2`, `jdbc` or `mongo` connection is refused on every query, with a `403` naming the unsupported connection
+type, never silently left unrestricted.** Table names are matched case-insensitively and bare (not
+schema-qualified), the same simplification `allowed_write_ops`'s keyword list already makes; a table-valued
+function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully restrict one.
+
+Omitted (or `null`) means no restriction, exactly today's behaviour. `PATCH /api_keys/<name>` with an
+explicit `{"allowed_tables": null}` clears an existing restriction, the same pattern the other grant fields
+use.
+
 ### Permission roles (templates)
 
 Creating several keys with the same shape of grants - the same connections, the same curated queries, the
 same rate limit - means repeating that shape by hand each time. A named role, managed through `/roles`
 (admin only, stored separately from keys), is a reusable *template* for exactly that: `connections`,
-`allow_writes`, `queries`, `collections`, `rate_limit`, `allowed_ips` and `allowed_write_ops`, the same fields a key
-itself carries (deliberately excluding `expires_at`, which is inherently per-key, not something a shared template
-should dictate).
+`allow_writes`, `queries`, `collections`, `rate_limit`, `allowed_ips`, `allowed_write_ops` and
+`allowed_tables`, the same fields a key itself carries (deliberately excluding `expires_at`, which is
+inherently per-key, not something a shared template should dictate).
 
 ~~~json
 {"name": "reporting", "connections": ["reporting-db"], "allow_writes": false, "rate_limit": "200/hour"}
@@ -641,14 +667,15 @@ worry about when deleting one. A key still records which role (if any) it was cr
 check.
 
 `role` cannot be combined with any explicit grant field (`connections`, `allow_writes`, `queries`,
-`collections`, `rate_limit`, `allowed_ips` or `allowed_write_ops`) in the same `POST /api_keys` request - that combination
-is rejected with `400`, naming the conflicting fields. Create the key from the role, then `PATCH` it
-afterward to customize it away from the template. `expires_at` is the one field that *can* still be set
-alongside `role`, since it's per-key by nature rather than part of the shared template.
+`collections`, `rate_limit`, `allowed_ips`, `allowed_write_ops` or `allowed_tables`) in the same
+`POST /api_keys` request - that combination is rejected with `400`, naming the conflicting fields. Create the
+key from the role, then `PATCH` it afterward to customize it away from the template. `expires_at` is the one
+field that *can* still be set alongside `role`, since it's per-key by nature rather than part of the shared
+template.
 
 `GET /roles` lists roles; `PATCH /roles/<name>` updates one (the same explicit-null-to-clear convention as
-`PATCH /api_keys/<name>` for `rate_limit`, `allowed_ips` and `allowed_write_ops`); `DELETE /roles/<name>`
-removes it - again, with zero effect on any key already created from it.
+`PATCH /api_keys/<name>` for `rate_limit`, `allowed_ips`, `allowed_write_ops` and `allowed_tables`);
+`DELETE /roles/<name>` removes it - again, with zero effect on any key already created from it.
 
 ## Observability
 
@@ -883,7 +910,7 @@ admin-only screens a scoped key can never reach:
   ],
   "caller": {
     "name": "acme-corp", "admin": false, "allow_writes": false, "allowed_write_ops": null,
-    "rate_limit": "200/hour", "server_rate_limit": null
+    "allowed_tables": null, "rate_limit": "200/hour", "server_rate_limit": null
   }
 }
 ~~~

@@ -2229,12 +2229,26 @@ function scopeNode(entry) {
   queryGrantTags(entry).forEach(function (t) { tags.push(t); });
   return tags.length ? h('div', { className: 'tags scope' }, tags) : h('span', { className: 'dim', text: '—' });
 }
+/** The Access column's own write-scope text (unchanged from before allowed_tables existed) plus, when set,
+ * a second independent badge for the table restriction - kept separate from the write-ops one since a key
+ * can restrict tables regardless of whether it can write at all, no new table column (keeps the table's
+ * width unchanged, same reasoning BACKLOG #21's allowed_write_ops badge already used). */
+function tablesBadge(entry) {
+  var tables = entry.allowed_tables || [];
+  if (!tables.length) return null;
+  return h('span', { className: 'tag', title: tables.join(', '),
+    text: tables.length + (tables.length === 1 ? ' table' : ' tables') });
+}
 function accessCell(entry) {
   var writeOps = entry.allow_writes && (entry.allowed_write_ops || []).length;
-  if (!entry.allow_writes) return h('td', { className: 'dim', style: 'white-space:nowrap', text: 'Read-only' });
-  if (writeOps) return h('td', { style: 'white-space:nowrap', title: entry.allowed_write_ops.join(', '),
-    text: 'Read/write (' + entry.allowed_write_ops.length + (entry.allowed_write_ops.length === 1 ? ' op' : ' ops') + ')' });
-  return h('td', { style: 'white-space:nowrap', text: 'Read/write' });
+  var badge = tablesBadge(entry);
+  var text = !entry.allow_writes ? 'Read-only'
+    : writeOps ? 'Read/write (' + entry.allowed_write_ops.length + (entry.allowed_write_ops.length === 1 ? ' op' : ' ops') + ')'
+    : 'Read/write';
+  var title = writeOps ? entry.allowed_write_ops.join(', ') : undefined;
+  var main = h('span', { title: title, text: text });
+  return h('td', { className: !entry.allow_writes ? 'dim' : '', style: 'white-space:nowrap' },
+    badge ? h('div', { style: 'display:flex;gap:6px;align-items:center' }, main, badge) : main);
 }
 
 // ---- roles ----
@@ -2342,6 +2356,7 @@ function openRoleForm(name, existing) {
   var rateLimitInput = h('input', { id: 'r-rate-limit', value: existing.rate_limit || '', placeholder: 'e.g. 100/minute', autocomplete: 'off', spellcheck: 'false' });
   var allowedIpsInput = h('input', { id: 'r-allowed-ips', value: (existing.allowed_ips || []).join(', '), placeholder: 'e.g. 203.0.113.5, 10.0.0.0/8', autocomplete: 'off', spellcheck: 'false' });
   var allowedWriteOpsInput = h('input', { id: 'r-allowed-write-ops', value: (existing.allowed_write_ops || []).join(', '), placeholder: 'e.g. insert, update', autocomplete: 'off', spellcheck: 'false' });
+  var allowedTablesInput = h('input', { id: 'r-allowed-tables', value: (existing.allowed_tables || []).join(', '), placeholder: 'e.g. orders, customers', autocomplete: 'off', spellcheck: 'false' });
   var actions = formActions(isEdit ? 'Save' : 'Create role', closeDrawer);
   var form = h('form', { className: 'form', novalidate: true, onsubmit: function (e) {
     e.preventDefault();
@@ -2353,7 +2368,9 @@ function openRoleForm(name, existing) {
     if (!allowedIps.length) allowedIps = null;
     var allowedWriteOps = allowedWriteOpsInput.value.split(',').map(function (v) { return v.trim().toLowerCase(); }).filter(Boolean);
     if (!allowedWriteOps.length) allowedWriteOps = null;
-    var payload = { connections: connections, allow_writes: writesCheckbox.checked, queries: queries, collections: collectionField.value(), rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps };
+    var allowedTables = allowedTablesInput.value.split(',').map(function (v) { return v.trim().toLowerCase(); }).filter(Boolean);
+    if (!allowedTables.length) allowedTables = null;
+    var payload = { connections: connections, allow_writes: writesCheckbox.checked, queries: queries, collections: collectionField.value(), rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps, allowed_tables: allowedTables };
     if (isEdit) updateRole(name, payload, actions.submit);
     else createRole(nameInput.value.trim(), payload, actions.submit);
   } },
@@ -2365,6 +2382,7 @@ function openRoleForm(name, existing) {
     collectionField.node,
     h('label', { className: 'switch' }, writesCheckbox, 'Allow writes', h('span', { className: 'hint', text: '— still capped by QUERYAPIGATE_ALLOW_WRITES' })),
     field('r-allowed-write-ops', 'Allowed write operations', allowedWriteOpsInput, 'Optional, comma-separated SQL keywords — e.g. "insert, update". Only takes effect when Allow writes is on.'),
+    field('r-allowed-tables', 'Allowed tables', allowedTablesInput, 'Optional, comma-separated table names — e.g. "orders, customers". Restricts every statement (read or write) to only these tables, on mysql/postgres/clickhouse/sqlite/duckdb connections — a query against an unsupported connection type (h2, jdbc, mongo) is always rejected while this is set, not silently unrestricted. Leave blank to allow any table.'),
     field('r-rate-limit', 'Rate limit', rateLimitInput, 'Optional — e.g. "100/minute". Leave blank for no limit of its own.'),
     field('r-allowed-ips', 'Allowed IPs', allowedIpsInput, 'Optional, comma-separated IP addresses or CIDR ranges. Leave blank to allow any address.'),
     h('div', { className: 'hint', text: 'A role is a template: it’s copied onto a key once, when the key is created "from" it. Editing or deleting this role afterward never changes a key already created from it.' }),
@@ -3035,6 +3053,7 @@ function openApiKeyForm(name, existing, fromRole) {
   var rateLimitInput = h('input', { id: 'k-rate-limit', value: existing.rate_limit || '', placeholder: 'e.g. 100/minute', autocomplete: 'off', spellcheck: 'false' });
   var allowedIpsInput = h('input', { id: 'k-allowed-ips', value: (existing.allowed_ips || []).join(', '), placeholder: 'e.g. 203.0.113.5, 10.0.0.0/8', autocomplete: 'off', spellcheck: 'false' });
   var allowedWriteOpsInput = h('input', { id: 'k-allowed-write-ops', value: (existing.allowed_write_ops || []).join(', '), placeholder: 'e.g. insert, update', autocomplete: 'off', spellcheck: 'false' });
+  var allowedTablesInput = h('input', { id: 'k-allowed-tables', value: (existing.allowed_tables || []).join(', '), placeholder: 'e.g. orders, customers', autocomplete: 'off', spellcheck: 'false' });
   var activeCheckbox = isEdit ? h('input', { id: 'k-active', type: 'checkbox' }) : null;
   if (activeCheckbox) activeCheckbox.checked = existing.active !== false;
   grantFields = h('div', {},
@@ -3046,6 +3065,7 @@ function openApiKeyForm(name, existing, fromRole) {
     collectionField.node,
     h('label', { className: 'switch' }, writesCheckbox, 'Allow writes', h('span', { className: 'hint', text: '— still capped by QUERYAPIGATE_ALLOW_WRITES' })),
     field('k-allowed-write-ops', 'Allowed write operations', allowedWriteOpsInput, 'Optional, comma-separated SQL keywords — e.g. "insert, update". Only takes effect when Allow writes is on; narrows which write statements this key may perform. Leave blank to allow any write.'),
+    field('k-allowed-tables', 'Allowed tables', allowedTablesInput, 'Optional, comma-separated table names — e.g. "orders, customers". Restricts every statement (read or write) to only these tables, on mysql/postgres/clickhouse/sqlite/duckdb connections — a query against an unsupported connection type (h2, jdbc, mongo) is always rejected while this is set, not silently unrestricted. Leave blank to allow any table.'),
     field('k-rate-limit', 'Rate limit', rateLimitInput, 'Optional, this key only — e.g. "100/minute". Checked in addition to QUERYAPIGATE_RATE_LIMIT, not instead of it. Leave blank for no limit of its own.'),
     field('k-allowed-ips', 'Allowed IPs', allowedIpsInput, 'Optional, comma-separated IP addresses or CIDR ranges — e.g. "203.0.113.5, 10.0.0.0/8". Leave blank to allow any address.'));
   function paintRoleMode() {
@@ -3068,8 +3088,10 @@ function openApiKeyForm(name, existing, fromRole) {
     if (!allowedIps.length) allowedIps = null;
     var allowedWriteOps = allowedWriteOpsInput.value.split(',').map(function (v) { return v.trim().toLowerCase(); }).filter(Boolean);
     if (!allowedWriteOps.length) allowedWriteOps = null;
-    if (isEdit) updateApiKey(name, { connections: connections, allow_writes: writesCheckbox.checked, active: activeCheckbox.checked, queries: queries, collections: collectionField.value(), expires_at: expiresAt, rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps }, actions.submit);
-    else createApiKey({ name: nameInput.value.trim(), connections: connections, allow_writes: writesCheckbox.checked, queries: queries, collections: collectionField.value(), expires_at: expiresAt, rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps }, actions.submit);
+    var allowedTables = allowedTablesInput.value.split(',').map(function (v) { return v.trim().toLowerCase(); }).filter(Boolean);
+    if (!allowedTables.length) allowedTables = null;
+    if (isEdit) updateApiKey(name, { connections: connections, allow_writes: writesCheckbox.checked, active: activeCheckbox.checked, queries: queries, collections: collectionField.value(), expires_at: expiresAt, rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps, allowed_tables: allowedTables }, actions.submit);
+    else createApiKey({ name: nameInput.value.trim(), connections: connections, allow_writes: writesCheckbox.checked, queries: queries, collections: collectionField.value(), expires_at: expiresAt, rate_limit: rateLimit, allowed_ips: allowedIps, allowed_write_ops: allowedWriteOps, allowed_tables: allowedTables }, actions.submit);
   } },
     field('k-name', 'Name', nameInput, isEdit ? null : 'Letters, digits, spaces, “.”, “_” and “-”.'),
     roleSelect ? field('k-role', 'Create from', roleSelect, 'Optional — copies that role’s connections, queries, collections, write access, rate limit and allowed IPs onto this key once, at creation. Editing or deleting the role afterward never changes this key.') : null,

@@ -44,6 +44,15 @@ def _param_re(dialect):
     return _PARAM_RE[dialect] if dialect in _PARAM_RE else _PARAM_RE[None]
 
 
+def substitute_placeholders(sql, dialect):
+    """Replace this project's own `:name`/`{name}` parameter markers with a harmless literal - for handing
+    SQL text to a strict external parser (sqlglot, via sqlflow.py/tableguard.py) that has no notion of
+    either marker convention and would otherwise misparse or reject them. Only the query's structure matters
+    to those callers, never the values."""
+    sql = _param_re(dialect).sub(lambda m: '1' if m.group('name') else m.group(0), sql)
+    return _BRACE_RE.sub('1', sql)
+
+
 def first_keyword(sql, dialect=None):
     match = re.match(r'[\s(]*([A-Za-z]+)', _literals_re(dialect).sub(' ', sql))
     return match.group(1).lower() if match else ''
@@ -57,7 +66,7 @@ def is_paginated(sql, dialect=None):
     return dialect != 'jdbc' and first_keyword(sql, dialect) in PAGINATED_STATEMENTS
 
 
-def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None):
+def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, allowed_tables=None):
     """Normalise a client-supplied statement and enforce the single-statement/read-only rules.
 
     ``dialect`` should be the target connection's ``db`` value, so literals are read with the rules that
@@ -69,6 +78,12 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None):
     statements are allowed once writes are otherwise permitted - e.g. INSERT but not DELETE/DROP on the
     same key. It never restricts a read-only statement, only a write one; ``None`` (the default) means no
     such narrowing, exactly today's behaviour.
+
+    ``allowed_tables`` (a key's own grant, BACKLOG #21) narrows *which tables* a statement may touch -
+    checked via tableguard.extract_tables(), which raises ApiError itself when a query's tables can't be
+    verified for this dialect (only mysql/postgres/clickhouse/sqlite/duckdb are supported - see
+    tableguard.py) rather than letting an unverifiable query through unchecked. ``None`` (the default) means
+    no such narrowing.
     """
     if not isinstance(sql, str) or not sql.strip():
         raise ApiError('SQL query is missing')
@@ -84,6 +99,13 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None):
         if keyword not in READ_ONLY_STATEMENTS and keyword not in allowed_write_ops:
             raise ApiError(f"This API key may only perform these write operations: "
                            f"{', '.join(sorted(allowed_write_ops))}.", 403)
+    if allowed_tables is not None:
+        from . import tableguard  # deferred: keeps this module's own import surface as light as today
+        found = tableguard.extract_tables(sql, dialect)                          # unless this is actually used
+        forbidden = found - allowed_tables
+        if forbidden:
+            raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed_tables))}. "
+                           f"Forbidden: {', '.join(sorted(forbidden))}.", 403)
     return sql
 
 

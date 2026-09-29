@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Table access restrictions for API keys/roles, `allowed_tables` (BACKLOG #21's remaining gap).** A key or
+  role can now be narrowed to a specific set of tables it may query - `mysql`, `postgres`, `clickhouse`,
+  `sqlite` and `duckdb` connections only, the dialects `sqlglot` (already an optional dependency, the `flow`
+  extra) can parse for this. Unlike `allowed_write_ops`, this restricts *every* statement, read or write.
+  Checked against every table a query actually touches - joins, subqueries, CTEs (a CTE's own name is never
+  mistaken for a real table) and the target table of a bare `DELETE`/`UPDATE`/`INSERT` are all resolved
+  correctly. A table-restricted key used against an `h2`/`jdbc`/`mongo` connection is refused on every query
+  with a clear `403`, never silently left unrestricted, since those dialects can't be verified. New
+  "Allowed tables" fields on the API Keys/Roles forms, and a table-count badge on the Access column.
 - **An MCP server exposing read-only saved queries as tools (BACKLOG #42).** `queryapigate mcp` (needs
   `pip install "queryapigate[mcp]"`, Python >= 3.10) starts an MCP server on its own port
   (`QUERYAPIGATE_MCP_PORT`, default 5001), separate from `queryapigate serve` - MCP's Streamable HTTP

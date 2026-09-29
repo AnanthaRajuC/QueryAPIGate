@@ -416,10 +416,11 @@ gauge reads 1 mid-flight and returns to 0 once the request completes). See
 
 ## 21. Finer-grained query governance: table allow-lists, operation-type granularity, a real streaming ceiling
 
-**Status: shipped, two of three gaps** (operation-type granularity and a streaming row ceiling - table
-allow-listing remains open, see below). `timeout`, `cache_ttl` and `rate_limit` were already solid, and
-`allowed_users` was already covered (a key's `connections`/`queries` grants, just modeled the other way
-round - not a gap).
+**Status: shipped, three of three gaps**, table allow-listing (the long-deferred remainder) now included -
+for `mysql`/`postgres`/`clickhouse`/`sqlite`/`duckdb` connections; `h2`/`jdbc`/`mongo` remain a deliberately
+deferred, explicitly-scoped-out remainder of *this* gap (see below), not silently unsupported. `timeout`,
+`cache_ttl` and `rate_limit` were already solid, and `allowed_users` was already covered (a key's
+`connections`/`queries` grants, just modeled the other way round - not a gap).
 **Shipped:**
 - **`allowed_write_ops`.** A key with `allow_writes` on can now be narrowed to specific write keywords
   (`["insert", "update"]`, say) rather than every write keyword being equally permitted once writes are on
@@ -451,18 +452,49 @@ admin key exempt from both restrictions, a stream truncated at exactly the cap (
 one), an under-cap result unaffected, startup rejection of a malformed cap, `execution_history` reflecting
 the truncated count, the new `"truncated"` metric status, and a real headless-Chrome UI test (write-op
 count and tooltip, edit-form prefill, table width unchanged at 1238px).
-**Still open:**
-- **`allowed_tables`.** The guard checks statement *type* only (`first_keyword()`); it never parses table
-  identifiers, so a key with access to a connection can run ad-hoc `SELECT` against any table on it, not
-  just an approved subset. This is the hardest of the three to do honestly: correctly identifying every
-  table reference (schema-qualified names, joins, subqueries, CTEs, table-valued functions) across six-plus
-  dialects needs a real SQL parser, not the lightweight regex-based approach `sqltools.py`'s own docstring
-  deliberately chose over one - a wrong parse here fails either open (a blocked table slips through) or
-  closed (a legitimate query is rejected), both bad. Matters most for ad-hoc `/execute_sql` on a key with
-  broad connection access; a *saved* query's SQL is fixed at save time, so an admin already knows what
-  tables it touches before granting access to it via `queries`. Worth scoping to ad-hoc SQL specifically,
-  and worth evaluating a real parsing library (e.g. `sqlglot`) rather than extending the current regex
-  guard, if this is picked up.
+- **`allowed_tables`.** Scoped with the user up front to `mysql`/`postgres`/`clickhouse`/`sqlite`/`duckdb`
+  only - the same five dialects `sqlflow.py` (#40) already parses for the Access tab's "Query flow" diagram;
+  `h2`/`jdbc`/`mongo` have no `sqlglot` dialect to parse against and are deliberately deferred, not silently
+  unsupported (see the fail-closed behavior below). Real SQL parsing was needed, not `sqltools.py`'s
+  lightweight regex guard - `sqlglot` (already an optional dependency via the `flow` extra) turned out to
+  have exactly the right tool, verified directly rather than assumed: a naive `find_all(exp.Table)` walk
+  (what `sqlflow.extract_flow()` already does for its visualization) wrongly treats a CTE's own name as a
+  real table; `sqlglot.optimizer.scope.build_scope()`, the "correct" CTE-aware tool, was tested and found to
+  return `None` entirely for `DELETE`/`UPDATE`/`INSERT` - it's optimizer machinery built for `SELECT`-shaped
+  queries only, and would have silently missed every write statement's own target table, a real hole for a
+  key that also restricts writes via `allowed_write_ops`. The actual fix, verified against CTEs, subqueries,
+  self-joins, `UNION`, and bare or CTE'd `DELETE`/`UPDATE`/`INSERT`: `find_all(exp.Table)` minus the names of
+  any `exp.CTE` in the same parse tree - simpler than the scope-builder, and unlike it, correct for every
+  statement type this guard needs to check. New `queryapigate/tableguard.py` (deliberately not folded into
+  `sqlflow.py`, whose own docstring commits to "never raises" for its visualization-only job - a security
+  check needs the opposite contract: an unverifiable query must be rejected, never quietly skipped).
+  `sqltools.validate_sql()` gained one more parameter, threaded through `engine.execute_sql()`/`stream_sql()`
+  to the same `app.py` call sites `allowed_write_ops` already reaches; `apikeys.py` got the same
+  create/update-key/role sweep `allowed_write_ops` already went through (`_validate_allowed_tables()`, a
+  ninth `Permission` field, role-copy-onto-key support). Unlike `allowed_write_ops`, this restricts *every*
+  statement, read or write, since a forbidden table is forbidden regardless of what's being done to it. A
+  table-restricted key used against an `h2`/`jdbc`/`mongo` connection is refused on *every* query with a
+  clear `403` naming the unsupported dialect - a deliberate, visible failure mode, not a silent bypass; an
+  admin who also grants such a connection to a table-restricted key will find it unusable until the
+  restriction is narrowed or this dialect gap is separately picked up. Admin UI gained an "Allowed tables"
+  field on both the API Keys and Roles forms, and a `"N tables"` badge on the Access column, alongside (not
+  replacing) the existing write-ops badge, matching #21's own established "no new table column" precedent.
+  Known, accepted limitations (verified, not guessed): a table name is extracted bare
+  (`information_schema.tables` -> `tables`), not schema-qualified, matching `allowed_write_ops`'s own
+  bare-keyword-list style but unable to disambiguate two identically-named tables in different schemas; a
+  table-valued function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully
+  restrict one.
+
+Verified (this shipment): every `tableguard.extract_tables()` case above codified as a permanent unit test,
+`sqltools.validate_sql()`'s own `allowed_tables` enforcement unit-tested directly (unset means unrestricted,
+a forbidden table rejected, a join pulling in one forbidden table rejected even with an allowed one present,
+an unsupported dialect always rejected, an existing `allowed_write_ops` violation still reported first), a
+full `AllowedTablesTests` integration class mirroring `AllowedWriteOpsTests` one-for-one (permitted/forbidden
+queries, restricting writes too, case-normalisation, malformed input, listing, clear-via-null,
+leave-unchanged, the admin key exempt, the h2 fail-closed case, a role correctly copying the restriction onto
+a key created from it), and a real headless-Chrome check (the "Allowed tables" field on both forms, the
+table-count badge with its tooltip, and real enforcement proven via direct `curl` calls against a key created
+entirely through the UI - a permitted table's query returning `200`, a forbidden one `403`).
 
 ## 22. Named permission roles/templates (reusable RBAC on top of per-key ACLs)
 
@@ -1571,15 +1603,38 @@ because any file needs an in-process lock (that's gone), but because the built-i
 `/metrics` are still per-process state with no cross-worker aggregation, a distinct, separately-scoped gap
 this migration doesn't touch.
 
+## 54. Surface the MCP server's status in the admin UI
+
+**Impact:** `queryapigate mcp` (#42) is a separate process with no presence in `/ui` at all today - unlike
+the Redis-backed response cache (#47) and the SSE broadcaster (#43), both of which got a Settings-panel row
+showing their backend/status. An admin currently has no way to tell, from the UI, whether the MCP server is
+even configured to run, what port it's on, or that it's reachable - they have to know to run `queryapigate
+mcp` and check its own stdout/logs, or use an MCP client to probe it directly.
+
+**Notes:** the natural home is the Settings screen, alongside the "Live updates"/"Cache backend" rows #43/#47
+already added (`config.describe_settings()`'s `cache` section, `queryapigate/config.py`) - a row for
+`QUERYAPIGATE_MCP_PORT`/`QUERYAPIGATE_MCP_MAX_ROWS` at minimum, matching every other settings row's
+read-only "effective value and whether it's the default" shape. A real reachability check (is something
+actually listening on that port right now) is a separate, harder question from those two rows: the REST
+process serving `/ui` has no way to know whether a *different* process (`queryapigate mcp`, possibly never
+started, possibly on another host) is currently up - answering that honestly would need the REST server to
+make its own probe request to the MCP port at settings-render time (extra latency/failure-mode on every
+`/settings` load) or accept a static "configured" vs. "confirmed reachable" distinction rather than a live
+health dot. Worth deciding explicitly rather than defaulting to a green/red dot that's actually just guessing.
+A richer treatment - listing the currently-exposed tools (i.e. what `tools/list` would currently return for
+the admin key, reusing `mcp_server.list_tools_for()` directly, no MCP protocol round-trip needed since it's
+the same process) - would make the Settings row more of a small dedicated panel than one line, closer to
+how #48's Caching screen went further than a single Settings row once built. Not started.
+
 ---
 
-**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
-#34 are shipped; #21 is shipped as its cheaper slice only (operation-type granularity + streaming row
-ceiling), with table allow-listing - the pricier, riskier remainder - still open; #36 is shipped as its
+**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32,
+#33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
+`mysql`/`postgres`/`clickhouse`/`sqlite`/`duckdb` and `h2`/`jdbc`/`mongo` deliberately deferred (fail-closed,
+not silently unsupported - see its own entry); #36 is shipped as its
 MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mongo's own aggregation/write/
 schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
-still open. Open: the table-allow-list half of #21, not started, and not recommended without a specific hard
-requirement (it needs real SQL parsing, not the lightweight guard this project deliberately uses); #25
+still open. Open: #25
 (general API latency, connection pooling and cache performance benchmarks), not started; #27 is shipped,
 in a different shape than originally sketched - see the correction in its own entry; #38 is shipped for
 mysql/sqlite/clickhouse, with Postgres/H2/DuckDB the documented remainder; #37 is shipped for
@@ -1595,5 +1650,6 @@ own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel
 dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
 own entry; #42 shipped for read-only saved queries only, with write-capable MCP tools - needing a
 `destructiveHint` classification and a write-confirmation decision - left explicitly open, see its own
-entry). Nothing is queued up next as of this entry. The "still open" note under #9 (confirming its CI changes
+entry). #54 (surfacing the MCP server's status in the admin UI) is queued up next, not started. The "still
+open" note under #9 (confirming its CI changes
 on a real run) is a smaller follow-up on finished work, not an open capability gap.

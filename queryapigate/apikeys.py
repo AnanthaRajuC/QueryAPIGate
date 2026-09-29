@@ -63,10 +63,19 @@ permitted. Checked in ``sqltools.validate_sql()`` alongside the existing read-on
 statement is always allowed regardless of this list, since it only ever narrows *write* access, never reach
 that already didn't exist. See ``engine.execute_sql()``.
 
+A key can also be narrowed to specific ``allowed_tables`` - a list of table names it may query, checked
+against every table a statement actually touches (``sqltools.validate_sql()``/``tableguard.py``, which
+raises rather than lets a query through when its tables can't be verified for the connection's dialect -
+only mysql/postgres/clickhouse/sqlite/duckdb are supported; a table-restricted key used against an
+h2/jdbc/mongo connection is refused every query, not silently unrestricted). Unset (``None``, the default)
+keeps today's behaviour: no table restriction. Unlike ``allowed_write_ops``, this restricts *every*
+statement, read or write, since a table a caller shouldn't see is forbidden regardless of what's being done
+to it.
+
 A named **role** (``create_role()``/``update_role()``/``delete_role()``, stored in its own ``roles`` table)
 is a reusable *template* for the grant fields above (``connections``, ``allow_writes``,
-``queries``, ``rate_limit``, ``allowed_ips``, ``allowed_write_ops``) - not a fourth kind of permission
-object a key references at authentication time. ``create_key(..., role="reporting")`` copies that role's
+``queries``, ``rate_limit``, ``allowed_ips``, ``allowed_write_ops``, ``allowed_tables``) - not a fourth kind
+of permission object a key references at authentication time. ``create_key(..., role="reporting")`` copies that role's
 fields onto the new key once, at creation; the key's own stored entry is the source of truth for every
 authenticate() call from then on, exactly as if an admin had typed the same fields directly. Editing or
 deleting a role afterward never touches a key already created from it - deliberately, so a role change
@@ -97,14 +106,15 @@ _USE_RECORD_INTERVAL = 60.0  # seconds between last_used_at writes for the same 
 _last_recorded_use: dict[str, float] = {}  # key name -> time.monotonic() of the last last_used_at write
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
-                                       'allowed_write_ops', 'collections'], defaults=(frozenset(),))
+                                       'allowed_write_ops', 'collections', 'allowed_tables'],
+                        defaults=(frozenset(), None))
 
 # The unrestricted caller used when the server has no key configured at all (QUERYAPIGATE_API_KEY unset and no
 # scoped keys stored) - today's "open by design" behaviour, unchanged by this module. Its name is None (there
 # is no key to name), unlike the admin key match below, which is named 'admin' so logs and /metrics can tell
 # "no auth configured" apart from "authenticated as the admin key".
 OPEN = Permission(name=None, admin=True, connections=ALL_CONNECTIONS, allow_writes=True, queries=ALL_QUERIES,
-                  rate_limit=None, allowed_write_ops=None)
+                  rate_limit=None, allowed_write_ops=None, allowed_tables=None)
 
 
 def can_use(permission, connection_name):
@@ -356,6 +366,20 @@ def _validate_allowed_write_ops(allowed_write_ops):
     return sorted({v.lower() for v in allowed_write_ops})
 
 
+def _validate_allowed_tables(allowed_tables):
+    """None means no restriction (today's behaviour, unchanged for every key that doesn't set this).
+    Otherwise a list of table names (normalised to lowercase - table names are matched case-insensitively,
+    the same simplification allowed_write_ops's own keyword list already makes), checked against every
+    table a statement actually touches by sqltools.validate_sql()/tableguard.py - see that module's own
+    docstring for exactly how tables are extracted and its known limitations (bare names only, not
+    schema-qualified; a table-valued function can't be restricted this way)."""
+    if allowed_tables is None:
+        return None
+    if not isinstance(allowed_tables, list) or not all(isinstance(v, str) and v for v in allowed_tables):
+        raise ApiError('allowed_tables must be a list of table names, or null for no restriction')
+    return sorted({v.lower() for v in allowed_tables})
+
+
 def is_expired(entry):
     """Whether a stored key entry's expires_at date has passed - checked live on every authenticate() call,
     not swept by a background job: an expired key simply stops matching, the same way flipping `active` to
@@ -412,7 +436,7 @@ def list_keys():
 
 
 def create_key(name, connections=None, allow_writes=None, queries=None, expires_at=None, rate_limit=None,
-               allowed_ips=None, allowed_write_ops=None, role=None, collections=None):
+               allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'")
     if role is None:
@@ -423,7 +447,8 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                                             ('queries', queries), ('collections', collections),
                                             ('rate_limit', rate_limit),
                                             ('allowed_ips', allowed_ips),
-                                            ('allowed_write_ops', allowed_write_ops)) if value is not None]
+                                            ('allowed_write_ops', allowed_write_ops),
+                                            ('allowed_tables', allowed_tables)) if value is not None]
         if given:
             raise ApiError(f"Cannot combine 'role' with explicit {', '.join(given)} - create the key from "
                            "the role, then update it afterward to customize.")
@@ -435,6 +460,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
         rate_limit = role_entry['rate_limit']
         allowed_ips = role_entry['allowed_ips']
         allowed_write_ops = role_entry['allowed_write_ops']
+        allowed_tables = role_entry.get('allowed_tables')
     secret = 'sk_' + secrets.token_urlsafe(32)
     with db.transaction() as conn:
         if conn.execute('SELECT 1 FROM api_keys WHERE name = ?', (name,)).fetchone() is not None:
@@ -449,6 +475,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
             'rate_limit': _validate_rate_limit(rate_limit),
             'allowed_ips': _validate_allowed_ips(allowed_ips),
             'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
+            'allowed_tables': _validate_allowed_tables(allowed_tables),
             'created_from_role': role,
             'active': True,
             'created_at': store.now(),
@@ -458,7 +485,8 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
 
 
 def update_key(name, connections=None, allow_writes=None, active=None, queries=None, expires_at=_UNSET,
-               rate_limit=_UNSET, allowed_ips=_UNSET, allowed_write_ops=_UNSET, collections=None):
+               rate_limit=_UNSET, allowed_ips=_UNSET, allowed_write_ops=_UNSET, collections=None,
+               allowed_tables=_UNSET):
     with db.transaction() as conn:
         row = conn.execute(
             'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
@@ -486,6 +514,8 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
             entry['allowed_ips'] = _validate_allowed_ips(allowed_ips)
         if allowed_write_ops is not _UNSET:  # same as the others: None here explicitly clears it
             entry['allowed_write_ops'] = _validate_allowed_write_ops(allowed_write_ops)
+        if allowed_tables is not _UNSET:  # same as the others: None here explicitly clears it
+            entry['allowed_tables'] = _validate_allowed_tables(allowed_tables)
         _upsert(conn, name, entry)
 
 
@@ -532,7 +562,7 @@ def list_roles():
 
 
 def create_role(name, connections=None, allow_writes=False, queries=None, rate_limit=None, allowed_ips=None,
-                allowed_write_ops=None, collections=None, example=False):
+                allowed_write_ops=None, collections=None, example=False, allowed_tables=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'")
     collections = _normalize_collections(collections)
@@ -548,6 +578,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
             'rate_limit': _validate_rate_limit(rate_limit),
             'allowed_ips': _validate_allowed_ips(allowed_ips),
             'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
+            'allowed_tables': _validate_allowed_tables(allowed_tables),
             'created_at': store.now(),
             **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
         }
@@ -555,7 +586,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
 
 
 def update_role(name, connections=None, allow_writes=None, queries=None, rate_limit=_UNSET, allowed_ips=_UNSET,
-                allowed_write_ops=_UNSET, collections=None):
+                allowed_write_ops=_UNSET, collections=None, allowed_tables=_UNSET):
     with db.transaction() as conn:
         row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
         if row is None:
@@ -577,6 +608,8 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
             entry['allowed_ips'] = _validate_allowed_ips(allowed_ips)
         if allowed_write_ops is not _UNSET:
             entry['allowed_write_ops'] = _validate_allowed_write_ops(allowed_write_ops)
+        if allowed_tables is not _UNSET:
+            entry['allowed_tables'] = _validate_allowed_tables(allowed_tables)
         _upsert_role(conn, name, entry)
 
 
@@ -664,7 +697,9 @@ def authenticate(supplied, client_ip=None):
                               queries=queries if queries == ALL_QUERIES else _queries_map(queries),
                               rate_limit=_parsed_rate_limit(entry),
                               allowed_write_ops=entry.get('allowed_write_ops'),
-                              collections=frozenset(entry.get('collections', [])))
+                              collections=frozenset(entry.get('collections', [])),
+                              allowed_tables=frozenset(entry['allowed_tables'])
+                              if entry.get('allowed_tables') is not None else None)
     return None
 
 
