@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A Caching screen (BACKLOG #48).** A new "Caching" tab (next to Metrics) shows the response cache's
+  backend (in-process or Redis, from `/settings`), live entry/hit/miss counts and hit rate (two new
+  `/metrics` counters, `queryapigate_cache_hits_total`/`queryapigate_cache_misses_total`, plus a
+  `queryapigate_cache_entries` gauge - counted from the `X-Cache` header responses already carry, no
+  changes to the cache lookup/store paths themselves), and a table of every saved query that declares a
+  `cache_ttl`.
+- **A shared, Redis-backed response cache (BACKLOG #47).** Setting `QUERYAPIGATE_REDIS_URL` swaps the
+  in-process `cache_ttl` cache for a Redis-backed one (`pip install "queryapigate[redis]"`) that survives a
+  restart and is shared across horizontally-scaled instances - useful when a hot OLTP query is hit hundreds
+  of times a second. Unset means today's behavior, byte-for-byte unchanged. A cache failure is always
+  treated as a miss/no-op, never a request failure. Does not change the documented `--workers 1`
+  recommendation for the file-based store - see the correction added to BACKLOG #43.
 - **A per-table reach indicator in Run SQL's Schema browser (BACKLOG #46).** Each table now shows the same
   Q/C/W badge the Access map uses - green means at least one API key or role can reach a query touching
   this table, a muted dot means only the admin key can, and no badge at all means no saved query touches it.

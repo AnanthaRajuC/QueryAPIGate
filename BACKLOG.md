@@ -1254,14 +1254,20 @@ nothing new most of the time.
 **Notes:** Flask can serve an SSE stream the same way `formats.py`'s streaming exports already stream a
 response body - mechanically straightforward. The real cost is fan-out, not the wire format:
 `store.record_execution()` would need to publish each new entry to something every connected SSE client can
-read from, which for a single-process dev server is a trivial in-memory broadcast, but **this project
-explicitly supports a multi-worker `gunicorn` deployment** (the `server` extra) - an event published in one
-worker process never reaches a client whose SSE connection landed on a different worker, so a naive
-in-memory implementation would silently miss updates for some clients in that (likely common, production)
-deployment shape. That needs either a shared broker (Redis pub/sub - a new required dependency for anyone
-wanting this feature) or scoping the v1 to single-worker deployments only, clearly documented as such. Worth
-picking one specific consumer to build first (most likely Home's recent-requests panel) rather than a
-generic "replace every poll with SSE" rewrite. Not started.
+read from, which for a single-process dev server is a trivial in-memory broadcast.
+
+**Correction (found while scoping #47's Redis cache):** this entry previously claimed "this project
+explicitly supports a multi-worker `gunicorn` deployment" - that's wrong. The Dockerfile pins `--workers 1`
+and `documentation/INSTALLATION_AND_SETUP.md` explicitly recommends one worker, both because `store.py`'s
+connection/saved-query/API-key files are protected only by an in-process `threading.RLock`, not something
+safe across processes - the actual constraint is real, it's just enforced by the file store, not documented
+as a deliberate limit the way this entry implied. Under that documented single-worker shape, a naive
+in-process broadcast for SSE would actually work correctly for every client, every time - no Redis needed
+for correctness. Redis pub/sub would only start to matter if QueryAPIGate is ever horizontally scaled to
+several *instances* (not workers) behind a load balancer, same shape #47's shared cache already targets -
+worth building on top of #47's `QUERYAPIGATE_REDIS_URL` if/when that becomes real, rather than inventing a
+separate Redis dependency for it. Worth picking one specific consumer to build first (most likely Home's
+recent-requests panel) rather than a generic "replace every poll with SSE" rewrite. Not started.
 
 ## 44. Home tab: surface real health signals, not just counts
 
@@ -1357,6 +1363,62 @@ that connection until a manual refresh. A `whenFilesCacheReady()` promise, resol
 first successful load, is now awaited at the top of `buildTableUsageIndex()` so the very first computation
 waits for real data instead of racing it.
 
+## 47. A shared, Redis-backed response cache (QUERYAPIGATE_REDIS_URL)
+
+**Status: shipped.** The daily production pain this closes: an OLTP query getting hit hundreds of times a
+second. `cache_ttl` on a saved query already existed to absorb that, but `cache.ResponseCache` is
+in-process memory only - wiped by every restart, and never shared if the deployment is ever scaled to more
+than one instance behind a load balancer. Setting `QUERYAPIGATE_REDIS_URL` swaps in `rediscache.py`'s
+`RedisResponseCache` instead, with the exact same three-method interface (`get`/`set`/`size`) `app.py`'s
+`cache_lookup()`/`cache_store()`/`run_saved()` already call - nothing downstream changed at all.
+
+One Redis hash per cache entry (`qag:cache:<key>`, `HSET` + `EXPIRE` in a pipeline, plain `HGETALL` to
+read), storing `body` as raw bytes (a saved query can render `xlsx`, which is binary - the client stays in
+bytes mode, no base64 needed since Redis strings/hash fields are binary-safe), `content_type`, `etag` and a
+JSON-encoded `headers` list. Redis's own `EXPIRE` replaces `ResponseCache`'s manual clock-check and
+`MAX_ENTRIES` LRU eviction. A cache failure (Redis unreachable, timeout) is always a miss on read and a
+silent no-op on write, never a request failure - the etag is still computed and returned from the body hash
+either way, so `cache_store()` needs no special-casing. `redis` is imported lazily, only inside
+`RedisResponseCache.__init__`, so a user who never sets the var never needs the package - mirrors how every
+DB driver in `runners.py` is imported lazily too. `config.check_settings()` validates the URL scheme and
+that `redis` is actually importable at startup (not connectivity - consistent with how database connections
+themselves are validated lazily, on first use); a new `redis` extra (`pip install "queryapigate[redis]"`) is
+standalone, not folded into `all`/`server`. Fully unit-tested against a small in-memory fake client (no real
+Redis server, no new test dependency), matching how `runners.py`'s own DB drivers are tested via mocked
+cursors, plus one test class that swaps the fake-backed `RedisResponseCache` into a real `create_app()` and
+re-runs the miss/hit/304 flow through actual HTTP requests to prove backend parity.
+
+**Explicitly out of scope, by the user's own call when this was scoped:** making the file-based store
+(connections/saved queries/API keys, `store.py`) safe for more than one worker process - that stays a
+separate, much larger project (real cross-process locking or a datastore migration touching 10+ locked
+sections throughout `store.py`). `--workers 1` remains the documented recommendation regardless of this
+cache. SSE (#43) also stays separate, not built here - see the correction added to #43's own entry.
+
+## 48. A Caching screen showing response-cache status and stats
+
+**Status: shipped.** #47 shipped the Redis-backed cache but left no way to see it working - `/settings`
+reported the backend but nothing about hit rate, entries, or which queries were actually being cached.
+A new "Caching" tab (beside Metrics) closes that gap, built entirely from data the app already computes:
+
+- Two new `/metrics` counters (`queryapigate_cache_hits_total`/`queryapigate_cache_misses_total`) and a
+  `queryapigate_cache_entries` gauge, added to `metrics.py`'s existing render pipeline the same way
+  `queryapigate_rate_limit_rejections_total`/`queryapigate_pool_idle_connections` already work. Hits/misses
+  are counted in `app.py`'s existing `after_request` hook from the `X-Cache` header a cacheable response
+  already carries - zero changes to `cache_lookup()`/`cache_store()`/`run_saved()`. Entries comes from
+  `.size()` on whichever cache backend is live (`app.extensions['queryapigate_cache']`, passed into
+  `metrics.render(cache=...)` by the `/metrics` route, since the cache lives per-Flask-app rather than as
+  a module-level singleton the way `pool.py`'s shared pool does).
+- The UI tab reuses `settingsData` (already loaded, `#47`'s "Response cache" section) for the backend
+  identity, and the already-parsed `metricsSeries` for hits/misses/entries/hit-rate - no dedicated endpoint.
+- The one genuinely new piece: `store.list_saved()` didn't expose a version's `cache_ttl` at all (only
+  `/catalog` did, which the admin UI never fetches) - added it to `/list_files`' existing payload so the
+  Caching tab's "which queries are actually cached" table costs no new fetch either, same as everything
+  else on this tab.
+- Found and fixed the same race BACKLOG #46 already ran into once: `renderCaching()` was only re-triggered
+  from `loadMetrics()`/`loadSettings()`, not `loadQueries()` - so the cache_ttl table's very first paint
+  could run before `filesCache` was populated and never repaint. Now called from all three loaders, same
+  "tolerate whichever independent fetch lands last" pattern `renderSettings()` already uses.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1374,8 +1436,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45 and #46 are shipped (#45's "empty collections" item excepted -
-it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved queries as
-tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The "still open"
-note under #9 (confirming its CI changes on a real run) is a smaller
-follow-up on finished work, not an open capability gap.
+out of scope for real parsing; #41, #44, #45, #46, #47 and #48 are shipped (#45's "empty collections" item
+excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
+queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
+"still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished
+work, not an open capability gap.

@@ -545,6 +545,7 @@ def list_saved():
             'last_modified_at': data.get('last_modified_at'),
             'status': data.get('status'),
             'execution_history': data.get('execution_history', []),
+            'cache_ttl': data.get('cache_ttl') or None,
         } for version, data in content.items() if version.isdigit() and isinstance(data, dict)]
         versions.sort(key=lambda v: v['version'])
         files.append({'filename': name, 'collection': read_collection(content), 'example': read_example(content),

@@ -238,6 +238,16 @@ def check_settings():
             raise ValueError('QUERYAPIGATE_SECRET_KEY must be a valid Fernet key - 32 url-safe base64-encoded '
                              'bytes, e.g. from `python -c "from cryptography.fernet import Fernet; '
                              'print(Fernet.generate_key().decode())"`') from None
+    raw = os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip()
+    if raw:
+        if not _REDIS_SCHEME_RE.match(raw):
+            raise ValueError("QUERYAPIGATE_REDIS_URL must start with redis://, rediss:// or unix://, not "
+                             f"'{raw.split('://')[0]}://'")
+        try:
+            import redis  # noqa: F401
+        except ImportError:
+            raise ValueError('QUERYAPIGATE_REDIS_URL is set but the "redis" package is not installed - '
+                             'run `pip install "queryapigate[redis]"`') from None
 
 
 def secret_key():
@@ -245,6 +255,29 @@ def secret_key():
     unset - encryption at rest is opt-in; without it, a connection's password is stored exactly as given,
     today's unchanged behaviour. Validated as a real Fernet key at startup by check_settings(), not here."""
     return os.environ.get('QUERYAPIGATE_SECRET_KEY') or None
+
+
+_REDIS_SCHEME_RE = re.compile(r'^(rediss?|unix)://', re.I)
+
+
+def redis_url():
+    """QUERYAPIGATE_REDIS_URL: swaps the response cache (cache.py's ResponseCache) for a Redis-backed one
+    (rediscache.RedisResponseCache) that survives a process restart and can be shared across horizontally-
+    scaled instances - see cache.py's own docstring for why the in-process default can't do that. None
+    (the default) keeps today's in-process cache, unchanged, with no new import. Validated as a real
+    redis:// URL, and that the redis package is actually installed, at startup by check_settings()."""
+    return os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip() or None
+
+
+def redact_redis_url(url):
+    """`url` with any password hidden, for safe logging and the Settings panel - same spirit as
+    store.mask_passwords() for a connection's own password."""
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    if not parts.password:
+        return url
+    netloc = parts.netloc.replace(parts.password, PASSWORD_MASK, 1)
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def max_page_size():
@@ -304,6 +337,7 @@ def describe_settings():
     timeout, slow = query_timeout(), slow_query_threshold()
     limit, export = rate_limit(), audit_log_export_file()
     cors = cors_origins()
+    redis_val = redis_url()
     return [
         {'id': 'general', 'title': 'General',
          'description': 'Where this server keeps its files and what it loads at startup.', 'rows': [
@@ -354,4 +388,10 @@ def describe_settings():
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
+        {'id': 'cache', 'title': 'Response cache',
+         'description': 'Where cache_ttl-carrying saved queries store their cached responses.', 'rows': [
+            row('Cache backend', 'In-process (default) or a shared Redis, surviving restarts and shared '
+                'across instances.', 'QUERYAPIGATE_REDIS_URL',
+                'in-process' if redis_val is None else f'Redis ({redact_redis_url(redis_val)})',
+                secret=True)]},
     ]

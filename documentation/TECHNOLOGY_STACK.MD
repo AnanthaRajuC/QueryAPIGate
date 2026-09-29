@@ -38,6 +38,7 @@ development environment resolved; "Constraint" is what `pyproject.toml` actually
 |---|---|---|---|
 | `flow` | sqlglot | 25.34.1 (`>=23,<26`) | Real, multi-dialect SQL parsing (`sqlflow.py`) - the Access tab's table/join extraction and node-link diagram, the Access map's table filter, and real `sqlglot`-formatted SQL pretty-printing (BACKLOG #40). Deliberately never consulted by the write-guard (`sqltools.validate_sql`) - a parse failure here only affects a visualization, never query execution. |
 | `encryption` | cryptography | 50.0.1 (`>=41`) | Encrypting a connection's password at rest (Fernet, `store.py`'s `_get_fernet()`) when `QUERYAPIGATE_SECRET_KEY` is set - optional; a connection's password is stored in plain JSON otherwise (with a startup warning). |
+| `redis` | redis (redis-py) | 8.1.0 (`>=5`) | The saved-query response cache (`cache_ttl`) backing store when `QUERYAPIGATE_REDIS_URL` is set (`rediscache.py`) - survives a restart and is shared across instances, instead of `cache.py`'s in-process default. A cache failure is always treated as a miss, never a request failure. |
 
 ### Optional extras for running/documenting the server
 

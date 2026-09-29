@@ -38,11 +38,12 @@ duckdb = ["duckdb>=1.0"]  # Connection.interrupt()/InterruptException, relied on
 mongo = ["pymongo>=4.0"]
 flow = ["sqlglot>=23,<26"]  # best-effort table/join extraction for the Access tab - see sqlflow.py
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
+redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
 all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
-dev = ["queryapigate[all]", "ruff>=0.5", "openapi-spec-validator>=0.7", "hypothesis>=6.100", "mypy>=1.10",
-      "coverage>=7.4"]
+dev = ["queryapigate[all]", "queryapigate[redis]", "ruff>=0.5", "openapi-spec-validator>=0.7", "hypothesis>=6.100",
+      "mypy>=1.10", "coverage>=7.4"]
 
 [project.urls]
 Homepage = "https://github.com/AnanthaRajuC/QueryAPIGate"

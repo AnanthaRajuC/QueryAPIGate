@@ -693,6 +693,10 @@ format](https://prometheus.io/docs/instrumenting/exposition_formats/):
   there's no equivalent single span to measure there.
 - `queryapigate_pool_idle_connections` - idle pooled database connections currently held.
 - `queryapigate_rate_limit_rejections_total` - requests rejected by the rate limiter.
+- `queryapigate_cache_hits_total` / `queryapigate_cache_misses_total` - responses served from, or missed in,
+  the `cache_ttl` response cache (in-process by default, Redis-backed when `QUERYAPIGATE_REDIS_URL` is set -
+  see `/settings`). Counted from the same `X-Cache: HIT`/`MISS` header a cacheable response already carries.
+- `queryapigate_cache_entries` - responses currently held in the response cache.
 
 Metrics are kept in memory for this one process. This is correct for the image this project ships (a
 single gunicorn worker - see the comment next to `--workers 1` in the Dockerfile); running several worker

@@ -370,6 +370,28 @@ class MetricsEndpointTests(AppTestCase):
         body = self.client.get('/metrics').get_data(as_text=True)
         return int(re.search(r'queryapigate_rate_limit_rejections_total (\d+)', body).group(1))
 
+    def test_cache_hit_and_miss_are_counted(self):
+        self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'd', 'filename': 'cached',
+                                                      'connection_name': 'lite', 'sql_query': 'SELECT * FROM t',
+                                                      'cache_ttl': 60})
+        before_hits, before_misses = self._cache_counts()
+        self.client.get('/q/cached')  # miss
+        self.client.get('/q/cached')  # hit
+        hits, misses = self._cache_counts()
+        self.assertEqual(hits - before_hits, 1)
+        self.assertEqual(misses - before_misses, 1)
+
+    def test_a_request_with_no_x_cache_header_touches_neither_counter(self):
+        before = self._cache_counts()
+        self.run_sql()  # ad-hoc /execute_sql never carries X-Cache
+        self.assertEqual(self._cache_counts(), before)
+
+    def _cache_counts(self):
+        body = self.client.get('/metrics').get_data(as_text=True)
+        hits = int(re.search(r'queryapigate_cache_hits_total (\d+)', body).group(1))
+        misses = int(re.search(r'queryapigate_cache_misses_total (\d+)', body).group(1))
+        return hits, misses
+
     def _rows_returned(self):
         body = self.client.get('/metrics').get_data(as_text=True)
         match = re.search(r'queryapigate_rows_returned_total\{connection="lite",dialect="sqlite",key="-"\} (\d+)', body)
@@ -479,6 +501,16 @@ class MetricsRenderTests(unittest.TestCase):
     def test_pool_occupancy_is_zero_when_pooling_is_disabled(self):
         with mock.patch('queryapigate.metrics.pool.get_pool', return_value=None):
             self.assertIn('queryapigate_pool_idle_connections 0', metrics.render())
+
+    def test_cache_entries_reflects_a_live_cache_instance(self):
+        from queryapigate import cache
+        live = cache.ResponseCache()
+        live.set(cache.ResponseCache.key(name='x'), b'body', 'text/plain', [], ttl=60)
+        self.assertIn('queryapigate_cache_entries 1', metrics.render(live))
+
+    def test_cache_entries_is_zero_without_a_cache_instance(self):
+        self.assertIn('queryapigate_cache_entries 0', metrics.render(None))
+        self.assertIn('queryapigate_cache_entries 0', metrics.render())
 
     def test_active_queries_gauge_tracks_inc_and_dec(self):
         before = int(re.search(r'queryapigate_active_queries (-?\d+)', metrics.render()).group(1))

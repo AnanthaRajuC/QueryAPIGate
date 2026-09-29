@@ -36,7 +36,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 18)
+        self.assertEqual(len(rows), 19)
         self.assertEqual(rows['QUERYAPIGATE_HOME']['source'], 'env')
         self.assertEqual(rows['QUERYAPIGATE_HOME']['value'], os.path.realpath(self.tmp.name))
         self.assertEqual(rows['QUERYAPIGATE_QUERY_TIMEOUT']['source'], 'default')

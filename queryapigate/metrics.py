@@ -25,6 +25,8 @@ _serialization_hist: dict[tuple, list] = {}  # (format,) -> [count per bucket...
 _serialization_sum: dict[tuple, float] = {}  # (format,) -> total seconds
 _active_queries = 0                     # queries currently executing (paged or mid-stream)
 _rate_limit_rejections = 0
+_cache_hits = 0                         # responses served from cache.ResponseCache/rediscache.RedisResponseCache
+_cache_misses = 0
 
 
 def _bucket_index(elapsed):
@@ -108,6 +110,18 @@ def inc_rate_limit_rejection():
         _rate_limit_rejections += 1
 
 
+def inc_cache_hit():
+    global _cache_hits
+    with _lock:
+        _cache_hits += 1
+
+
+def inc_cache_miss():
+    global _cache_misses
+    with _lock:
+        _cache_misses += 1
+
+
 def summary_for_key(name):
     """Live usage for one API key's name, aggregated from the same counters /metrics renders - queries run,
     of those how many failed, and rows returned. No latency figure: the request/query duration histograms
@@ -166,8 +180,11 @@ def _render_histogram(lines, name, help_text, label_names, hist, totals):
         lines.append(f'{name}_count{_labels(labels)} {cumulative}')
 
 
-def render():
-    """The current metrics as Prometheus text exposition format."""
+def render(cache=None):
+    """The current metrics as Prometheus text exposition format. `cache` is the live response-cache
+    instance (cache.ResponseCache or rediscache.RedisResponseCache, app.extensions['queryapigate_cache']) -
+    passed in by the /metrics route rather than imported here, since the cache lives per-Flask-app, not as
+    a module-level singleton the way pool.py's shared pool does."""
     with _lock:
         request_counts = dict(_request_counts)
         request_hist = {k: list(v) for k, v in _request_hist.items()}
@@ -181,6 +198,8 @@ def render():
         serialization_sum = dict(_serialization_sum)
         active_queries = _active_queries
         rejections = _rate_limit_rejections
+        cache_hits = _cache_hits
+        cache_misses = _cache_misses
 
     lines = []
     _render_counter(lines, 'queryapigate_requests_total', 'Total HTTP requests.',
@@ -211,5 +230,17 @@ def render():
     lines.append('# HELP queryapigate_rate_limit_rejections_total Requests rejected by the rate limiter.')
     lines.append('# TYPE queryapigate_rate_limit_rejections_total counter')
     lines.append(f'queryapigate_rate_limit_rejections_total {rejections}')
+
+    lines.append('# HELP queryapigate_cache_hits_total Responses served from the cache_ttl response cache.')
+    lines.append('# TYPE queryapigate_cache_hits_total counter')
+    lines.append(f'queryapigate_cache_hits_total {cache_hits}')
+
+    lines.append('# HELP queryapigate_cache_misses_total Cacheable requests not found in the response cache.')
+    lines.append('# TYPE queryapigate_cache_misses_total counter')
+    lines.append(f'queryapigate_cache_misses_total {cache_misses}')
+
+    lines.append('# HELP queryapigate_cache_entries Responses currently held in the response cache.')
+    lines.append('# TYPE queryapigate_cache_entries gauge')
+    lines.append(f'queryapigate_cache_entries {cache.size() if cache is not None else 0}')
 
     return '\n'.join(lines) + '\n'

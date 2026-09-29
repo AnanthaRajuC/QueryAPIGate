@@ -1,12 +1,15 @@
 """Tests for the opt-in, per-saved-query response cache."""
+import hashlib
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import cache, create_app
+from queryapigate import cache, config, create_app
+from queryapigate.rediscache import RedisResponseCache
 
 
 class ResponseCacheTests(unittest.TestCase):
@@ -61,6 +64,150 @@ class ResponseCacheTests(unittest.TestCase):
             self.assertIsNotNone(self.cache.get('a'))
             self.assertIsNone(self.cache.get('b'))
             self.assertIsNotNone(self.cache.get('c'))
+
+
+class _FakeRedisPipeline:
+    """Just enough of redis-py's pipeline object for RedisResponseCache.set() - queues ops, applies them
+    (or raises, simulating a write failure) on execute()."""
+
+    def __init__(self, client):
+        self._client = client
+        self._ops = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def hset(self, name, mapping):
+        self._ops.append(('hset', name, mapping))
+
+    def expire(self, name, ttl):
+        self._ops.append(('expire', name, ttl))
+
+    def execute(self):
+        if self._client._fail == 'hset':
+            raise self._client.RedisError('simulated write failure')
+        for op, name, value in self._ops:
+            if op == 'hset':
+                self._client._apply_hset(name, value)
+            else:
+                self._client._ttls[name] = value
+        self._ops = []
+
+
+class _FakeRedis:
+    """A minimal in-memory stand-in for the four redis-py calls RedisResponseCache actually makes - no real
+    Redis server needed, the same spirit as the MagicMock cursors/connections runners.py's own DB driver
+    tests use. `fail='hset'` or `fail='hgetall'` makes the matching call raise redis.RedisError instead."""
+
+    def __init__(self, fail=None):
+        self._data = {}  # name -> {field bytes: value bytes}
+        self._ttls = {}  # name -> last ttl passed to expire()
+        self._fail = fail
+        import redis
+        self.RedisError = redis.RedisError
+
+    def _apply_hset(self, name, mapping):
+        entry = self._data.setdefault(name, {})
+        for field, value in mapping.items():
+            key = field.encode() if isinstance(field, str) else field
+            entry[key] = value if isinstance(value, bytes) else str(value).encode()
+
+    def pipeline(self):
+        return _FakeRedisPipeline(self)
+
+    def hgetall(self, name):
+        if self._fail == 'hgetall':
+            raise self.RedisError('simulated read failure')
+        return dict(self._data.get(name, {}))
+
+    def scan_iter(self, match):
+        prefix = match.rstrip('*')
+        return iter([k for k in self._data if k.startswith(prefix)])
+
+
+class RedisResponseCacheTests(unittest.TestCase):
+    """RedisResponseCache against the fake client above - proves the get/set/expire/error-handling logic
+    without a real Redis server, matching how runners.py's DB drivers are tested via mocked cursors."""
+
+    def setUp(self):
+        self.fake = _FakeRedis()
+        self.cache = RedisResponseCache('redis://localhost:6379/0', client=self.fake)
+
+    def test_set_then_get_round_trips(self):
+        key = cache.ResponseCache.key(name='q', version=1, values={'id': 1})
+        etag = self.cache.set(key, b'hello', 'text/plain', [['X-Page', '1']], ttl=10)
+        body, content_type, headers, got_etag = self.cache.get(key)
+        self.assertEqual(body, b'hello')
+        self.assertEqual(content_type, 'text/plain')
+        self.assertEqual(headers, [['X-Page', '1']])
+        self.assertEqual(got_etag, etag)
+
+    def test_etag_is_a_hash_of_the_body(self):
+        key = cache.ResponseCache.key(name='q')
+        etag = self.cache.set(key, b'hello', 'text/plain', [], ttl=10)
+        self.assertEqual(etag, hashlib.sha256(b'hello').hexdigest())
+
+    def test_missing_key_is_none(self):
+        self.assertIsNone(self.cache.get('nope'))
+
+    def test_expire_is_called_with_the_ttl(self):
+        key = cache.ResponseCache.key(name='q')
+        self.cache.set(key, b'hello', 'text/plain', [], ttl=42)
+        self.assertEqual(self.fake._ttls['qag:cache:' + key], 42)
+
+    def test_a_read_failure_is_treated_as_a_miss(self):
+        failing = RedisResponseCache('redis://localhost:6379/0', client=_FakeRedis(fail='hgetall'))
+        self.assertIsNone(failing.get('anything'))
+
+    def test_a_write_failure_is_a_silent_noop_but_still_returns_an_etag(self):
+        failing = RedisResponseCache('redis://localhost:6379/0', client=_FakeRedis(fail='hset'))
+        etag = failing.set('k', b'hello', 'text/plain', [], ttl=10)
+        self.assertEqual(etag, hashlib.sha256(b'hello').hexdigest())
+        self.assertIsNone(failing.get('k'))  # the write never actually landed
+
+    def test_size_counts_only_this_caches_entries(self):
+        self.cache.set(cache.ResponseCache.key(name='a'), b'1', 'text/plain', [], ttl=10)
+        self.cache.set(cache.ResponseCache.key(name='b'), b'2', 'text/plain', [], ttl=10)
+        self.assertEqual(self.cache.size(), 2)
+
+
+class RedisConfigTests(unittest.TestCase):
+    """config.py's QUERYAPIGATE_REDIS_URL validation and redaction - independent of any real Redis server
+    or of create_app(), same spirit as LegacySettingsTests in test_cli.py for the SQL2API_ startup check."""
+
+    def setUp(self):
+        clean = {name: value for name, value in os.environ.items() if not name.startswith('QUERYAPIGATE_')}
+        patcher = mock.patch.dict(os.environ, clean, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_malformed_scheme_is_rejected_at_startup(self):
+        os.environ['QUERYAPIGATE_REDIS_URL'] = 'http://localhost:6379'
+        self.assertRaises(ValueError, config.check_settings)
+
+    def test_a_real_redis_url_passes_validation(self):
+        os.environ['QUERYAPIGATE_REDIS_URL'] = 'redis://localhost:6379/0'
+        config.check_settings()  # must not raise
+
+    def test_missing_redis_package_is_a_clear_startup_error(self):
+        os.environ['QUERYAPIGATE_REDIS_URL'] = 'redis://localhost:6379/0'
+        with mock.patch.dict(sys.modules, {'redis': None}):
+            with self.assertRaises(ValueError) as ctx:
+                config.check_settings()
+        self.assertIn('queryapigate[redis]', str(ctx.exception))
+
+    def test_redact_hides_the_password(self):
+        redacted = config.redact_redis_url('redis://user:secret@localhost:6379/0')
+        self.assertNotIn('secret', redacted)
+        self.assertIn('user', redacted)
+        self.assertIn('localhost:6379', redacted)
+
+    def test_redact_is_a_no_op_without_a_password(self):
+        url = 'redis://localhost:6379/0'
+        self.assertEqual(config.redact_redis_url(url), url)
 
 
 class AppTestCase(unittest.TestCase):
@@ -142,6 +289,34 @@ class CacheHeaderTests(AppTestCase):
         post_res = self.client.post('/q/q', json={'params': {'id': 1}})
         self.assertEqual(post_res.headers['X-Cache'], 'HIT')
         self.assertEqual(post_res.get_data(), get_res.get_data())
+
+
+class RedisBackedAppCacheTests(AppTestCase):
+    """Swaps in a RedisResponseCache (backed by the fake client, no real Redis server) after create_app()
+    and re-runs the core miss/hit/304 flow through real HTTP requests - proving the two backends are
+    interchangeable from the outside, exactly as cache_lookup()/cache_store() in app.py assume."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.application.extensions['queryapigate_cache'] = RedisResponseCache(
+            'redis://localhost:6379/0', client=_FakeRedis())
+
+    def test_first_call_is_a_miss_second_is_a_hit_with_identical_body(self):
+        self.save(cache_ttl=60)
+        first = self.client.get('/q/q?id=1')
+        self.assertEqual(first.headers['X-Cache'], 'MISS')
+        second = self.client.get('/q/q?id=1')
+        self.assertEqual(second.headers['X-Cache'], 'HIT')
+        self.assertEqual(second.get_data(), first.get_data())
+        self.assertEqual(second.headers['ETag'], first.headers['ETag'])
+
+    def test_if_none_match_gets_a_304_with_no_body(self):
+        self.save(cache_ttl=60)
+        first = self.client.get('/q/q?id=1')
+        etag = first.headers['ETag']
+        second = self.client.get('/q/q?id=1', headers={'If-None-Match': etag})
+        self.assertEqual(second.status_code, 304)
+        self.assertEqual(second.get_data(), b'')
 
 
 class ExecutionHistoryInteractionTests(AppTestCase):

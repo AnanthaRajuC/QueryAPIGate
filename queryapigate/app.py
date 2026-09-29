@@ -97,7 +97,13 @@ def create_app():
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
     app.extensions['queryapigate_limiter'] = RateLimiter()
     app.extensions['queryapigate_key_limiter'] = KeyRateLimiters()
-    app.extensions['queryapigate_cache'] = cache.ResponseCache()
+    redis_url = config.redis_url()
+    if redis_url:
+        from .rediscache import RedisResponseCache
+        app.extensions['queryapigate_cache'] = RedisResponseCache(redis_url)
+        log.info('Response cache: Redis (%s)', config.redact_redis_url(redis_url))
+    else:
+        app.extensions['queryapigate_cache'] = cache.ResponseCache()
     if config.cors_origins() == '*' and not config.api_key():
         log.warning('QUERYAPIGATE_CORS_ORIGINS=* without QUERYAPIGATE_API_KEY: any website a user visits can call '
                     'this API from their browser and reach every active connection. Set an API key or list the '
@@ -173,6 +179,11 @@ def create_app():
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
         metrics.observe_request(request.method, endpoint, str(response.status_code), elapsed, caller_key_name())
+        cache_status = response.headers.get('X-Cache')
+        if cache_status == 'HIT':
+            metrics.inc_cache_hit()
+        elif cache_status == 'MISS':
+            metrics.inc_cache_miss()
         if endpoint not in ACCESS_LOG_QUIET:
             extra = {'method': request.method, 'path': request.path, 'status': response.status_code,
                     'duration_ms': round(elapsed * 1000, 1)}
@@ -1023,7 +1034,8 @@ def health():
 
 @bp.route('/metrics', methods=['GET'])
 def metrics_endpoint():
-    return Response(metrics.render(), mimetype='text/plain; version=0.0.4; charset=utf-8')
+    return Response(metrics.render(current_app.extensions.get('queryapigate_cache')),
+                    mimetype='text/plain; version=0.0.4; charset=utf-8')
 
 
 def _is_runnable(data):

@@ -724,6 +724,7 @@ UI_HTML = r"""<!doctype html>
     </div>
     <div class="nav-group"><div class="nav-label">Observability</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="metrics" data-group="Observability" data-label="Metrics" title="Metrics"><span class="nav-abbr">Mt</span><span class="nav-text">Metrics</span></button>
+      <button type="button" role="tab" data-tab="caching" data-group="Observability" data-label="Caching" title="Caching"><span class="nav-abbr">Ca</span><span class="nav-text">Caching</span></button>
       <button type="button" role="tab" data-tab="auditlog" data-group="Observability" data-label="Audit log" title="Audit log"><span class="nav-abbr">Au</span><span class="nav-text">Audit log</span></button>
     </div>
   </nav>
@@ -853,6 +854,15 @@ UI_HTML = r"""<!doctype html>
       <button id="refresh-metrics" type="button" class="btn">Refresh</button>
     </div>
     <div id="metrics-body"><div class="loading"><span class="spin"></span>Loading metrics…</div></div>
+  </section>
+
+  <section id="tab-caching">
+    <div class="page-head">
+      <div class="titles"><h1>Caching</h1><span class="sub">The response cache backing saved queries' <code>cache_ttl</code> - see the Response cache row in Settings for the backend itself.</span></div>
+      <span class="spacer"></span>
+      <button id="refresh-caching" type="button" class="btn">Refresh</button>
+    </div>
+    <div id="caching-body"><div class="loading"><span class="spin"></span>Loading…</div></div>
   </section>
 
   <section id="tab-accessmap">
@@ -1268,9 +1278,10 @@ var PREF_ROWS = [
 var settingsData = null, settingsSection = 'general';
 async function loadSettings() {
   var body = await apiJson('settings');
-  if (!body) { settingsData = null; renderSettings(); return; }
+  if (!body) { settingsData = null; renderSettings(); renderCaching(); return; }
   settingsData = body.sections;
   renderSettings();
+  renderCaching();
   paintAuditSub();
 }
 function renderSettings() {
@@ -2533,8 +2544,10 @@ async function loadMetrics() {
   metricsAt = Date.now();
   paintMetricsAge();
   renderHome();
+  renderCaching();
 }
 $('refresh-metrics').onclick = loadMetrics;
+$('refresh-caching').onclick = loadMetrics;
 
 function statTile(label, value, warn) {
   return h('div', { className: 'stat-tile' },
@@ -2835,6 +2848,49 @@ function renderMetrics(series) {
       h('thead', {}, h('tr', {}, ['Connection', 'Queries', 'Errors', 'Avg latency', 'Rows returned'].map(function (t, i) { return h('th', { className: i ? 'num' : '', text: t }); }))),
       h('tbody', {}, tRows))));
   }
+}
+
+/** The Caching tab: how the cache_ttl response cache (BACKLOG #47) is actually performing - backend from
+ * the Settings 'cache' section (settingsData, already loaded), hit/miss/entry counts from the same
+ * metricsSeries loadMetrics() already parses, and which saved queries actually declare a cache_ttl from
+ * filesCache - all data already fetched elsewhere, no dedicated endpoint for this tab. */
+function renderCaching() {
+  var box = $('caching-body');
+  if (!box) return;
+  clear(box);
+  var cacheSection = (settingsData || []).filter(function (s) { return s.id === 'cache'; })[0];
+  var backend = cacheSection ? cacheSection.rows[0].value : '…';
+  var hits = metricGauge(metricsSeries, 'queryapigate_cache_hits_total');
+  var misses = metricGauge(metricsSeries, 'queryapigate_cache_misses_total');
+  var entries = metricGauge(metricsSeries, 'queryapigate_cache_entries');
+  var total = hits + misses;
+  var hitRate = total ? (100 * hits / total).toFixed(1) + '%' : '—';
+
+  box.appendChild(h('div', { className: 'stat-tiles' },
+    statTile('Cache backend', backend),
+    statTile('Entries', entries),
+    statTile('Hit rate', hitRate),
+    statTile('Hits', hits),
+    statTile('Misses', misses)));
+
+  var cached = filesCache.filter(function (f) { return latestOf(f).cache_ttl > 0; })
+    .sort(function (a, b) { return a.filename < b.filename ? -1 : 1; });
+  box.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Saved queries with cache_ttl set'));
+  if (!cached.length) {
+    box.appendChild(h('div', { className: 'hint', text: 'No saved query declares a cache_ttl yet - set one on a read-only query to start caching its responses.' }));
+    return;
+  }
+  var rows = cached.map(function (f) {
+    var v = latestOf(f);
+    return h('tr', {},
+      h('td', {}, h('button', { type: 'button', className: 'target', text: f.filename, onclick: function () { openSavedQuery(f); } })),
+      h('td', {}, f.collection || h('span', { className: 'dim', text: '—' })),
+      h('td', { className: 'mono', text: v.connection_name || '—' }),
+      h('td', { className: 'mono num', text: v.cache_ttl + 's' }));
+  });
+  box.appendChild(h('div', { className: 'panel', style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['Query', 'Collection', 'Connection', 'cache_ttl'].map(function (t, i) { return h('th', { className: i === 3 ? 'num' : '', text: t }); }))),
+    h('tbody', {}, rows))));
 }
 
 function openApiKeyForm(name, existing, fromRole) {
@@ -3221,6 +3277,7 @@ async function loadQueries(selectName) {
   renderDetail();
   renderAccessMap();
   renderHome();
+  renderCaching();
 }
 function paintQueriesSub() {
   var sub = clear($('queries-sub'));

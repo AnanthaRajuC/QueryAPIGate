@@ -59,7 +59,8 @@ Behaviour is controlled by environment variables - see the table in the
 [README](https://github.com/AnanthaRajuC/QueryAPIGate#configuration)
 (`QUERYAPIGATE_HOME`, `QUERYAPIGATE_ALLOW_WRITES`, `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_MAX_PAGE_SIZE`, `QUERYAPIGATE_QUERY_TIMEOUT`,
 `QUERYAPIGATE_POOL_SIZE`, `QUERYAPIGATE_POOL_IDLE_TIMEOUT`, `QUERYAPIGATE_CORS_ORIGINS`, `QUERYAPIGATE_RATE_LIMIT`,
-`QUERYAPIGATE_TRUST_PROXY`, `QUERYAPIGATE_HOST`, `QUERYAPIGATE_PORT`, `QUERYAPIGATE_DEBUG`, `QUERYAPIGATE_H2_JAR`).
+`QUERYAPIGATE_TRUST_PROXY`, `QUERYAPIGATE_HOST`, `QUERYAPIGATE_PORT`, `QUERYAPIGATE_DEBUG`, `QUERYAPIGATE_H2_JAR`,
+`QUERYAPIGATE_REDIS_URL`).
 
 ## Running in production
 
@@ -78,6 +79,39 @@ Or use the published Docker image (`ghcr.io/anantharajuc/queryapigate`, with a `
 [Dockerfile](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/Dockerfile) - see the README. The image sets
 gunicorn's worker timeout to 120 seconds; keep it above
 `QUERYAPIGATE_QUERY_TIMEOUT` if you run your own gunicorn.
+
+## Shared response cache (Redis)
+
+A saved query's `cache_ttl` (see the README) is served from an in-process cache by default - fast, zero
+setup, but wiped by every restart and never shared if you run more than one instance behind a load
+balancer. For an OLTP query that gets hit hundreds of times a second, set `QUERYAPIGATE_REDIS_URL` to point
+at a Redis instance instead: the cache then survives a restart and is shared across every instance that
+points at the same Redis, so a cache warmed by one instance serves every instance's traffic instead of each
+duplicating the same database hits.
+
+~~~bash
+pip install "queryapigate[redis]"
+QUERYAPIGATE_REDIS_URL=redis://localhost:6379/0 queryapigate serve
+~~~
+
+If Redis is briefly unreachable, a cached response is simply treated as a miss - the query still runs
+against the real database, it's just not served from cache for that one request. Nothing here changes the
+`--workers 1` recommendation above: that limit comes from the file-based connection/saved-query store, not
+the cache, and is unaffected either way.
+
+An optional sidecar service for `docker-compose.yml`:
+
+~~~yaml
+services:
+  redis:
+    image: redis:7-alpine
+  queryapigate:
+    # ...
+    environment:
+      QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+~~~
 
 ## Scheduled exports to a file
 
