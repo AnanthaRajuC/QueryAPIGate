@@ -1,4 +1,5 @@
 """The Flask application: HTTP routes on top of the store, engine and formatters."""
+import json
 import logging
 import math
 import re
@@ -92,7 +93,7 @@ def create_app():
     from . import __version__
     config.check_settings()
     db.init_schema()
-    store.import_legacy_connections_if_empty()
+    store.import_legacy_data_if_empty()
     logging_setup.configure(log)
     app = Flask(__name__)
     hops = config.proxy_hops()
@@ -624,10 +625,14 @@ def run_named_query(name):
 
 @bp.route('/view_file_content', methods=['GET'])
 def view_file_content():
+    """The admin UI's "Show raw file" toggle. No real file exists once saved queries live in SQLite, so
+    this reconstructs the same JSON text a saved-query file always looked like (same shape
+    store.load_versions() returns, same indent=4 the old write_json_atomic() used) - the UI already just
+    JSON.parses this string and reads it the normal way, so it can't tell the difference."""
     require_admin()
     path = store.resolve_saved_file(request.args.get('filename'))
-    with open(path, 'r') as f:
-        return jsonify({'content': f.read()}), 200
+    content = store.load_versions(path)
+    return jsonify({'content': json.dumps(content, indent=4)}), 200
 
 
 @bp.route('/query_flow', methods=['GET'])

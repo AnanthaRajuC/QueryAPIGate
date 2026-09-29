@@ -48,18 +48,17 @@ CREATE TABLE IF NOT EXISTS saved_query_versions (
   PRIMARY KEY (query_name, version)
 );
 
+-- One row per run, `entry_json` holding the whole entry verbatim (connection_name/request_id/key_name/
+-- status/rows/duration_ms/serialization_ms/error - whichever keys the caller actually gave, exactly as
+-- given) rather than structured columns: several UI features (History, Metrics, the "requests per day"
+-- chart) distinguish a key being *absent* from being present-but-null, which a JSON blob preserves for
+-- free and per-column NULLs cannot. `executed_at` is pulled out as a real column since it's what every
+-- ordering/capping query needs.
 CREATE TABLE IF NOT EXISTS execution_history (
   query_name TEXT NOT NULL,
   version INTEGER NOT NULL,
   executed_at TEXT NOT NULL,
-  connection_name TEXT,
-  request_id TEXT,
-  key_name TEXT,
-  status TEXT NOT NULL,
-  rows INTEGER,
-  duration_ms REAL,
-  serialization_ms REAL,
-  error TEXT,
+  entry_json TEXT NOT NULL,
   FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);

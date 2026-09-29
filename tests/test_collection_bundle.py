@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from queryapigate import bundle, cli, store
+from queryapigate import bundle, cli, db, store
 from queryapigate.errors import ApiError
 from tests.helpers import write_connections
 
@@ -43,8 +43,8 @@ class BundleTestCase(unittest.TestCase):
         return {'name': name, 'sql_query': 'SELECT 1', 'author': 'me', 'description': 'd', **extra}
 
     def files(self):
-        return sorted(os.listdir(os.path.join(self.home, 'saved_sql'))) if \
-            os.path.isdir(os.path.join(self.home, 'saved_sql')) else []
+        names = sorted(row[0] for row in db.connection().execute('SELECT name FROM saved_queries').fetchall())
+        return [f'{n}.json' for n in names]
 
 
 class ExportTests(BundleTestCase):

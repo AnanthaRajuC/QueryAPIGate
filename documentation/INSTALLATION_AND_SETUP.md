@@ -39,19 +39,21 @@ pip install -e ".[dev]"
 QueryAPIGate keeps its state in one folder - `QUERYAPIGATE_HOME`, by default the current directory:
 
 ~~~
-db_connections.json     connection registry
-saved_sql/              one JSON file per saved query
+queryapigate.db      connections and saved queries (SQLite)
+api_keys.json        scoped API keys
+roles.json           named permission templates
+audit_log.json       a durable record of administrative changes
 ~~~
 
 ~~~bash
 mkdir my-api && cd my-api
-queryapigate init            # writes db_connections.json (all templates inactive) and saved_sql/
-# edit db_connections.json, set "active": true on the connections you want
+queryapigate init            # writes queryapigate.db (a template connection per db type, all inactive)
+# edit them: admin UI, or PATCH /connections - set "active": true on the ones you want
 queryapigate serve           # http://127.0.0.1:5000
 ~~~
 
-To try it without any database of your own, use the bundled examples: `cd examples && cp db_connections.example.json
-db_connections.json && queryapigate serve`.
+To try it without any database of your own, use the bundled examples instead:
+`queryapigate init && queryapigate examples load && queryapigate serve`.
 
 ## Configuration
 
@@ -162,8 +164,10 @@ changes before it upgrades:
 | Docker image | `ghcr.io/anantharajuc/sql2api` | `ghcr.io/anantharajuc/queryapigate` |
 | JSON log `logger` field | `sql2api` | `queryapigate` |
 
-Your data folder needs no change: `db_connections.json`, `saved_sql/`, `api_keys.json`, `roles.json` and
-`audit_log.json` are read exactly as before.
+Your data folder needs no manual change: `api_keys.json`, `roles.json` and `audit_log.json` are read exactly
+as before. `db_connections.json`/`saved_sql/` (if you're upgrading from before connections and saved
+queries moved to `queryapigate.db`) are imported automatically, once, the first time the server or CLI runs
+against that home - nothing to run by hand, and the original files are left untouched, never deleted.
 
 **Rename every environment variable, especially `SQL2API_API_KEY`.** The old names are not read at all, and
 an unset API key means an open server - so a server that still finds any `SQL2API_*` variable in its

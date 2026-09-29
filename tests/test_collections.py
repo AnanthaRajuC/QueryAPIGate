@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import apikeys, collection_admin, create_app, store
+from queryapigate import apikeys, collection_admin, create_app, db, store
 from queryapigate.errors import ApiError
 from tests.helpers import write_connections
 
@@ -65,8 +65,7 @@ class AppTestCase(unittest.TestCase):
         return self.client.get('/audit_log', headers=self.admin).get_json()['entries']
 
     def query_file(self, name):
-        with open(os.path.join(self.tmp.name, 'saved_sql', f'{name}.json')) as f:
-            return json.load(f)
+        return store.load_versions(name)
 
 
 class NameTests(unittest.TestCase):
@@ -102,7 +101,7 @@ class StorageTests(AppTestCase):
         res = self.client.patch('/save_sql_to_file', headers=self.admin, json={
             'filename': 'q1', 'author': 'me', 'description': 'd', 'sql_query': 'SELECT 1', 'collection': 'Bad Name'})
         self.assertEqual(res.status_code, 400)
-        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, 'saved_sql', 'q1.json')))
+        self.assertFalse(store.saved_query_exists('q1'))
 
     def test_moving_is_not_a_new_version_and_touches_nothing_else(self):
         self.save('q1')
@@ -125,11 +124,10 @@ class StorageTests(AppTestCase):
 
     def test_a_hand_edited_invalid_value_reads_as_no_collection(self):
         self.save('q1', collection='reporting')
-        path = os.path.join(self.tmp.name, 'saved_sql', 'q1.json')
-        content = self.query_file('q1')
-        content['collection'] = 'Not Valid!'
-        with open(path, 'w') as f:
-            json.dump(content, f)
+        # Simulates a hand-edited invalid value - bypasses set_collection()'s own validation the same way
+        # directly hand-editing the old JSON file could.
+        with db.transaction() as conn:
+            conn.execute("UPDATE saved_queries SET collection = 'Not Valid!' WHERE name = 'q1'")
         self.assertEqual(self.collections()['collections'], {})
         self.assertEqual(self.collections()['uncollected'], ['q1'])
 
@@ -497,34 +495,43 @@ class RenameTests(AppTestCase):
         self.assertEqual(self.collections()['collections']['new']['queries'], ['q1', 'q2'])
         self.assertEqual(self._reach(), [200, 200])
 
-    def test_an_interruption_part_way_through_the_move_loses_no_access_and_rerunning_finishes(self):
-        real = store.write_json_atomic
-        calls = {'n': 0}
+    def test_an_interruption_during_the_move_moves_nothing_not_half(self):
+        """store.move_collection() is now one real SQL transaction - a genuine improvement over the old
+        per-file-atomic-but-not-overall approach: a failure after some rows were already touched rolls
+        every one of them back, so a partial move (the old "half done" state this test used to assert)
+        can no longer happen at all. Injects the failure on the *second* UPDATE inside the transaction -
+        proving the first row's change is undone too, not just that the second one never landed.
+        sqlite3.Connection is a C type (its methods can't be monkeypatched directly), so this wraps it in a
+        thin proxy instead - transparent for everything except the one statement being made flaky."""
+        real_conn = db.connection()
 
-        def flaky(path, data):
-            if str(path).endswith('.json') and 'saved_sql' in str(path):
-                calls['n'] += 1
-                if calls['n'] == 2:
-                    raise OSError('interrupted')
-            return real(path, data)
+        class FlakyConn:
+            calls = 0
 
-        with mock.patch.object(store, 'write_json_atomic', flaky):
-            with self.assertRaises(OSError):
+            def execute(self, sql, *args, **kwargs):
+                if sql.strip().startswith('UPDATE saved_queries SET collection'):
+                    FlakyConn.calls += 1
+                    if FlakyConn.calls == 2:
+                        raise sqlite3.OperationalError('interrupted')
+                return real_conn.execute(sql, *args, **kwargs)
+
+            def __getattr__(self, attr):
+                return getattr(real_conn, attr)
+
+        with mock.patch.object(db, 'connection', return_value=FlakyConn()):
+            with self.assertRaises(sqlite3.OperationalError):
                 collection_admin.rename_collection('old', 'new')
-        members = store.collection_members()
-        self.assertEqual({k: len(v) for k, v in members.items()}, {'old': 1, 'new': 1, 'keep': 1})  # half done
+        self.assertEqual(store.collection_members(), {'old': ['q1', 'q2'], 'keep': ['q3']})  # nothing moved
         self.assertEqual(self._reach(), [200, 200])  # and the key still reaches both
         self.assertEqual(self.rename('old', 'new', merge=True).status_code, 200)
         self.assertEqual(store.collection_members(), {'new': ['q1', 'q2'], 'keep': ['q3']})
         self.assertEqual(apikeys.list_keys()['k']['collections'], ['new'])
         self.assertEqual(apikeys.list_roles()['r']['collections'], ['new'])
 
-    def test_no_file_is_ever_left_half_written(self):
+    def test_every_query_is_still_loadable_after_a_rename(self):
         self.rename('old', 'new')
-        for name in os.listdir(os.path.join(self.tmp.name, 'saved_sql')):
-            self.assertTrue(name.endswith('.json'), name)
-            with open(os.path.join(self.tmp.name, 'saved_sql', name)) as f:
-                json.load(f)
+        for name in ('q1', 'q2', 'q3'):
+            store.load_versions(name)  # must not raise
 
 
 class RouteDocumentationTests(AppTestCase):

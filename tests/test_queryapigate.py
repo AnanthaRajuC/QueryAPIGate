@@ -12,7 +12,7 @@ from unittest import mock
 
 import duckdb
 
-from queryapigate import config, create_app, engine, metrics, pool, runners, schema, sqltools, store
+from queryapigate import config, create_app, db, engine, metrics, pool, runners, schema, sqltools, store
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
 from tests.helpers import write_connections
@@ -183,8 +183,7 @@ class SavedQueryTests(ApiTestCase):
         self.save('my query', sql='SELECT 2', tags=['x'])
         self.save('another')
 
-        with open(os.path.join(self.saved_dir, 'my query.json')) as f:
-            saved = json.load(f)
+        saved = store.load_versions('my query')
         self.assertEqual(sorted(saved), ['1', '2'])
         self.assertEqual(saved['2']['version'], 2)
         self.assertEqual(saved['2']['tags'], ['x'])
@@ -1082,8 +1081,7 @@ class ParameterRuleApiTests(ApiTestCase):
         self.client.get('/q/rules?min_id=24')
         for _ in range(3):
             self.assertEqual(self.client.get('/q/rules?min_id=abc').status_code, 400)
-        with open(os.path.join(self.saved_dir, 'rules.json')) as f:
-            history = json.load(f)['1']['execution_history']
+        history = store.load_versions('rules')['1']['execution_history']
         self.assertEqual([e['status'] for e in history], ['success'])
 
     def test_undeclared_parameters_still_work_as_before(self):
@@ -1159,10 +1157,20 @@ class SavedQueryOpenApiTests(ApiTestCase):
         self.assertIn('/q/rules', self.spec(**{'X-API-Key': 'k3y'})['paths'])
 
     def test_unreadable_saved_files_do_not_break_the_document(self):
-        with open(os.path.join(self.saved_dir, 'junk.json'), 'w') as f:
-            f.write('{not json')
-        with open(os.path.join(self.saved_dir, 'odd.json'), 'w') as f:
-            json.dump({'1': {'sql_query': 12, 'query_parameters': 'weird'}}, f)
+        # Simulates corrupt/unexpected stored data directly (bypassing normal save validation) - a
+        # malformed fields_json ('junk', the equivalent of the old "not valid JSON" file) and a
+        # semantically-wrong-but-parseable one ('odd', sql_query not even a string) must each be skipped,
+        # not break the whole document.
+        with db.transaction() as conn:
+            conn.execute("INSERT INTO saved_queries (name, collection, example) VALUES ('junk', NULL, 0)")
+            conn.execute("""INSERT INTO saved_query_versions
+                (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
+                VALUES ('junk', 1, 'u', 'active', 'now', 'now', '{not json')""")
+            conn.execute("INSERT INTO saved_queries (name, collection, example) VALUES ('odd', NULL, 0)")
+            conn.execute("""INSERT INTO saved_query_versions
+                (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
+                VALUES ('odd', 1, 'u', 'active', 'now', 'now', ?)""",
+                (json.dumps({'sql_query': 12, 'query_parameters': 'weird'}),))
         spec = self.spec()
         self.assertIn('/q/rules', spec['paths'])
         self.assertNotIn('/q/junk', spec['paths'])
@@ -1309,8 +1317,7 @@ class TimeoutTests(ApiTestCase):
     def test_saved_query_timeout_is_recorded_in_history(self):
         self.save('slow', sql=FOREVER, connection_name='lite')
         self.assertEqual(self.client.get('/q/slow?timeout=0.5').status_code, 504)
-        with open(os.path.join(self.saved_dir, 'slow.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('slow')['1']['execution_history'][0]
         self.assertEqual(entry['status'], 'error')
         self.assertIn('time limit', entry['error'])
 
@@ -1371,8 +1378,7 @@ class NamedQueryTests(ApiTestCase):
         self.save('h', sql='SELECT actor_id FROM actor WHERE actor_id = :id', connection_name='lite')
         self.client.get('/q/h?id=1')
         self.client.get('/q/h')  # fails: missing parameter
-        with open(os.path.join(self.saved_dir, 'h.json')) as f:
-            history = json.load(f)['1']['execution_history']
+        history = store.load_versions('h')['1']['execution_history']
         self.assertEqual([e['status'] for e in history], ['success', 'error'])
         self.assertEqual(history[0]['rows'], 1)
         self.assertIn('duration_ms', history[0])
@@ -1380,24 +1386,21 @@ class NamedQueryTests(ApiTestCase):
 
         for _ in range(config.HISTORY_LIMIT + 5):
             self.client.get('/q/h?id=1')
-        with open(os.path.join(self.saved_dir, 'h.json')) as f:
-            self.assertEqual(len(json.load(f)['1']['execution_history']), config.HISTORY_LIMIT)
+        self.assertEqual(len(store.load_versions('h')['1']['execution_history']), config.HISTORY_LIMIT)
 
     def test_execution_history_entries_carry_the_request_id_and_calling_key(self):
         # Lets a slow/failed row an admin sees in the History tab be traced back to the structured log line
         # (or caller) that produced it, rather than only guessable by timestamp.
         self.save('h2', sql='SELECT actor_id FROM actor WHERE actor_id = :id', connection_name='lite')
         res = self.client.get('/q/h2?id=1')
-        with open(os.path.join(self.saved_dir, 'h2.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('h2')['1']['execution_history'][0]
         self.assertEqual(entry['request_id'], res.headers['X-Request-Id'])
         self.assertEqual(entry['key_name'], '-')  # this fixture runs open, no API key configured
 
     def test_execution_history_entries_carry_serialization_time_separately_from_query_time(self):
         self.save('h3', sql='SELECT actor_id FROM actor WHERE actor_id = :id', connection_name='lite')
         self.client.get('/q/h3?id=1')
-        with open(os.path.join(self.saved_dir, 'h3.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('h3')['1']['execution_history'][0]
         self.assertIn('serialization_ms', entry)
         self.assertIn('duration_ms', entry)  # query execution time - a separate measurement, see app.render()
 
@@ -1510,8 +1513,7 @@ class StreamingTests(ApiTestCase):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_STREAM_MAX_ROWS': '4'}):
             res = self.client.get('/q/capped?stream=true&format=csv')
             res.get_data()
-        with open(os.path.join(self.saved_dir, 'capped.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('capped')['1']['execution_history'][0]
         self.assertEqual((entry['status'], entry['rows']), ('success', 4))
 
     def test_json_format_is_rejected(self):
@@ -1545,8 +1547,7 @@ class StreamingTests(ApiTestCase):
         self.assertEqual(res.status_code, 200)
         res.get_data()  # history is only recorded once the streamed body is actually drained
         self.assertIsNone(res.headers.get('X-Cache'))
-        with open(os.path.join(self.saved_dir, 'allrows.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('allrows')['1']['execution_history'][0]
         self.assertEqual((entry['status'], entry['rows']), ('success', 25))
 
     def test_saved_query_stream_history_carries_the_request_id_and_calling_key(self):
@@ -1556,8 +1557,7 @@ class StreamingTests(ApiTestCase):
         self.save('allrows2', sql='SELECT * FROM actor ORDER BY actor_id', connection_name='lite')
         res = self.client.get('/q/allrows2?stream=true&format=csv')
         res.get_data()
-        with open(os.path.join(self.saved_dir, 'allrows2.json')) as f:
-            entry = json.load(f)['1']['execution_history'][0]
+        entry = store.load_versions('allrows2')['1']['execution_history'][0]
         self.assertEqual(entry['request_id'], res.headers['X-Request-Id'])
         self.assertEqual(entry['key_name'], '-')
 

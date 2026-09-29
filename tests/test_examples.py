@@ -33,8 +33,8 @@ class ExamplesTestCase(unittest.TestCase):
         self.addCleanup(size.stop)
 
     def saved_files(self):
-        folder = os.path.join(self.home, 'saved_sql')
-        return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        names = sorted(row[0] for row in db.connection().execute('SELECT name FROM saved_queries').fetchall())
+        return [f'{n}.json' for n in names]
 
     def save_user_query(self, name, collection=None):
         store.save_version(name, {'sql_query': 'SELECT 1', 'author': 'me', 'description': 'mine', 'tags': [],
@@ -201,7 +201,7 @@ class LoadTests(ExamplesTestCase):
         self.assertIn('mine', self.saved_files()[0] + ' '.join(self.saved_files()))
         self.assertNotIn('example', store.read_connections()['prod'])
         self.assertNotIn('example', apikeys.list_roles()['their-role'])
-        self.assertFalse(store.load_versions(os.path.join(self.home, 'saved_sql', 'mine.json')).get('example'))
+        self.assertFalse(store.load_versions('mine').get('example'))
 
     def test_a_users_query_with_an_examples_name_stops_the_load_and_changes_nothing(self):
         self.save_user_query('example_top_films')
@@ -271,9 +271,8 @@ class UnloadTests(ExamplesTestCase):
 
     def test_unload_never_removes_a_user_query_that_shares_a_name(self):
         examples.load(FIXED_NOW)
-        # The user replaces an example with their own file of the same name (no example mark).
-        path = os.path.join(self.home, 'saved_sql', 'example_top_films.json')
-        os.remove(path)
+        # The user replaces an example with their own query of the same name (no example mark).
+        store.delete_saved('example_top_films')
         self.save_user_query('example_top_films')
         examples.unload()
         self.assertEqual(self.saved_files(), ['example_top_films.json'])

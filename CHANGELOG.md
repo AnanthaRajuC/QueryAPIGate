@@ -144,13 +144,19 @@ All notable changes to this project are documented here. The format follows
   foreign-key concept) are explicit gaps, not bugs; a composite key reports only its first column.
 
 ### Changed
-- **Connections now live in `queryapigate.db` (SQLite), not `db_connections.json`** - the first slice of
-  moving off hand-rolled JSON file storage (more in a later release; saved queries, API keys, roles and the
-  audit log are unaffected for now). A pre-existing `db_connections.json` is imported automatically, once,
-  the first time the connections table is empty - nothing to run by hand, and the JSON file is never
-  consulted again afterward. `QUERYAPIGATE_HOME` now needs to be writable (previously `db_connections.json`
-  only needed to be readable) - the bundled `docker-compose.yml` demo, whose data folder was mounted
-  read-only, now seeds a proper writable volume from it via a small one-shot init container instead.
+- **Connections and saved queries now live in `queryapigate.db` (SQLite), not `db_connections.json`/
+  `saved_sql/*.json`** (BACKLOG #53) - Phase 1 of moving off hand-rolled JSON file storage (API keys, roles
+  and the audit log are unaffected for now, and stay JSON-backed for a later phase). Every public
+  `store.py` function kept its exact name, signature and return shape, so no other module needed to change;
+  compound read-modify-write operations (saving a new version, moving a query between collections, trimming
+  `execution_history` to its last 50 runs) are now real, all-or-nothing SQL transactions instead of a
+  whole-file rewrite under one coarse lock. Pre-existing `db_connections.json`/`saved_sql/*.json` are
+  imported automatically, once, the first time the relevant table is empty - nothing to run by hand, and the
+  JSON files are never consulted again afterward. `GET /view_file_content` (the admin UI's "Show raw file"
+  toggle) still returns the identical JSON text a saved-query file always looked like, reconstructed from
+  SQLite. `QUERYAPIGATE_HOME` now needs to be writable (previously only needed to be readable) - the bundled
+  `docker-compose.yml` demo, whose data folder was mounted read-only, now seeds a proper writable volume from
+  it via a small one-shot init container instead.
 
 ## [0.9.0] - 2026-09-28
 

@@ -1,11 +1,15 @@
-"""Persistence: the connection registry and the saved-query files (plain JSON on disk).
+"""Persistence: the connection registry and saved queries (SQLite, via db.py - see db.py's own docstring
+for why), plus the audit log (still plain JSON on disk, capped and rewritten in full on every event).
 
-Everything that touches those files goes through here so that access stays confined to the
-configured home folder and read-modify-write cycles are serialised.
+Every saved-query function still speaks in terms of a "path" for backward compatibility with every
+caller - resolve_saved_file()'s own docstring explains why that's now just the query's name, not a real
+filesystem path. api_keys.json/roles.json (apikeys.py) also reuse `lock`/`write_json_atomic` from here for
+their own, still-JSON storage - only connections and saved queries have moved to SQLite so far.
 """
 import json
 import os
 import re
+import sqlite3
 import threading
 import uuid
 from datetime import datetime
@@ -325,50 +329,94 @@ def delete_connection(name):
 # --------------------------------------------------------------------------------------
 
 def saved_path_for_name(filename):
-    """Path of the saved-query file for a client-supplied name (without extension)."""
+    """Validate a client-supplied saved-query name; returns it unchanged. No real file path is involved
+    once saved queries live in SQLite - kept as the one shared name-shape validator (bundle.py also calls
+    this purely for its validation side effect) so a name is held to the same rule everywhere."""
     if not isinstance(filename, str) or not _FILENAME_RE.match(filename) or filename.startswith('.'):
         raise ApiError("Filename may only contain letters, digits, spaces, '.', '_' and '-'")
-    return os.path.join(config.saved_sql_dir(), f'{filename}.json')
+    return filename
+
+
+def saved_query_exists(name):
+    """A plain existence check by exact name - used by examples.py's conflict detection, which needs to
+    know "is something already using this name" without resolve_saved_file()'s reference-parsing/403
+    semantics (a conflict is never a client-facing path, just an internal decision)."""
+    return db.connection().execute('SELECT 1 FROM saved_queries WHERE name = ?', (name,)).fetchone() is not None
 
 
 def resolve_saved_file(ref):
-    """Resolve a client-supplied file reference to an existing .json file inside the saved_sql folder.
+    """Resolve a client-supplied reference to an existing saved query, returning its canonical name.
 
-    Accepts a bare name ("cht" or "cht.json"), a path relative to the home folder
-    ("saved_sql/cht.json") or an absolute path - as long as it ends up in the saved_sql folder.
+    No real file path is involved once saved queries live in SQLite - but every caller already treats this
+    return value as opaque (passing it straight to load_versions()/query_name()/record_execution()), so
+    nothing outside this module needs to change. Still accepts every form it always has - a bare name
+    ("cht" or "cht.json"), a path relative to the home folder ("saved_sql/cht.json") or an absolute path -
+    for backward compatibility; anything that doesn't reduce to a single valid name (a path escaping
+    saved_sql/, a name containing a separator) is rejected the same way an out-of-bounds path used to be.
     """
     if not isinstance(ref, str) or not ref.strip():
         raise ApiError('Filename is missing')
-    saved_dir = str(config.saved_sql_dir())
-    if os.path.isabs(ref):
-        candidate = ref
-    elif os.sep in ref or '/' in ref:
-        candidate = os.path.join(config.home(), ref)
-    else:
-        candidate = os.path.join(saved_dir, ref if ref.endswith('.json') else f'{ref}.json')
-    candidate = os.path.realpath(candidate)
-    if os.path.dirname(candidate) != os.path.realpath(saved_dir) or not candidate.endswith('.json'):
+    candidate = ref
+    if os.path.isabs(candidate):
+        home = str(config.home())
+        if not candidate.startswith(home + os.sep):
+            raise ApiError('Only .json files inside the saved_sql folder can be accessed', 403)
+        candidate = os.path.relpath(candidate, home)
+    candidate = candidate.replace(os.sep, '/')
+    if candidate.startswith('saved_sql/'):
+        candidate = candidate[len('saved_sql/'):]
+    if candidate.endswith('.json'):
+        candidate = candidate[:-len('.json')]
+    if '/' in candidate or not _FILENAME_RE.match(candidate) or candidate.startswith('.'):
         raise ApiError('Only .json files inside the saved_sql folder can be accessed', 403)
-    if not os.path.isfile(candidate):
+    if db.connection().execute('SELECT 1 FROM saved_queries WHERE name = ?', (candidate,)).fetchone() is None:
         raise ApiError('File not found', 404)
     return candidate
 
 
 def query_name(path):
-    """The canonical saved-query name for a path resolve_saved_file() returned - the same string an admin
-    types into an API key's ``queries`` grant (see apikeys.py), regardless of which of resolve_saved_file()'s
-    accepted reference forms (bare name, relative path, absolute path) the caller originally used."""
-    return os.path.splitext(os.path.basename(path))[0]
+    """The canonical saved-query name for a value resolve_saved_file() returned - already the name itself
+    (see resolve_saved_file()'s own docstring for why "path" is now just a name)."""
+    return path
 
 
-def load_versions(path):
-    try:
-        with open(path, 'r') as f:
-            content = json.load(f)
-    except json.JSONDecodeError:
-        raise ApiError('Saved query file is not valid JSON', 500) from None
-    if not isinstance(content, dict):
-        raise ApiError('Saved query file has an unexpected structure', 500)
+def load_versions(name):
+    """Reconstruct the same nested dict shape a saved-query JSON file used to be:
+    {"<version>": {...fields, execution_history}, ..., "collection"?: str, "example"?: bool} - every pure
+    function downstream (version_numbers(), select_version(), read_collection(), read_example(),
+    _apply_collection(), and so list_saved()/latest_versions() built on top of them) still operates on
+    exactly this shape unchanged, so this is the one function that needs to bridge SQL to it."""
+    row = db.connection().execute(
+        'SELECT collection, example FROM saved_queries WHERE name = ?', (name,)).fetchone()
+    if row is None:
+        raise ApiError('File not found', 404)
+    content = {}
+    if row['collection'] is not None:
+        content['collection'] = row['collection']
+    if row['example']:
+        content['example'] = True
+    version_rows = db.connection().execute(
+        'SELECT version, uuid, status, created_at, last_modified_at, fields_json '
+        'FROM saved_query_versions WHERE query_name = ? ORDER BY version', (name,)).fetchall()
+    for v in version_rows:
+        try:
+            fields = json.loads(v['fields_json'])
+        except json.JSONDecodeError:
+            raise ApiError('Saved query data is not valid JSON', 500) from None
+        if not isinstance(fields, dict):
+            raise ApiError('Saved query data has an unexpected structure', 500)
+        history_rows = db.connection().execute(
+            'SELECT entry_json FROM execution_history WHERE query_name = ? AND version = ? '
+            'ORDER BY executed_at, rowid', (name, v['version'])).fetchall()
+        content[str(v['version'])] = {
+            'uuid': v['uuid'],
+            **fields,
+            'created_at': v['created_at'],
+            'last_modified_at': v['last_modified_at'],
+            'status': v['status'],
+            'version': v['version'],
+            'execution_history': [json.loads(h['entry_json']) for h in history_rows],
+        }
     return content
 
 
@@ -422,85 +470,89 @@ def save_version(filename, fields, collection=_UNSET, example=False):
     """Store ``fields`` as the next version of a saved query; returns (uuid, version number).
 
     ``collection`` belongs to the query, not to a version: left out, the query's current collection is kept;
-    a name sets it; None clears it. It is written in the same atomic file write as the new version, so a
-    query is never saved without the collection it was saved with.
+    a name sets it; None clears it. It is written in the same transaction as the new version, so a query is
+    never saved without the collection it was saved with.
 
-    ``example=True`` marks the query as installed by ``queryapigate examples load`` (a top-level ``"example":
-    true`` on the file, written in the same atomic write), which is how ``examples unload`` knows exactly what is
-    its own to remove. It never clears the mark."""
-    path = saved_path_for_name(filename)
+    ``example=True`` marks the query as installed by ``queryapigate examples load`` (an ``example`` flag on
+    the query row), which is how ``examples unload`` knows exactly what is its own to remove. It never
+    clears the mark."""
+    name = saved_path_for_name(filename)
     if collection is not _UNSET and collection is not None:
         validate_collection_name(collection)
     query_uuid = str(uuid.uuid4())
     timestamp = now()
-    with lock:
-        os.makedirs(config.saved_sql_dir(), exist_ok=True)
-        versions = load_versions(path) if os.path.exists(path) else {}
-        number = max(version_numbers(versions), default=0) + 1
-        versions[str(number)] = {
-            'uuid': query_uuid,
-            **fields,
-            'created_at': timestamp,
-            'last_modified_at': timestamp,
-            'status': 'active',
-            'version': number,
-            'execution_history': [],
-        }
+    with db.transaction() as conn:
+        exists = conn.execute('SELECT 1 FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        if exists is None:
+            conn.execute('INSERT INTO saved_queries (name, collection, example) VALUES (?, NULL, 0)', (name,))
+        row = conn.execute('SELECT MAX(version) AS m FROM saved_query_versions WHERE query_name = ?',
+                           (name,)).fetchone()
+        number = (row['m'] or 0) + 1
+        conn.execute("""
+            INSERT INTO saved_query_versions
+                (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
+            VALUES (?, ?, ?, 'active', ?, ?, ?)
+        """, (name, number, query_uuid, timestamp, timestamp, json.dumps(fields)))
         if collection is not _UNSET:
-            _apply_collection(versions, collection)
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (collection, name))
         if example:
-            versions['example'] = True
-        write_json_atomic(path, versions)
+            conn.execute('UPDATE saved_queries SET example = 1 WHERE name = ?', (name,))
     return query_uuid, number
 
 
 def set_collection(ref, collection):
     """Move a saved query into ``collection`` (None removes it from any). Returns the previous collection.
-    Not a new version - the SQL did not change - and nothing else in the file is touched."""
+    Not a new version - the SQL did not change - and nothing else about the query is touched."""
     if collection is not None:
         validate_collection_name(collection)
-    path = resolve_saved_file(ref)
-    with lock:
-        content = load_versions(path)
-        previous = read_collection(content)
-        if previous != collection or ('collection' in content) != (collection is not None):
-            _apply_collection(content, collection)
-            write_json_atomic(path, content)
+    name = resolve_saved_file(ref)
+    with db.transaction() as conn:
+        row = conn.execute('SELECT collection FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        previous = row['collection'] if row else None
+        if previous != collection:
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (collection, name))
     return previous
 
 
 def set_cache_ttl(ref, version, ttl):
     """Set (a positive `ttl`) or clear (0 or None) one version's cache_ttl in place. Not a new version -
     same treatment as set_collection() above - and, like save_version()'s own cache_ttl handling, only ever
-    writes the key when it's truthy rather than storing an explicit 0. Returns the resolved version number
-    (the one actually changed, whether the caller asked for a specific one or the latest)."""
-    path = resolve_saved_file(ref)
-    with lock:
-        content = load_versions(path)
-        number, data = select_version(content, version)
-        if ttl:
-            data['cache_ttl'] = ttl
+    stores the key when it's truthy rather than an explicit 0. Returns the resolved version number (the one
+    actually changed, whether the caller asked for a specific one or the latest)."""
+    name = resolve_saved_file(ref)
+    with db.transaction() as conn:
+        if version is None:
+            row = conn.execute(
+                'SELECT version, fields_json FROM saved_query_versions WHERE query_name = ? '
+                'ORDER BY version DESC LIMIT 1', (name,)).fetchone()
         else:
-            data.pop('cache_ttl', None)
-        write_json_atomic(path, content)
-    return number
+            row = conn.execute(
+                'SELECT version, fields_json FROM saved_query_versions WHERE query_name = ? AND version = ?',
+                (name, version)).fetchone()
+        if row is None:
+            raise ApiError(f'Version {version} not found', 404)
+        fields = json.loads(row['fields_json'])
+        if ttl:
+            fields['cache_ttl'] = ttl
+        else:
+            fields.pop('cache_ttl', None)
+        conn.execute('UPDATE saved_query_versions SET fields_json = ? WHERE query_name = ? AND version = ?',
+                    (json.dumps(fields), name, row['version']))
+        return row['version']
 
 
 def _saved_files():
-    """(name, path, content) for every readable saved-query file; a folder that does not exist yet (nothing
-    saved) is empty and an unreadable file is skipped - the one directory walk everything below shares."""
-    saved_dir = str(config.saved_sql_dir())
-    if not os.path.isdir(saved_dir):
-        return
-    for filename in sorted(os.listdir(saved_dir)):
-        path = os.path.join(saved_dir, filename)
-        if not (filename.endswith('.json') and os.path.isfile(path)):
-            continue
+    """(name, path, content) for every saved query - "path" is just the name itself (see
+    resolve_saved_file()'s docstring for why); content is the same nested dict shape load_versions()
+    returns, reconstructed from SQL. The one shared query everything below iterates over."""
+    rows = db.connection().execute('SELECT name FROM saved_queries ORDER BY name').fetchall()
+    for row in rows:
+        name = row['name']
         try:
-            content = load_versions(path)
+            content = load_versions(name)
         except ApiError:
             continue
-        yield filename[:-5], path, content
+        yield name, name, content
 
 
 def example_query_names():
@@ -520,51 +572,125 @@ def collection_members():
 
 
 def move_collection(old, new):
-    """Re-file every query in ``old`` under ``new``; returns the names moved. Each file is rewritten
-    atomically, so an interruption leaves some queries under ``old`` and the rest under ``new`` - never a
-    half-written file - and running it again finishes the job (collection_admin.rename_collection())."""
+    """Re-file every query in ``old`` under ``new``; returns the names moved. The whole move is one
+    transaction now (a real improvement over the old per-file-atomic-but-not-overall approach) - an
+    interruption leaves every query still under ``old``, never a mix, and running it again is still exactly
+    as safe/idempotent as collection_admin.rename_collection() already assumes."""
     validate_collection_name(new)
     moved = []
-    with lock:
-        for name, path, content in _saved_files():
-            if read_collection(content) == old:
-                content['collection'] = new
-                write_json_atomic(path, content)
-                moved.append(name)
+    with db.transaction() as conn:
+        rows = conn.execute('SELECT name FROM saved_queries WHERE collection = ?', (old,)).fetchall()
+        for row in rows:
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (new, row['name']))
+            moved.append(row['name'])
     return moved
 
 
 def delete_saved(ref, version=None):
-    """Delete a saved query file, or a single version of it (the file goes with its last version)."""
-    path = resolve_saved_file(ref)
-    with lock:
+    """Delete a saved query, or a single version of it (the query goes with its last version) - cascades to
+    that version's/query's own execution_history via the schema's own ON DELETE CASCADE."""
+    name = resolve_saved_file(ref)
+    with db.transaction() as conn:
         if version is None:
-            os.remove(path)
+            conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
             return
-        content = load_versions(path)
-        if str(version) not in content:
+        row = conn.execute(
+            'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
+            (name, version)).fetchone()
+        if row is None:
             raise ApiError(f'Version {version} not found', 404)
-        del content[str(version)]
-        if version_numbers(content):
-            write_json_atomic(path, content)
-        else:
-            os.remove(path)
+        conn.execute('DELETE FROM saved_query_versions WHERE query_name = ? AND version = ?', (name, version))
+        remaining = conn.execute(
+            'SELECT 1 FROM saved_query_versions WHERE query_name = ? LIMIT 1', (name,)).fetchone()
+        if remaining is None:
+            conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
 
 
 def record_execution(path, version, entry):
-    """Append to a saved version's execution_history (newest last, capped). Never raises."""
+    """Append to a saved version's execution_history (newest last, capped at config.HISTORY_LIMIT). Never
+    raises - a failure here must never block the request it's logging for, the same trade-off
+    record_audit() makes."""
+    name = path
     try:
-        with lock:
-            content = load_versions(path)
-            data = content.get(str(version))
-            if not isinstance(data, dict):
+        with db.transaction() as conn:
+            exists = conn.execute(
+                'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
+                (name, version)).fetchone()
+            if exists is None:
                 return
-            history = data.setdefault('execution_history', [])
-            history.append(entry)
-            del history[:-config.HISTORY_LIMIT]
-            write_json_atomic(path, content)
-    except (OSError, ApiError):
+            conn.execute(
+                'INSERT INTO execution_history (query_name, version, executed_at, entry_json) VALUES (?, ?, ?, ?)',
+                (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
+            # keep only the newest HISTORY_LIMIT rows for this version - same "keep last N" cap
+            # config.HISTORY_LIMIT always meant, now enforced per-insert instead of on a whole-file rewrite.
+            conn.execute("""
+                DELETE FROM execution_history WHERE rowid IN (
+                    SELECT rowid FROM execution_history WHERE query_name = ? AND version = ?
+                    ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
+                )
+            """, (name, version, config.HISTORY_LIMIT))
+    except (OSError, ApiError, sqlite3.Error):
         pass
+
+
+def import_legacy_saved_queries_if_empty():
+    """First-boot bootstrap for saved_sql/*.json, the same shape as import_legacy_connections_if_empty()
+    above and for the same reason: only runs while saved_queries is completely empty, only ever adds, and
+    the legacy folder itself is never written to or consulted again once anything exists in SQLite. Reads
+    the legacy file shape directly (not through load_versions(), which now expects SQL to already have the
+    data this function's whole job is to put there) - a version or history entry that doesn't parse as
+    expected is skipped rather than failing the whole import, the same tolerance _saved_files() used to
+    give a corrupt file."""
+    if db.connection().execute('SELECT 1 FROM saved_queries LIMIT 1').fetchone() is not None:
+        return
+    saved_dir = config.saved_sql_dir()
+    if not saved_dir.is_dir():
+        return
+    with db.transaction() as conn:
+        for filename in sorted(os.listdir(str(saved_dir))):
+            path = saved_dir / filename
+            if not (filename.endswith('.json') and path.is_file()):
+                continue
+            name = filename[:-len('.json')]
+            try:
+                with open(path, 'r') as f:
+                    content = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(content, dict):
+                continue
+            collection = read_collection(content)
+            example = read_example(content)
+            conn.execute('INSERT OR IGNORE INTO saved_queries (name, collection, example) VALUES (?, ?, ?)',
+                        (name, collection, int(example)))
+            for key, data in content.items():
+                if not (key.isdigit() and isinstance(data, dict)):
+                    continue
+                version = int(key)
+                fields = {k: v for k, v in data.items() if k not in
+                         ('uuid', 'created_at', 'last_modified_at', 'status', 'version', 'execution_history')}
+                conn.execute("""
+                    INSERT OR IGNORE INTO saved_query_versions
+                        (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (name, version, data.get('uuid') or str(uuid.uuid4()), data.get('status') or 'active',
+                      data.get('created_at') or now(), data.get('last_modified_at') or now(),
+                      json.dumps(fields)))
+                history = data.get('execution_history')
+                for entry in history if isinstance(history, list) else []:
+                    if not isinstance(entry, dict):
+                        continue
+                    conn.execute(
+                        'INSERT INTO execution_history (query_name, version, executed_at, entry_json) '
+                        'VALUES (?, ?, ?, ?)',
+                        (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
+
+
+def import_legacy_data_if_empty():
+    """Called once at startup (app.create_app(), cli.main()): the single entry point for both first-boot
+    bootstraps above, so every caller only needs to remember one name."""
+    import_legacy_connections_if_empty()
+    import_legacy_saved_queries_if_empty()
 
 
 def latest_versions():

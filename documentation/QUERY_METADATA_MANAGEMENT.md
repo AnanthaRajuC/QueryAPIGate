@@ -1,7 +1,9 @@
 # Query metadata
 
-Each saved query is a JSON file in `saved_sql/` with one entry per version (`"1"`, `"2"`, ...). Saving under an existing
-name adds the next version; the latest version runs unless one is requested.
+Each saved query lives in `queryapigate.db`, with one entry per version (`"1"`, `"2"`, ...) - the same shape
+it always was as a `saved_sql/*.json` file (`GET /view_file_content` still hands you exactly this, for the
+admin UI's "Show raw file" view). Saving under an existing name adds the next version; the latest version
+runs unless one is requested.
 
 | Field | Type | Purpose | Example |
 |-------|------|---------|---------|

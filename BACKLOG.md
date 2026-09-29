@@ -1485,6 +1485,41 @@ horizontal bars already use, just vertical. Only the tallest bar is direct-label
 layer, matching how `reachDot()` and others already do this. Omitted entirely (returns `null`) when there's
 no history, same as every other conditional chart in this file.
 
+## 53. Move connections and saved queries off JSON files onto SQLite (Phase 1)
+
+**Status: shipped**, for connections and saved queries only - `api_keys.json`/`roles.json`/`audit_log.json`
+stay JSON-backed for a later, separately-scoped phase. Every store used to be a plain JSON file, serialized
+through one process-local `threading.RLock` - exactly why the Dockerfile and docs pin `--workers 1`, since
+that lock protects concurrent *threads* in one process, not concurrent *processes* (surfaced while scoping
+#47's Redis cache). New `queryapigate/db.py` owns a `queryapigate.db` SQLite file (one connection per thread,
+WAL mode, `foreign_keys=ON`, a `busy_timeout` so lock contention waits instead of raising) with a hybrid
+relational/JSON schema - structured columns only for what's filtered or joined on (name, collection, active,
+version, status), everything else (host/port/user/password, per-dialect fields, tags, query_parameters) kept
+flexible as a JSON blob column, same as it always was inside a `.json` file. Every `store.py` public function
+(`read_connections`, `update_connections`, `resolve_saved_file`, `load_versions`, `save_version`,
+`set_cache_ttl`, `record_execution`, `move_collection`, etc.) kept its exact name, signature and return
+shape, so the ~10 other modules that call into it - `app.py`, `engine.py`, `runners.py`, `examples.py`,
+`collection_admin.py`, `cli.py` and the rest - needed zero changes. Compound "read, mutate, write" operations
+(saving a new version, moving a query between collections, recording an execution and trimming its history
+to the last 50) became real, all-or-nothing SQL transactions - a genuine correctness upgrade over the old
+single coarse lock, not just a port; `move_collection()` in particular is now atomic across every query it
+touches, where before each file was only atomic on its own. Rather than a separate, explicit
+`migrate-to-sqlite` command (the original plan), a real Docker Compose CI regression - the app no longer
+reading `db_connections.json` at all, on a fresh read-only-mounted `/data` - led to a simpler design:
+`store.import_legacy_data_if_empty()` runs once on startup (`create_app()` and the CLI's `main()`), only when
+the relevant table is completely empty, reading whatever legacy JSON is there and importing it without ever
+touching or deleting the original files. `GET /view_file_content` (the admin UI's "Show raw file" toggle) and
+the `filepath` field on saved-query responses - the two places file-based storage reached the public API -
+keep working unchanged: `resolve_saved_file()` now resolves down to a canonical name rather than a real path,
+and `/view_file_content` reconstructs the identical JSON text a saved-query file always looked like from
+`load_versions()`'s output. Verified against the full test suite, a real `docker compose up -d --build --wait`
+run, the CLI's `init`/`examples load`/`export`/`collection export|import` commands, and a real browser check
+that History, the per-query Metrics tab and the requests-per-day chart all still read correctly from
+`execution_history` now living in SQLite. `--workers > 1` is still not recommended - `collection_admin.rename_collection()`
+and `examples.load()`/`unload()` each span the new SQLite tables and the still-JSON `api_keys.json`/
+`roles.json` in one logical operation, so they stay serialized behind the existing process-local lock until
+a later phase migrates the remaining three stores too.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1502,8 +1537,9 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50, #51 and #52 are shipped (#45's "empty collections" item
-excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
-queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
-"still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished
-work, not an open capability gap.
+out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped (#45's
+"empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53 shipped
+for connections and saved queries only, with `api_keys.json`/`roles.json`/`audit_log.json` deferred to a
+later phase, see its own entry). #42 (an MCP server exposing saved queries as tools) and #43 (SSE for live
+updates instead of polling) are queued up next, not started. The "still open" note under #9 (confirming its
+CI changes on a real run) is a smaller follow-up on finished work, not an open capability gap.

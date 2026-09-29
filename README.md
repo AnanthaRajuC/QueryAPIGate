@@ -450,8 +450,9 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?page_size=3' -H 'Content-Type: a
 Open <http://127.0.0.1:5000/docs> for the interactive API reference, or <http://127.0.0.1:5000/ui> for a small
 admin UI to manage connections and saved queries and run ad-hoc SQL without leaving the browser.
 
-For your own databases, run `queryapigate init` in an empty folder: it creates `db_connections.json` (inactive templates for
-every supported database) and `saved_sql/`. Edit the file, set `"active": true`, and start the server there.
+For your own databases, run `queryapigate init` in an empty folder: it creates `queryapigate.db` with an
+inactive template connection for every supported database type. Edit them (admin UI, or `PATCH
+/connections`), set `"active": true`, and start the server there.
 
 ## Saving a query as an endpoint
 
@@ -486,7 +487,7 @@ Everything is configured through environment variables (all optional):
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `QUERYAPIGATE_HOME` | current directory | Folder holding `db_connections.json` and `saved_sql/`. |
+| `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries), `api_keys.json`, `roles.json` and `audit_log.json`. |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
 | `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api_keys`), every request except `/health`, `/docs`, `/ui`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
@@ -521,14 +522,15 @@ QueryAPIGate runs whatever SQL it is given against your databases, so it ships l
   defence in depth, not a replacement for grants. (H2's driver cannot enforce read-only, so H2 relies on the guard.)
 - Use bound `:name` parameters. The older `{name}` placeholders paste text into the SQL and are therefore restricted
   to numbers and plain text.
-- Saved-query files are only read from `saved_sql/`; passwords are never returned by the API.
+- Passwords are never returned by the API.
 - Set `QUERYAPIGATE_SECRET_KEY` to encrypt connection passwords at rest instead of relying solely on the `${VAR}`
-  convention - keep the key itself outside `db_connections.json` and out of version control, the same as any
+  convention - keep the key itself outside `QUERYAPIGATE_HOME` and out of version control, the same as any
   other credential; there is no way to recover an encrypted password without it.
 - Set query timeouts and result-size expectations deliberately (`QUERYAPIGATE_QUERY_TIMEOUT`, `QUERYAPIGATE_MAX_PAGE_SIZE`),
   enable rate limiting, and route logs and `/metrics` into your existing monitoring.
-- Plan for backup and recovery of `db_connections.json`, `saved_sql/` and `api_keys.json` (`QUERYAPIGATE_HOME`), and
-  put QueryAPIGate behind your normal reverse-proxy/TLS-termination setup rather than exposing it directly.
+- Plan for backup and recovery of `queryapigate.db`, `api_keys.json`, `roles.json` and `audit_log.json`
+  (`QUERYAPIGATE_HOME`), and put QueryAPIGate behind your normal reverse-proxy/TLS-termination setup rather
+  than exposing it directly.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
@@ -569,8 +571,9 @@ docker run -p 5000:5000 -v queryapigate-data:/data -e QUERYAPIGATE_API_KEY=chang
 | `X.Y.Z`, `latest` | QueryAPIGate with the MySQL, PostgreSQL and ClickHouse drivers (SQLite is built in) |
 | `X.Y.Z-h2`, `latest-h2` | The same plus Java and the H2 driver - also the variant to use for a generic `jdbc` connection (mount your vendor's jar) |
 
-The container keeps `db_connections.json` and `saved_sql/` in `/data` (create a starter with
-`docker run --rm -v queryapigate-data:/data ghcr.io/anantharajuc/queryapigate queryapigate init`). The named volume above works
+The container keeps `queryapigate.db`, `api_keys.json`, `roles.json` and `audit_log.json` in `/data` (create
+a starter with `docker run --rm -v queryapigate-data:/data ghcr.io/anantharajuc/queryapigate queryapigate init`).
+The named volume above works
 out of the box. To use a folder on the host instead (`-v "$PWD/data:/data"`), create it yourself first (`mkdir data`) and make sure
 it is writable by uid 1000, the container's user - a folder that Docker creates for you is owned by root, which the container
 cannot write to (or run with `--user "$(id -u):$(id -g)"`). It runs as a non-root user under

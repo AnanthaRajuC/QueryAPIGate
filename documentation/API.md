@@ -154,8 +154,9 @@ with the query named in the body:
 }
 ~~~
 
-`filepath` may be a bare name (`film_by_id`), a path relative to the data folder, or an absolute path - but it must
-resolve to a `.json` file inside `saved_sql/`.
+`filepath` may be a bare name (`film_by_id`), a `saved_sql/`-qualified path, or an absolute path ending the
+same way - accepted forms kept for compatibility with how a saved query used to be referenced as a real
+file; every form resolves to the same saved query by name.
 
 ## Response caching
 
@@ -226,12 +227,14 @@ value becomes part of the SQL it must be a number, a boolean, or a string made o
 ## Delete a saved query
 
 `DELETE /saved_sql/film_by_id` removes the whole query; `DELETE /saved_sql/film_by_id?version=2` removes one
-version (the file goes with its last version).
+version (the query goes with its last version).
 
-## View a saved query file
+## View a saved query's raw data
 
-`GET /view_file_content?filename=film_by_id` returns `{"content": "<raw file text>"}`. Only files in `saved_sql/`
-can be read.
+`GET /view_file_content?filename=film_by_id` returns `{"content": "<JSON text>"}` - the same shape a saved
+query always looked like as a file (see [Query metadata](QUERY_METADATA_MANAGEMENT.md)), for the admin UI's
+"Show raw file" view. Only an existing saved query's own name/reference can be read (see `filepath` above
+for accepted forms).
 
 ## Collections
 
@@ -405,7 +408,7 @@ for the connection fields.
 A `${VAR}` password reference is expanded from the environment at connection time and never written to disk as
 plaintext. A literal password is encrypted at rest when `QUERYAPIGATE_SECRET_KEY` is set (see
 [Encryption at rest](#encryption-at-rest-for-connection-passwords) below); without that variable it is stored
-as given, in `db_connections.json` on disk, not just masked in API responses. The server logs a startup
+as given, in `queryapigate.db` on disk, not just masked in API responses. The server logs a startup
 warning naming any connection whose password is still a literal string with no protection at all, so a
 deployment that hasn't adopted either convention finds out - nothing blocks it, this is a nudge, not an
 enforcement.
@@ -426,8 +429,8 @@ An encrypted password is masked the same as a literal one in `GET /connections` 
 returns a `500` naming the problem, and the server logs a startup warning if encrypted passwords exist on
 disk but no key is configured to read them - the same "fail closed, say why" precedent `expires_at` and
 `rate_limit` already follow for a key's own malformed data. There is no way to recover an encrypted password
-without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhere safe, outside `db_connections.json`
-and outside version control, the same way you would any other credential.
+without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhere safe, outside
+`QUERYAPIGATE_HOME` and outside version control, the same way you would any other credential.
 
 `GET /connections/reporting/schema` lists its tables and views for self-service query writing:
 
@@ -904,7 +907,7 @@ Errors are returned as `{"error": "..."}`; failed queries also include `"detail"
 | 400 | Missing or invalid input (SQL, paging, format, filename, parameters, several statements). Parameter-rule violations add an `errors` map keyed by parameter name. |
 | 401 | Missing or wrong `X-API-Key` (only when a key is configured) |
 | 429 | Rate limit exceeded; wait `Retry-After` seconds |
-| 403 | Inactive connection, write statement while writes are disabled, a file outside `saved_sql/`, a connection this API key isn't scoped to, or a management action a scoped (non-admin) key can't perform |
+| 403 | Inactive connection, write statement while writes are disabled, an invalid saved-query reference, a connection this API key isn't scoped to, or a management action a scoped (non-admin) key can't perform |
 | 404 | Unknown connection, saved query, version or file |
 | 500 | The database rejected the query or could not be reached |
 | 504 | The query exceeded its time limit and was cancelled (the response includes `"timeout"`) |

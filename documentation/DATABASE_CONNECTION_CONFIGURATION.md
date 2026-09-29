@@ -1,11 +1,14 @@
 # Database connection configuration
 
-Connections live in `db_connections.json` inside the data folder (`QUERYAPIGATE_HOME`, default: the current directory).
-Create a starter file with `queryapigate init` (inactive templates for every supported database).
-The file is re-read on every request, so edits take effect without a restart, and it can also be managed through the
-[`/connections` API](API.md#connections).
+Connections live in `queryapigate.db` inside the data folder (`QUERYAPIGATE_HOME`, default: the current directory).
+`queryapigate init` seeds a starter (inactive templates for every supported database).
+Every request reads the current state fresh, so edits take effect without a restart, and connections are
+managed through the [`/connections` API](API.md#connections) (or the admin UI, which is built on it).
 
-## File structure
+## Shape
+
+The same shape `GET /connections` returns and `PATCH /connections` accepts - not a literal file anymore,
+but every field means exactly what it always did:
 
 ~~~json
 {
@@ -67,7 +70,7 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 - **Health checks.** A connection that sat idle for more than a few seconds is checked before reuse; a dead one is
   replaced transparently.
 - **Changes take effect.** `PATCH`/`DELETE /connections` close all idle pooled connections immediately. If you edit
-  `db_connections.json` by hand, old connections are dropped as they reach the idle timeout.
+  `queryapigate.db` directly (e.g. via `sqlite3`), old connections are dropped as they reach the idle timeout.
 - **Sizing.** The pool bounds *idle* connections, not concurrent ones. Each server process has its own pool, so the
   most idle connections your database sees is roughly `QUERYAPIGATE_POOL_SIZE` x distinct connections x worker processes;
   keep that below the database's `max_connections`.
@@ -193,5 +196,5 @@ used (a missing variable is reported as an error naming it). `GET /connections` 
 ## Best practice
 
 - Use a database account with only the privileges the API needs. The read-only guard is defence in depth.
-- Keep `db_connections.json` out of version control (the repository's `.gitignore` already does).
+- Keep `queryapigate.db` out of version control (the repository's `.gitignore` already does).
 - Use `"active": false` to disable a connection without deleting it.

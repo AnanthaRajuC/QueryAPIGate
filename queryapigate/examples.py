@@ -332,7 +332,7 @@ def _conflicts():
         found.append(f'the file {DB_FILE}')
     marked = set(store.example_query_names())
     for name in QUERY_NAMES:
-        if name not in marked and os.path.exists(os.path.join(config.saved_sql_dir(), f'{name}.json')):
+        if name not in marked and store.saved_query_exists(name):
             found.append(f"saved query '{name}'")
     roles = apikeys.list_roles()
     found += [f"role '{name}'" for name in ROLE_NAMES if name in roles and roles[name].get('example') is not True]

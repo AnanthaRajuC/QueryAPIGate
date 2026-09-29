@@ -29,16 +29,20 @@ def _serve(args):
 
 
 def _init(args):
+    """Scaffold a fresh home: just queryapigate.db (with the example connection templates seeded in, all
+    inactive) now that connections are SQLite-backed - no more db_connections.json/saved_sql/ for a new
+    install. On an existing home, main()'s own db.init_schema()/import_legacy_data_if_empty() already ran
+    before this - if that found real data (a fresh table freshly imported from a legacy file, or one
+    already populated from a previous run), this is a no-op, the same "already exists - left untouched"
+    result `init` always gave."""
     home = config.home()
     home.mkdir(parents=True, exist_ok=True)
-    (home / 'saved_sql').mkdir(exist_ok=True)
-    target = config.connections_file()
-    if target.exists():
-        print(f'{target} already exists - left untouched')
-    else:
-        store.write_json_atomic(str(target), config.EXAMPLE_CONNECTIONS)
-        print(f'Created {target}\nEdit it, set "active": true on the connections you want, '
-              'then run: queryapigate serve')
+    if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
+        print(f'{config.db_file()} already has connections - left untouched')
+        return 0
+    store.update_connections(config.EXAMPLE_CONNECTIONS['connections'])
+    print(f'Created {config.db_file()}\nEdit it (queryapigate serve, then the admin UI, or PATCH /connections) - '
+          'set "active": true on the connections you want, then run: queryapigate serve')
     return 0
 
 
@@ -333,5 +337,5 @@ def main(argv=None):
     if getattr(args, 'home', None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
     db.init_schema()
-    store.import_legacy_connections_if_empty()
+    store.import_legacy_data_if_empty()
     return args.func(args)
