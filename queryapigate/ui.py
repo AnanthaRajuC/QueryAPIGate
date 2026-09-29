@@ -631,8 +631,8 @@ UI_HTML = r"""<!doctype html>
   .home-activity-row time { color: var(--ink-3); font: 11px var(--mono); white-space: nowrap; }
   .home-activity-row .target { font-weight: 600; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
   .home-actions { display: flex; flex-direction: column; gap: 8px; }
-  #home-health, #home-recent-requests { padding: 14px 16px; }
-  #home-health h2, #home-recent-requests h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+  #home-health, #home-recent-requests, #home-slowest-queries { padding: 14px 16px; }
+  #home-health h2, #home-recent-requests h2, #home-slowest-queries h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
   .health-ok { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
   .health-warn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .health-danger { background: color-mix(in oklab, var(--danger) 16%, transparent); color: var(--danger); }
@@ -765,6 +765,7 @@ UI_HTML = r"""<!doctype html>
       <div class="panel" id="home-actions"></div>
     </div>
     <div class="panel" id="home-recent-requests" style="margin-top:16px"></div>
+    <div class="panel" id="home-slowest-queries" style="margin-top:16px"></div>
   </section>
   <section id="tab-connections">
     <div class="page-head">
@@ -2215,7 +2216,7 @@ function renderRoles() {
       h('td', {}, h('div', { className: 'tags scope' }, queryGrantTags(r).length ? queryGrantTags(r) : [h('span', { className: 'tag coll', text: '—' })])),
       accessCell(r),
       h('td', { className: r.rate_limit ? 'mono' : 'mono dim', style: 'white-space:nowrap', text: r.rate_limit || 'server default' }),
-      h('td', { className: 'mono', text: String(keysFrom[name] || 0), title: 'Keys created from this role' }),
+      h('td', { className: keysFrom[name] ? 'mono' : 'mono dim', text: String(keysFrom[name] || 0), title: 'Keys created from this role' }),
       h('td', {}, h('div', { className: 'actions' },
         h('button', { type: 'button', className: 'btn ghost sm', text: 'New key from this', onclick: function () { openApiKeyForm(null, {}, name); } }),
         h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openRoleForm(name, r); } }),
@@ -2583,6 +2584,7 @@ function renderHome() {
     h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
 
   renderRecentRequests();
+  renderSlowestQueries();
 }
 /** true once a key's expires_at date is within the next 7 days but hasn't passed yet - isKeyExpired()'s
  * "already gone" counterpart, so Home's health panel can tell "act now" apart from "act soon." */
@@ -2677,14 +2679,63 @@ function renderRecentRequests() {
         h('td', { className: 'mono num', text: e.duration_ms === undefined ? '' : e.duration_ms + ' ms' }));
     })))));
 }
-/** A lightweight 5s poll for the Home tab's recent-requests panel - a plain GET /list_files (the same
- * endpoint loadQueries() already uses) rather than calling loadQueries() itself, which also drives the
- * whole Saved Queries screen's own state/DOM even when nobody's looking at it. */
+/** Same source as aggregateRecentExecutions(), sorted by duration instead of time - entries with no
+ * duration_ms (an error caught before timing, or a stream that never reports one) are left out, since
+ * there's nothing to rank them by. */
+function aggregateSlowestExecutions(limit) {
+  var rows = [];
+  filesCache.forEach(function (f) {
+    f.versions.forEach(function (v) {
+      (v.execution_history || []).forEach(function (e) {
+        if (e.duration_ms !== undefined && e.duration_ms !== null) {
+          rows.push({ filename: f.filename, version: v.version, connection: v.connection_name, entry: e });
+        }
+      });
+    });
+  });
+  rows.sort(function (a, b) { return b.entry.duration_ms - a.entry.duration_ms; });
+  return rows.slice(0, limit || 10);
+}
+/** The Home tab's "Slowest queries" panel - the same execution_history renderRecentRequests() shows,
+ * ranked by duration instead of time, refreshed on the same 5s cadence. */
+function renderSlowestQueries() {
+  var box = $('home-slowest-queries');
+  if (!box) return;
+  clear(box);
+  box.appendChild(h('h2', { text: 'Slowest queries' }));
+  var rows = aggregateSlowestExecutions(10);
+  if (!rows.length) {
+    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No timed runs recorded yet' }),
+      h('span', { text: 'Shows up once a saved query has run through /q/<name> at least once.' })));
+    return;
+  }
+  box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['', 'Time', 'Query', 'Connection', 'Caller', 'Rows', 'Duration'].map(function (t, i) {
+      return h('th', { className: i === 5 || i === 6 ? 'num' : '', text: t });
+    }))),
+    h('tbody', {}, rows.map(function (r) {
+      var e = r.entry, good = e.status === 'success';
+      return h('tr', {},
+        h('td', { style: 'width:20px;padding-right:0' }, h('span', { className: 'dot ' + (good ? 'ok' : 'bad'), title: String(e.status || '') })),
+        h('td', { className: 'mono dim', style: 'white-space:nowrap', text: String(e.executed_at || '') }),
+        h('td', {}, h('button', { type: 'button', className: 'target', text: r.filename, onclick: function () {
+          showTab('queries'); selected.name = r.filename; selected.version = r.version; selected.tab = 'history'; renderQueryList(); renderDetail();
+        } })),
+        h('td', { className: 'mono dim', text: r.connection || '' }),
+        h('td', { className: 'mono', text: String(e.key_name || '') }),
+        h('td', { className: 'mono num', text: e.rows === undefined || e.rows === null ? '—' : String(e.rows) }),
+        h('td', { className: 'mono num', text: e.duration_ms + ' ms' }));
+    })))));
+}
+/** A lightweight 5s poll for the Home tab's recent-requests/slowest-queries panels - a plain GET
+ * /list_files (the same endpoint loadQueries() already uses) rather than calling loadQueries() itself,
+ * which also drives the whole Saved Queries screen's own state/DOM even when nobody's looking at it. */
 async function pollRecentRequests() {
   var data = await apiJson('list_files');
   if (!data) return;
   filesCache = (data.files || []).slice().sort(function (a, b) { return a.filename < b.filename ? -1 : 1; });
   renderRecentRequests();
+  renderSlowestQueries();
 }
 setInterval(function () {
   if ($('tab-home') && $('tab-home').classList.contains('active')) pollRecentRequests();
@@ -3379,7 +3430,7 @@ function renderQueryRolesTab(body, reach) {
       h('td', {}, reachDot(r.via, true)),
       accessCell(full),
       h('td', { className: full.rate_limit ? 'mono' : 'mono dim', style: 'white-space:nowrap', text: full.rate_limit || 'server default' }),
-      h('td', { className: 'mono', text: String(keysFrom[r.name] || 0), title: 'Keys created from this role' }),
+      h('td', { className: keysFrom[r.name] ? 'mono' : 'mono dim', text: String(keysFrom[r.name] || 0), title: 'Keys created from this role' }),
       h('td', {}, h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openRoleForm(r.name, full); } })));
   });
   body.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
@@ -4997,11 +5048,33 @@ function runMongo(opts) {
  * entire table. The table name is schema-qualified (schema.fetch_schema()'s 'schema' field - Postgres's
  * 'public', MySQL/ClickHouse's own database name, SQLite/DuckDB's fixed 'main', ...) since the same table
  * name can exist in more than one schema on the same connection. */
+/** The first alias for `name` not already in `used` - its own first letter, then first two letters, then
+ * the full (lowercased) name - so two joined tables, or a table joining to itself, never collide. */
+function pickAlias(name, used) {
+  var lower = name.toLowerCase();
+  var candidates = [lower.charAt(0), lower.slice(0, 2), lower];
+  for (var i = 0; i < candidates.length; i++) if (!used[candidates[i]]) return candidates[i];
+  return lower + '_' + Object.keys(used).length; // exhausted even the full name - astronomically unlikely
+}
 function buildSqlSelect(table) {
-  var cols = table.columns.length ? table.columns.map(function (c) { return '  ' + c.name; }).join(',\n') : '  *';
-  var target = (table.schema ? table.schema + '.' : '') + table.name;
+  // A foreign key (real ones only, since #37 - PK/FK markers in the schema browser) turns the starter
+  // query into a real JOIN instead of a bare SELECT * - only activates when there's an actual relationship
+  // to show, so a table with none produces exactly the same output as before.
+  var fkCols = table.columns.filter(function (c) { return c.foreign_key; });
+  var used = {};
+  var mainAlias = fkCols.length ? pickAlias(table.name, used) : null;
+  if (mainAlias) used[mainAlias] = table.name;
+  var joins = fkCols.map(function (c) {
+    var alias = pickAlias(c.foreign_key.table, used);
+    used[alias] = c.foreign_key.table;
+    return 'JOIN ' + c.foreign_key.table + ' ' + alias + ' ON ' + mainAlias + '.' + c.name + ' = ' + alias + '.' + c.foreign_key.column;
+  });
+  var prefix = mainAlias ? mainAlias + '.' : '';
+  var cols = table.columns.length ? table.columns.map(function (c) { return '  ' + prefix + c.name; }).join(',\n') : '  *';
+  var target = (table.schema ? table.schema + '.' : '') + table.name + (mainAlias ? ' ' + mainAlias : '');
   var sql = 'SELECT\n' + cols + '\nFROM ' + target;
-  if (table.columns.length) sql += '\nORDER BY ' + table.columns[0].name;
+  if (joins.length) sql += '\n' + joins.join('\n');
+  if (table.columns.length) sql += '\nORDER BY ' + prefix + table.columns[0].name;
   return sql + '\nLIMIT 100';
 }
 /** Grows `textarea`'s editor box (its parent .editor/.editor.boxed - both make the textarea's own height

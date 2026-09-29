@@ -1278,32 +1278,34 @@ was already computed or loaded somewhere else in the app; this only needed reusi
 
 ## 45. More zero-cost improvements: data already loaded, just not reused yet
 
-**Impact:** a handful of small wins, each surfacing data the app already fetches/tracks somewhere, just not
-in the place it would actually be useful - no new endpoint, no new metric, no new dependency for any of
-them.
+**Status: shipped**, except one item that turned out not to apply - see below. A handful of small wins,
+each surfacing data the app already fetches/tracks somewhere, just not in the place it would actually be
+useful - no new endpoint, no new metric, no new dependency for any of them.
 
-**Shipped:**
 - **FK hints in table-scoped autocomplete.** The autocomplete popup (#39) shows a `→ table` hint (the
   column's `foreign_key.table`, full `table.column` detail on hover) next to a foreign-key column, the
   same schema data the schema browser's own badges (#37) already carry - no new fetch.
 - **Keys expiring soon, not just already-expired.** The API Keys table now highlights (in `var(--warn)`,
   "(expires soon)") a key expiring within 7 days, alongside the existing already-expired highlighting -
   reuses `isKeyExpiringSoon()` (added for Home's health panel, #44), same `expires_at` field.
-
-**Still open:**
-- **Slowest recent queries.** The same `execution_history` data Home's Recent API requests panel (#41)
-  already aggregates has `duration_ms` on every entry - sorting by that instead of by time surfaces "what's
-  actually slow" for free, on Home or Metrics.
-- **Unused roles.** Every API key already records `created_from_role` when made from one
-  (`apikeys.list_keys()`) - cross-referencing that against the role list gives "N roles have never had a
-  key created from them" (a dead permission template), zero new fetch.
-- **Empty collections.** `collectionsCache` already tracks collection → query membership - flagging a
-  collection with zero queries in it is free.
-- **FK-aware "copy starter query."** Since #37, a table's columns already carry `primary_key`/
-  `foreign_key` in the schema cache the browser already holds - the schema browser's starter-query button
-  (`schemaBrowser()`'s `selectFn`/⧉ icon) could generate the real `JOIN` when a table has foreign keys,
-  instead of always a bare `SELECT * FROM table`. A real capability upgrade, not just a display tweak, and
-  zero new backend work.
+- **Slowest queries.** A new Home panel, ranking the exact same `execution_history` data the Recent API
+  requests panel (#41) already aggregates - `aggregateSlowestExecutions()` just sorts by `duration_ms`
+  instead of `executed_at` - refreshed on the same 5s poll, no separate fetch.
+- **Unused roles.** `renderRoles()` already computed a per-role "Keys created from this role" count
+  (`keysFrom[name]`) - it just rendered a plain, easy-to-miss "0" for a role nobody's used yet. Now dimmed
+  (`mono dim`, the same convention this file already uses for an empty value elsewhere), in both the Roles
+  table and a saved query's own Roles tab. No new logic - the count already existed, only its visibility
+  changed.
+- **FK-aware "copy starter query."** Since #37, a table's columns already carry `foreign_key` in the
+  schema cache the browser already holds - `buildSqlSelect()` now generates a real `JOIN`, with real table
+  aliases (collision-safe even for a table referencing itself), when a table has foreign keys, instead of
+  always a bare `SELECT * FROM table`. A table with no foreign keys produces byte-for-byte the same output
+  as before.
+- **"Empty collections" - doesn't apply, not shipped.** Checking before building it: a collection isn't a
+  standalone entity in this app, it's a derived property of the queries filed under it
+  (`openNewCollectionForm()` says so directly - "a collection exists only while a query is in it"). The
+  moment a collection's last query leaves it, the collection itself stops existing - there is no empty-
+  collection state to flag.
 
 ---
 
@@ -1322,8 +1324,8 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41 and #44 are shipped. #42 (an MCP server exposing saved queries as tools),
-#43 (SSE for live updates instead of polling) and #45 (further zero-cost reuse of already-loaded data) are
-queued up next, not started. The "still open" note under #9 (confirming its CI changes on a real run) is a
-smaller
+out of scope for real parsing; #41, #44 and #45 are shipped (#45's "empty collections" item excepted - it
+doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved queries as
+tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The "still open"
+note under #9 (confirming its CI changes on a real run) is a smaller
 follow-up on finished work, not an open capability gap.

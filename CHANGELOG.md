@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **BACKLOG #45 finished: three more zero-cost reuses of already-loaded data, and one corrected note.**
+  A new "Slowest queries" panel on Home, ranking the same `execution_history` data Recent API requests
+  already shows by `duration_ms` instead of time. A role with zero keys created from it now renders dimmed
+  in both the Roles table and a saved query's Roles tab, instead of a plain "0" easy to miss. The schema
+  browser's "copy starter query" icon now generates a real `JOIN` (with real table aliases, collision-safe
+  even for a self-referencing foreign key) when a table has foreign keys, instead of always a bare
+  `SELECT * FROM table` - a table with no foreign keys is completely unchanged. "Empty collections," the
+  fourth item #45 originally listed, turned out not to apply to this app's data model - a collection is a
+  derived property of the queries filed under it, not a standalone entity, so there's no such state to flag.
 - **Two zero-cost reuses of already-loaded data (BACKLOG #45).** Table-scoped autocomplete now shows a
   `→ table` hint (full detail on hover) next to a foreign-key column, using the same schema data the
   schema browser's PK/FK badges (#37) already carry. The API Keys table now highlights a key expiring
