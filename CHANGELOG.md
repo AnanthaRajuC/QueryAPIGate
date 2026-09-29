@@ -6,12 +6,18 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A per-query Cache tab (BACKLOG #49).** The saved-query detail view gets a new "Cache" tab, right after
+  Access, showing and editing that version's `cache_ttl` - an on/off toggle plus a TTL field, saved via a
+  new `PUT /saved_sql/<name>/cache_ttl` (admin only). Editing it is not a new version, the same way moving
+  a query's collection already isn't - no version bump, no `execution_history` entry, takes effect on the
+  very next request.
 - **A Caching screen (BACKLOG #48).** A new "Caching" tab (next to Metrics) shows the response cache's
   backend (in-process or Redis, from `/settings`), live entry/hit/miss counts and hit rate (two new
   `/metrics` counters, `queryapigate_cache_hits_total`/`queryapigate_cache_misses_total`, plus a
   `queryapigate_cache_entries` gauge - counted from the `X-Cache` header responses already carry, no
   changes to the cache lookup/store paths themselves), and a table of every saved query that declares a
-  `cache_ttl`.
+  `cache_ttl`. The Saved queries detail view also gets a "Cached · Ns" chip next to the existing
+  version/latest/status ones, on any query with a `cache_ttl` set.
 - **A shared, Redis-backed response cache (BACKLOG #47).** Setting `QUERYAPIGATE_REDIS_URL` swaps the
   in-process `cache_ttl` cache for a Redis-backed one (`pip install "queryapigate[redis]"`) that survives a
   restart and is shared across horizontally-scaled instances - useful when a hot OLTP query is hit hundreds

@@ -214,6 +214,17 @@ def build_spec(version, saved_queries=None):
                 'requestBody': _body({'collection': {'type': 'string', 'nullable': True}}, ['collection']),
                 'responses': {'200': {'description': 'Moved; includes from, to and the access gained or lost'},
                               **_ERRORS}}},
+            '/saved_sql/{name}/cache_ttl': {'put': {
+                'summary': "Set or clear one version's cache_ttl in place (admin only)",
+                'tags': ['Saved queries'],
+                'description': 'Not a new version - operational metadata, not the query definition. '
+                    '?version= targets a specific version; omitted means the latest. 0 or null turns '
+                    'caching off for that version.',
+                'parameters': [{'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'string'}},
+                               {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'}}],
+                'requestBody': _body({'cache_ttl': {'type': 'integer', 'nullable': True}}, ['cache_ttl']),
+                'responses': {'200': {'description': 'Updated; includes the resolved version and cache_ttl'},
+                              **_ERRORS}}},
             '/collections': {'get': {
                 'summary': 'Every collection: its queries, and the keys and roles that reach it (admin only)',
                 'tags': ['Saved queries'],

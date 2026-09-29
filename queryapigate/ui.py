@@ -4059,6 +4059,7 @@ function renderDetail() {
       versionNode,
       h('span', { className: 'hint', text: isLatest ? 'latest' : 'older version' }),
       h('span', { className: 'pill ' + (status === 'active' ? 'ok' : 'off') }, h('i'), status.charAt(0).toUpperCase() + status.slice(1)),
+      v.cache_ttl ? h('span', { className: 'tag', title: 'Served from cache for ' + v.cache_ttl + 's after each run - see the Caching tab', text: 'Cached · ' + v.cache_ttl + 's' }) : null,
       h('span', { className: 'spacer' }),
       h('button', { type: 'button', className: 'btn md', text: 'New version', onclick: function () { openQueryForm(f.filename, v); } }),
       h('button', { type: 'button', className: 'btn md', text: 'Move…', title: 'File this query under a collection (PUT /saved_sql/' + f.filename + '/collection)', onclick: function () { openMoveForm(f); } }),
@@ -4074,7 +4075,8 @@ function renderDetail() {
       subtab('curl', 'Curl'),
       subtab('keys', 'API Keys', h('span', { className: 'count', text: reach.keys.length ? String(reach.keys.length) : '' })),
       subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' })),
-      subtab('access', 'Access')));
+      subtab('access', 'Access'),
+      subtab('cache', 'Cache')));
   var body = h('div', { className: 'd-body' });
   box.appendChild(head);
   box.appendChild(body);
@@ -4084,6 +4086,7 @@ function renderDetail() {
   else if (selected.tab === 'access') { body.appendChild(accessBox(f.filename, reach)); renderQueryFlowPanel(body, f, v, reach); }
   else if (selected.tab === 'history') renderHistoryTab(body, v);
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
+  else if (selected.tab === 'cache') renderCacheTab(body, f, v);
   else renderRunTab(body, f, v, isLatest);
 }
 function metaItem(k, val) { return h('div', {}, h('dt', { text: k }), h('dd', { title: String(val), text: String(val) })); }
@@ -4323,6 +4326,35 @@ async function renderCurlTab(body, f, v, isLatest) {
   body.appendChild(h('pre', { className: 'curlbox', text: cmd }));
   body.appendChild(h('div', {}, h('button', { type: 'button', className: 'btn md', text: 'Copy command', onclick: function () { copyText(cmd); } })));
   if (params.length) body.appendChild(h('div', { className: 'hint', text: 'Replace the <placeholder> value(s) with real parameters before running it.' }));
+}
+
+/** This version's cache_ttl, viewed and edited in place (PUT /saved_sql/<name>/cache_ttl) - not a new
+ * version, same as moving a query's collection isn't. Scoped to `v`, the currently-selected version,
+ * exactly like the History/Curl/SQL tabs already are - cache_ttl is per-version data (run_saved() reads it
+ * off whichever version actually ran). Saving reloads filesCache so the header's "Cached · Ns" chip and
+ * the Caching tab's own table (BACKLOG #48) both stay in sync without a page reload. */
+function renderCacheTab(body, f, v) {
+  var enabled = h('input', { id: 'cache-on', type: 'checkbox' });
+  enabled.checked = !!v.cache_ttl;
+  var ttlInput = h('input', { id: 'cache-ttl', type: 'number', min: '1', step: '1', value: String(v.cache_ttl || 60) });
+  var ttlField = field('cache-ttl', 'TTL (seconds)', ttlInput,
+    'How long a response is served from cache before the query runs again for real.');
+  function paint() { ttlField.style.display = enabled.checked ? '' : 'none'; }
+  enabled.onchange = paint;
+  var saveBtn = h('button', { type: 'button', id: 'cache-save', className: 'btn primary', text: 'Save', onclick: async function () {
+    var ttl = enabled.checked ? Number(ttlInput.value) : 0;
+    if (enabled.checked && (!Number.isInteger(ttl) || ttl < 1)) { showError('TTL must be a whole number of seconds, at least 1.'); return; }
+    saveBtn.disabled = true;
+    var res = await apiJson('saved_sql/' + enc(f.filename) + '/cache_ttl?version=' + v.version,
+      { method: 'PUT', json: { cache_ttl: ttl || null } });
+    saveBtn.disabled = false;
+    if (res) { showError(''); toast(ttl ? 'Caching enabled for v' + v.version + ' (' + ttl + 's)' : 'Caching disabled for v' + v.version); loadQueries(f.filename); }
+  } });
+  body.appendChild(h('div', { className: 'form', style: 'max-width:420px' },
+    h('label', { className: 'switch' }, enabled, 'Cache this version’s responses',
+      h('span', { className: 'hint', text: '— only takes effect for read-only SQL; a query that writes is never cached, regardless of this setting.' })),
+    ttlField, saveBtn));
+  paint();
 }
 
 async function openQueryForm(baseName, baseVersion) {

@@ -378,3 +378,84 @@ class CacheTtlValidationTests(AppTestCase):
         self.save(cache_ttl=0)
         res = self.client.get('/q/q?id=1')
         self.assertNotIn('X-Cache', res.headers)
+
+
+class SetCacheTtlEndpointTests(AppTestCase):
+    """PUT /saved_sql/<name>/cache_ttl - editing a version's cache_ttl in place, without a new version."""
+
+    def test_sets_a_ttl_on_the_latest_version_without_a_new_version(self):
+        self.save(cache_ttl=None)
+        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 90})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        body = res.get_json()
+        self.assertEqual(body['version'], 1)
+        self.assertEqual(body['cache_ttl'], 90)
+        files = self.client.get('/list_files').get_json()['files']
+        v = [f for f in files if f['filename'] == 'q'][0]['versions']
+        self.assertEqual(len(v), 1)  # still one version - not a new one
+        self.assertEqual(v[0]['cache_ttl'], 90)
+
+    def test_takes_effect_immediately_on_the_next_run(self):
+        self.save(cache_ttl=None)
+        first = self.client.get('/q/q?id=1')
+        self.assertNotIn('X-Cache', first.headers)
+        self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 60})
+        second = self.client.get('/q/q?id=1')
+        self.assertEqual(second.headers['X-Cache'], 'MISS')
+        third = self.client.get('/q/q?id=1')
+        self.assertEqual(third.headers['X-Cache'], 'HIT')
+
+    def test_zero_clears_it_and_stops_caching(self):
+        self.save(cache_ttl=60)
+        self.client.get('/q/q?id=1')
+        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 0})
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.get_json()['cache_ttl'])
+        after = self.client.get('/q/q?id=1')
+        self.assertNotIn('X-Cache', after.headers)
+
+    def test_null_also_clears_it(self):
+        self.save(cache_ttl=60)
+        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': None})
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.get_json()['cache_ttl'])
+
+    def test_targets_a_specific_older_version(self):
+        self.save(cache_ttl=None)
+        self.save(cache_ttl=None)  # v2, now the latest
+        res = self.client.put('/saved_sql/q/cache_ttl?version=1', json={'cache_ttl': 45})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['version'], 1)
+        files = self.client.get('/list_files').get_json()['files']
+        v = [f for f in files if f['filename'] == 'q'][0]['versions']
+        self.assertEqual(v[0]['cache_ttl'], 45)
+        self.assertIsNone(v[1].get('cache_ttl'))
+
+    def test_a_negative_value_is_rejected(self):
+        self.save(cache_ttl=None)
+        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': -1})
+        self.assertEqual(res.status_code, 400)
+
+    def test_a_non_integer_value_is_rejected(self):
+        self.save(cache_ttl=None)
+        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': '60'})
+        self.assertEqual(res.status_code, 400)
+
+    def test_missing_cache_ttl_field_is_rejected(self):
+        self.save(cache_ttl=None)
+        res = self.client.put('/saved_sql/q/cache_ttl', json={})
+        self.assertEqual(res.status_code, 400)
+
+    def test_a_nonexistent_version_is_404(self):
+        self.save(cache_ttl=None)
+        res = self.client.put('/saved_sql/q/cache_ttl?version=99', json={'cache_ttl': 30})
+        self.assertEqual(res.status_code, 404)
+
+    def test_only_admin_may_edit_it(self):
+        self.save(cache_ttl=None)
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        client = create_app().test_client()
+        scoped = client.post('/api_keys', json={'name': 'scoped', 'connections': []},
+                             headers={'X-API-Key': 'admin-key'}).get_json()['key']
+        res = client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 30}, headers={'X-API-Key': scoped})
+        self.assertEqual(res.status_code, 403)

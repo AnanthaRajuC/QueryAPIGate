@@ -19,6 +19,7 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 | [`/saved_sql/<name>`](#delete-a-saved-query) | DELETE | Delete a saved query or one version |
 | [`/view_file_content`](#view-a-saved-query-file) | GET | Raw saved-query file |
 | [`/saved_sql/<name>/collection`](#collections) | PUT | Move a saved query into a collection, or out of any |
+| [`/saved_sql/<name>/cache_ttl`](#save-a-query) | PUT | Set or clear one version's cache_ttl in place |
 | [`/collections`](#collections) | GET | Every collection, its queries, and the keys and roles that reach it |
 | [`/collections/<name>`](#collections) | PATCH | Rename a collection, carrying every grant with it |
 | [`/collections/<name>/postman`](#exporting-a-collection-to-postman) | GET | Download a collection as a Postman Collection file |
@@ -158,16 +159,21 @@ resolve to a `.json` file inside `saved_sql/`.
 
 ## Response caching
 
-Opt-in, per saved query: set `cache_ttl` (seconds) when [saving it](#save-a-query). A cached response is only ever
-served for that exact name, version, connection, resolved parameter values, `format` and page - anything else is a
-separate entry. It is **never** used for a query whose SQL is a write (`INSERT`/`UPDATE`/`DELETE`/DDL), regardless of
-`cache_ttl`: caching such a query would silently skip the write on every call after the first.
+Opt-in, per saved query: set `cache_ttl` (seconds) when [saving it](#save-a-query), or turn it on/off or retune it
+for an existing version in place with `PUT /saved_sql/<name>/cache_ttl` (admin only, `{"cache_ttl": <seconds>}`,
+`0` or `null` turns it off; `?version=` targets a specific version, defaulting to the latest) - not a new version,
+so it never bumps `execution_history` or the query's version number, the same way moving a query's collection
+doesn't. A cached response is only ever served for that exact name, version, connection, resolved parameter
+values, `format` and page - anything else is a separate entry. It is **never** used for a query whose SQL is a
+write (`INSERT`/`UPDATE`/`DELETE`/DDL), regardless of `cache_ttl`: caching such a query would silently skip the
+write on every call after the first.
 
 A fresh response carries `ETag`, `Cache-Control: max-age=<cache_ttl>` and `X-Cache: MISS`. A request within the TTL
 gets the same body with `X-Cache: HIT`; send back `If-None-Match: <ETag>` to get `304 Not Modified` with no body
-instead. A cache hit is not appended to `execution_history` - nothing ran against the database. The cache is kept in
-this one process's memory (see the note on `/metrics`' `queryapigate_pool_idle_connections` for what that means for a
-multi-process deployment) and is shared across every API key that can use the connection - it stores nothing an
+instead. A cache hit is not appended to `execution_history` - nothing ran against the database. The cache is kept
+in this one process's memory by default, or shared across restarts/instances when `QUERYAPIGATE_REDIS_URL` is set
+(see [Installation & Setup](INSTALLATION_AND_SETUP.md#shared-response-cache-redis) and the Caching tab in the admin
+UI) - either way it is shared across every API key that can use the connection, since it stores nothing an
 authorized caller could not already see by running the query itself.
 
 ## Parameter rules

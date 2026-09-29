@@ -697,6 +697,26 @@ def move_query(name):
                     'access': access}), 200
 
 
+@bp.route('/saved_sql/<name>/cache_ttl', methods=['PUT'])
+def set_query_cache_ttl(name):
+    """Set (``{"cache_ttl": <seconds>}``) or clear (``0`` or ``null``) one version's cache_ttl in place -
+    not a new version, same treatment as move_query() above for a query's collection. ?version= targets a
+    specific version; omitted means the latest, same default select_version() itself uses."""
+    require_admin()
+    data = get_json_body()
+    if 'cache_ttl' not in data:
+        raise ApiError('cache_ttl is missing (use 0 or null to turn caching off)')
+    ttl = data['cache_ttl']
+    definitions.validate_cache_ttl(ttl)
+    version = get_int(request.args.get('version'), 'version')
+    path = store.resolve_saved_file(name)
+    query = store.query_name(path)
+    number = store.set_cache_ttl(name, version, ttl)
+    store.record_audit(caller_key_name(), 'set_cache_ttl', query, {'version': number, 'cache_ttl': ttl or None})
+    return jsonify({'message': f"'{query}' v{number} cache_ttl updated", 'filename': query, 'version': number,
+                    'cache_ttl': ttl or None}), 200
+
+
 @bp.route('/collections', methods=['GET'])
 def get_collections():
     require_admin()

@@ -15,6 +15,13 @@ def as_object(value, label):
     return value
 
 
+def validate_cache_ttl(cache_ttl):
+    """The one rule a cache_ttl must follow, however it arrives - saving a new version here, or editing an
+    existing version's in place via PUT /saved_sql/<name>/cache_ttl (app.py)."""
+    if cache_ttl is not None and (not isinstance(cache_ttl, int) or isinstance(cache_ttl, bool) or cache_ttl < 0):
+        raise ApiError('cache_ttl must be a non-negative integer number of seconds')
+
+
 def validate_definition(data):
     """Check ``data`` (a decoded request body or bundle entry) and return ``(fields, collection)``: the fields
     to store on the new version, and the collection to file the query under - ``NO_COLLECTION_GIVEN`` when
@@ -53,8 +60,7 @@ def validate_definition(data):
     if connection_name is not None and not isinstance(connection_name, str):
         raise ApiError('connection_name must be a string')
     cache_ttl = data.get('cache_ttl')
-    if cache_ttl is not None and (not isinstance(cache_ttl, int) or isinstance(cache_ttl, bool) or cache_ttl < 0):
-        raise ApiError('cache_ttl must be a non-negative integer number of seconds')
+    validate_cache_ttl(cache_ttl)
     collection = NO_COLLECTION_GIVEN
     if 'collection' in data:
         collection = data['collection']

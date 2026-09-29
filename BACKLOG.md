@@ -1413,11 +1413,37 @@ A new "Caching" tab (beside Metrics) closes that gap, built entirely from data t
 - The one genuinely new piece: `store.list_saved()` didn't expose a version's `cache_ttl` at all (only
   `/catalog` did, which the admin UI never fetches) - added it to `/list_files`' existing payload so the
   Caching tab's "which queries are actually cached" table costs no new fetch either, same as everything
-  else on this tab.
+  else on this tab. That same field addition also let the Saved queries detail view grow a "Cached · Ns"
+  chip alongside its existing version/latest/status ones (`renderDetail()`) - zero new fetch there either.
 - Found and fixed the same race BACKLOG #46 already ran into once: `renderCaching()` was only re-triggered
   from `loadMetrics()`/`loadSettings()`, not `loadQueries()` - so the cache_ttl table's very first paint
   could run before `filesCache` was populated and never repaint. Now called from all three loaders, same
   "tolerate whichever independent fetch lands last" pattern `renderSettings()` already uses.
+
+## 49. A per-query "Cache" tab - view and edit cache_ttl in place
+
+**Status: shipped.** `cache_ttl` could previously only be set when saving a new version - no quick way to
+turn caching on/off or retune the TTL for an existing version. A new "Cache" tab (saved-query detail view,
+right after Access) closes that gap:
+
+- Editing `cache_ttl` is treated exactly like moving a query's collection already is: **not a new version**.
+  `store.set_collection()`'s own docstring already states the precedent ("Not a new version - the SQL did
+  not change - and nothing else in the file is touched") - a new `store.set_cache_ttl(ref, version, ttl)`
+  mutates the target version's `cache_ttl` in place (truthy → stored, falsy → removed, mirroring how
+  `save_version()` itself only ever writes the key when it's truthy) under the same file lock/atomic write
+  `set_collection()` uses, rather than going through `save_version()`'s always-`max+1` path.
+- Scoped to one specific version, not "the query" - `cache_ttl` is per-version data today (`run_saved()`
+  reads it off whichever version actually ran), so the tab edits `v`, the version currently selected via
+  the existing version chips, exactly like the History/Curl/SQL tabs already are.
+- New `PUT /saved_sql/<name>/cache_ttl` (admin only, `?version=` defaulting to latest), modeled directly on
+  `move_query()`'s `PUT /saved_sql/<name>/collection` - same admin-only/audited/in-place shape. The
+  validation rule itself (non-negative integer) was extracted out of `definitions.py`'s
+  `validate_definition()` into a shared `validate_cache_ttl()` so saving a new version and editing an
+  existing one's cache_ttl can never disagree about what's valid.
+- "On/off" is just `cache_ttl` being positive vs. `0`/absent - no new boolean flag on disk or in the API;
+  the UI toggle is a convenience that remembers the last-typed TTL so turning caching back on doesn't lose
+  it. Saving reloads `filesCache`, so the existing "Cached · Ns" header chip (#48) and the Caching tab's own
+  table both stay in sync immediately, with no page reload.
 
 ---
 
@@ -1436,7 +1462,7 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47 and #48 are shipped (#45's "empty collections" item
+out of scope for real parsing; #41, #44, #45, #46, #47, #48 and #49 are shipped (#45's "empty collections" item
 excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
 queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
 "still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished

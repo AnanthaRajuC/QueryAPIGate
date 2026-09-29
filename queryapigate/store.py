@@ -432,6 +432,23 @@ def set_collection(ref, collection):
     return previous
 
 
+def set_cache_ttl(ref, version, ttl):
+    """Set (a positive `ttl`) or clear (0 or None) one version's cache_ttl in place. Not a new version -
+    same treatment as set_collection() above - and, like save_version()'s own cache_ttl handling, only ever
+    writes the key when it's truthy rather than storing an explicit 0. Returns the resolved version number
+    (the one actually changed, whether the caller asked for a specific one or the latest)."""
+    path = resolve_saved_file(ref)
+    with lock:
+        content = load_versions(path)
+        number, data = select_version(content, version)
+        if ttl:
+            data['cache_ttl'] = ttl
+        else:
+            data.pop('cache_ttl', None)
+        write_json_atomic(path, content)
+    return number
+
+
 def _saved_files():
     """(name, path, content) for every readable saved-query file; a folder that does not exist yet (nothing
     saved) is empty and an unreadable file is skipped - the one directory walk everything below shares."""
