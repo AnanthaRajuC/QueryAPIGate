@@ -546,6 +546,7 @@ UI_HTML = r"""<!doctype html>
   .autocol-popover .row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 8px; border-radius: 5px;
     font: 12.5px var(--mono); cursor: pointer; }
   .autocol-popover .row .t { color: var(--ink-2); }
+  .autocol-popover .row .t.fk { font-style: italic; }
   .autocol-popover .row.on { background: var(--accent-soft, var(--bg)); }
   .tags.scope .tag { border-style: dashed; }
   .panel-bar select { width: auto; height: 30px; padding: 0 8px; background: var(--bg); border-color: var(--line-strong); font-size: 12.5px; }
@@ -1607,9 +1608,12 @@ function attachColumnAutocomplete(textarea, getConnName, getDatabase) {
   function paintRows() {
     clear(popover);
     rows.forEach(function (c, i) {
-      popover.appendChild(h('div', { className: 'row' + (i === activeIndex ? ' on' : ''),
+      var title = c.type + (c.foreign_key ? ' · FK → ' + c.foreign_key.table + '.' + c.foreign_key.column : '');
+      popover.appendChild(h('div', { className: 'row' + (i === activeIndex ? ' on' : ''), title: title,
         onmousedown: function (e) { e.preventDefault(); accept(i); } },
-        h('span', { text: c.name }), h('span', { className: 't', text: c.type })));
+        h('span', { text: c.name }),
+        c.foreign_key ? h('span', { className: 't fk', text: '→ ' + c.foreign_key.table })
+          : h('span', { className: 't', text: c.type })));
     });
   }
   function accept(i) {
@@ -2124,8 +2128,10 @@ function renderApiKeys() {
   var rows = names.map(function (name) {
     var k = apiKeysCache[name];
     var expired = k.expires_at && k.expires_at < today;
+    var expiringSoon = !expired && isKeyExpiringSoon(k);
     var expiry = k.expires_at
-      ? h('span', { style: expired ? 'color:var(--danger)' : '', text: k.expires_at + (expired ? ' (expired)' : '') })
+      ? h('span', { style: expired ? 'color:var(--danger)' : expiringSoon ? 'color:var(--warn)' : '',
+          text: k.expires_at + (expired ? ' (expired)' : expiringSoon ? ' (expires soon)' : '') })
       : h('span', { className: 'dim', text: 'never' });
     var ips = (k.allowed_ips || []).length
       ? h('span', { title: k.allowed_ips.join(', '), text: k.allowed_ips.length + (k.allowed_ips.length === 1 ? ' IP' : ' IPs') })

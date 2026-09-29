@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Two zero-cost reuses of already-loaded data (BACKLOG #45).** Table-scoped autocomplete now shows a
+  `→ table` hint (full detail on hover) next to a foreign-key column, using the same schema data the
+  schema browser's PK/FK badges (#37) already carry. The API Keys table now highlights a key expiring
+  within 7 days (not just an already-expired one), reusing the `isKeyExpiringSoon()` check added for
+  Home's health panel (#44).
 - **A "System health" panel and three more stat tiles on the Home tab (BACKLOG #44).** Active queries,
   pool idle connections and rate-limit rejections join the existing stat tiles - the same numbers the
   Metrics tab already computes, just not previously shown on Home. The new health panel flags expired and

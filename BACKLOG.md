@@ -1282,16 +1282,21 @@ was already computed or loaded somewhere else in the app; this only needed reusi
 in the place it would actually be useful - no new endpoint, no new metric, no new dependency for any of
 them.
 
-**Notes:**
+**Shipped:**
+- **FK hints in table-scoped autocomplete.** The autocomplete popup (#39) shows a `→ table` hint (the
+  column's `foreign_key.table`, full `table.column` detail on hover) next to a foreign-key column, the
+  same schema data the schema browser's own badges (#37) already carry - no new fetch.
+- **Keys expiring soon, not just already-expired.** The API Keys table now highlights (in `var(--warn)`,
+  "(expires soon)") a key expiring within 7 days, alongside the existing already-expired highlighting -
+  reuses `isKeyExpiringSoon()` (added for Home's health panel, #44), same `expires_at` field.
+
+**Still open:**
 - **Slowest recent queries.** The same `execution_history` data Home's Recent API requests panel (#41)
   already aggregates has `duration_ms` on every entry - sorting by that instead of by time surfaces "what's
   actually slow" for free, on Home or Metrics.
 - **Unused roles.** Every API key already records `created_from_role` when made from one
   (`apikeys.list_keys()`) - cross-referencing that against the role list gives "N roles have never had a
   key created from them" (a dead permission template), zero new fetch.
-- **Keys expiring soon, not just already-expired.** The API Keys table already color-codes an *expired*
-  key (and #44 proposes the same for Home); neither flags one expiring soon (e.g. within 7 days) - same
-  `expires_at` field, just a second threshold alongside the existing one.
 - **Empty collections.** `collectionsCache` already tracks collection → query membership - flagging a
   collection with zero queries in it is free.
 - **FK-aware "copy starter query."** Since #37, a table's columns already carry `primary_key`/
@@ -1299,11 +1304,6 @@ them.
   (`schemaBrowser()`'s `selectFn`/⧉ icon) could generate the real `JOIN` when a table has foreign keys,
   instead of always a bare `SELECT * FROM table`. A real capability upgrade, not just a display tweak, and
   zero new backend work.
-- **FK hints in table-scoped autocomplete.** The autocomplete popup (#39) already has each column's full
-  schema row (including `foreign_key`) available when it builds its rows - it just doesn't show
-  `→ table.column` next to a foreign key column the way the schema browser's own badges (#37) do.
-
-Not started.
 
 ---
 
