@@ -4,7 +4,6 @@ runs unconditionally in dev/CI, unlike the network-database integration tests); 
 pieces that don't need a connection at all: config, the SQL guard's pagination/dialect handling, and the
 file-resolution guard shared with SQLite.
 """
-import json
 import os
 import tempfile
 import unittest
@@ -61,8 +60,6 @@ class ConnectionApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)

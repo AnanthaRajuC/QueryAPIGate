@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest import mock
 
-from queryapigate import apikeys, cli, config, create_app, definitions, examples, postman, store
+from queryapigate import apikeys, cli, config, create_app, db, definitions, examples, postman, store
 from queryapigate.errors import ApiError
 
 FIXED_NOW = datetime(2026, 9, 25, 12, 0, 0)
@@ -25,6 +25,7 @@ class ExamplesTestCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_LOAD_EXAMPLES', 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE'):
             os.environ.pop(name, None)
+        db.init_schema()
         apikeys._last_recorded_use.clear()
         # A smaller dataset keeps the suite quick; test_the_shipped_size_... checks the real one.
         size = mock.patch.object(examples, 'RENTAL_COUNT', 3000)
@@ -126,7 +127,10 @@ class DatabaseTests(ExamplesTestCase):
 
     def test_no_half_written_file_is_left_behind(self):
         self.build()
-        self.assertEqual(sorted(os.listdir(self.home)), ['x.db'])
+        # queryapigate.db(-wal/-shm) is our own SQLite store (created by setUp's db.init_schema()),
+        # unrelated to the example database build this test is actually about.
+        others = sorted(f for f in os.listdir(self.home) if not f.startswith('queryapigate.db'))
+        self.assertEqual(others, ['x.db'])
 
 
 class ManifestTests(ExamplesTestCase):

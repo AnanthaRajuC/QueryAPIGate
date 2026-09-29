@@ -1,7 +1,6 @@
 """Tests for named permission roles (BACKLOG #22): a reusable *template* for a key's grant fields, copied
 onto a key once at creation time - never consulted again afterward. Distinct from a key's own permissions
 (tests/test_api_keys.py), which remain the sole source of truth once a key exists."""
-import json
 import os
 import sqlite3
 import tempfile
@@ -9,6 +8,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import apikeys, create_app
+from tests.helpers import write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -21,14 +21,13 @@ class AppTestCase(unittest.TestCase):
         conn.execute('CREATE TABLE t (id INTEGER)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {
-                'a': {'db': 'sqlite', 'database': self.db_path, 'active': True},
-                'b': {'db': 'sqlite', 'database': self.db_path, 'active': True},
-            }}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)
+        write_connections({
+            'a': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+            'b': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+        })
         self.client = create_app().test_client()
         self.admin_headers = {'X-API-Key': 'admin-key'}
         apikeys._last_recorded_use.clear()

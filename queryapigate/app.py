@@ -16,6 +16,7 @@ from . import (
     collection_admin,
     config,
     cors,
+    db,
     definitions,
     engine,
     examples,
@@ -90,6 +91,7 @@ def load_examples_at_startup():
 def create_app():
     from . import __version__
     config.check_settings()
+    db.init_schema()
     logging_setup.configure(log)
     app = Flask(__name__)
     hops = config.proxy_hops()
@@ -126,7 +128,7 @@ def create_app():
         log.warning("Connection(s) %s store a literal password in %s. Consider a \"${VAR}\" reference to an "
                     "environment variable instead - it reads the same way but keeps the secret out of the file, "
                     "or set QUERYAPIGATE_SECRET_KEY to encrypt it at rest automatically.",
-                    ', '.join(plaintext), config.connections_file())
+                    ', '.join(plaintext), config.db_file())
     if config.load_examples():
         load_examples_at_startup()
     app.json = JSONProvider(app)

@@ -11,6 +11,7 @@ from datetime import datetime
 from unittest import mock
 
 from queryapigate import cli, config
+from tests.helpers import write_connections
 
 
 class ExportTests(unittest.TestCase):
@@ -24,18 +25,17 @@ class ExportTests(unittest.TestCase):
         conn.executemany('INSERT INTO t VALUES (?, ?)', [(1, 'a'), (2, 'b'), (3, 'c')])
         conn.commit()
         conn.close()
-        self._write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
-        os.makedirs(os.path.join(self.home, 'saved_sql'))
-        self.save('all_rows', 'SELECT id, name FROM t ORDER BY id', connection_name='lite')
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home})
         patcher.start()
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_STREAM_MAX_ROWS', 'QUERYAPIGATE_QUERY_TIMEOUT', 'QUERYAPIGATE_AUDIT_LOG_LIMIT'):
             os.environ.pop(name, None)
+        self._write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
+        os.makedirs(os.path.join(self.home, 'saved_sql'))
+        self.save('all_rows', 'SELECT id, name FROM t ORDER BY id', connection_name='lite')
 
     def _write_connections(self, connections):
-        with open(os.path.join(self.home, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': connections}, f)
+        write_connections(connections)
 
     def save(self, filename, sql, connection_name=None, query_parameters=None):
         entry = {'1': {'sql_query': sql, 'author': 'a', 'description': 'd', 'connection_name': connection_name,

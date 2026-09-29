@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import config, create_app, pool, runners
+from tests.helpers import write_connections
 
 CREATE = {
     'postgres': 'CREATE TABLE queryapigate_it (id INT, name VARCHAR(50), price NUMERIC(8, 2), added TIMESTAMP)',
@@ -54,12 +55,11 @@ class IntegrationBase:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self._prepare_storage()
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'it': self.details}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        write_connections({'it': self.details})
         self.client = create_app().test_client()
 
         # Setting up and tearing down needs writes; the tests themselves run read-only.

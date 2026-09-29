@@ -10,7 +10,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config
+from . import config, db
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -83,16 +83,25 @@ def read_audit_log():
 
 
 # --------------------------------------------------------------------------------------
-# Connections
+# Connections - SQLite-backed (queryapigate.db, see db.py). `db`/`active`/`created_at`/`updated_at` are
+# real columns (queried/filtered directly); everything else (password, host, port, user, database,
+# example, ...) lives in `details_json`, exactly as flexible as it was as a raw JSON dict, and is merged
+# back into one dict by _connection_row_to_dict() so every caller sees the same shape as before.
 # --------------------------------------------------------------------------------------
 
+def _connection_row_to_dict(row):
+    details = json.loads(row['details_json'])
+    details['db'] = row['db']
+    details['active'] = bool(row['active'])
+    details['created_at'] = row['created_at']
+    details['updated_at'] = row['updated_at']
+    return details
+
+
 def read_connections():
-    try:
-        with open(config.connections_file(), 'r') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return {}
-    return data.get('connections', {})
+    rows = db.connection().execute(
+        'SELECT name, db, active, created_at, updated_at, details_json FROM connections').fetchall()
+    return {row['name']: _connection_row_to_dict(row) for row in rows}
 
 
 def _expand_env(value):
@@ -178,14 +187,17 @@ def get_connection(connection_name):
     """Return the usable (active, env-expanded, password-decrypted) details of a named connection."""
     if not isinstance(connection_name, str) or not connection_name:
         raise ApiError('Connection name is missing')
-    details = read_connections().get(connection_name)
-    if not details:
+    row = db.connection().execute(
+        'SELECT db, active, created_at, updated_at, details_json FROM connections WHERE name = ?',
+        (connection_name,)).fetchone()
+    if not row:
         raise ApiError(f"Connection '{connection_name}' not found", 404)
-    if not details.get('active', False):
+    if not row['active']:
         raise ApiError(f"The connection '{connection_name}' is currently not active. "
                        "To use it, it must be set to active.", 403)
-    if details.get('db') not in config.SUPPORTED_DB_TYPES:
+    if row['db'] not in config.SUPPORTED_DB_TYPES:
         raise ApiError('Unsupported database type')
+    details = _connection_row_to_dict(row)
     resolved = {key: _expand_env(value) for key, value in details.items()}
     if 'password' in resolved:
         resolved['password'] = _decrypt_password(resolved['password'])
@@ -224,16 +236,15 @@ def encrypt_plaintext_passwords_in_place():
     """Called once at startup when QUERYAPIGATE_SECRET_KEY is set: encrypts any connection password that's still
     a literal, so a connection saved before the key existed benefits immediately rather than waiting for its
     next PATCH /connections - "don't require a one-time manual migration step" from the start."""
-    with lock:
-        connections = read_connections()
-        changed = False
-        for details in connections.values():
+    with db.transaction() as conn:
+        rows = conn.execute('SELECT name, details_json FROM connections').fetchall()
+        for row in rows:
+            details = json.loads(row['details_json'])
             password = details.get('password')
             if _is_plaintext_password(password):
                 details['password'] = _encrypt_password(password)
-                changed = True
-        if changed:
-            write_json_atomic(config.connections_file(), {'connections': connections})
+                conn.execute('UPDATE connections SET details_json = ? WHERE name = ?',
+                            (json.dumps(details), row['name']))
 
 
 def encrypted_password_connections():
@@ -248,39 +259,43 @@ def update_connections(connections):
         if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
             raise ApiError(f"Connection '{name}' must be an object whose 'db' is one of: "
                            f"{', '.join(config.SUPPORTED_DB_TYPES)}")
-    with lock:
-        existing = read_connections()
+    with db.transaction() as conn:
         timestamp = now()
         for name, details in connections.items():
+            existing_row = conn.execute(
+                'SELECT created_at, details_json FROM connections WHERE name = ?', (name,)).fetchone()
+            existing_details = json.loads(existing_row['details_json']) if existing_row else {}
             # GET masks passwords, so a client echoing the mask back means "keep the current one" - reused
             # exactly as stored (already encrypted, if it was), never re-encrypted.
-            if details.get('password') == config.PASSWORD_MASK and name in existing:
-                details = {**details, 'password': existing[name].get('password', '')}
+            if details.get('password') == config.PASSWORD_MASK and existing_row:
+                details = {**details, 'password': existing_details.get('password', '')}
             elif 'password' in details:
                 # A genuinely new literal password (or ${VAR} reference, which _encrypt_password() passes
                 # through unchanged) - encrypted here if QUERYAPIGATE_SECRET_KEY is set, stored as given otherwise.
                 details = {**details, 'password': _encrypt_password(details['password'])}
             # created_at/updated_at are server-controlled, never taken from the request (a client echoing back
             # what GET /connections returned must not be able to fake either one). A connection that already
-            # existed keeps its created_at; one saved before this field existed is backfilled from its own
-            # updated_at (still better than nothing) or, failing that, from now.
-            was = existing.get(name, {})
-            created_at = was.get('created_at') or was.get('updated_at') or timestamp
-            details = {k: v for k, v in details.items() if k not in ('created_at', 'updated_at')}
-            details['created_at'] = created_at
-            details['updated_at'] = timestamp
-            existing[name] = details
-        config.home().mkdir(parents=True, exist_ok=True)
-        write_json_atomic(config.connections_file(), {'connections': existing})
+            # existed keeps its created_at (the column is NOT NULL, so any existing row already has a real
+            # one - no legacy-data backfill needed here, only in the one-time JSON migration itself).
+            created_at = existing_row['created_at'] if existing_row else timestamp
+            dialect = details.get('db')
+            active = bool(details.get('active', False))
+            extra = {k: v for k, v in details.items() if k not in ('db', 'active', 'created_at', 'updated_at')}
+            conn.execute("""
+                INSERT INTO connections (name, db, active, created_at, updated_at, details_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    db = excluded.db, active = excluded.active,
+                    created_at = excluded.created_at, updated_at = excluded.updated_at,
+                    details_json = excluded.details_json
+            """, (name, dialect, int(active), created_at, timestamp, json.dumps(extra)))
 
 
 def delete_connection(name):
-    with lock:
-        existing = read_connections()
-        if name not in existing:
+    with db.transaction() as conn:
+        cur = conn.execute('DELETE FROM connections WHERE name = ?', (name,))
+        if cur.rowcount == 0:
             raise ApiError(f"Connection '{name}' not found", 404)
-        del existing[name]
-        write_json_atomic(config.connections_file(), {'connections': existing})
 
 
 # --------------------------------------------------------------------------------------

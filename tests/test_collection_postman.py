@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from queryapigate import cli, create_app, postman, store
 from queryapigate import params as param_rules
 from queryapigate.errors import ApiError
+from tests.helpers import write_connections
 
 # Every kind of rule a parameter can carry, so no type or constraint escapes the "example must be valid" check.
 PARAMETER_MATRIX = {
@@ -44,11 +45,10 @@ class PostmanTestCase(unittest.TestCase):
         conn.execute('CREATE TABLE t (id INTEGER)')
         conn.commit()
         conn.close()
-        with open(os.path.join(self.home, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'a': {'db': 'sqlite', 'database': db, 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)
+        write_connections({'a': {'db': 'sqlite', 'database': db, 'active': True}})
 
     def save(self, name, collection='reporting', connection='a', params=None, sql=None, **extra):
         params = params or {}

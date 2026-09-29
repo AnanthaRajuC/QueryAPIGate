@@ -55,6 +55,13 @@ def connections_file():
     return home() / 'db_connections.json'
 
 
+def db_file():
+    """queryapigate.db - the SQLite store for connections and saved queries (db.py, store.py). Created by
+    `queryapigate init` on a fresh home, or `queryapigate migrate-to-sqlite` when upgrading a home that
+    still has the legacy db_connections.json/saved_sql/ files."""
+    return home() / 'queryapigate.db'
+
+
 def api_keys_file():
     return home() / 'api_keys.json'
 

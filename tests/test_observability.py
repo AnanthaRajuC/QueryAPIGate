@@ -15,6 +15,7 @@ from flask import g
 
 from queryapigate import apikeys, create_app, logging_setup, metrics
 from queryapigate import app as app_module
+from tests.helpers import write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -28,14 +29,13 @@ class AppTestCase(unittest.TestCase):
         conn.execute('INSERT INTO t VALUES (1)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_JSON_LOGS', 'QUERYAPIGATE_SLOW_QUERY_THRESHOLD',
                      'QUERYAPIGATE_RATE_LIMIT'):
             os.environ.pop(name, None)
+        write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
         self.client = create_app().test_client()
 
     def run_sql(self, sql='SELECT * FROM t'):
@@ -220,14 +220,13 @@ class JsonLogFieldsTests(unittest.TestCase):
         conn.execute('INSERT INTO t VALUES (1)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_JSON_LOGS': '1',
                                                'QUERYAPIGATE_SLOW_QUERY_THRESHOLD': '0'})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
         os.environ.pop('QUERYAPIGATE_RATE_LIMIT', None)
+        write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
         self.client = create_app().test_client()
         self.buf = io.StringIO()
         logging.getLogger('queryapigate').handlers[0].stream = self.buf

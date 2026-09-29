@@ -20,8 +20,6 @@ class AppTestCase(unittest.TestCase):
         conn.execute('CREATE TABLE t (id INTEGER)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)

@@ -1,6 +1,5 @@
 """Tests for GET /settings - the read-only view of the server's configuration behind the admin UI's Settings
 screen. It must reflect the real environment, and it must never hand a secret to the browser."""
-import json
 import os
 import tempfile
 import unittest
@@ -13,8 +12,6 @@ class SettingsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {}}, f)
         clean = {name: value for name, value in os.environ.items() if not name.startswith('QUERYAPIGATE_')}
         patcher = mock.patch.dict(os.environ, {**clean, 'QUERYAPIGATE_HOME': self.tmp.name,
                                                'QUERYAPIGATE_API_KEY': 'admin-key'}, clear=True)

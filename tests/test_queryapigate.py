@@ -12,9 +12,10 @@ from unittest import mock
 
 import duckdb
 
-from queryapigate import config, create_app, engine, metrics, pool, runners, schema, sqltools
+from queryapigate import config, create_app, engine, metrics, pool, runners, schema, sqltools, store
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
+from tests.helpers import write_connections
 
 
 class ApiTestCase(unittest.TestCase):
@@ -32,20 +33,19 @@ class ApiTestCase(unittest.TestCase):
         conn.close()
 
         self.saved_dir = os.path.join(tmp, 'saved_sql')
-        self.connections_file = os.path.join(tmp, 'db_connections.json')
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {
-                'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True},
-                'off': {'db': 'sqlite', 'database': self.db_path, 'active': False},
-                'pg': {'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd',
-                       'active': True},
-            }}, f)
 
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_ALLOW_WRITES', 'QUERYAPIGATE_MAX_PAGE_SIZE'):
             os.environ.pop(name, None)
+
+        write_connections({
+            'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+            'off': {'db': 'sqlite', 'database': self.db_path, 'active': False},
+            'pg': {'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd',
+                   'active': True},
+        })
 
         self.client = create_app().test_client()
 
@@ -230,7 +230,7 @@ class SavedQueryTests(ApiTestCase):
 
     def test_file_access_is_confined_to_saved_sql(self):
         self.save('q')
-        outside = (self.connections_file, '../db_connections.json', '/etc/passwd', 'saved_sql/../db_connections.json')
+        outside = (self.db_path, '../db_connections.json', '/etc/passwd', 'saved_sql/../db_connections.json')
         for path in outside:
             res = self.client.get('/view_file_content', query_string={'filename': path})
             self.assertIn(res.status_code, (403, 404), path)
@@ -292,8 +292,7 @@ class ConnectionTests(ApiTestCase):
         conns['fresh'] = {'db': 'sqlite', 'database': 'x.db', 'active': True}
         self.assertEqual(self.client.patch('/connections', json={'connections': conns}).status_code, 200)
 
-        with open(self.connections_file) as f:
-            stored = json.load(f)['connections']
+        stored = store.read_connections()
         self.assertEqual(stored['pg']['password'], 'secret')
         self.assertEqual(stored['pg']['host'], 'new-host')
         self.assertIn('fresh', stored)
@@ -871,8 +870,7 @@ class PoolTests(unittest.TestCase):
 
     def test_engine_only_hands_the_pool_to_runners_when_enabled(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp}):
-            with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-                json.dump({'connections': {'c': {'db': 'mysql', 'host': 'h', 'active': True}}}, f)
+            write_connections({'c': {'db': 'mysql', 'host': 'h', 'active': True}})
             recorder = mock.MagicMock(return_value=(['a'], [(1,)]))
             with mock.patch.dict(engine.RUNNERS, {'mysql': recorder}):
                 engine.execute_sql('SELECT 1', 'c', 10, 0)
@@ -1541,9 +1539,8 @@ class StreamingTests(ApiTestCase):
 
 class ConnectionSecretsTests(ApiTestCase):
     def test_env_var_references_are_expanded_for_use_and_left_visible_in_listing(self):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {'env': {'db': 'sqlite', 'database': '${IT_DB_PATH}', 'password': '${IT_PW}',
-                                               'active': True}}}, f)
+        write_connections({'env': {'db': 'sqlite', 'database': '${IT_DB_PATH}', 'password': '${IT_PW}',
+                                   'active': True}})
         conns = self.client.get('/connections').get_json()['connections']
         self.assertEqual(conns['env']['password'], '${IT_PW}')
         res = self.client.post('/execute_sql', json={'sql': 'SELECT 1 AS one', 'connection_name': 'env'})
@@ -1554,36 +1551,32 @@ class ConnectionSecretsTests(ApiTestCase):
         self.assertEqual(res.get_json(), [{'one': 1}])
 
     def test_a_literal_password_triggers_a_startup_warning(self):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {'plain': {'db': 'sqlite', 'database': self.db_path,
-                                                  'password': 'literal-secret', 'active': True}}}, f)
+        write_connections({'plain': {'db': 'sqlite', 'database': self.db_path,
+                                     'password': 'literal-secret', 'active': True}})
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
             create_app()
         self.assertTrue(any('plain' in line and 'literal password' in line for line in logs.output))
 
     def test_an_env_var_reference_does_not_trigger_the_warning(self):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {'env': {'db': 'sqlite', 'database': self.db_path,
-                                               'password': '${IT_PW}', 'active': True}}}, f)
+        write_connections({'env': {'db': 'sqlite', 'database': self.db_path,
+                                   'password': '${IT_PW}', 'active': True}})
         with mock.patch('queryapigate.app.log.warning') as warning:
             create_app()
         for call in warning.call_args_list:
             self.assertNotIn('literal password', call.args[0])
 
     def test_an_empty_password_does_not_trigger_the_warning(self):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {'nopass': {'db': 'sqlite', 'database': self.db_path,
-                                                   'password': '', 'active': True}}}, f)
+        write_connections({'nopass': {'db': 'sqlite', 'database': self.db_path,
+                                      'password': '', 'active': True}})
         with mock.patch('queryapigate.app.log.warning') as warning:
             create_app()
         for call in warning.call_args_list:
             self.assertNotIn('literal password', call.args[0])
 
     def test_multiple_plaintext_connections_are_all_named_in_one_warning(self):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': {
-                'first': {'db': 'sqlite', 'database': self.db_path, 'password': 'a', 'active': True},
-                'second': {'db': 'sqlite', 'database': self.db_path, 'password': 'b', 'active': True}}}, f)
+        write_connections({
+            'first': {'db': 'sqlite', 'database': self.db_path, 'password': 'a', 'active': True},
+            'second': {'db': 'sqlite', 'database': self.db_path, 'password': 'b', 'active': True}})
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
             create_app()
         line = next(line for line in logs.output if 'literal password' in line)

@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import datetime
 
-from . import __version__, bundle, config, examples, postman, store
+from . import __version__, bundle, config, db, examples, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -332,4 +332,5 @@ def main(argv=None):
         args = parser.parse_args(['serve', *(argv or [])])
     if getattr(args, 'home', None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
+    db.init_schema()
     return args.func(args)

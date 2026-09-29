@@ -10,6 +10,7 @@ from unittest import mock
 
 from queryapigate import bundle, cli, store
 from queryapigate.errors import ApiError
+from tests.helpers import write_connections
 
 
 class BundleTestCase(unittest.TestCase):
@@ -17,13 +18,12 @@ class BundleTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = self.tmp.name
-        with open(os.path.join(self.home, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home})
         patcher.start()
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'QUERYAPIGATE_AUDIT_LOG_LIMIT'):
             os.environ.pop(name, None)
+        write_connections({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
 
     def save(self, name, collection=store._UNSET, **extra):
         fields = {'sql_query': 'SELECT 1', 'author': 'me', 'description': f'{name} d', 'tags': ['t'],
@@ -103,9 +103,8 @@ class RoundTripTests(BundleTestCase):
         self.save('q2', 'reporting', tags=['x', 'y'])
         document = bundle.export_bundle('reporting')
         with tempfile.TemporaryDirectory() as other:
-            with open(os.path.join(other, 'db_connections.json'), 'w') as f:
-                json.dump({'connections': {'a': {'db': 'sqlite', 'database': 'y.db', 'active': True}}}, f)
             with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': other}):
+                write_connections({'a': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
                 result = bundle.import_bundle(document)
                 self.assertEqual(result['created'], ['q1', 'q2'])
                 self.assertEqual(result['missing_connections'], [])

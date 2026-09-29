@@ -13,6 +13,7 @@ from unittest import mock
 
 from queryapigate import apikeys, collection_admin, create_app, store
 from queryapigate.errors import ApiError
+from tests.helpers import write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -26,14 +27,13 @@ class AppTestCase(unittest.TestCase):
         conn.execute('INSERT INTO t VALUES (1)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {
-                'a': {'db': 'sqlite', 'database': db_path, 'active': True},
-                'b': {'db': 'sqlite', 'database': db_path, 'active': True},
-            }}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)
+        write_connections({
+            'a': {'db': 'sqlite', 'database': db_path, 'active': True},
+            'b': {'db': 'sqlite', 'database': db_path, 'active': True},
+        })
         self.client = create_app().test_client()
         self.admin = {'X-API-Key': 'admin-key'}
         apikeys._last_recorded_use.clear()

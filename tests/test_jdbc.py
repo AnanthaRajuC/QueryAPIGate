@@ -3,7 +3,6 @@ driver in tests/test_integration.py's JdbcViaH2Tests (H2 standing in for an arbi
 tests cover the pieces that don't need a live connection: config, the SQL guard's pagination/dialect
 handling, the schema-browser boundary, and the JVM classpath-union logic.
 """
-import json
 import os
 import tempfile
 import unittest
@@ -11,6 +10,7 @@ from unittest import mock
 
 from queryapigate import config, create_app, runners, schema, sqltools
 from queryapigate.errors import ApiError
+from tests import helpers
 
 
 class ConfigTests(unittest.TestCase):
@@ -42,8 +42,7 @@ class JvmClasspathTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def write_connections(self, connections):
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': connections}, f)
+        helpers.write_connections(connections)
 
     def test_always_includes_the_h2_jar(self):
         self.write_connections({})
@@ -103,13 +102,12 @@ class SchemaGuardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'ora': {
-                'db': 'jdbc', 'jar': '/x.jar', 'driver_class': 'x.Driver', 'jdbc_url': 'jdbc:x://h',
-                'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
+        helpers.write_connections({'ora': {
+            'db': 'jdbc', 'jar': '/x.jar', 'driver_class': 'x.Driver', 'jdbc_url': 'jdbc:x://h',
+            'active': True}})
 
     def test_schema_introspection_is_not_supported_for_jdbc(self):
         with self.assertRaises(ApiError) as ctx:
@@ -121,8 +119,6 @@ class ConnectionApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)

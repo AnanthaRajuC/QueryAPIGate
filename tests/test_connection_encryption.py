@@ -11,7 +11,7 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
-from queryapigate import config, create_app, store
+from queryapigate import config, create_app, db, store
 
 
 class AppTestCase(unittest.TestCase):
@@ -25,22 +25,32 @@ class AppTestCase(unittest.TestCase):
         conn.execute('INSERT INTO t VALUES (1)')
         conn.commit()
         conn.close()
-        self.connections_file = os.path.join(tmp, 'db_connections.json')
-        self.write_connections({})
         self.secret_key = Fernet.generate_key().decode()
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_API_KEY': 'admin-key',
                                                'QUERYAPIGATE_SECRET_KEY': self.secret_key})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.write_connections({})
         self.admin_headers = {'X-API-Key': 'admin-key'}
 
     def write_connections(self, connections):
-        with open(self.connections_file, 'w') as f:
-            json.dump({'connections': connections}, f)
+        """A raw write, deliberately bypassing store.update_connections()'s own encryption/mask-echo logic -
+        several tests here exist specifically to prove *startup* migration (encrypt_plaintext_passwords_in_
+        place()) does the encrypting, so the value written here must land on disk exactly as given."""
+        db.init_schema()
+        with db.transaction() as conn:
+            conn.execute('DELETE FROM connections')
+            timestamp = store.now()
+            for name, details in connections.items():
+                extra = {k: v for k, v in details.items() if k not in ('db', 'active', 'created_at', 'updated_at')}
+                conn.execute(
+                    'INSERT INTO connections (name, db, active, created_at, updated_at, details_json) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (name, details.get('db'), int(bool(details.get('active', False))), timestamp, timestamp,
+                     json.dumps(extra)))
 
     def stored(self):
-        with open(self.connections_file) as f:
-            return json.load(f)['connections']
+        return store.read_connections()
 
     def encrypted_token(self, plaintext):
         return 'enc:' + Fernet(self.secret_key.encode()).encrypt(plaintext.encode()).decode()

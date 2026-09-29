@@ -1,6 +1,5 @@
 """Tests for the opt-in, per-saved-query response cache."""
 import hashlib
-import json
 import os
 import sqlite3
 import sys
@@ -10,6 +9,7 @@ from unittest import mock
 
 from queryapigate import cache, config, create_app
 from queryapigate.rediscache import RedisResponseCache
+from tests.helpers import write_connections
 
 
 class ResponseCacheTests(unittest.TestCase):
@@ -221,13 +221,12 @@ class AppTestCase(unittest.TestCase):
         conn.executemany('INSERT INTO t VALUES (?, ?)', [(1, 'a'), (2, 'b')])
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
         os.environ.pop('QUERYAPIGATE_ALLOW_WRITES', None)
+        write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
         self.client = create_app().test_client()
 
     def save(self, filename='q', sql='SELECT * FROM t WHERE id = :id', cache_ttl=None, **extra):

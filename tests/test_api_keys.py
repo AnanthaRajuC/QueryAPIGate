@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from queryapigate import apikeys, create_app
+from tests.helpers import write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -23,15 +24,14 @@ class AppTestCase(unittest.TestCase):
         conn.execute('INSERT INTO t VALUES (1)')
         conn.commit()
         conn.close()
-        with open(os.path.join(tmp, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {
-                'a': {'db': 'sqlite', 'database': self.db_path, 'active': True},
-                'b': {'db': 'sqlite', 'database': self.db_path, 'active': True},
-            }}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_ALLOW_WRITES', None)
+        write_connections({
+            'a': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+            'b': {'db': 'sqlite', 'database': self.db_path, 'active': True},
+        })
         self.client = create_app().test_client()
         self.admin_headers = {'X-API-Key': 'admin-key'}
         # apikeys._last_recorded_use is in-process, module-level state (see its "throttle last_used_at
@@ -660,12 +660,11 @@ class OpenServerBootstrapTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        write_connections({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
 
     def test_a_fully_open_server_stays_admin_with_no_key_at_all(self):
         client = create_app().test_client()
@@ -691,8 +690,6 @@ class StartupWarningTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': {}}, f)
         with open(os.path.join(self.tmp.name, 'api_keys.json'), 'w') as f:
             json.dump({'keys': {'x': {'hash': 'x', 'connections': '*', 'allow_writes': False,
                                        'active': True, 'created_at': 'now'}}}, f)
