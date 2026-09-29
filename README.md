@@ -507,6 +507,8 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
 | `QUERYAPIGATE_LOAD_EXAMPLES` | unset | `yes` loads the [example APIs](documentation/EXAMPLES.md) (reporting, dashboard, export, partner) at startup - idempotent; a malformed value stops startup. Never removes anything: use `queryapigate examples unload`. |
 | `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` | unset | Path to also append every audit entry to, one JSON object per line, never capped - for retention beyond the rolling window above. |
+| `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp` - see [documentation/MCP.md](documentation/MCP.md). |
+| `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for an MCP tool call's result. Always a positive count; a malformed value stops startup. |
 
 ## Security and production considerations
 
@@ -619,7 +621,8 @@ Clean up with `docker compose down -v`.
 | `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |
 | `/ui` | GET | A small admin UI: manage connections and saved queries, run ad-hoc SQL. |
 
-Full details are in [documentation/API.md](documentation/API.md).
+Full details are in [documentation/API.md](documentation/API.md). Saved queries can also be reached as MCP
+tools for an AI agent - see [documentation/MCP.md](documentation/MCP.md).
 
 ## Client SDKs
 

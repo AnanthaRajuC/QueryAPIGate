@@ -19,6 +19,7 @@ nav:
   - Installation: documentation/INSTALLATION_AND_SETUP.md
   - Example APIs: documentation/EXAMPLES.md
   - API reference: documentation/API.md
+  - MCP server: documentation/MCP.md
   - Database connections: documentation/DATABASE_CONNECTION_CONFIGURATION.md
   - Query metadata: documentation/QUERY_METADATA_MANAGEMENT.md
   - Technology stack: documentation/TECHNOLOGY_STACK.MD

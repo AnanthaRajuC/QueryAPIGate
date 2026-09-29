@@ -1190,58 +1190,71 @@ to attach a history entry to.
 
 ## 42. An MCP server exposing saved queries as tools
 
-**Impact:** every saved query is already a named, permission-scoped, parameter-validated unit of work - the
-same shape an MCP tool wants. An MCP server would let an AI agent call a saved query directly (list what
-it's allowed to run, see its parameter schema, invoke it) instead of an agent having to shell out to `curl`
-against the REST API, the way `/catalog`/`/openapi.json` already let a human or a REST client discover the
-same thing.
+**Status: shipped, for read-only saved queries only** - `queryapigate mcp` (needs
+`pip install "queryapigate[mcp]"`, and Python >= 3.10, the `mcp` package's own floor, higher than this
+project's own `>=3.9`) starts an MCP server, on its own port (`QUERYAPIGATE_MCP_PORT`, default 5001),
+separate from `queryapigate serve` - MCP's Streamable HTTP transport is ASGI-native, this app is WSGI (Flask
+on gunicorn, `--worker-class gthread` per #43), and bridging the two into one process would have meant
+either an ASGI-capable worker for the *whole* app or a WSGI/ASGI bridge with its own streaming edge cases;
+a separate process is the same shape "run gunicorn for the API" already is, not a change to how the REST
+API is served. What actually matters for correctness - reusing `apikeys.py`/`store.py`/`app.run_saved()` by
+direct Python import, not an HTTP round-trip back to the REST API - holds regardless of the process split.
 
-**Notes:** the discovery and validation work already exists and should be reused, not rebuilt - the same
-parameter-schema logic `openapi.py`/`postman.py` already use to describe a saved query's `query_parameters`
-becomes an MCP tool's input schema; tool listing should honor exactly the same per-key/collection scoping
-`apikeys.can_use_query`/`can_use_collection` already enforce for `/catalog`, so an agent's key can never see
-or call more than the identical REST key could; execution should go through the exact same
-`engine.execute_sql`/`run_saved` path (caching, rate limiting, audit logging all stay unified, no parallel
-code path to keep in sync). The real design decision is transport: MCP supports both `stdio` (for an agent
-embedding the server as a local subprocess) and a remote HTTP transport (the current spec's "Streamable
-HTTP") - since this is a self-hosted server people expose over a network, not a local CLI tool, the HTTP
-transport is almost certainly the right one, authenticated the same way as everything else here
-(`X-API-Key`). Not started.
+Built exactly as this entry's own notes scoped it: `tools/list` (`mcp_server.list_tools_for()`) reuses the
+exact same `apikeys.can_run_saved()` scoping `GET /catalog` already enforces, computed fresh on every call
+(never cached - two different API keys reach different queries, proven by a test asserting `tools/list` and
+`/catalog` always agree, not by hand-duplicating an expected set); `inputSchema` reuses `params.json_schema()`
+verbatim, the same translation `/openapi.json` already uses. `tools/call` (`mcp_server.call_tool_for()`) runs
+a query through `app.run_saved()` itself - the exact function `GET /q/<name>` uses - via a synthetic Flask
+`test_request_context()` rather than a parallel execution path, so the connection-grant check, param
+resolution, `cache_ttl` caching, `execution_history` recording and #43's live Home-tab broadcast all fire
+exactly as they do over REST (verified: a `cache_ttl`-carrying query's second identical call is provably
+served from cache - `execution_history` gains exactly one entry across both calls, not two - and a query run
+via MCP shows up in the REST server's own History tab immediately, checked against two servers actually
+running side by side against the same `QUERYAPIGATE_HOME`).
+
+**Only read-only saved queries become tools** (`sqltools.first_keyword() in READ_ONLY_STATEMENTS`, plus any
+Mongo `find()`, always read-only) - a write-capable query stays reachable over REST as before, per the scope
+decision made with the user up front: exposing a write over MCP needs a `destructiveHint` classification this
+codebase has no existing constant for (see the notes below, unchanged) and a considered decision on
+confirming an LLM-initiated write before it executes - real, separately-scoped follow-up work, not bundled
+into this first slice. A tool call's result is capped at `QUERYAPIGATE_MCP_MAX_ROWS` (default 200 rows),
+independent of the REST API's own `QUERYAPIGATE_MAX_PAGE_SIZE` default, since an LLM's context can't hold a
+large result the way a human paging through the admin UI can; a caller-supplied smaller `page_size` is still
+honored. A failed call is reported as a normal MCP result with `isError: true` (translating `ApiError` at
+the one MCP boundary, per this entry's own "structured tool errors" note below), not a transport-level error.
+
+Verified against the full test suite (840 tests, including a real end-to-end test with the actual `mcp` SDK's
+own client talking to a real running server - not just `tools/list`/`tools/call` shapes checked in isolation),
+ruff/mypy, and a real CLI run with `queryapigate mcp` and `queryapigate serve` running side by side against
+one `QUERYAPIGATE_HOME`, called from a real MCP client.
 
 **Making a saved query a genuinely first-class MCP tool, not just a REST endpoint wrapped in MCP's shape:**
-real MCP tool concepts, and what each needs from a saved query's current definition -
+real MCP tool concepts, and what each needs from a saved query's current definition - shipped/open status
+per item, now that v1 is built:
 
-- **`description`** - already exists, but written for the wrong audience. Today's descriptions are admin
-  documentation ("Most-rented films, optionally within one category"); an MCP tool description is what the
-  *model* uses to decide whether to call the tool. No new field - a writing discipline for saved-query
-  descriptions going forward, maybe a reminder in the save form.
-- **`inputSchema`** - already derivable, not yet built. `query_parameters`' `type`/`min`/`max`/`enum`/
-  `pattern`/`required`/`default` shape already gets turned into JSON Schema for `/openapi.json` - the same
-  translation produces a tool's `inputSchema`. Zero new data.
-- **`outputSchema`** - a real mismatch, not just missing code. A saved query's result columns aren't
-  statically known (arbitrary, admin-editable SQL) - either skip it (the spec allows a tool with no
-  declared output shape) or add a genuinely new field where the admin declares the expected result shape.
-  Not free either way.
-- **Annotations (`readOnlyHint`/`destructiveHint`/`idempotentHint`)** - partially free. `readOnlyHint` and
-  `idempotentHint` map directly from `sqltools.first_keyword()`'s existing statement classification (already
-  used for the write-guard). `destructiveHint` is genuinely new - today's model only distinguishes read-only
-  vs. `allow_writes`, not "does this delete/overwrite," so a real destructive query and a safe upsert would
-  look identical under the current classification.
-- **Structured tool errors** - a real protocol difference, not a saved-query change. MCP wants a failed
-  tool call returned as a normal result with `isError: true` so the model can see and reason about the
-  failure, not a transport-level error the way `ApiError`/HTTP status codes work today. Needs a translation
-  layer at the MCP boundary.
-- **Result size** - no REST equivalent to reuse. `?page_size=`/`?stream=true` don't translate to a tool
-  call - an LLM's context can't hold a 20,000-row result. The MCP layer needs its own sane default cap,
-  independent of what a saved query's caller might request over REST.
-- **Elicitation for writes** - worth a deliberate decision, not required by the spec. Newer MCP supports
-  the server asking the client to get human confirmation mid-call - worth considering for any
-  `allow_writes` saved query, given an LLM autonomously running a write is a different risk profile than a
-  human clicking Run in the admin UI.
+- **`description`** - **shipped as-is.** Reused verbatim from the saved query's own `description` field for
+  v1 - still written for admins, not the model, but no new field invented for this slice.
+- **`inputSchema`** - **shipped.** `query_parameters` -> JSON Schema via `params.json_schema()`, the same
+  translation `/openapi.json` already used. Zero new data, as scoped.
+- **`outputSchema`** - **still skipped**, per the spec's own allowance for a tool with no declared output
+  shape. A saved query's result columns still aren't statically known; a genuinely new
+  admin-declares-the-shape field remains real, un-started design work if this is ever wanted.
+- **Annotations (`readOnlyHint`/`destructiveHint`/`idempotentHint`)** - **`readOnlyHint`/`idempotentHint`
+  shipped** (both always `True` for the read-only-only v1 tool set). **`destructiveHint` still not built** -
+  moot for now since nothing destructive is exposed at all; still no `DESTRUCTIVE_STATEMENTS` constant to
+  reuse if/when write-capable tools are added.
+- **Structured tool errors** - **shipped.** `ApiError` is translated to `isError: true` at the one MCP
+  boundary (`mcp_server.call_tool_for()`), not left as a transport-level HTTP status.
+- **Result size** - **shipped.** `QUERYAPIGATE_MCP_MAX_ROWS` (default 200), independent of the REST API's own
+  page-size default, with a truncation note in the result text.
+- **Elicitation for writes** - **still open**, since no write-capable query reaches MCP at all in this
+  version - the confirmation-flow decision this note flags stays exactly as open as it was, deferred to
+  whatever follow-up adds write support.
 
-Net: `inputSchema`, the read-only/idempotent hints and the name/description fields are close-to-free reuse
-of data that already exists; `outputSchema` and `destructiveHint` are real new design decisions; structured
-errors and result-size capping are protocol-boundary work, not changes to the saved-query definition itself.
+Net, updated: everything scoped as "close-to-free reuse" shipped; `outputSchema` and `destructiveHint` remain
+the real new design decisions this entry always said they'd be, both still open because both are only
+meaningful once write-capable (or result-shape-aware) tools exist - not needed for a read-only-only v1.
 
 ## 43. Server-Sent Events (SSE) for live updates, instead of polling
 
@@ -1575,11 +1588,12 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped
+out of scope for real parsing; #41, #42, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped
 (#45's "empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53
 shipped in full, both phases - every persistent store this app owns now lives in `queryapigate.db`, see its
 own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel, with the example
 dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
-own entry). #42 (an MCP server exposing saved queries as tools) is queued up next, not started. The "still
-open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished work, not an
-open capability gap.
+own entry; #42 shipped for read-only saved queries only, with write-capable MCP tools - needing a
+`destructiveHint` classification and a write-confirmation decision - left explicitly open, see its own
+entry). Nothing is queued up next as of this entry. The "still open" note under #9 (confirming its CI changes
+on a real run) is a smaller follow-up on finished work, not an open capability gap.

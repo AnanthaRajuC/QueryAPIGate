@@ -28,6 +28,28 @@ def _serve(args):
     return 0
 
 
+def _mcp(args):
+    """`queryapigate mcp`: an MCP server exposing read-only saved queries as tools (BACKLOG #42), on its own
+    port, separate from `queryapigate serve` - see mcp_server.py's own module docstring for why. Needs the
+    optional `queryapigate[mcp]` extra (not a core dependency), imported lazily so `queryapigate serve`/other
+    commands never need it installed."""
+    try:
+        app = create_app()
+    except ValueError as error:
+        print(f'queryapigate: {error}', file=sys.stderr)
+        return 2
+    try:
+        from .mcp_server import run
+    except ImportError:
+        print('queryapigate: the "mcp" package is not installed - run `pip install "queryapigate[mcp]"`',
+             file=sys.stderr)
+        return 2
+    logging.getLogger('queryapigate').info('Serving MCP tools for %s at http://%s:%s/mcp',
+                                           config.home(), args.host, args.port)
+    run(app, host=args.host, port=args.port)
+    return 0
+
+
 def _init(args):
     """Scaffold a fresh home: just queryapigate.db (with the example connection templates seeded in, all
     inactive) now that connections are SQLite-backed - no more db_connections.json/saved_sql/ for a new
@@ -262,6 +284,12 @@ def build_parser():
     serve.add_argument('--debug', action='store_true', default=config.env_flag('QUERYAPIGATE_DEBUG'),
                        help='Flask debug mode - never use on a reachable host')
     serve.set_defaults(func=_serve)
+
+    mcp_parser = commands.add_parser('mcp', help='start an MCP server exposing read-only saved queries as '
+                                                 'tools (needs `pip install "queryapigate[mcp]"`)')
+    mcp_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
+    mcp_parser.add_argument('--port', type=int, default=config.mcp_port())
+    mcp_parser.set_defaults(func=_mcp)
 
     init = commands.add_parser('init', help='create db_connections.json and saved_sql/ in the home folder')
     init.set_defaults(func=_init)

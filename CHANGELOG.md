@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **An MCP server exposing read-only saved queries as tools (BACKLOG #42).** `queryapigate mcp` (needs
+  `pip install "queryapigate[mcp]"`, Python >= 3.10) starts an MCP server on its own port
+  (`QUERYAPIGATE_MCP_PORT`, default 5001), separate from `queryapigate serve` - MCP's Streamable HTTP
+  transport is ASGI, this app is WSGI, so the two run as separate processes against the same
+  `QUERYAPIGATE_HOME` rather than being bridged into one. `tools/list` reuses the exact same
+  `apikeys.can_run_saved()` scoping `GET /catalog` already enforces, computed fresh per request (never
+  cached - two different API keys reach different queries); `tools/call` runs a query through the exact same
+  `run_saved()` the REST API uses via a synthetic Flask request context, so caching, `execution_history`,
+  audit logging and the Home tab's live feed (BACKLOG #43) all fire exactly as they do over REST - no
+  parallel execution path. Only read-only saved queries (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`, and any
+  Mongo `find()`) become tools in this version; a write-capable query stays reachable over REST as before,
+  since exposing it over MCP needs a `destructiveHint` classification and a confirmation-flow decision this
+  codebase doesn't make yet. A tool call's result is capped at `QUERYAPIGATE_MCP_MAX_ROWS` (default 200),
+  independent of the REST API's own page-size default, since an LLM's context can't hold a large result.
 - **Live updates for the admin UI's Home tab via Server-Sent Events (BACKLOG #43).** The "Recent API
   requests"/"Slowest queries" panels used to poll `GET /list_files` (the whole saved-queries catalog) every
   5 seconds while Home was visible. A new `GET /events` (admin only) now pushes one `data: {...}` line per

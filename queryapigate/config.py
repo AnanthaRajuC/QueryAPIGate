@@ -12,6 +12,8 @@ DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
 DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
 DEFAULT_POOL_IDLE_TIMEOUT = 300.0  # seconds
 DEFAULT_SLOW_QUERY_THRESHOLD = 1.0  # seconds
+DEFAULT_MCP_PORT = 5001  # distinct from QUERYAPIGATE_PORT so `queryapigate mcp` and `serve` can run together
+DEFAULT_MCP_MAX_ROWS = 200  # rows returned by an MCP tools/call - an LLM's context can't hold a huge result
 
 # Ships with the package; override with QUERYAPIGATE_H2_JAR to use a different H2 version.
 BUNDLED_H2_JAR = Path(__file__).parent / 'lib' / 'h2-2.2.224.jar'
@@ -235,6 +237,12 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_LIMIT', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_AUDIT_LOG_LIMIT must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_MCP_PORT', '').strip()
+    if raw and (not raw.isdigit() or int(raw) < 1):
+        raise ValueError('QUERYAPIGATE_MCP_PORT must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_MCP_MAX_ROWS', '').strip()
+    if raw and (not raw.isdigit() or int(raw) < 1):
+        raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
     raw = os.environ.get('QUERYAPIGATE_SECRET_KEY', '').strip()
     if raw:
         try:
@@ -309,6 +317,24 @@ def stream_max_rows():
 def json_logs():
     """Emit structured (one JSON object per line) logs instead of plain text (QUERYAPIGATE_JSON_LOGS)."""
     return env_flag('QUERYAPIGATE_JSON_LOGS')
+
+
+def mcp_port():
+    """Bind port for `queryapigate mcp` (QUERYAPIGATE_MCP_PORT), default DEFAULT_MCP_PORT (5001) - distinct
+    from QUERYAPIGATE_PORT so the MCP server and the REST server can run side by side against the same
+    QUERYAPIGATE_HOME without a port clash."""
+    raw = os.environ.get('QUERYAPIGATE_MCP_PORT', '').strip()
+    return int(raw) if raw else DEFAULT_MCP_PORT
+
+
+def mcp_max_rows():
+    """Row cap for an MCP tools/call result (QUERYAPIGATE_MCP_MAX_ROWS), default DEFAULT_MCP_MAX_ROWS (200) -
+    independent of QUERYAPIGATE_MAX_PAGE_SIZE, the REST API's own page-size ceiling: an LLM's context window
+    can't hold a large result the way a human paging through the admin UI can, so this needs its own,
+    smaller-by-default cap regardless of what a REST caller is allowed to request. Validated at startup
+    (check_settings()), the same "fail loudly on a typo" treatment stream_max_rows() gets."""
+    raw = os.environ.get('QUERYAPIGATE_MCP_MAX_ROWS', '').strip()
+    return int(raw) if raw else DEFAULT_MCP_MAX_ROWS
 
 
 def slow_query_threshold():

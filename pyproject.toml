@@ -39,11 +39,14 @@ mongo = ["pymongo>=4.0"]
 flow = ["sqlglot>=23,<26"]  # best-effort table/join extraction for the Access tab - see sqlflow.py
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
+mcp = ["mcp>=1.9,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. Needs Python >=3.10 (the mcp
+                       # package's own floor), higher than this project's own >=3.9 - the same shape h2's
+                       # extra already needs a JVM beyond what `pip install` alone provides.
 all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
-dev = ["queryapigate[all]", "queryapigate[redis]", "ruff>=0.5", "openapi-spec-validator>=0.7", "hypothesis>=6.100",
-      "mypy>=1.10", "coverage>=7.4"]
+dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[mcp]", "ruff>=0.5", "openapi-spec-validator>=0.7",
+      "hypothesis>=6.100", "mypy>=1.10", "coverage>=7.4"]
 
 [project.urls]
 Homepage = "https://github.com/AnanthaRajuC/QueryAPIGate"
