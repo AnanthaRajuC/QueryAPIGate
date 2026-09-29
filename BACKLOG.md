@@ -1470,6 +1470,21 @@ up - a one-bar chart says nothing a stat tile hasn't already. Reuses `renderMetr
 appears in `execution_history` in the first place (see `ExecutionHistoryInteractionTests`), so every number
 here is already, correctly, about real runs only.
 
+## 52. A "requests per day" chart below the meta row
+
+**Status: shipped.** The saved-query detail header's meta row (connection/collection/author/modified/tags)
+is always visible regardless of which subtab is open - the user wanted a daily request-count chart right
+below it, in a box roughly 3x that row's height. New `dailyRequestCounts(history)` buckets the selected
+version's `execution_history` by calendar day (`executed_at`'s first 10 characters, already
+`YYYY-MM-DD...`), zero-filled from the first to the last day recorded so a quiet day is a real zero bar
+rather than a gap - a column chart, per the dataviz skill's own "trend over time, discrete counts" guidance,
+not a line (which would wrongly imply interpolation between days). Single hue (`var(--accent)`, already used
+everywhere else in the app - no new palette to validate), plain `div` bars the same technique `barCard()`'s
+horizontal bars already use, just vertical. Only the tallest bar is direct-labelled (the extreme, per
+"label selectively"); every bar carries an exact date/count native `title` tooltip instead of a custom hover
+layer, matching how `reachDot()` and others already do this. Omitted entirely (returns `null`) when there's
+no history, same as every other conditional chart in this file.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1487,7 +1502,7 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50 and #51 are shipped (#45's "empty collections" item
+out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50, #51 and #52 are shipped (#45's "empty collections" item
 excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
 queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
 "still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished

@@ -520,6 +520,15 @@ UI_HTML = r"""<!doctype html>
   .meta div { background: var(--bg); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .meta dt { font-size: 11px; color: var(--ink-3); }
   .meta dd { margin: 0; font: 12px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .req-day-chart { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .req-day-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .req-day-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .req-day-cols { display: flex; align-items: flex-end; gap: 2px; height: 130px; border-bottom: 1px solid var(--line); }
+  .req-day-col { flex: 1 1 0; min-width: 2px; max-width: 24px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+  .req-day-bar { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; }
+  .req-day-bar:not(.zero) { min-height: 2px; }
+  .req-day-label { font: 11px var(--mono); color: var(--ink-2); margin-bottom: 2px; white-space: nowrap; }
+  .req-day-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--ink-3); }
   .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 -20px; padding: 0 14px; }
   .subtabs button { border: 0; background: none; font: 500 12.5px var(--sans); color: var(--ink-2); padding: 10px 8px; cursor: pointer; position: relative; display: flex; gap: 6px; align-items: center; }
   .subtabs button:hover { color: var(--ink); }
@@ -4090,6 +4099,7 @@ function renderDetail() {
       metaItem('connection', v.connection_name || '—'), metaItem('collection', f.collection || '—'), metaItem('author', v.author || '—'),
       metaItem('modified', v.last_modified_at || v.created_at || '—'),
       tagsText ? metaItem('tags', tagsText) : null),
+    renderRequestsPerDayChart(v.execution_history),
     h('div', { className: 'subtabs', role: 'tablist' },
       subtab('run', 'Run'), subtab('sql', 'SQL'),
       subtab('history', 'History', h('span', { className: 'count', text: history.length ? String(history.length) : '' })),
@@ -4113,6 +4123,52 @@ function renderDetail() {
   else renderRunTab(body, f, v, isLatest);
 }
 function metaItem(k, val) { return h('div', {}, h('dt', { text: k }), h('dd', { title: String(val), text: String(val) })); }
+/** `execution_history` in, one {date, count} per calendar day out - zero-filled from the first to the last
+ * day recorded, so a quiet day is a real zero rather than a gap in the range. `executed_at` is already
+ * "YYYY-MM-DD HH:MM:SS", so the date is just its first 10 characters. */
+function dailyRequestCounts(history) {
+  var counts = {};
+  (history || []).forEach(function (e) {
+    var day = String(e.executed_at || '').slice(0, 10);
+    if (day) counts[day] = (counts[day] || 0) + 1;
+  });
+  var days = Object.keys(counts).sort();
+  if (!days.length) return [];
+  var out = [];
+  var cursor = new Date(days[0] + 'T00:00:00Z');
+  var end = new Date(days[days.length - 1] + 'T00:00:00Z');
+  while (cursor <= end) {
+    var iso = cursor.toISOString().slice(0, 10);
+    out.push({ date: iso, count: counts[iso] || 0 });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+/** A daily request-count column chart, shown under the meta row regardless of which subtab is open - the
+ * same query's traffic at a glance. Plain div bars growing from a single baseline (the technique
+ * barCard()'s horizontal bars already use, just vertical here), single hue since this is one series - see
+ * the dataviz skill's form/color guidance. Only the tallest bar is direct-labelled (the extreme); every bar
+ * carries its exact date/count as a native title tooltip, the same lightweight pattern reachDot() and
+ * friends already use instead of a custom hover layer. null when there's no history, so the caller can
+ * simply skip appending it - the same "no chart with nothing to show" rule every other conditional chart in
+ * this file already follows. */
+function renderRequestsPerDayChart(history) {
+  var days = dailyRequestCounts(history);
+  if (!days.length) return null;
+  var max = days.reduce(function (m, d) { return Math.max(m, d.count); }, 0);
+  var cols = days.map(function (d) {
+    var pct = max ? 100 * d.count / max : 0;
+    return h('div', { className: 'req-day-col', title: d.date + ' — ' + d.count + (d.count === 1 ? ' request' : ' requests') },
+      d.count === max && max > 0 ? h('div', { className: 'req-day-label', text: String(d.count) }) : null,
+      h('div', { className: 'req-day-bar' + (d.count ? '' : ' zero'), style: 'height:' + pct + '%' }));
+  });
+  return h('div', { className: 'req-day-chart' },
+    h('div', { className: 'req-day-head' }, h('h3', { text: 'Requests per day' }),
+      h('span', { className: 'hint', text: days.length === 1 ? '1 day' : days.length + ' days' })),
+    h('div', { className: 'req-day-cols' }, cols),
+    h('div', { className: 'req-day-axis' }, h('span', { text: days[0].date }),
+      days.length > 1 ? h('span', { text: days[days.length - 1].date }) : null));
+}
 /** A small popover menu under `anchor`; closes on any outside click or Escape. items: [{label, title, run}]. */
 function openMenu(anchor, items) {
   var old = document.getElementById('popmenu');

@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A "requests per day" chart below the meta row (BACKLOG #52).** The saved-query detail view now shows a
+  daily request-count column chart right under the connection/collection/author/modified row, visible on
+  every subtab. Zero-filled from the first to the last day in the selected version's `execution_history` -
+  a quiet day is a real zero bar, not a gap - with the tallest day direct-labelled and every bar carrying
+  an exact date/count tooltip. No new fetch.
 - **A per-query Metrics tab (BACKLOG #51).** Right after Cache, showing that version's own run stats -
   total runs, success rate, avg/slowest duration, avg rows, last run, and a "Runs by caller" chart when
   more than one key has called it - aggregated entirely from `execution_history` already on the client, no
