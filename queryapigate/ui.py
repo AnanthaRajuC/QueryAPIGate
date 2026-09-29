@@ -4938,7 +4938,11 @@ $('run-sql').addEventListener('dblclick', function (e) {
 var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), text); },
   function (tableName) { previewTable($('run-connection').value, tableName); },
   function (table) { applySelectQuery($('run-sql'), $('run-connection').value, table); },
-  function (tableName) { showTableDdl($('run-connection').value, tableName); });
+  function (tableName) {
+    var c = connectionsCache[$('run-connection').value];
+    var database = c && $('run-database').value !== c.database ? $('run-database').value : null;
+    showTableDdl($('run-connection').value, tableName, database);
+  });
 $('run-schema-slot').appendChild(schemaField(runSchema));
 $('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
@@ -5132,10 +5136,12 @@ function previewTable(connectionName, tableName) {
  * mysql/sqlite/clickhouse connections (DDL_DIALECTS; paintTables() already hides the icon for any other
  * dialect, this is what actually fetches it). Opens the shared drawer, so it's only wired to Run SQL's own
  * schema browser - the query-form drawer's embedded one would clobber the very form it's shown inside. */
-async function showTableDdl(connectionName, tableName) {
+async function showTableDdl(connectionName, tableName, database) {
   var slot = openDrawer('table-ddl-slot', tableName, connectionName + ' · CREATE TABLE');
   slot.appendChild(loadingNode());
-  var data = await apiJson('connections/' + enc(connectionName) + '/table_ddl?table=' + enc(tableName));
+  var url = 'connections/' + enc(connectionName) + '/table_ddl?table=' + enc(tableName);
+  if (database) url += '&database=' + enc(database);
+  var data = await apiJson(url);
   clear(slot);
   if (!data) { slot.appendChild(h('div', { className: 'hint', text: 'Could not load this table’s DDL - see the error above.' })); return; }
   var box = codeBox(data.ddl);
