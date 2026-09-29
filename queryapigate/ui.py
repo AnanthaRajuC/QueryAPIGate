@@ -4097,7 +4097,8 @@ function renderDetail() {
       subtab('keys', 'API Keys', h('span', { className: 'count', text: reach.keys.length ? String(reach.keys.length) : '' })),
       subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' })),
       subtab('access', 'Access'),
-      subtab('cache', 'Cache')));
+      subtab('cache', 'Cache'),
+      subtab('metrics', 'Metrics')));
   var body = h('div', { className: 'd-body' });
   box.appendChild(head);
   box.appendChild(body);
@@ -4108,6 +4109,7 @@ function renderDetail() {
   else if (selected.tab === 'history') renderHistoryTab(body, v);
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
   else if (selected.tab === 'cache') renderCacheTab(body, f, v);
+  else if (selected.tab === 'metrics') renderQueryMetricsTab(body, v);
   else renderRunTab(body, f, v, isLatest);
 }
 function metaItem(k, val) { return h('div', {}, h('dt', { text: k }), h('dd', { title: String(val), text: String(val) })); }
@@ -4242,6 +4244,44 @@ function renderHistoryTab(body, v) {
   statusSelect.onchange = paint;
   searchInput.oninput = paint;
   paint();
+}
+
+/** A scoped-down renderMetrics(): the same stat-tiles/barCard building blocks, aggregated from just this
+ * one version's execution_history (the same array History lists raw) instead of the server-wide /metrics
+ * feed - no new fetch. A cache hit never appears in execution_history in the first place (see
+ * ExecutionHistoryInteractionTests), so every number here is already, correctly, about real runs only. */
+function renderQueryMetricsTab(body, v) {
+  var hs = v.execution_history || [];
+  if (!hs.length) {
+    body.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No runs recorded' }),
+      h('span', { text: 'Runs of v' + v.version + ' through /q/ appear here.' })));
+    return;
+  }
+  var successes = hs.filter(function (x) { return x.status === 'success'; });
+  var errorRate = 100 * (hs.length - successes.length) / hs.length;
+  var durations = hs.map(function (x) { return x.duration_ms; }).filter(function (d) { return d !== undefined && d !== null; });
+  var avgDuration = durations.length ? Math.round(durations.reduce(function (a, d) { return a + d; }, 0) / durations.length) : null;
+  var maxDuration = durations.length ? Math.max.apply(null, durations) : null;
+  var rowCounts = successes.map(function (x) { return x.rows; }).filter(function (r) { return r !== undefined && r !== null; });
+  var avgRows = rowCounts.length ? Math.round(rowCounts.reduce(function (a, r) { return a + r; }, 0) / rowCounts.length) : null;
+  var last = lastRun(v);
+
+  body.appendChild(h('div', { className: 'stat-tiles' },
+    statTile('Total runs', hs.length),
+    statTile('Success rate', (100 - errorRate).toFixed(1) + '%', errorRate >= 5),
+    statTile('Avg duration', avgDuration === null ? '—' : avgDuration + ' ms'),
+    statTile('Slowest run', maxDuration === null ? '—' : maxDuration + ' ms'),
+    statTile('Avg rows', avgRows === null ? '—' : avgRows),
+    statTile('Last run', last ? last.executed_at : '—')));
+
+  var byCaller = {};
+  hs.forEach(function (x) { var k = x.key_name || '-'; byCaller[k] = (byCaller[k] || 0) + 1; });
+  var callerNames = Object.keys(byCaller).sort();
+  if (callerNames.length > 1) {
+    var callerRows = callerNames.map(function (k) { return { label: k, value: byCaller[k] }; });
+    body.appendChild(h('div', { className: 'metrics-charts' },
+      barCard('Runs by caller', callerRows, function () { return 'var(--accent)'; })));
+  }
 }
 
 /** The latest version's declared parameters come from the OpenAPI catalogue (one source of truth with the

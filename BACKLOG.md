@@ -1457,6 +1457,19 @@ mirrors `renderQueryFlowPanel()`'s exact fetch-then-paint shape and shares the s
 by filename:version) every other flow consumer already uses - free if the Access tab already loaded this
 query's flow, one `/query_flow` call otherwise.
 
+## 51. A per-query "Metrics" tab, after Cache
+
+**Status: shipped.** History already lists every raw run of the selected version, but there was no
+at-a-glance summary. A new "Metrics" tab, right after Cache, aggregates the exact same
+`v.execution_history` array History renders as a raw table - no new fetch, same per-version scope as
+History/Curl/SQL/Cache. Tiles: total runs, success rate (red below 95%, same `statTile(..., warn)` pattern
+the top-level Metrics tab's own error-rate tile uses), avg/slowest duration, avg rows returned (success
+runs only), last run. A "Runs by caller" `barCard` appears only when more than one distinct `key_name` shows
+up - a one-bar chart says nothing a stat tile hasn't already. Reuses `renderMetrics()`'s own
+`statTile()`/`barCard()` verbatim rather than inventing a second visual language; a cache hit already never
+appears in `execution_history` in the first place (see `ExecutionHistoryInteractionTests`), so every number
+here is already, correctly, about real runs only.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and
@@ -1474,7 +1487,7 @@ mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint mode
 "every column, suggested anywhere" version still open; #40 is shipped, including table/join extraction, the
 Access map's table filter, real pretty-printing for `formatSql()`'s call sites, and the node-link diagram
 on the Access tab, with only column lineage and write-target detection deferred, plus H2/JDBC permanently
-out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49 and #50 are shipped (#45's "empty collections" item
+out of scope for real parsing; #41, #44, #45, #46, #47, #48, #49, #50 and #51 are shipped (#45's "empty collections" item
 excepted - it doesn't apply to this app's data model, see its own entry). #42 (an MCP server exposing saved
 queries as tools) and #43 (SSE for live updates instead of polling) are queued up next, not started. The
 "still open" note under #9 (confirming its CI changes on a real run) is a smaller follow-up on finished

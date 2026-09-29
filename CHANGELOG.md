@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A per-query Metrics tab (BACKLOG #51).** Right after Cache, showing that version's own run stats -
+  total runs, success rate, avg/slowest duration, avg rows, last run, and a "Runs by caller" chart when
+  more than one key has called it - aggregated entirely from `execution_history` already on the client, no
+  new fetch. Reuses `renderMetrics()`'s own `statTile()`/`barCard()` building blocks.
 - **A tables/joins flow diagram on the SQL tab (BACKLOG #50).** The saved-query SQL tab now shows the same
   "Query flow" diagram the Access tab does - tables and their join edges, flowing into the query - minus
   the keys/roles column, since this tab is about the query's own structure, not who can reach it. Shares
