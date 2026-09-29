@@ -333,4 +333,5 @@ def main(argv=None):
     if getattr(args, 'home', None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
     db.init_schema()
+    store.import_legacy_connections_if_empty()
     return args.func(args)

@@ -18,11 +18,23 @@ services:
       timeout: 3s
       retries: 20
 
+  # A one-shot init container: copies the read-only demo/data/ seed into the writable demo-data volume
+  # below, once, before queryapigate starts - so the repository files themselves are never modified, even
+  # though QueryAPIGate's own SQLite store (queryapigate.db) now needs a genuinely writable home.
+  seed:
+    image: busybox:stable
+    volumes:
+      - ./demo/data:/data-seed:ro
+      - demo-data:/data
+    command: ["sh", "-c", "cp -r /data-seed/. /data/"]
+
   queryapigate:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${QUERYAPIGATE_PORT:-5000}:5000"   # only reachable from this machine
     environment:
@@ -30,5 +42,7 @@ services:
       DEMO_DB_PASSWORD: demo                      # referenced from demo/data/db_connections.json as ${DEMO_DB_PASSWORD}
       QUERYAPIGATE_RATE_LIMIT: 120/minute
     volumes:
-      # Read-only, so the repository files are never modified (saved-query run history is simply not recorded here).
-      - ./demo/data:/data:ro
+      - demo-data:/data
+
+volumes:
+  demo-data:

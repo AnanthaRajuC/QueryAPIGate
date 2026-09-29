@@ -324,6 +324,56 @@ class ConnectionTests(ApiTestCase):
         self.assertNotEqual(stored['created_at'], '2000-01-01 00:00:00')
 
 
+class LegacyConnectionsImportTests(unittest.TestCase):
+    """A still-present db_connections.json (an upgrade from before the SQLite store existed, or a
+    read-only seed file like the docker-compose demo's) must still be picked up on first boot - the exact
+    regression a read-only-mounted demo home surfaced: the app no longer reads that file at all once
+    anything exists in SQLite, so a fresh SQLite store with zero rows needs to import it once, automatically."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = self.tmp.name
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ('QUERYAPIGATE_API_KEY',):
+            os.environ.pop(name, None)
+
+    def write_legacy_json(self, connections):
+        with open(os.path.join(self.home, 'db_connections.json'), 'w') as f:
+            json.dump({'connections': connections}, f)
+
+    def test_a_legacy_file_is_imported_on_first_boot(self):
+        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
+        client = create_app().test_client()
+        conns = client.get('/connections').get_json()['connections']
+        self.assertIn('a', conns)
+        self.assertTrue(conns['a']['active'])
+
+    def test_a_missing_legacy_file_is_a_no_op_not_an_error(self):
+        client = create_app().test_client()  # no db_connections.json at all
+        self.assertEqual(client.get('/connections').get_json()['connections'], {})
+
+    def test_import_only_happens_once_a_later_edit_to_the_json_file_is_never_picked_up(self):
+        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
+        create_app()
+        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True},
+                                'b': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
+        client = create_app().test_client()  # second boot: connections table is no longer empty
+        conns = client.get('/connections').get_json()['connections']
+        self.assertNotIn('b', conns)
+
+    def test_a_connection_created_through_the_api_also_blocks_a_later_import(self):
+        client = create_app().test_client()  # boots with no legacy file - table starts empty
+        client.patch('/connections', json={'connections': {'made': {
+            'db': 'sqlite', 'database': 'x.db', 'active': True}}})
+        self.write_legacy_json({'from_json': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
+        conns = create_app().test_client().get('/connections').get_json()['connections']
+        self.assertIn('made', conns)
+        self.assertNotIn('from_json', conns)
+
+
 class TestConnectionTests(ApiTestCase):
     def test_succeeds_against_a_real_connection(self):
         res = self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})

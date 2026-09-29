@@ -143,6 +143,15 @@ All notable changes to this project are documented here. The format follows
   badges, never a broken schema fetch. `h2` (unverifiable in this environment) and `clickhouse` (no real
   foreign-key concept) are explicit gaps, not bugs; a composite key reports only its first column.
 
+### Changed
+- **Connections now live in `queryapigate.db` (SQLite), not `db_connections.json`** - the first slice of
+  moving off hand-rolled JSON file storage (more in a later release; saved queries, API keys, roles and the
+  audit log are unaffected for now). A pre-existing `db_connections.json` is imported automatically, once,
+  the first time the connections table is empty - nothing to run by hand, and the JSON file is never
+  consulted again afterward. `QUERYAPIGATE_HOME` now needs to be writable (previously `db_connections.json`
+  only needed to be readable) - the bundled `docker-compose.yml` demo, whose data folder was mounted
+  read-only, now seeds a proper writable volume from it via a small one-shot init container instead.
+
 ## [0.9.0] - 2026-09-28
 
 ### Added

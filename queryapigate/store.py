@@ -104,6 +104,28 @@ def read_connections():
     return {row['name']: _connection_row_to_dict(row) for row in rows}
 
 
+def import_legacy_connections_if_empty():
+    """First-boot bootstrap: the connections table is now the only place a connection is read from - a
+    still-present db_connections.json (an upgrade from before this table existed, or a read-only seed file
+    like the docker-compose demo's) would otherwise just go silently unread. Only runs when the table is
+    completely empty, so it's safe to call on every startup: once anything exists in SQLite (imported here,
+    or created through the API) this never looks at the JSON file again. Never raises - a missing or
+    corrupt legacy file just means there is nothing to import, the same "nothing there yet" state as a
+    genuinely fresh install."""
+    if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
+        return
+    path = config.connections_file()
+    if not path.exists():
+        return
+    try:
+        with open(path, 'r') as f:
+            connections = json.load(f).get('connections', {})
+    except (OSError, json.JSONDecodeError):
+        return
+    if connections:
+        update_connections(connections)
+
+
 def _expand_env(value):
     """Replace ${VAR} references in a connection value with the environment variable's content."""
     if not isinstance(value, str):

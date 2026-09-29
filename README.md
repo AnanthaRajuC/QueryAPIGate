@@ -589,9 +589,10 @@ curl -H 'X-API-Key: demo-key' 'http://127.0.0.1:5000/q/films_by_rating?rating=PG
 ~~~
 
 Open <http://127.0.0.1:5000/docs>, paste `demo-key` into the box at the top, and both saved queries appear as endpoints.
-The demo listens on localhost only, mounts its configuration read-only, and reads the database password from an
-environment variable (`${DEMO_DB_PASSWORD}` in
-[`demo/data/db_connections.json`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/demo/data/db_connections.json)).
+The demo listens on localhost only. Its seed data - the connection and saved queries in
+[`demo/data/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/demo/data), including the database
+password read from an environment variable (`${DEMO_DB_PASSWORD}`) - is copied into a writable Docker
+volume once at startup by a small init container, so the repository files themselves are never modified.
 Clean up with `docker compose down -v`.
 
 ## API overview

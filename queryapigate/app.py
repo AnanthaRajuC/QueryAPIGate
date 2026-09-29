@@ -92,6 +92,7 @@ def create_app():
     from . import __version__
     config.check_settings()
     db.init_schema()
+    store.import_legacy_connections_if_empty()
     logging_setup.configure(log)
     app = Flask(__name__)
     hops = config.proxy_hops()
