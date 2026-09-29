@@ -1345,6 +1345,18 @@ Scoped to Run SQL's own schema browser only, same reason as the DDL icon (#38): 
 embedded schema browser already lives inside the shared drawer this feature also needs, and opening it
 there would clobber the form it's shown inside.
 
+The panel shows each touching query's actual SQL, not just its name - fetched and formatted the same way
+the SQL tab already does (`getContent()` + `queryDisplayText()` + `prettySql()`, real `sqlglot` pretty-
+printing when the dialect supports it), rendered in the same read-only `codeBox()` used everywhere else in
+the app. The query name stays a clickable heading (still jumps to Saved Queries); the drawer opts into a
+new `.drawer.wide` modifier (reset on every `openDrawer()` call so it never leaks into a narrower drawer
+used next) to fit the SQL comfortably. Fixed a real race discovered while building this: `buildTableUsageIndex()`
+reads the saved-queries list (`filesCache`) synchronously, but the Schema browser's first paint can run
+before the initial `list_files` load finishes populating it, permanently caching an empty usage index for
+that connection until a manual refresh. A `whenFilesCacheReady()` promise, resolved once by `loadQueries()`'s
+first successful load, is now awaited at the top of `buildTableUsageIndex()` so the very first computation
+waits for real data instead of racing it.
+
 ---
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32, #33 and

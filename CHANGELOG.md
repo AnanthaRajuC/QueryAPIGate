@@ -15,7 +15,10 @@ All notable changes to this project are documented here. The format follows
   paint, not one lookup per table, so browsing a connection's schema now costs about what clicking one
   table in the Access map already cost today, computed once and shared across every table shown. Only
   wired into Run SQL's own schema browser, same reason as the DDL icon (#38) - the saved-query form's
-  embedded schema browser already lives inside the shared drawer this needs.
+  embedded schema browser already lives inside the shared drawer this needs. The panel now also shows each
+  touching query's actual, formatted SQL (not just its name), in a wider drawer to fit it comfortably. Also
+  fixes a race where the Schema browser's very first paint could run before the saved-queries list finished
+  loading, permanently caching an empty usage index for that connection until a manual refresh.
 - **A "show CREATE TABLE" icon in the schema browser (BACKLOG #38).** A new ⌸ icon next to the existing
   ⧉/👁 ones shows a table's real DDL (`GET /connections/{name}/table_ddl`) for `mysql`, `sqlite` and
   `clickhouse` connections - SQLite's is free (`sqlite_master.sql` already *is* the CREATE TABLE text),

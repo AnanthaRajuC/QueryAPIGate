@@ -433,6 +433,7 @@ UI_HTML = r"""<!doctype html>
   .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(500px, 100%); z-index: 41; background: var(--surface); border-left: 1px solid var(--line);
     box-shadow: var(--shadow); display: flex; flex-direction: column; transform: translateX(102%); transition: transform 0.18s ease; visibility: hidden; }
   .drawer.open { transform: none; visibility: visible; }
+  .drawer.wide { width: min(760px, 100%); }
   .drawer-head { display: flex; align-items: flex-start; gap: 10px; padding: 16px 18px 14px; border-bottom: 1px solid var(--line); }
   .drawer-head h3 { font-size: 15px; }
   .kicker { font: 11px var(--mono); color: var(--ink-3); margin-bottom: 3px; }
@@ -530,6 +531,8 @@ UI_HTML = r"""<!doctype html>
   .get-row .endpoint { flex: 1; min-width: 160px; font: 12.5px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .get-row select { width: auto; height: 28px; padding: 0 6px; font-size: 12px; background: var(--surface); }
   .codebox { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 12px 0; font: 12.5px/1.65 var(--mono); overflow: auto; }
+  .table-usage-query { margin-bottom: 14px; }
+  .table-usage-query .target { display: block; margin-bottom: 6px; }
   .ln-r { display: flex; white-space: pre; }
   .ln-n { flex: none; width: 44px; padding-right: 14px; text-align: right; color: var(--line-strong); user-select: none; }
   .curlbox { margin: 0; padding: 14px 16px; font: 12.5px/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
@@ -1339,6 +1342,7 @@ function openDrawer(slotId, title, kicker) {
   clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
+  $('drawer').classList.remove('wide'); // opt-in per drawer (showTableUsage()) - reset so it never leaks into the next one
   $('drawer').classList.add('open');
   $('drawer').setAttribute('aria-hidden', 'false');
   $('drawer-backdrop').hidden = false;
@@ -3091,6 +3095,7 @@ function tableReachSummary(filenames) {
  * not one per table - this is what lets the Schema browser badge every table at once for close to what
  * computeTableMatches() already costs to check just one. */
 async function buildTableUsageIndex(connName, tableNames) {
+  await whenFilesCacheReady();
   var index = {};
   tableNames.forEach(function (t) { index[t] = new Set(); });
   var candidates = filesCache.filter(function (f) { return latestOf(f).connection_name === connName; });
@@ -3180,6 +3185,13 @@ function findFile(name) { return filesCache.filter(function (f) { return f.filen
 function lastRun(v) { var hs = v.execution_history || []; return hs[hs.length - 1] || null; }
 
 var queriesInitialised = false;
+/** buildTableUsageIndex() reads filesCache synchronously - awaiting this once avoids the race where the
+ * Schema browser's first paint runs before the initial list_files load has populated it, permanently
+ * caching an empty usage index for that connection until a manual refresh. */
+var filesCacheReady = false, filesCacheReadyWaiters = [];
+function whenFilesCacheReady() {
+  return filesCacheReady ? Promise.resolve() : new Promise(function (resolve) { filesCacheReadyWaiters.push(resolve); });
+}
 async function loadQueries(selectName) {
   await loadCollections();
   var data = await apiJson('list_files');
@@ -3189,6 +3201,7 @@ async function loadQueries(selectName) {
     return;
   }
   filesCache = (data.files || []).slice().sort(function (a, b) { return a.filename < b.filename ? -1 : 1; });
+  if (!filesCacheReady) { filesCacheReady = true; filesCacheReadyWaiters.forEach(function (r) { r(); }); filesCacheReadyWaiters = []; }
   contentCache = {};
   $('count-queries').textContent = filesCache.length ? String(filesCache.length) : '';
   paintQueriesSub();
@@ -5236,17 +5249,35 @@ async function showTableDdl(connectionName, tableName, database) {
  * scoping as showTableDdl() and the same reason - only wired to Run SQL's own schema browser. "View in
  * Access map" reuses the exact matched-filename set already computed here instead of recomputing it, so
  * the two screens can never disagree about which queries touch this table. */
-function showTableUsage(connectionName, tableName, filenames) {
+async function showTableUsage(connectionName, tableName, filenames) {
   var slot = openDrawer('table-usage-slot', tableName,
     connectionName + ' · used by ' + filenames.length + (filenames.length === 1 ? ' query' : ' queries'));
+  $('drawer').classList.add('wide'); // room for each query's actual SQL below its name, not just a name list
   var summary = tableReachSummary(filenames);
   slot.appendChild(h('p', { className: 'sub-h' }, 'Queries'));
-  slot.appendChild(h('div', { className: 'access-reach', style: 'flex-direction:column;align-items:flex-start' },
-    filenames.slice().sort().map(function (fname) {
-      return h('button', { type: 'button', className: 'target', text: fname, onclick: function () {
-        closeDrawer(); openSavedQuery(findFile(fname));
-      } });
-    })));
+  var queriesBox = h('div', { className: 'table-usage-queries' });
+  slot.appendChild(queriesBox);
+  var sorted = filenames.slice().sort();
+  sorted.forEach(function (fname) { queriesBox.appendChild(h('div', { className: 'hint' }, 'Loading ' + fname + '…')); });
+  var rendered = await Promise.all(sorted.map(async function (fname) {
+    var f = findFile(fname);
+    var wrap = h('div', { className: 'table-usage-query' },
+      h('button', { type: 'button', className: 'target', text: fname, onclick: function () {
+        closeDrawer(); openSavedQuery(f);
+      } }));
+    if (!f) { wrap.appendChild(h('div', { className: 'hint', text: 'This query no longer exists.' })); return wrap; }
+    var v = latestOf(f);
+    var c = await getContent(fname);
+    if (!c) { wrap.appendChild(h('div', { className: 'hint', text: 'Could not load this query’s SQL.' })); return wrap; }
+    var data = c.parsed && c.parsed[String(v.version)];
+    var sql = queryDisplayText(data, c.raw);
+    var dialect = connectionsCache[v.connection_name] && connectionsCache[v.connection_name].db;
+    sql = await prettySql(fname, v.version, dialect, sql);
+    wrap.appendChild(codeBox(sql));
+    return wrap;
+  }));
+  clear(queriesBox);
+  rendered.forEach(function (node) { queriesBox.appendChild(node); });
   slot.appendChild(h('p', { className: 'sub-h', style: 'margin-top:14px' }, 'Access'));
   if (!summary.keys.length && !summary.roles.length) {
     slot.appendChild(h('div', { className: 'hint', text: 'Only the admin key can run queries touching this table.' }));
