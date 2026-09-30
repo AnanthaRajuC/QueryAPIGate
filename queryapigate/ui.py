@@ -723,8 +723,11 @@ UI_HTML = r"""<!doctype html>
     </div>
     <div class="nav-group"><div class="nav-label">Data</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="connections" data-group="Data" data-label="Connections" title="Connections"><span class="nav-abbr">Cn</span><span class="nav-text">Connections</span><span class="count" id="count-connections"></span></button>
-      <button type="button" role="tab" data-tab="queries" data-group="Data" data-label="API Repository" title="API Repository"><span class="nav-abbr">Ar</span><span class="nav-text">API Repository</span><span class="count" id="count-queries"></span></button>
-      <button type="button" role="tab" data-tab="run" data-group="Data" data-label="API Designer" title="API Designer"><span class="nav-abbr">Ad</span><span class="nav-text">API Designer</span></button>
+      <button type="button" role="tab" data-tab="caching" data-group="Data" data-label="Caching" title="Caching"><span class="nav-abbr">Ca</span><span class="nav-text">Caching</span></button>
+    </div>
+    <div class="nav-group"><div class="nav-label">API</div><div class="nav-rule"></div>
+      <button type="button" role="tab" data-tab="queries" data-group="API" data-label="API Repository" title="API Repository"><span class="nav-abbr">Ar</span><span class="nav-text">API Repository</span><span class="count" id="count-queries"></span></button>
+      <button type="button" role="tab" data-tab="run" data-group="API" data-label="API Designer" title="API Designer"><span class="nav-abbr">Ad</span><span class="nav-text">API Designer</span></button>
     </div>
     <div class="nav-group"><div class="nav-label">Access</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="apikeys" data-group="Access" data-label="API keys" title="API keys"><span class="nav-abbr">Ky</span><span class="nav-text">API keys</span><span class="count" id="count-apikeys"></span></button>
@@ -733,7 +736,6 @@ UI_HTML = r"""<!doctype html>
     </div>
     <div class="nav-group"><div class="nav-label">Observability</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="metrics" data-group="Observability" data-label="Metrics" title="Metrics"><span class="nav-abbr">Mt</span><span class="nav-text">Metrics</span></button>
-      <button type="button" role="tab" data-tab="caching" data-group="Observability" data-label="Caching" title="Caching"><span class="nav-abbr">Ca</span><span class="nav-text">Caching</span></button>
       <button type="button" role="tab" data-tab="auditlog" data-group="Observability" data-label="Audit log" title="Audit log"><span class="nav-abbr">Au</span><span class="nav-text">Audit log</span></button>
     </div>
   </nav>

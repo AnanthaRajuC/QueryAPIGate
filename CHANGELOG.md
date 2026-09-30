@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format follows
   "Open in API Repository"). Scoped to UI chrome only: internal ids (`data-tab="queries"`/`"run"`), routes
   (`/q/<name>`), JSON field names, CLI output, and the generic noun "a saved query" used elsewhere in hints
   and docs are all unchanged.
+- **Regrouped the admin UI sidebar**: API Repository and API Designer moved out of "Data" into their own new
+  "API" section; Caching moved from "Observability" into "Data", alongside Connections.
 
 ### Added
 - **The admin UI's Settings screen now has an "MCP server" section (BACKLOG #54)**, showing
