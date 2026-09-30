@@ -175,23 +175,38 @@ class LoadTests(ExamplesTestCase):
         added = examples.load(FIXED_NOW)
         self.assertEqual(sorted(added['queries']), sorted(examples.QUERY_NAMES))
         self.assertEqual(sorted(added['roles']), sorted(examples.ROLE_NAMES))
+        self.assertEqual(sorted(added['key_secrets']), sorted(examples.KEY_NAMES))
+        self.assertTrue(all(secret.startswith('sk_') for secret in added['key_secrets'].values()))
         self.assertTrue(added['connection'])
         state = examples.status()
         self.assertTrue(state['loaded'])
         self.assertFalse(state['partial'])
         self.assertEqual(state['collections'], sorted(examples.SCENARIOS))
+        self.assertEqual(sorted(state['keys']), sorted(examples.KEY_NAMES))
         self.assertTrue(os.path.isfile(os.path.join(self.home, examples.DB_FILE)))
         self.assertTrue(store.read_connections()[examples.CONNECTION]['example'])
         self.assertTrue(all(r['example'] for r in apikeys.list_roles().values()))
+        self.assertTrue(all(k['example'] for k in apikeys.list_keys().values()))
         for file in store.list_saved():
             self.assertTrue(file['example'], file['filename'])
+            for version in file['versions']:
+                history = version['execution_history']
+                self.assertTrue(8 <= len(history) <= 20, file['filename'])
+                self.assertTrue(all(e['status'] == 'success' for e in history), file['filename'])
 
     def test_it_is_idempotent_and_never_adds_versions(self):
         examples.load(FIXED_NOW)
         again = examples.load(FIXED_NOW)
-        self.assertEqual(again, {'connection': False, 'queries': [], 'roles': []})
+        self.assertEqual(again, {'connection': False, 'queries': [], 'roles': [], 'key_secrets': {}})
         for file in store.list_saved():
             self.assertEqual([v['version'] for v in file['versions']], [1], file['filename'])
+
+    def test_a_second_load_never_adds_more_history(self):
+        examples.load(FIXED_NOW)
+        before = {f['filename']: len(f['versions'][0]['execution_history']) for f in store.list_saved()}
+        examples.load(FIXED_NOW)
+        after = {f['filename']: len(f['versions'][0]['execution_history']) for f in store.list_saved()}
+        self.assertEqual(before, after)
 
     def test_nothing_of_the_users_is_touched_by_loading(self):
         self.save_user_query('mine', 'my-group')
@@ -212,6 +227,7 @@ class LoadTests(ExamplesTestCase):
         self.assertEqual(self.saved_files(), ['example_top_films.json'])
         self.assertFalse(os.path.exists(os.path.join(self.home, examples.DB_FILE)))
         self.assertEqual(apikeys.list_roles(), {})
+        self.assertEqual(apikeys.list_keys(), {})
         self.assertEqual(store.read_connections(), {})
 
     def test_a_users_connection_role_or_file_with_an_examples_name_also_stops_it(self):
@@ -225,6 +241,11 @@ class LoadTests(ExamplesTestCase):
             examples.load(FIXED_NOW)
         self.assertIn("role 'example-partner'", caught.exception.message)
         apikeys.delete_role('example-partner')
+        apikeys.create_key('example-partner', connections=[])
+        with self.assertRaises(ApiError) as caught:
+            examples.load(FIXED_NOW)
+        self.assertIn("API key 'example-partner'", caught.exception.message)
+        apikeys.delete_key('example-partner')
         with open(os.path.join(self.home, examples.DB_FILE), 'w') as f:
             f.write('not ours')
         with self.assertRaises(ApiError) as caught:
@@ -261,13 +282,15 @@ class UnloadTests(ExamplesTestCase):
         examples.load(FIXED_NOW)
         removed = examples.unload()
         self.assertEqual(sorted(removed['queries']), sorted(examples.QUERY_NAMES))
+        self.assertEqual(sorted(removed['keys']), sorted(examples.KEY_NAMES))
         self.assertEqual(self.saved_files(), ['mine.json'])
         self.assertEqual(sorted(store.read_connections()), ['prod'])
         self.assertEqual(sorted(apikeys.list_roles()), ['their-role'])
+        self.assertEqual(apikeys.list_keys(), {})
         self.assertFalse(os.path.exists(os.path.join(self.home, examples.DB_FILE)))
         self.assertEqual(store.collection_members(), {'my-group': ['mine']})
         self.assertEqual(examples.status(), {'loaded': False, 'partial': False, 'connection': None, 'queries': [],
-                                             'roles': [], 'collections': []})
+                                             'roles': [], 'keys': [], 'collections': []})
 
     def test_unload_never_removes_a_user_query_that_shares_a_name(self):
         examples.load(FIXED_NOW)
@@ -278,7 +301,7 @@ class UnloadTests(ExamplesTestCase):
         self.assertEqual(self.saved_files(), ['example_top_films.json'])
 
     def test_unload_when_nothing_is_loaded_is_a_no_op(self):
-        self.assertEqual(examples.unload(), {'connection': False, 'queries': [], 'roles': [],
+        self.assertEqual(examples.unload(), {'connection': False, 'queries': [], 'roles': [], 'keys': [],
                                              'keys_still_granted': []})
 
     def test_unload_reports_keys_whose_grant_is_now_inert(self):
@@ -301,8 +324,10 @@ class RunTests(ExamplesTestCase):
 
     def setUp(self):
         super().setUp()
-        examples.load()  # today, for real, as a user would
-        self.client = create_app().test_client()
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        examples.load()  # today, for real, as a user would - now also creates a real key per scenario, so
+        self.client = create_app().test_client()             # the admin key is used here to reach all of them
+        self.admin = {'X-API-Key': 'admin-key'}               # in one test, rather than one key per scenario
 
     def test_every_example_query_runs_and_returns_rows(self):
         for scenario in examples.SCENARIOS.values():
@@ -312,21 +337,21 @@ class RunTests(ExamplesTestCase):
                 params = {k: postman.example_value(s) for k, s in specs.items()}
                 if 'text' in params:
                     params['text'] = 'Harbor'  # a pattern has no generated example
-                res = self.client.get(f"/q/{q['name']}", query_string=params)
+                res = self.client.get(f"/q/{q['name']}", query_string=params, headers=self.admin)
                 self.assertEqual(res.status_code, 200, f"{q['name']}: {res.get_data(as_text=True)[:200]}")
                 self.assertTrue(res.get_json(), q['name'])
 
     def test_the_kpis_are_sensible(self):
-        today = self.client.get('/q/example_kpi_rentals_today').get_json()[0]
+        today = self.client.get('/q/example_kpi_rentals_today', headers=self.admin).get_json()[0]
         self.assertGreater(today['rentals_today'], 0)
-        active = self.client.get('/q/example_kpi_active_rentals').get_json()[0]['active_rentals']
-        overdue = self.client.get('/q/example_kpi_overdue').get_json()[0]['overdue']
+        active = self.client.get('/q/example_kpi_active_rentals', headers=self.admin).get_json()[0]['active_rentals']
+        overdue = self.client.get('/q/example_kpi_overdue', headers=self.admin).get_json()[0]['overdue']
         self.assertGreater(active, overdue)
         self.assertGreater(overdue, 0)
 
     def test_the_optional_category_filter_works(self):
-        everything = self.client.get('/q/example_top_films?top_n=50').get_json()
-        comedy = self.client.get('/q/example_top_films?top_n=50&category=Comedy').get_json()
+        everything = self.client.get('/q/example_top_films?top_n=50', headers=self.admin).get_json()
+        comedy = self.client.get('/q/example_top_films?top_n=50&category=Comedy', headers=self.admin).get_json()
         self.assertTrue(comedy)
         self.assertTrue(all(r['category'] == 'Comedy' for r in comedy))
         self.assertGreater(len({r['category'] for r in everything}), 1)  # unfiltered really is unfiltered
@@ -334,19 +359,19 @@ class RunTests(ExamplesTestCase):
         self.assertEqual(comedy[0]['rank'], 1)
 
     def test_the_export_streams_every_row(self):
-        res = self.client.get('/q/example_all_rentals?stream=true&format=csv')
+        res = self.client.get('/q/example_all_rentals?stream=true&format=csv', headers=self.admin)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.get_data(as_text=True).splitlines()), examples.RENTAL_COUNT + 1)
 
     def test_parameter_rules_are_enforced(self):
-        self.assertEqual(self.client.get('/q/example_top_films?category=Nope').status_code, 400)
-        self.assertEqual(self.client.get('/q/example_top_films?top_n=51').status_code, 400)
-        self.assertEqual(self.client.get('/q/example_film_search?text=a1').status_code, 400)
-        self.assertEqual(self.client.get('/q/example_film_lookup').status_code, 400)  # film_id is required
+        self.assertEqual(self.client.get('/q/example_top_films?category=Nope', headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.get('/q/example_top_films?top_n=51', headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.get('/q/example_film_search?text=a1', headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.get('/q/example_film_lookup', headers=self.admin).status_code, 400)
 
     def test_the_dashboard_queries_are_served_from_cache_on_the_second_call(self):
-        first = self.client.get('/q/example_kpi_active_rentals')
-        second = self.client.get('/q/example_kpi_active_rentals')
+        first = self.client.get('/q/example_kpi_active_rentals', headers=self.admin)
+        second = self.client.get('/q/example_kpi_active_rentals', headers=self.admin)
         self.assertEqual(first.headers['X-Cache'], 'MISS')
         self.assertEqual(second.headers['X-Cache'], 'HIT')
 

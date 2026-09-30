@@ -27,10 +27,10 @@ serialization boilerplate for it.
 Write SQL. Configure the query. Apply access controls. Get an API.
 
 ~~~bash
-$ curl 'http://127.0.0.1:5000/q/example_film_search?text=Harbor&page_size=2'
+$ curl 'http://127.0.0.1:5000/q/example_film_search?text=Harbor&page_size=2' -H 'X-API-Key: demo-key'
 [{"film_id":48,"title":"Broken Harbor","category":"Action","rating":"PG-13"},{"film_id":44,"title":"Electric Harbor","category":"Documentary","rating":"G"}]
 
-$ curl 'http://127.0.0.1:5000/q/example_top_films?top_n=2&category=Comedy&format=csv'
+$ curl 'http://127.0.0.1:5000/q/example_top_films?top_n=2&category=Comedy&format=csv' -H 'X-API-Key: demo-key'
 title,category,rating,rentals,rank
 Electric Signal,Comedy,PG,977,1
 Crimson Garden,Comedy,PG-13,631,2
@@ -172,8 +172,8 @@ QueryAPIGate is built to expose specific query results, not database credentials
   independent of any connection grant - individual queries in that list can also be curated for write access,
   without granting it anywhere else reachable through the key.
 - Example APIs: `queryapigate examples load` installs four worked scenarios - a reporting API, dashboard data,
-  a streaming export and a partner integration - as collections, queries and roles you can run and remove again,
-  touching nothing of yours.
+  a streaming export and a partner integration - as collections, queries, roles and a ready-to-use API key per
+  scenario, touching nothing of yours, and removable again with one command.
 - Collections: file saved queries into named groups and grant a key a whole group - read-only, live, and every
   move that changes who can reach a query is audited with the keys that gained or lost access. Rename a
   collection without any key losing reach part-way; export one as a portable bundle and import it elsewhere.
@@ -432,18 +432,20 @@ From a clone: `pip install -e ".[dev]"`. Or use Docker - see [below](#docker).
 ## Quick start
 
 Fastest: `queryapigate examples load && queryapigate serve` installs four worked [example APIs](documentation/EXAMPLES.md)
-(reporting, dashboard, export, partner) you can try, and `queryapigate examples unload` removes them again.
+(reporting, dashboard, export, partner) you can try, and `queryapigate examples unload` removes them again. Loading
+them creates a real API key per scenario, which also means the server now requires a key for every request - set
+`QUERYAPIGATE_API_KEY` yourself first so you have an admin key on hand for ad-hoc SQL too:
 
 ~~~bash
-queryapigate examples load
-queryapigate serve                            # http://127.0.0.1:5000
+QUERYAPIGATE_API_KEY=demo-key queryapigate examples load    # also prints one scoped key per scenario - store them now
+QUERYAPIGATE_API_KEY=demo-key queryapigate serve             # http://127.0.0.1:5000
 ~~~
 
 The examples come with a small generated `examples` database (films, customers and rentals), so you can also run ad-hoc SQL
 straight away:
 
 ~~~bash
-curl -X POST 'http://127.0.0.1:5000/execute_sql?page_size=3' -H 'Content-Type: application/json' \
+curl -X POST 'http://127.0.0.1:5000/execute_sql?page_size=3' -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
      -d '{"sql": "SELECT film_id, title, rating FROM film WHERE film_id > :min", "params": {"min": 10}, "connection_name": "examples"}'
 ~~~
 
@@ -459,7 +461,7 @@ inactive template connection for every supported database type. Edit them (admin
 This uses the `examples` connection that `queryapigate examples load` sets up:
 
 ~~~bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'Content-Type: application/json' -d '{
+curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "filename": "film_by_id",
   "sql_query": "SELECT * FROM film WHERE film_id = :id",
   "query_parameters": {"id": {"type": "int", "min": 1, "max": 60, "description": "Film id"}},
@@ -467,8 +469,8 @@ curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'Content-Type: applicati
   "author": "me", "description": "Look up a film"
 }'
 
-curl 'http://127.0.0.1:5000/q/film_by_id?id=7&format=yaml'
-curl 'http://127.0.0.1:5000/q/film_by_id?id=0'
+curl 'http://127.0.0.1:5000/q/film_by_id?id=7&format=yaml' -H 'X-API-Key: demo-key'
+curl 'http://127.0.0.1:5000/q/film_by_id?id=0' -H 'X-API-Key: demo-key'
 # {"error": "Invalid parameters: id must be at least 1", "errors": {"id": "must be at least 1"}}
 ~~~
 

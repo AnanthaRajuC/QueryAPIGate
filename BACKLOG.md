@@ -700,11 +700,38 @@ autocomplete, and real SQL pretty-printing.
 
 **Safety properties, each guarded by a test that was confirmed to fail when broken:** everything installed is marked
 `example` and removal deletes exactly that (never a query of yours that shares a name); loading refuses, changing
-nothing, if something unmarked holds an example's name (a query, role, connection *or* the database file); loading is
-idempotent (no extra versions on re-run) and completes an interrupted load, reporting `partial` meanwhile. **No API
-key is created** - one would switch a server that has none from open to authenticated - so the walkthrough shows
-creating keys from the example roles instead. A startup problem under `QUERYAPIGATE_LOAD_EXAMPLES` is a logged
-warning, never a startup failure, and a malformed value is rejected.
+nothing, if something unmarked holds an example's name (a query, role, key, connection *or* the database file);
+loading is idempotent (no extra versions, no extra history, no new keys on re-run) and completes an interrupted
+load, reporting `partial` meanwhile. A startup problem under `QUERYAPIGATE_LOAD_EXAMPLES` is a logged warning,
+never a startup failure, and a malformed value is rejected.
+
+**Reversed afterward, deliberately: real example API keys and seeded request history, at explicit follow-up
+request.** `load()` now creates one real API key per role (`role=<name>`, the same "create key from role" path
+the admin UI uses) - this is a deliberate reversal of the "no key is created" property above, confirmed with the
+user up front rather than an oversight: the moment these keys exist, `apikeys.auth_required()` flips true and
+every request needs a key, everywhere, not just the example endpoints. Weighed and accepted: a demo an admin can
+actually call immediately, with real per-scenario keys to copy into a client, was judged worth losing the
+"stays open" default. Each key's secret is shown exactly once - printed by `queryapigate examples load`,
+returned in `POST /examples`'s response, or logged once at server startup for `QUERYAPIGATE_LOAD_EXAMPLES`
+(the only channel available there, with no interactive terminal watching) - and is genuinely unrecoverable after
+that, the same rule every API key already has; a second `load()` creates no new keys and returns no new secrets.
+A real security bug caught and fixed *before* it shipped, not after: the first draft passed `load()`'s full
+return value (including the plaintext secrets) straight into `store.record_audit()`, which would have persisted
+every secret into the audit log forever, visible on the Audit Log tab to anyone who can view it - fixed with a
+`redact_for_audit()` helper that replaces the secrets with just the sorted key names before anything is
+persisted, mirroring how a connection's password is already masked before an audit entry is ever written.
+
+`load()` also seeds each freshly-created query's `execution_history` with 8-20 realistic-looking synthetic runs,
+spread over the last 7 days, through `store.record_execution()` - the exact function a real request already
+uses - so the admin UI's History tab, Home tab and per-query requests-per-day chart show something immediately
+instead of staying empty until someone actually calls a query; a second `load()` never adds more, since only
+queries created *this* call are ever seeded. Deliberately *not* extended to the in-memory `/metrics` counters or
+the API Keys/Connections "Usage" columns - confirmed with the user up front - since those are documented,
+genuinely live-traffic counters that reset on every restart; synthesizing them would only last until the next
+one while quietly changing what they honestly mean. Verified directly, not assumed: a fresh restart immediately
+after loading shows `/metrics` and every key's usage at zero, while the seeded `execution_history` (real SQLite
+rows, unaffected by a restart) is still there in full - proving the two are genuinely independent, not a partial
+leak in either direction.
 
 **Deliberately not done:** hiding examples while keeping them installed (a filter across every listing surface is
 exactly the kind of thing that drifts; removal is one explicit, exact operation instead), refreshing examples in place

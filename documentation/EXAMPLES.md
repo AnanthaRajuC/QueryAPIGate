@@ -7,8 +7,9 @@ rate-limited surface over a database, instead of a hand-rolled controller.
 
 ~~~bash
 pip install queryapigate
-queryapigate examples load          # installs everything below into the current folder (or --home DIR)
-queryapigate serve                  # then open http://127.0.0.1:5000/ui
+queryapigate examples load          # installs everything below, and prints a real API key per scenario -
+                                     # store them now, they cannot be shown again (see below)
+queryapigate serve                  # then open http://127.0.0.1:5000/ui - a key from above is now required
 queryapigate examples unload        # removes exactly what `load` installed - nothing else
 ~~~
 
@@ -24,21 +25,30 @@ called `examples`.
 | | |
 |---|---|
 | `queryapigate examples load` | Install them. Idempotent: running it again changes nothing (no extra versions), and it finishes an interrupted load. |
-| `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, connection and database file. |
+| `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, keys, connection and database file. |
 | `queryapigate examples status` | Say whether they are loaded (`Loaded`, `Partly loaded`, or `Not loaded`). |
 | `QUERYAPIGATE_LOAD_EXAMPLES=yes` | Load them at server start - for a container (`docker run -e QUERYAPIGATE_LOAD_EXAMPLES=yes -v qag:/data ...`). Idempotent across restarts. Unset, or `no`, leaves things as they are: it never removes anything - use `unload`. |
 | Admin UI | Saved Queries shows **Load example APIs** when the home is empty, and once loaded an "Example APIs are loaded" bar with **Remove examples**. |
 | `POST` / `DELETE` / `GET /examples` | The same, over [HTTP](API.md#example-apis) (admin only). |
 
-Everything installed is **marked `example`** (a top-level `"example": true` on each query file, and on the role and
-connection entries), and removal deletes exactly what is marked:
+Everything installed is **marked `example`** (a top-level `"example": true` on each query file, and on the role, key
+and connection entries), and removal deletes exactly what is marked:
 
-- A query, role, connection or file of yours that merely shares a name is **never overwritten and never removed** -
-  loading stops with a clear message and changes nothing until you rename it.
+- A query, role, key, connection or file of yours that merely shares a name is **never overwritten and never
+  removed** - loading stops with a clear message and changes nothing until you rename it.
 - If you edit the `examples` connection in the admin UI it stops being marked (it is yours now), so `unload` leaves
   it and a later `load` reports the conflict.
-- **No API key is created.** A key would switch a server that has none from open to authenticated. The keys below
-  are made from the example roles, by you, when you want them.
+- **A real API key is created for every role** (`role: "<name>"`, the same "create key from role" the admin UI
+  itself uses) - the server now requires a key for *every* request, not just the example ones, the moment these
+  exist. Each key's secret is shown exactly once: printed by `queryapigate examples load`, returned in
+  `POST /examples`'s response, or logged a single time at server startup if you used
+  `QUERYAPIGATE_LOAD_EXAMPLES` instead - store it then, it is never shown again (the same rule every API key
+  already has). Want an *additional*, differently-scoped or differently-named key for a specific team instead of
+  the auto-created one? The `curl` examples under each scenario below still show how, from the same role.
+- Each freshly-loaded query also gets a handful of realistic-looking, real `execution_history` entries, so the
+  admin UI's History tab, Home tab and requests-per-day chart show something immediately - a second `load` never
+  adds more. The API Keys/Connections "Usage" columns and the Metrics tab are **not** seeded this way: those
+  reflect real live traffic only, reset on every restart, and stay at zero until you actually call something.
 - If you granted a key one of the example collections, `unload` tells you, and that grant now reaches nothing (see
   `GET /collections`).
 

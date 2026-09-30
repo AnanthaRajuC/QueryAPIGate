@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Example API keys and seeded request history for `queryapigate examples load` (BACKLOG #27).** Loading
+  the example APIs now also creates one real API key per role (reporting/dashboard/export/partner/executive)
+  and seeds each freshly-loaded query with realistic-looking `execution_history`, so the admin UI's History
+  tab, Home tab and requests-per-day chart show real data immediately instead of staying empty until someone
+  actually calls a query. **This is a deliberate reversal of examples.py's previous "no key is created"
+  design** - the server now requires authentication for every request the moment these keys exist, not just
+  the example endpoints. Each key's secret is shown exactly once (printed by the CLI, returned by
+  `POST /examples`, or logged once at startup for `QUERYAPIGATE_LOAD_EXAMPLES`) and is never recoverable
+  after that. The seeded history is real, persisted `execution_history` via the same function a real request
+  already uses; the in-memory `/metrics` counters and the API Keys/Connections "Usage" columns are
+  deliberately not seeded, since those are documented as live-traffic-only and reset on every restart.
+  README's Quick Start now sets `QUERYAPIGATE_API_KEY` from the start, since none of the example keys can run
+  ad-hoc SQL and the server no longer stays open by default.
 - **Table access restrictions for API keys/roles, `allowed_tables` (BACKLOG #21's remaining gap).** A key or
   role can now be narrowed to a specific set of tables it may query - `mysql`, `postgres`, `clickhouse`,
   `sqlite` and `duckdb` connections only, the dialects `sqlglot` (already an optional dependency, the `flow`

@@ -436,7 +436,8 @@ def list_keys():
 
 
 def create_key(name, connections=None, allow_writes=None, queries=None, expires_at=None, rate_limit=None,
-               allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None):
+               allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None,
+               example=False):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'")
     if role is None:
@@ -479,6 +480,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
             'created_from_role': role,
             'active': True,
             'created_at': store.now(),
+            **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
         }
         _upsert(conn, name, entry)
     return secret

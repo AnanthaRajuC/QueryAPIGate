@@ -232,12 +232,17 @@ def _examples_command(action):
 @_examples_command
 def _examples_load(args):
     added = examples.load()
-    if added['connection'] or added['queries'] or added['roles']:
-        store.record_audit('cli', 'load_examples', 'examples', added)
+    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+        store.record_audit('cli', 'load_examples', 'examples', examples.redact_for_audit(added))
         print(f"Loaded the example APIs: {len(added['queries'])} queries in "
               f"{len(examples.SCENARIOS)} collections, {len(added['roles'])} roles, "
               f"and the '{examples.CONNECTION}' connection.")
-        print('Try:  queryapigate serve   then open /ui, or  curl http://127.0.0.1:5000/q/example_top_films')
+        if added['key_secrets']:
+            print('Example API keys (store these now - they cannot be shown again):')
+            for name, secret in sorted(added['key_secrets'].items()):
+                print(f'  {name}: {secret}')
+        print('Try:  queryapigate serve   then open /ui, or  curl http://127.0.0.1:5000/q/example_top_films '
+             "-H 'X-API-Key: <one of the secrets above>'")
         print('Remove them again with:  queryapigate examples unload')
     else:
         print('The example APIs are already loaded - nothing changed.')
@@ -247,9 +252,10 @@ def _examples_load(args):
 @_examples_command
 def _examples_unload(args):
     removed = examples.unload()
-    if removed['connection'] or removed['queries'] or removed['roles']:
+    if removed['connection'] or removed['queries'] or removed['roles'] or removed['keys']:
         store.record_audit('cli', 'unload_examples', 'examples', removed)
-        print(f"Removed {len(removed['queries'])} example queries, {len(removed['roles'])} roles"
+        print(f"Removed {len(removed['queries'])} example queries, {len(removed['roles'])} roles, "
+              f"{len(removed['keys'])} API keys"
               f"{' and the connection' if removed['connection'] else ''}.")
         if removed['keys_still_granted']:
             print('These keys were granted an example collection, which no longer exists, so that grant now '

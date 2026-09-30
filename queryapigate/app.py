@@ -86,9 +86,19 @@ def load_examples_at_startup():
         log.warning('QUERYAPIGATE_LOAD_EXAMPLES is set but the examples could not be loaded (unexpected error: %s)',
                     error, exc_info=True)
         return
-    if added['connection'] or added['queries'] or added['roles']:
-        store.record_audit('startup', 'load_examples', 'examples', added)
-        log.info('Loaded the example APIs: %d queries, %d roles', len(added['queries']), len(added['roles']))
+    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+        store.record_audit('startup', 'load_examples', 'examples', examples.redact_for_audit(added))
+        log.info('Loaded the example APIs: %d queries, %d roles, %d API keys', len(added['queries']),
+                len(added['roles']), len(added['key_secrets']))
+        if added['key_secrets']:
+            # There is no interactive terminal at startup to hand these to (unlike `queryapigate examples
+            # load`'s own stdout) and a secret is never recoverable once created - the log is the only
+            # channel available, the same one every other startup notice here already uses, so this is
+            # logged once, now, or it is lost forever. The server now requires authentication for every
+            # request, not just the examples - capture these before this container/process's log output
+            # rotates away.
+            log.warning('Example API keys were just created - store these now, they cannot be shown again: %s',
+                       ', '.join(f'{name}={secret}' for name, secret in sorted(added['key_secrets'].items())))
 
 
 def create_app():
@@ -773,8 +783,8 @@ def load_examples():
     example already holds one of their names."""
     require_admin()
     added = examples.load()
-    if added['connection'] or added['queries'] or added['roles']:
-        store.record_audit(caller_key_name(), 'load_examples', 'examples', added)
+    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+        store.record_audit(caller_key_name(), 'load_examples', 'examples', examples.redact_for_audit(added))
     return jsonify({'message': 'Examples loaded', **added, **examples.status()}), 200
 
 
@@ -783,7 +793,7 @@ def unload_examples():
     """Remove exactly what is marked as an example - nothing else."""
     require_admin()
     removed = examples.unload()
-    if removed['connection'] or removed['queries'] or removed['roles']:
+    if removed['connection'] or removed['queries'] or removed['roles'] or removed['keys']:
         store.record_audit(caller_key_name(), 'unload_examples', 'examples', removed)
     return jsonify({'message': 'Examples removed', **removed}), 200
 

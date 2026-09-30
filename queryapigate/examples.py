@@ -18,11 +18,29 @@ plus ``category``, ``store``, ``staff``, ``address`` and ``payment`` - with real
 ``example_all_rentals`` (the export scenario) joins six of them (``rental``, ``film``, ``customer``, ``payment``,
 ``staff``, ``store``).
 
-Everything installed is *marked* ``example`` (a top-level ``"example": true`` on a query file, and on the role and
-connection entries), and removal deletes exactly what is marked - never something of yours that merely shares a
-name. Loading refuses to touch anything that is not marked, and is idempotent: running it again changes nothing.
-No API key is created, on purpose: a key would switch a server that has none from open to authenticated. The
-walkthrough in ``documentation/EXAMPLES.md`` shows how to create one from the example roles.
+Everything installed is *marked* ``example`` (a top-level ``"example": true`` on a query file, and on the role,
+key and connection entries), and removal deletes exactly what is marked - never something of yours that merely
+shares a name. Loading refuses to touch anything that is not marked, and is idempotent: running it again changes
+nothing.
+
+Loading also creates one real API key per role (``role=<name>``, the same "create key from role" path the admin
+UI uses), so every scenario is immediately usable rather than just described. This is a deliberate reversal of
+this module's own earlier design (a key used to be left for the reader to create by hand, specifically so a
+server with none stayed open) - the moment these keys exist, the server requires a key for *every* request, not
+just the example endpoints. A key's secret is shown exactly once, in ``load()``'s own return value
+(``key_secrets``) - printed by the CLI, returned by ``POST /examples``, or logged a single time at startup for
+``QUERYAPIGATE_LOAD_EXAMPLES`` (the only channel available there, since nothing interactive is watching); it is
+never recoverable afterward, the same rule every API key already has. Weighed against staying open: a demo an
+admin can actually call immediately, with real per-scenario keys to copy into a client, was judged worth losing
+the "still open" default - see ``documentation/EXAMPLES.md`` for the full reasoning and how to use the keys.
+
+Loading also seeds each fresh query's ``execution_history`` with a handful of realistic-looking synthetic runs
+(``_seed_execution_history()``) - through ``store.record_execution()``, the exact function a real request already
+uses - so the admin UI's History tab, Home tab and requests-per-day chart show something immediately instead of
+staying empty until someone actually calls a query. Deliberately *not* extended to the in-memory ``/metrics``
+counters or the API Keys/Connections "Usage" columns: those are documented as live-traffic counters, reset on
+every restart, and synthesizing them would only last until the next one while quietly changing what they
+honestly mean.
 """
 import os
 import random
@@ -281,6 +299,9 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 QUERY_NAMES = [q['name'] for scenario in SCENARIOS.values() for q in scenario['queries']]
+# Which scenario's own key would realistically have run each query - used only to attribute synthetic
+# execution_history entries to a plausible caller, see _seed_execution_history().
+_KEY_BY_QUERY = {q['name']: scenario['role']['name'] for scenario in SCENARIOS.values() for q in scenario['queries']}
 
 # A fifth role, deliberately not tied to one collection like the four above - it demonstrates that a role
 # (and so a key created from it) can be granted several collections at once, not just one. Not part of
@@ -293,6 +314,9 @@ EXTRA_ROLES: list[dict[str, Any]] = [
 ]
 
 ROLE_NAMES = [scenario['role']['name'] for scenario in SCENARIOS.values()] + [r['name'] for r in EXTRA_ROLES]
+# One example API key per role, reusing the role's own name - created_from_role already links them, and
+# same name in the API Keys tab vs. the Roles tab makes the pairing obvious without a second naming scheme.
+KEY_NAMES = ROLE_NAMES
 
 
 def _bundle(collection):
@@ -309,17 +333,22 @@ def _marked_connection():
 
 
 def status():
-    """What is installed right now. ``loaded`` means all of it (the connection, every query and every role); a
-    partly installed state - an interrupted load - reports ``partial`` so it is never mistaken for either extreme."""
+    """What is installed right now. ``loaded`` means all of it (the connection, every query, every role and
+    every key); a partly installed state - an interrupted load - reports ``partial`` so it is never mistaken
+    for either extreme. ``keys`` lists example key *names* only, never secrets - a key's secret is shown
+    once, at creation, in ``load()``'s own return value (``key_secrets``), and is gone forever after that,
+    the same rule every API key already has."""
     connection = _marked_connection()
     has_connection = bool(connection and connection.get('example') is True)
     queries = sorted(store.example_query_names())
     roles = sorted(name for name, role in apikeys.list_roles().items() if role.get('example') is True)
+    keys = sorted(name for name, key in apikeys.list_keys().items() if key.get('example') is True)
     collections = sorted({c for c, names in store.collection_members().items() if set(names) & set(queries)})
-    complete = has_connection and set(queries) == set(QUERY_NAMES) and set(roles) == set(ROLE_NAMES)
-    installed_any = has_connection or bool(queries) or bool(roles)
+    complete = (has_connection and set(queries) == set(QUERY_NAMES) and set(roles) == set(ROLE_NAMES)
+               and set(keys) == set(KEY_NAMES))
+    installed_any = has_connection or bool(queries) or bool(roles) or bool(keys)
     return {'loaded': complete, 'partial': installed_any and not complete, 'connection': CONNECTION if has_connection
-            else None, 'queries': queries, 'roles': roles, 'collections': collections}
+            else None, 'queries': queries, 'roles': roles, 'keys': keys, 'collections': collections}
 
 
 def _conflicts():
@@ -336,7 +365,48 @@ def _conflicts():
             found.append(f"saved query '{name}'")
     roles = apikeys.list_roles()
     found += [f"role '{name}'" for name in ROLE_NAMES if name in roles and roles[name].get('example') is not True]
+    keys = apikeys.list_keys()
+    found += [f"API key '{name}'" for name in KEY_NAMES if name in keys and keys[name].get('example') is not True]
     return found
+
+
+def _seed_execution_history(created_query_names, now=None, seed=42):
+    """Synthetic, realistic-looking execution_history for freshly-loaded example queries (only ones actually
+    created this call - never touches an existing query's real history, so a second load() adds nothing
+    more, the same idempotency guarantee everything else here already has), so the admin UI's History tab,
+    Home tab and requests-per-day chart show something immediately instead of staying empty until a real
+    request happens. Deterministic for a given now/seed, the same reproducibility build_database() already
+    commits to - a separate random.Random instance, so this never shares or disturbs that function's own RNG
+    stream. Every entry is `status: "success"` - a fresh install's history shouldn't scatter fake errors -
+    and goes through store.record_execution(), the exact function a real request already uses, so it is
+    real, persisted execution_history in every respect except how it was produced."""
+    rng = random.Random(seed)
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    for name in created_query_names:
+        key_name = _KEY_BY_QUERY.get(name)
+        if key_name is None:
+            continue
+        version, _data = store.select_version(store.load_versions(name), None)
+        for _ in range(rng.randint(8, 20)):
+            executed_at = now - timedelta(days=rng.random() * 7, seconds=rng.randint(0, 86400))
+            entry = {
+                'executed_at': executed_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'connection_name': CONNECTION,
+                'key_name': key_name,
+                'status': 'success',
+                'rows': rng.randint(1, 50),
+                'duration_ms': rng.randint(2, 40),
+            }
+            store.record_execution(name, version, entry)
+
+
+def redact_for_audit(added):
+    """`load()`'s own return value, safe to pass to store.record_audit(): `key_secrets` (real, plaintext,
+    shown-once secrets) is replaced with just the sorted list of names a fresh key was created for - the
+    audit log must record *that* a key was created, never its value, the same redaction connection passwords
+    already get (masked/`"changed"`, never the literal secret) before anything persists it or the admin UI's
+    Audit Log tab can ever display it."""
+    return {**added, 'key_secrets': sorted(added['key_secrets'])}
 
 
 def load(now=None):
@@ -348,7 +418,7 @@ def load(now=None):
         if conflicts:
             raise ApiError('Nothing loaded - these already exist and are not examples, so they will not be '
                            f"overwritten: {', '.join(conflicts)}. Rename or remove them first.", 409)
-        added = {'connection': False, 'queries': [], 'roles': []}
+        added = {'connection': False, 'queries': [], 'roles': [], 'key_secrets': {}}
         config.home().mkdir(parents=True, exist_ok=True)
         db_path = config.home() / DB_FILE
         if _marked_connection() is None:
@@ -380,21 +450,31 @@ def load(now=None):
                 apikeys.create_role(role['name'], connections=[], allow_writes=False, collections=role['collections'],
                                     rate_limit=role['rate_limit'], example=True)
                 added['roles'].append(role['name'])
+        existing_keys = apikeys.list_keys()
+        for role_name in KEY_NAMES:
+            if role_name not in existing_keys:
+                added['key_secrets'][role_name] = apikeys.create_key(role_name, role=role_name, example=True)
+        _seed_execution_history(added['queries'], now)
     return added
 
 
 def unload():
-    """Remove exactly what is marked as an example: its queries, roles and connection (and the database file). Never
-    touches anything unmarked. Reports keys that were granted an example collection, whose grant is now inert."""
+    """Remove exactly what is marked as an example: its queries, roles, keys and connection (and the database
+    file). Never touches anything unmarked. Reports keys that were granted an example collection, whose grant
+    is now inert - a different thing from the example keys removed here, which are the ones *made from* an
+    example role, not merely granted one."""
     with store.lock:
         before = status()
-        removed = {'connection': False, 'queries': [], 'roles': []}
+        removed = {'connection': False, 'queries': [], 'roles': [], 'keys': []}
         for name in before['queries']:
             store.delete_saved(name)
             removed['queries'].append(name)
         for name in before['roles']:
             apikeys.delete_role(name)
             removed['roles'].append(name)
+        for name in before['keys']:
+            apikeys.delete_key(name)
+            removed['keys'].append(name)
         if before['connection']:
             store.delete_connection(CONNECTION)
             removed['connection'] = True
