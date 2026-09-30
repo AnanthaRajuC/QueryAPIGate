@@ -877,6 +877,7 @@ UI_HTML = r"""<!doctype html>
       <button id="refresh-caching" type="button" class="btn">Refresh</button>
     </div>
     <div id="caching-body"><div class="loading"><span class="spin"></span>Loading…</div></div>
+    <div id="cache-entries-panel"></div>
   </section>
 
   <section id="tab-accessmap">
@@ -1045,6 +1046,7 @@ UI_HTML = r"""<!doctype html>
     <div id="query-info-slot"></div>
     <div id="table-ddl-slot"></div>
     <div id="table-usage-slot"></div>
+    <div id="cache-entry-slot"></div>
   </div>
 </aside>
 <div id="palette" hidden role="dialog" aria-label="Search">
@@ -1371,7 +1373,7 @@ $('key-bar').onsubmit = function (e) {
 
 // ---- drawer (hosts the connection and saved-query forms) ----
 function openDrawer(slotId, title, kicker) {
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot')); clear($('cache-entry-slot'));
   $('drawer-title').textContent = title;
   $('drawer-kicker').textContent = kicker || '';
   $('drawer').classList.remove('wide'); // opt-in per drawer (showTableUsage()) - reset so it never leaks into the next one
@@ -1384,7 +1386,7 @@ function closeDrawer() {
   $('drawer').classList.remove('open');
   $('drawer').setAttribute('aria-hidden', 'true');
   $('drawer-backdrop').hidden = true;
-  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot'));
+  clear($('connection-form-slot')); clear($('query-form-slot')); clear($('apikey-form-slot')); clear($('role-form-slot')); clear($('query-info-slot')); clear($('delete-connection-slot')); clear($('table-ddl-slot')); clear($('table-usage-slot')); clear($('cache-entry-slot'));
 }
 $('drawer-close').onclick = closeDrawer;
 $('drawer-backdrop').onclick = closeDrawer;
@@ -2584,6 +2586,7 @@ async function loadMetrics() {
   paintMetricsAge();
   renderHome();
   renderCaching();
+  loadCacheEntries();
 }
 $('refresh-metrics').onclick = loadMetrics;
 $('refresh-caching').onclick = loadMetrics;
@@ -3020,6 +3023,69 @@ function renderCaching() {
   box.appendChild(h('div', { className: 'panel', style: 'overflow-x:auto' }, h('table', { className: 'grid' },
     h('thead', {}, h('tr', {}, ['Query', 'Collection', 'Connection', 'cache_ttl'].map(function (t, i) { return h('th', { className: i === 3 ? 'num' : '', text: t }); }))),
     h('tbody', {}, rows))));
+}
+
+// ---- cache entries: browse what's actually sitting in the response cache right now (in-process or Redis,
+// whichever is configured - both backends implement the same list_entries()/get_body()/delete()/clear()
+// shape, see cache.py/rediscache.py). Body preview reuses renderResponse(), the exact same result renderer
+// API Designer's own Run tab uses - GET /cache/entries/<key> serves the cached body with its real content
+// type, so a plain fetch() Response feeds straight into it with no bespoke viewer. ----
+var cacheEntriesCache = [];
+async function loadCacheEntries() {
+  if (!$('cache-entries-panel')) return; // the tab hasn't been painted into the page yet
+  var body = await apiJson('cache/entries');
+  cacheEntriesCache = (body && body.entries) || [];
+  renderCacheEntriesPanel();
+}
+function renderCacheEntriesPanel() {
+  var box = clear($('cache-entries-panel'));
+  var head = h('div', { className: 'set-head', style: 'margin-top:14px' },
+    h('h2', { text: 'Cache entries' }),
+    h('span', { text: cacheEntriesCache.length + (cacheEntriesCache.length === 1 ? ' live entry' : ' live entries') + ' right now.' }));
+  var clearBtn = h('button', { type: 'button', className: 'btn sm', text: 'Clear cache', disabled: !cacheEntriesCache.length,
+    onclick: async function () {
+      if (!confirm('Evict all ' + cacheEntriesCache.length + ' cache entries? The next call to each query will re-run for real.')) return;
+      var res = await apiJson('cache/entries', { method: 'DELETE' });
+      if (res) { toast('Cache cleared'); loadCacheEntries(); }
+    } });
+  box.appendChild(h('div', { style: 'display:flex;align-items:center;gap:12px' }, head, h('span', { className: 'spacer' }), clearBtn));
+  if (!cacheEntriesCache.length) {
+    box.appendChild(h('div', { className: 'hint', text: 'Nothing cached right now - call a query with a cache_ttl set, then check back.' }));
+    return;
+  }
+  var rows = cacheEntriesCache.map(function (e) {
+    var m = e.meta || {};
+    return h('tr', {},
+      h('td', {}, h('button', { type: 'button', className: 'target', text: m.name || e.key.slice(0, 12) + '…',
+        onclick: function () { showCacheEntry(e); } })),
+      h('td', { className: 'mono', text: m.version !== undefined ? 'v' + m.version : '—' }),
+      h('td', { className: 'mono', text: m.connection || '—' }),
+      h('td', { className: 'mono', text: m.format || '—' }),
+      h('td', { className: 'mono num', text: e.content_type }),
+      h('td', { className: 'mono num', text: e.size_bytes < 1024 ? e.size_bytes + ' B' : (e.size_bytes / 1024).toFixed(1) + ' KB' }),
+      h('td', { className: 'mono num', text: Math.max(0, Math.round(e.ttl_remaining_s)) + 's' }),
+      h('td', {}, h('button', { type: 'button', className: 'btn sm ghost', text: 'Delete', onclick: async function () {
+        var res = await apiJson('cache/entries/' + enc(e.key), { method: 'DELETE' });
+        if (res) { toast('Entry deleted'); loadCacheEntries(); }
+      } })));
+  });
+  box.appendChild(h('div', { className: 'panel', style: 'overflow-x:auto;margin-top:8px' }, h('table', { className: 'grid' },
+    h('thead', {}, h('tr', {}, ['Query', 'Version', 'Connection', 'Format', 'Content type', 'Size', 'TTL left', ''].map(function (t, i) {
+      return h('th', { className: (i >= 4 && i <= 6) ? 'num' : '', text: t });
+    }))),
+    h('tbody', {}, rows))));
+}
+async function showCacheEntry(entry) {
+  var m = entry.meta || {};
+  var slot = openDrawer('cache-entry-slot', m.name || 'Cache entry', entry.key);
+  var status = h('div', { className: 'resbar' }), results = h('div', { className: 'res-body' });
+  slot.appendChild(h('div', { className: 'hint' }, 'The exact cached body, served with its real Content-Type - what a caller receives on a hit.'));
+  slot.appendChild(status);
+  slot.appendChild(h('div', { className: 'panel results' }, results));
+  var res;
+  try { res = await apiFetch('cache/entries/' + enc(entry.key)); }
+  catch (e) { clear(results).appendChild(h('div', { className: 'res-note err', text: 'Network error: ' + e.message })); return; }
+  await renderResponse(res, { results: results, status: status, filename: m.name || 'cache-entry', format: m.format });
 }
 
 function openApiKeyForm(name, existing, fromRole) {

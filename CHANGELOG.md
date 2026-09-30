@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A cache-entries browser on the Caching screen.** Lists every live response-cache entry (query, version,
+  connection, format, content type, size, TTL remaining) for whichever backend is configured - in-process or
+  Redis, both now implementing the same `list_entries()`/`get_body()`/`delete()`/`clear()` shape. A "Preview"
+  action opens the exact cached response body, served with its real content type, through the **same result
+  renderer API Designer's own Run tab already uses** - not a bespoke viewer. Per-entry delete and a "Clear
+  cache" action, both admin-only and unaudited (cache housekeeping, not a configuration change). New routes:
+  `GET`/`DELETE /cache/entries`, `GET`/`DELETE /cache/entries/{key}`. Scoped deliberately to what
+  QueryAPIGate itself put in the cache (`qag:cache:*`), not a general Redis key browser - Redis here is an
+  internal cache implementation detail, not a modeled connection.
 - **Real-time connection-pool numbers on Home and Metrics.** `pool.py` gained an `active_count()` alongside
   the existing `idle_count()` (a new `queryapigate_pool_active_connections` gauge, next to
   `queryapigate_pool_idle_connections`) - the pool tracked idle connections only before, with no visibility

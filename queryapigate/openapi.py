@@ -510,6 +510,25 @@ def build_spec(version, saved_queries=None):
                            'from the environment or is the default (admin only, read-only; secrets are reported '
                            'as configured or not, never returned)', 'tags': ['Service'],
                 'responses': {'200': {'description': 'Settings grouped into sections'}, **_ERRORS}}},
+            '/cache/entries': {
+                'get': {'summary': 'Every live response-cache entry\'s metadata - name, version, connection, '
+                           'format, content type, size and TTL remaining (admin only; never the cached body '
+                           'itself - see GET /cache/entries/{key} for that)', 'tags': ['Service'],
+                       'responses': {'200': {'description': 'Live entries, soonest-expiring first'}, **_ERRORS}},
+                'delete': {'summary': 'Evict every cache entry (admin only; not audited - a miss just '
+                             're-populates from a real query)', 'tags': ['Service'],
+                          'responses': {'200': {'description': 'Cleared'}, **_ERRORS}}},
+            '/cache/entries/{key}': {
+                'parameters': [{'name': 'key', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
+                'get': {'summary': 'One cache entry\'s cached response body, served with its real content '
+                           'type - exactly as a caller would have received it on a hit (admin only)',
+                       'tags': ['Service'],
+                       'responses': {'200': {'description': 'The cached body'},
+                                    '404': {'description': 'Missing, expired, or already evicted'}, **_ERRORS}},
+                'delete': {'summary': 'Evict one cache entry early (admin only; not audited)',
+                          'tags': ['Service'],
+                          'responses': {'200': {'description': 'Deleted (also 200 if it was already gone)'},
+                                       **_ERRORS}}},
             '/catalog': {'get': {
                 'summary': 'Every saved query this caller can reach, and the terms it is offered under',
                 'tags': ['Saved queries'],

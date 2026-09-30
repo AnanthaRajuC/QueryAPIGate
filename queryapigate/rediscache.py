@@ -39,15 +39,17 @@ class RedisResponseCache:
             return None
         return raw[b'body'], raw[b'content_type'].decode(), json.loads(raw[b'headers']), raw[b'etag'].decode()
 
-    def set(self, key, body, content_type, headers, ttl):
+    def set(self, key, body, content_type, headers, ttl, meta=None):
         """Store a response under `key` for `ttl` seconds and return its ETag - always, even if the write
-        to Redis itself fails, since ETag is just a hash of the body the caller already has in hand."""
+        to Redis itself fails, since ETag is just a hash of the body the caller already has in hand.
+        ``meta`` is stored alongside for the admin UI's cache browser only - see cache.py's ResponseCache.set()
+        docstring; never consulted to serve a hit."""
         etag = hashlib.sha256(body).hexdigest()
         try:
             full_key = _PREFIX + key
             with self._client.pipeline() as pipe:
                 pipe.hset(full_key, mapping={'body': body, 'content_type': content_type, 'etag': etag,
-                                             'headers': json.dumps(headers)})
+                                             'headers': json.dumps(headers), 'meta': json.dumps(meta or {})})
                 pipe.expire(full_key, ttl)
                 pipe.execute()
         except self._redis_error as e:
@@ -59,3 +61,47 @@ class RedisResponseCache:
             return sum(1 for _ in self._client.scan_iter(_PREFIX + '*'))
         except self._redis_error:
             return 0
+
+    def list_entries(self):
+        """Every live entry's metadata for the admin UI's cache browser - never the body itself, so listing
+        stays cheap even with large cached responses (a separate get_body() call fetches one in full)."""
+        out = []
+        try:
+            for full_key in self._client.scan_iter(_PREFIX + '*'):
+                try:
+                    raw = self._client.hmget(full_key, 'meta', 'content_type', 'body')
+                    ttl = self._client.ttl(full_key)
+                except self._redis_error:
+                    continue
+                if raw[0] is None or ttl is None or ttl < 0:
+                    continue  # gone between the scan and this read, or has no TTL (shouldn't happen - skip)
+                meta = json.loads(raw[0]) if raw[0] else {}
+                content_type = raw[1].decode() if raw[1] else ''
+                size_bytes = len(raw[2]) if raw[2] else 0
+                out.append({'key': full_key.decode()[len(_PREFIX):], 'meta': meta, 'content_type': content_type,
+                           'size_bytes': size_bytes, 'ttl_remaining_s': float(ttl)})
+        except self._redis_error as e:
+            log.warning('Redis cache listing failed: %s', e)
+        return out
+
+    def get_body(self, key):
+        """(body, content_type) for one entry, or None if missing, expired or Redis is unreachable."""
+        hit = self.get(key)
+        if hit is None:
+            return None
+        body, content_type, _headers, _etag = hit
+        return body, content_type
+
+    def delete(self, key):
+        try:
+            self._client.delete(_PREFIX + key)
+        except self._redis_error as e:
+            log.warning('Redis cache delete failed: %s', e)
+
+    def clear(self):
+        try:
+            keys = list(self._client.scan_iter(_PREFIX + '*'))
+            if keys:
+                self._client.delete(*keys)
+        except self._redis_error as e:
+            log.warning('Redis cache clear failed: %s', e)

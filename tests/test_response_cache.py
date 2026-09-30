@@ -65,6 +65,49 @@ class ResponseCacheTests(unittest.TestCase):
             self.assertIsNone(self.cache.get('b'))
             self.assertIsNotNone(self.cache.get('c'))
 
+    def test_list_entries_reports_metadata_size_and_ttl_remaining(self):
+        self.cache.set('k', b'hello', 'application/json', [], ttl=30, meta={'name': 'q', 'version': 1})
+        self.now += 10
+        entries = self.cache.list_entries()
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual(e['key'], 'k')
+        self.assertEqual(e['meta'], {'name': 'q', 'version': 1})
+        self.assertEqual(e['content_type'], 'application/json')
+        self.assertEqual(e['size_bytes'], len(b'hello'))
+        self.assertEqual(e['ttl_remaining_s'], 20.0)
+
+    def test_list_entries_omits_expired_entries(self):
+        self.cache.set('k', b'hello', 'text/plain', [], ttl=10)
+        self.now += 10.001
+        self.assertEqual(self.cache.list_entries(), [])
+
+    def test_list_entries_defaults_meta_to_an_empty_dict_when_not_given(self):
+        self.cache.set('k', b'hello', 'text/plain', [], ttl=10)
+        self.assertEqual(self.cache.list_entries()[0]['meta'], {})
+
+    def test_get_body_returns_body_and_content_type_only(self):
+        self.cache.set('k', b'hello', 'text/plain', [('X-Page', '1')], ttl=10)
+        self.assertEqual(self.cache.get_body('k'), (b'hello', 'text/plain'))
+
+    def test_get_body_is_none_for_a_missing_key(self):
+        self.assertIsNone(self.cache.get_body('nope'))
+
+    def test_delete_removes_one_entry_and_is_a_noop_for_a_missing_one(self):
+        self.cache.set('a', b'1', 'text/plain', [], ttl=10)
+        self.cache.set('b', b'2', 'text/plain', [], ttl=10)
+        self.cache.delete('a')
+        self.cache.delete('does-not-exist')  # must not raise
+        self.assertIsNone(self.cache.get('a'))
+        self.assertIsNotNone(self.cache.get('b'))
+
+    def test_clear_removes_every_entry(self):
+        self.cache.set('a', b'1', 'text/plain', [], ttl=10)
+        self.cache.set('b', b'2', 'text/plain', [], ttl=10)
+        self.cache.clear()
+        self.assertEqual(self.cache.size(), 0)
+        self.assertEqual(self.cache.list_entries(), [])
+
 
 class _FakeRedisPipeline:
     """Just enough of redis-py's pipeline object for RedisResponseCache.set() - queues ops, applies them
@@ -93,27 +136,31 @@ class _FakeRedisPipeline:
             if op == 'hset':
                 self._client._apply_hset(name, value)
             else:
-                self._client._ttls[name] = value
+                self._client._ttls[_enc(name)] = value
         self._ops = []
 
 
+def _enc(x):
+    return x.encode() if isinstance(x, str) else x
+
+
 class _FakeRedis:
-    """A minimal in-memory stand-in for the four redis-py calls RedisResponseCache actually makes - no real
+    """A minimal in-memory stand-in for the redis-py calls RedisResponseCache actually makes - no real
     Redis server needed, the same spirit as the MagicMock cursors/connections runners.py's own DB driver
-    tests use. `fail='hset'` or `fail='hgetall'` makes the matching call raise redis.RedisError instead."""
+    tests use. Keys/fields are always stored and returned as bytes, matching a real client constructed with
+    decode_responses=False. `fail='hset'` (etc.) makes the matching call raise redis.RedisError instead."""
 
     def __init__(self, fail=None):
-        self._data = {}  # name -> {field bytes: value bytes}
-        self._ttls = {}  # name -> last ttl passed to expire()
+        self._data = {}  # name (bytes) -> {field bytes: value bytes}
+        self._ttls = {}  # name (bytes) -> last ttl passed to expire()
         self._fail = fail
         import redis
         self.RedisError = redis.RedisError
 
     def _apply_hset(self, name, mapping):
-        entry = self._data.setdefault(name, {})
+        entry = self._data.setdefault(_enc(name), {})
         for field, value in mapping.items():
-            key = field.encode() if isinstance(field, str) else field
-            entry[key] = value if isinstance(value, bytes) else str(value).encode()
+            entry[_enc(field)] = value if isinstance(value, bytes) else str(value).encode()
 
     def pipeline(self):
         return _FakeRedisPipeline(self)
@@ -121,10 +168,28 @@ class _FakeRedis:
     def hgetall(self, name):
         if self._fail == 'hgetall':
             raise self.RedisError('simulated read failure')
-        return dict(self._data.get(name, {}))
+        return dict(self._data.get(_enc(name), {}))
+
+    def hmget(self, name, *fields):
+        if self._fail == 'hmget':
+            raise self.RedisError('simulated read failure')
+        entry = self._data.get(_enc(name), {})
+        return [entry.get(_enc(f)) for f in fields]
+
+    def ttl(self, name):
+        if self._fail == 'ttl':
+            raise self.RedisError('simulated read failure')
+        return self._ttls.get(_enc(name), -2)  # -2: redis-py's own "key does not exist" convention
+
+    def delete(self, *names):
+        if self._fail == 'delete':
+            raise self.RedisError('simulated write failure')
+        for name in names:
+            self._data.pop(_enc(name), None)
+            self._ttls.pop(_enc(name), None)
 
     def scan_iter(self, match):
-        prefix = match.rstrip('*')
+        prefix = _enc(match.rstrip('*'))
         return iter([k for k in self._data if k.startswith(prefix)])
 
 
@@ -156,7 +221,7 @@ class RedisResponseCacheTests(unittest.TestCase):
     def test_expire_is_called_with_the_ttl(self):
         key = cache.ResponseCache.key(name='q')
         self.cache.set(key, b'hello', 'text/plain', [], ttl=42)
-        self.assertEqual(self.fake._ttls['qag:cache:' + key], 42)
+        self.assertEqual(self.fake._ttls[('qag:cache:' + key).encode()], 42)
 
     def test_a_read_failure_is_treated_as_a_miss(self):
         failing = RedisResponseCache('redis://localhost:6379/0', client=_FakeRedis(fail='hgetall'))
@@ -172,6 +237,57 @@ class RedisResponseCacheTests(unittest.TestCase):
         self.cache.set(cache.ResponseCache.key(name='a'), b'1', 'text/plain', [], ttl=10)
         self.cache.set(cache.ResponseCache.key(name='b'), b'2', 'text/plain', [], ttl=10)
         self.assertEqual(self.cache.size(), 2)
+
+    def test_list_entries_reports_metadata_size_and_ttl(self):
+        key = cache.ResponseCache.key(name='q')
+        self.cache.set(key, b'hello', 'application/json', [], ttl=30, meta={'name': 'q', 'version': 1})
+        entries = self.cache.list_entries()
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual(e['key'], key)  # the bare key, qag:cache: prefix stripped
+        self.assertEqual(e['meta'], {'name': 'q', 'version': 1})
+        self.assertEqual(e['content_type'], 'application/json')
+        self.assertEqual(e['size_bytes'], len(b'hello'))
+        self.assertEqual(e['ttl_remaining_s'], 30.0)
+
+    def test_list_entries_defaults_meta_to_an_empty_dict_when_not_given(self):
+        key = cache.ResponseCache.key(name='q')
+        self.cache.set(key, b'hello', 'text/plain', [], ttl=10)
+        self.assertEqual(self.cache.list_entries()[0]['meta'], {})
+
+    def test_list_entries_is_empty_on_a_read_failure(self):
+        failing = RedisResponseCache('redis://localhost:6379/0', client=_FakeRedis(fail='hmget'))
+        key = cache.ResponseCache.key(name='q')
+        # written via the healthy fake, then read back through a client that fails hmget - proves
+        # list_entries() degrades to empty rather than raising, same failure posture as get()/size().
+        self.cache.set(key, b'hello', 'text/plain', [], ttl=10)
+        failing._client._data = self.fake._data
+        failing._client._ttls = self.fake._ttls
+        self.assertEqual(failing.list_entries(), [])
+
+    def test_get_body_returns_body_and_content_type_only(self):
+        key = cache.ResponseCache.key(name='q')
+        self.cache.set(key, b'hello', 'text/plain', [], ttl=10)
+        self.assertEqual(self.cache.get_body(key), (b'hello', 'text/plain'))
+
+    def test_get_body_is_none_for_a_missing_key(self):
+        self.assertIsNone(self.cache.get_body('nope'))
+
+    def test_delete_removes_one_entry_and_is_a_noop_for_a_missing_one(self):
+        a, b = cache.ResponseCache.key(name='a'), cache.ResponseCache.key(name='b')
+        self.cache.set(a, b'1', 'text/plain', [], ttl=10)
+        self.cache.set(b, b'2', 'text/plain', [], ttl=10)
+        self.cache.delete(a)
+        self.cache.delete('does-not-exist')  # must not raise
+        self.assertIsNone(self.cache.get(a))
+        self.assertIsNotNone(self.cache.get(b))
+
+    def test_clear_removes_every_entry(self):
+        self.cache.set(cache.ResponseCache.key(name='a'), b'1', 'text/plain', [], ttl=10)
+        self.cache.set(cache.ResponseCache.key(name='b'), b'2', 'text/plain', [], ttl=10)
+        self.cache.clear()
+        self.assertEqual(self.cache.size(), 0)
+        self.assertEqual(self.cache.list_entries(), [])
 
 
 class RedisConfigTests(unittest.TestCase):
@@ -316,6 +432,83 @@ class RedisBackedAppCacheTests(AppTestCase):
         second = self.client.get('/q/q?id=1', headers={'If-None-Match': etag})
         self.assertEqual(second.status_code, 304)
         self.assertEqual(second.get_data(), b'')
+
+
+class CacheEntriesEndpointTests(AppTestCase):
+    """GET/DELETE /cache/entries and GET/DELETE /cache/entries/<key> - the admin UI's Caching-screen cache
+    browser (BACKLOG: real-time cache entries), reusing the same result-rendering component API Designer's
+    own Run tab does for the body preview."""
+
+    def test_lists_a_live_entry_with_its_metadata(self):
+        self.save(cache_ttl=60)
+        self.client.get('/q/q?id=1')  # a miss, so one entry now exists
+        res = self.client.get('/cache/entries')
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        entries = res.get_json()['entries']
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual(e['meta']['name'], 'q')
+        self.assertEqual(e['meta']['version'], 1)
+        self.assertEqual(e['meta']['connection'], 'lite')
+        self.assertEqual(e['meta']['format'], 'json')
+        self.assertEqual(e['content_type'], 'application/json')
+        self.assertGreater(e['size_bytes'], 0)
+        self.assertGreater(e['ttl_remaining_s'], 0)
+
+    def test_empty_when_nothing_is_cached(self):
+        res = self.client.get('/cache/entries')
+        self.assertEqual(res.get_json()['entries'], [])
+
+    def test_entry_body_is_served_with_its_real_content_type(self):
+        self.save(cache_ttl=60)
+        live = self.client.get('/q/q?id=1')
+        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
+        res = self.client.get(f'/cache/entries/{key}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.content_type, live.content_type)
+        self.assertEqual(res.get_data(), live.get_data())
+
+    def test_entry_body_404s_for_an_unknown_key(self):
+        res = self.client.get('/cache/entries/does-not-exist')
+        self.assertEqual(res.status_code, 404)
+
+    def test_delete_one_entry_removes_it(self):
+        self.save(cache_ttl=60)
+        self.client.get('/q/q?id=1')
+        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
+        res = self.client.delete(f'/cache/entries/{key}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get('/cache/entries').get_json()['entries'], [])
+        # a deleted entry is a clean miss, not an error, on the next real call
+        self.assertEqual(self.client.get('/q/q?id=1').headers['X-Cache'], 'MISS')
+
+    def test_delete_one_is_a_noop_for_an_unknown_key(self):
+        res = self.client.delete('/cache/entries/does-not-exist')
+        self.assertEqual(res.status_code, 200)
+
+    def test_clear_removes_every_entry(self):
+        self.save(filename='q1', sql='SELECT * FROM t WHERE id = :id', cache_ttl=60)
+        self.save(filename='q2', sql='SELECT * FROM t WHERE id = :id', cache_ttl=60)
+        self.client.get('/q/q1?id=1')
+        self.client.get('/q/q2?id=1')
+        self.assertEqual(len(self.client.get('/cache/entries').get_json()['entries']), 2)
+        res = self.client.delete('/cache/entries')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get('/cache/entries').get_json()['entries'], [])
+
+    def test_every_cache_route_is_admin_only(self):
+        self.save(cache_ttl=60)
+        self.client.get('/q/q?id=1')
+        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        client = create_app().test_client()
+        scoped = client.post('/api_keys', json={'name': 'scoped', 'connections': []},
+                             headers={'X-API-Key': 'admin-key'}).get_json()['key']
+        headers = {'X-API-Key': scoped}
+        self.assertEqual(client.get('/cache/entries', headers=headers).status_code, 403)
+        self.assertEqual(client.get(f'/cache/entries/{key}', headers=headers).status_code, 403)
+        self.assertEqual(client.delete(f'/cache/entries/{key}', headers=headers).status_code, 403)
+        self.assertEqual(client.delete('/cache/entries', headers=headers).status_code, 403)
 
 
 class ExecutionHistoryInteractionTests(AppTestCase):

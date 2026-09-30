@@ -525,12 +525,14 @@ def cache_lookup(cache_key, ttl):
     return response
 
 
-def cache_store(cache_key, response, ttl):
-    """Store `response` under `cache_key` for `ttl` seconds and tag it as a fresh cache MISS."""
+def cache_store(cache_key, response, ttl, meta=None):
+    """Store `response` under `cache_key` for `ttl` seconds and tag it as a fresh cache MISS. `meta`
+    (name/version/connection/format/page) is never consulted to serve a hit - it exists purely for the
+    admin UI's cache browser, see cache.py's ResponseCache.set() docstring."""
     replay_headers = [(name, value) for name, value in response.headers.items()
                       if name.lower() not in ('content-type', 'content-length')]
     etag = current_app.extensions['queryapigate_cache'].set(cache_key, response.get_data(), response.content_type,
-                                                       replay_headers, ttl)
+                                                       replay_headers, ttl, meta)
     response.headers['ETag'] = f'"{etag}"'
     response.headers['Cache-Control'] = f'max-age={ttl}'
     response.headers['X-Cache'] = 'MISS'
@@ -595,6 +597,8 @@ def run_saved(ref, body, url_params):
         if sqltools.first_keyword(sql, dialect) in sqltools.READ_ONLY_STATEMENTS:
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
                                                 values=values, format=output_format, page=page, page_size=limit)
+            cache_meta = {'name': path, 'version': number, 'connection': connection_name,
+                         'format': output_format, 'page': page}
             cached = cache_lookup(cache_key, ttl)
             if cached is not None:
                 return cached
@@ -614,7 +618,7 @@ def run_saved(ref, body, url_params):
                                                           'duration_ms': elapsed_ms,
                                                           'serialization_ms': g.serialization_ms})
     if cache_key is not None:
-        response = cache_store(cache_key, response, ttl)
+        response = cache_store(cache_key, response, ttl, cache_meta)
     return response
 
 
@@ -1117,6 +1121,55 @@ def settings_endpoint():
     never returned."""
     require_admin()
     return jsonify({'sections': config.describe_settings()}), 200
+
+
+# --------------------------------------------------------------------------------------
+# Cache entries - the admin UI's Caching screen "browse the cache" panel. Scoped to what
+# QueryAPIGate itself put in the response cache (in-process or Redis, whichever is
+# configured - see cache.py/rediscache.py, both implementing the same list_entries()/
+# get_body()/delete()/clear() shape) rather than a general key-value browser: Redis here
+# is an internal cache implementation detail, not a modeled connection.
+# --------------------------------------------------------------------------------------
+
+@bp.route('/cache/entries', methods=['GET'])
+def cache_entries():
+    """Every live cache entry's metadata (name/version/connection/format/page, content type, size, TTL
+    remaining) - never the body itself, so listing stays cheap. Admin only, like everything else that
+    reveals server-side state a caller didn't ask for."""
+    require_admin()
+    entries = current_app.extensions['queryapigate_cache'].list_entries()
+    entries.sort(key=lambda e: e['ttl_remaining_s'])
+    return jsonify({'entries': entries}), 200
+
+
+@bp.route('/cache/entries', methods=['DELETE'])
+def clear_cache_entries():
+    """Evicts every entry - the "Clear cache" button. Not audited: this is cache housekeeping (a miss just
+    re-populates from a real query), not a configuration change."""
+    require_admin()
+    current_app.extensions['queryapigate_cache'].clear()
+    return jsonify({'message': 'Cache cleared'}), 200
+
+
+@bp.route('/cache/entries/<key>', methods=['GET'])
+def cache_entry_body(key):
+    """The cached response body itself, served with its real content type - exactly as a caller would have
+    received it on a hit. Lets the admin UI's cache browser reuse the same result renderer API Designer and
+    a saved query's own Run tab already use, instead of a bespoke preview widget."""
+    require_admin()
+    hit = current_app.extensions['queryapigate_cache'].get_body(key)
+    if hit is None:
+        raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404)
+    body, content_type = hit
+    return Response(body, content_type=content_type)
+
+
+@bp.route('/cache/entries/<key>', methods=['DELETE'])
+def delete_cache_entry(key):
+    """Evicts one entry early. Not audited - see clear_cache_entries()."""
+    require_admin()
+    current_app.extensions['queryapigate_cache'].delete(key)
+    return jsonify({'message': 'Entry deleted'}), 200
 
 
 # --------------------------------------------------------------------------------------
