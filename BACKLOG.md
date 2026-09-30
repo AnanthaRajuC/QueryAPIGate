@@ -1632,26 +1632,25 @@ this migration doesn't touch.
 
 ## 54. Surface the MCP server's status in the admin UI
 
+**Status: shipped**, as a Settings row only - the two sub-decisions below resolved in favor of the smaller
+option, confirmed explicitly rather than assumed. `config.describe_settings()` gained an `mcp` section (same
+file/function the `cache` section from #43/#47 already lives in) with a `QUERYAPIGATE_MCP_PORT`/
+`QUERYAPIGATE_MCP_MAX_ROWS` row each, rendered by the Settings screen's existing generic section/row
+machinery - no `ui.py` changes needed, since every section already renders the same read-only "effective
+value and whether it's the default" shape. **No reachability check**: the section's own description says
+plainly that `queryapigate mcp` is a separate process this one doesn't start or probe, rather than showing a
+green/red dot that would just be guessing (the REST process serving `/ui` has no way to know whether a
+*different* process is actually up without adding a probe request, its latency, and its own failure mode to
+every `/settings` load - deliberately not done). **No tool-listing panel** either: the richer treatment
+(listing what `tools/list` would currently return for the admin key, via `mcp_server.list_tools_for()`,
+closer to how #48's Caching screen became its own panel) was scoped out in favor of the minimal row-only
+version. Both remain open, smaller follow-ups if wanted later, not started.
+
 **Impact:** `queryapigate mcp` (#42) is a separate process with no presence in `/ui` at all today - unlike
 the Redis-backed response cache (#47) and the SSE broadcaster (#43), both of which got a Settings-panel row
 showing their backend/status. An admin currently has no way to tell, from the UI, whether the MCP server is
 even configured to run, what port it's on, or that it's reachable - they have to know to run `queryapigate
 mcp` and check its own stdout/logs, or use an MCP client to probe it directly.
-
-**Notes:** the natural home is the Settings screen, alongside the "Live updates"/"Cache backend" rows #43/#47
-already added (`config.describe_settings()`'s `cache` section, `queryapigate/config.py`) - a row for
-`QUERYAPIGATE_MCP_PORT`/`QUERYAPIGATE_MCP_MAX_ROWS` at minimum, matching every other settings row's
-read-only "effective value and whether it's the default" shape. A real reachability check (is something
-actually listening on that port right now) is a separate, harder question from those two rows: the REST
-process serving `/ui` has no way to know whether a *different* process (`queryapigate mcp`, possibly never
-started, possibly on another host) is currently up - answering that honestly would need the REST server to
-make its own probe request to the MCP port at settings-render time (extra latency/failure-mode on every
-`/settings` load) or accept a static "configured" vs. "confirmed reachable" distinction rather than a live
-health dot. Worth deciding explicitly rather than defaulting to a green/red dot that's actually just guessing.
-A richer treatment - listing the currently-exposed tools (i.e. what `tools/list` would currently return for
-the admin key, reusing `mcp_server.list_tools_for()` directly, no MCP protocol round-trip needed since it's
-the same process) - would make the Settings row more of a small dedicated panel than one line, closer to
-how #48's Caching screen went further than a single Settings row once built. Not started.
 
 ---
 
@@ -1677,6 +1676,7 @@ own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel
 dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
 own entry; #42 shipped for read-only saved queries only, with write-capable MCP tools - needing a
 `destructiveHint` classification and a write-confirmation decision - left explicitly open, see its own
-entry). #54 (surfacing the MCP server's status in the admin UI) is queued up next, not started. The "still
+entry); #54 is shipped as a Settings-row-only slice, with a live reachability check and a tool-listing panel
+both left explicitly open, see its own entry. The "still
 open" note under #9 (confirming its CI changes
 on a real run) is a smaller follow-up on finished work, not an open capability gap.

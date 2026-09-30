@@ -60,3 +60,8 @@ is still honored.
 |----------|---------|--------|
 | `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp`. |
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for a tool call's result. Always a positive count; a malformed value stops startup. |
+
+Both show up as a read-only "MCP server" section on the admin UI's Settings screen (BACKLOG #54) - the
+effective value and whether it's the default, same as every other setting there. `queryapigate mcp` is a
+separate process, so this is its configuration only: the REST server showing this section has no way to know
+whether an MCP process is actually running or reachable on that port.

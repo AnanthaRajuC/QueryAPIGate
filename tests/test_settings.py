@@ -33,13 +33,23 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 20)
+        self.assertEqual(len(rows), 22)
         self.assertEqual(rows['']['label'], 'Live updates')  # GET /events (BACKLOG #43) has no env var of its own
         self.assertEqual(rows['QUERYAPIGATE_HOME']['source'], 'env')
         self.assertEqual(rows['QUERYAPIGATE_HOME']['value'], os.path.realpath(self.tmp.name))
         self.assertEqual(rows['QUERYAPIGATE_QUERY_TIMEOUT']['source'], 'default')
         self.assertEqual(rows['QUERYAPIGATE_QUERY_TIMEOUT']['value'], '30 s')
         self.assertEqual(rows['QUERYAPIGATE_STREAM_MAX_ROWS']['value'], 'unbounded')
+        self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['source'], 'default')
+        self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['value'], '5001')
+        self.assertEqual(rows['QUERYAPIGATE_MCP_MAX_ROWS']['value'], '200 rows')
+
+    def test_mcp_section_reflects_the_environment(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '6100', 'QUERYAPIGATE_MCP_MAX_ROWS': '50'}):
+            rows = self.rows()
+        self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['source'], 'env')
+        self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['value'], '6100')
+        self.assertEqual(rows['QUERYAPIGATE_MCP_MAX_ROWS']['value'], '50 rows')
 
     def test_reflects_the_environment(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_RATE_LIMIT': '60/minute', 'QUERYAPIGATE_POOL_SIZE': '7',

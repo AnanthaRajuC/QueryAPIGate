@@ -157,6 +157,35 @@ application code, with no path to a REST endpoint except writing a backend servi
 
 If you already know SQL, you can produce a governed API without building an API application around it.
 
+### Architecture
+
+```text
+                    ┌──────────────────────────┐
+                    │       QueryAPIGate       │
+                    │                          │
+                    │   Governed Data Layer    │
+                    └────────────┬─────────────┘
+                                 │
+             ┌───────────────────┼──────────────────┐
+             │                   │                  │
+        DATA ACCESS          GOVERNANCE        DATA DELIVERY
+             │                   │                  │
+       Saved Queries          API Keys          REST APIs
+       SQL / Mongo            Roles             JSON/CSV
+       Multi-DB               Collections       Streaming
+       DuckDB/files           Permissions       CLI exports
+       JDBC                   Rate limits       cron/K8s
+             │                IP controls
+             │                Audit
+             │
+             └───────────────────┬──────────────────┘
+                                 │
+                         OBSERVABILITY
+                                 │
+                    Metrics / Logs / History
+                    OpenAPI / Postman / UI
+```
+
 ---
 
 ## Key features

@@ -435,4 +435,10 @@ def describe_settings():
                 'UI clients. In-process only for now - correct for the documented single-process deployment; '
                 'would need a Redis-pub/sub backend (not built yet) to work across several instances behind '
                 'a load balancer, same constraint the cache backend above already has.', '', 'in-process')]},
+        {'id': 'mcp', 'title': 'MCP server',
+         'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process, not started or '
+             'checked for reachability by this one.', 'rows': [
+            row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
+            row('MCP max rows', 'Row cap for a tools/call result - an LLM\'s context can\'t hold a huge one.',
+                'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows')]},
     ]

@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **The admin UI's Settings screen now has an "MCP server" section (BACKLOG #54)**, showing
+  `QUERYAPIGATE_MCP_PORT`/`QUERYAPIGATE_MCP_MAX_ROWS` in the same read-only "effective value and whether it's
+  the default" shape as every other setting. `queryapigate mcp` (BACKLOG #42) is a separate process, so this
+  is configuration only, not a live health check - the section says so plainly rather than showing a status
+  dot that would just be guessing whether that other process is actually up.
 - **Example API keys and seeded request history for `queryapigate examples load` (BACKLOG #27).** Loading
   the example APIs now also creates one real API key per role (reporting/dashboard/export/partner/executive)
   and seeds each freshly-loaded query with realistic-looking `execution_history`, so the admin UI's History
