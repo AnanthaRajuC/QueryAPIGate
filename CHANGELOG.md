@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Three new benchmark scripts (BACKLOG #25): `benchmarks/latency.py`, `pooling.py`, `caching.py`**,
+  alongside the existing buffered-vs-streamed `run.py`, sharing new common plumbing in `benchmarks/common.py`.
+  `latency.py` measures p50/p95/p99 for a small `GET /q/<name>`/`POST /execute_sql` call against a fixed
+  100-row table, isolating queryapigate's own overhead from query execution time. `pooling.py` measures
+  throughput/latency and the idle-pool hit rate as concurrent callers increase relative to
+  `QUERYAPIGATE_POOL_SIZE` - and documents a real finding along the way: `pool.py` only bounds *idle*
+  connections, not concurrent ones, so there is no bounded-pool "wait time" to measure the way a
+  traditional pool would have. `caching.py` measures the real hit-vs-miss latency delta for a
+  `cache_ttl`-carrying saved query, classified by the response's own `X-Cache` header. Real runs committed
+  for MySQL and ClickHouse (see `benchmarks/README.md`); the other four dialects are a follow-up.
+
 ### Changed
 - **Renamed the "Saved queries" and "Run SQL" admin UI sections to "API Repository" and "API Designer"**
   - the sidebar nav, breadcrumb, page heading, Home stat tile, quick actions, Ctrl-K search group, and every

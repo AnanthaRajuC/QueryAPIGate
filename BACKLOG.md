@@ -592,10 +592,22 @@ query against an encrypted connection still runs successfully end to end through
 
 ## 25. Benchmark coverage gaps: general API latency, connection pooling, cache performance
 
-**Impact:** `benchmarks/` (see [benchmarks/README.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/README.md))
-currently answers exactly one
-question - buffered vs. streamed memory and latency for one large flat `SELECT`, per dialect - and answers
-it well. It does not answer three other questions a production-grade deployment would reasonably want
+**Status: shipped**, as three new scripts (`benchmarks/latency.py`, `pooling.py`, `caching.py`) alongside the
+existing `run.py`, sharing a new `benchmarks/common.py` (the `Server`/`Sampler`/native-connect plumbing
+`run.py` used to own alone). Real runs committed for MySQL and ClickHouse (disposable Docker containers,
+matching CI's own images/credentials, torn down after) - see `benchmarks/README.md` for the full results and
+methodology per script. One real finding worth flagging here since it changed the pooling benchmark's own
+design partway through: `pool.py` only bounds *idle* connections kept around, not concurrent ones, so
+"wait time when the pool is exhausted" - the framing this entry originally used below - does not apply to
+this codebase's pool at all. `pooling.py` measures what's actually real instead: throughput/latency and the
+idle-pool hit rate (`queryapigate_pool_idle_connections`, sampled during the run) as concurrency increases
+relative to `QUERYAPIGATE_POOL_SIZE`. Postgres/SQLite/H2/DuckDB runs are left as a follow-up - the harness
+handles every dialect `run.py` already does, just not yet run and committed for the other four.
+
+**Impact (as originally scoped):** `benchmarks/` (see [benchmarks/README.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/README.md))
+used to answer exactly one
+question - buffered vs. streamed memory and latency for one large flat `SELECT`, per dialect - and answered
+it well. It did not answer three other questions a production-grade deployment would reasonably want
 evidence for:
 - **General API latency.** The existing suite only measures latency at the 1M-row large-export scale; there
   is no benchmark for the common case - a typical small `/execute_sql` or `GET /q/<name>` call - so there's
@@ -1654,14 +1666,15 @@ mcp` and check its own stdout/logs, or use an MCP client to probe it directly.
 
 ---
 
-**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #26, #27, #28, #29, #30, #31, #32,
-#33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
+**Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31,
+#32, #33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
 `mysql`/`postgres`/`clickhouse`/`sqlite`/`duckdb` and `h2`/`jdbc`/`mongo` deliberately deferred (fail-closed,
-not silently unsupported - see its own entry); #36 is shipped as its
+not silently unsupported - see its own entry); #25 is shipped as three new benchmark scripts with real MySQL
+and ClickHouse runs committed, with Postgres/SQLite/H2/DuckDB runs left as a follow-up (the harness already
+handles them, see its own entry); #36 is shipped as its
 MongoDB find-only slice only, with MSSQL/Oracle/Redis/Snowflake/BigQuery and Mongo's own aggregation/write/
 schema-sampling/caching/streaming/query-builder-UI remainder - each its own separately-scoped unit of work -
-still open. Open: #25
-(general API latency, connection pooling and cache performance benchmarks), not started; #27 is shipped,
+still open. #27 is shipped,
 in a different shape than originally sketched - see the correction in its own entry; #38 is shipped for
 mysql/sqlite/clickhouse, with Postgres/H2/DuckDB the documented remainder; #37 is shipped for
 mysql/postgres/sqlite/duckdb, with H2 and ClickHouse's differing constraint model left as explicit gaps;

@@ -18,12 +18,9 @@ import json
 import os
 import platform
 import statistics
-import subprocess
 import sys
 import tempfile
-import threading
 import time
-import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,118 +29,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import dataset  # noqa: E402,I001
+from common import Sampler, Server, build_connections_file, get_connection_details, native_close, native_connect  # noqa: E402,I001
 from queryapigate import __version__ as queryapigate_version  # noqa: E402,I001
 
 RESULTS_DIR = Path(__file__).parent / 'results'
-SAMPLE_INTERVAL = 0.2  # seconds between RSS samples while a request is in flight
-
-
-# --------------------------------------------------------------------------------------
-# Native connections, for seeding only - the benchmark itself always goes through the
-# real HTTP API, but seeding a million rows through /execute_sql would itself dominate
-# the clock, so setup uses each driver directly, the same way the seed took shape during
-# manual testing (see runners.py's driver docstrings for the memory findings that grew
-# out of that same manual testing).
-# --------------------------------------------------------------------------------------
-
-def native_connect(dialect, details):
-    if dialect == 'mysql':
-        import mysql.connector
-        return mysql.connector.connect(host=details['host'], port=details.get('port', 3306),
-                                       user=details['user'], password=details.get('password', ''),
-                                       database=details['database'])
-    if dialect == 'postgres':
-        import psycopg2
-        return psycopg2.connect(host=details['host'], port=details.get('port', 5432), user=details['user'],
-                                password=details.get('password', ''), dbname=details['database'])
-    if dialect == 'clickhouse':
-        from clickhouse_driver import Client
-        return Client(host=details['host'], port=details.get('port', 9000), user=details.get('user', 'default'),
-                     password=details.get('password', ''), database=details.get('database', 'default'))
-    if dialect == 'h2':
-        import jaydebeapi  # noqa: I001
-
-        from queryapigate import config
-        host = details['host']
-        if details.get('port'):
-            host = f"{host}:{details['port']}"
-        url = f"jdbc:h2:tcp://{host}/~/{details['database']}"
-        return jaydebeapi.connect('org.h2.Driver', url, [details.get('user', 'SA'), details.get('password', '')],
-                                  [config.h2_jar()])
-    raise ValueError(f'native_connect() does not handle {dialect!r} (file-based dialects are seeded directly)')
-
-
-def native_close(dialect, conn):
-    if dialect == 'clickhouse':
-        conn.disconnect()
-    else:
-        conn.close()
-
-
-# --------------------------------------------------------------------------------------
-# The queryapigate server under test: a real subprocess, hit over real HTTP, same as a user
-# would - not the Flask test client, which does not exercise a real WSGI response cycle
-# or a real separate OS process to sample memory from.
-# --------------------------------------------------------------------------------------
-
-class Server:
-    def __init__(self, home, port, max_page_size):
-        self.port = port
-        env = {**os.environ, 'QUERYAPIGATE_HOME': str(home), 'QUERYAPIGATE_MAX_PAGE_SIZE': str(max_page_size)}
-        env.pop('QUERYAPIGATE_API_KEY', None)
-        self.proc = subprocess.Popen(
-            [sys.executable, '-m', 'queryapigate', 'serve', '--port', str(port), '--host', '127.0.0.1'],
-            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self._wait_healthy()
-
-    def _wait_healthy(self):
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            try:
-                urllib.request.urlopen(f'http://127.0.0.1:{self.port}/health', timeout=1)
-                return
-            except (urllib.error.URLError, ConnectionError):
-                time.sleep(0.2)
-        raise RuntimeError('queryapigate server did not become healthy in time')
-
-    def rss_mb(self):
-        with open(f'/proc/{self.proc.pid}/status') as f:
-            for line in f:
-                if line.startswith('VmRSS:'):
-                    return int(line.split()[1]) / 1024
-        return None
-
-    def stop(self):
-        self.proc.terminate()
-        try:
-            self.proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-
-
-class Sampler:
-    """Samples the server's RSS on a background thread while one request is in flight."""
-
-    def __init__(self, server):
-        self.server = server
-        self.samples = []
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def _run(self):
-        while not self._stop.is_set():
-            rss = self.server.rss_mb()
-            if rss is not None:
-                self.samples.append(rss)
-            self._stop.wait(SAMPLE_INTERVAL)
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *exc):
-        self._stop.set()
-        self._thread.join(timeout=2)
 
 
 # --------------------------------------------------------------------------------------
@@ -197,27 +86,6 @@ def summarize(results):
 # --------------------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------------------
-
-def get_connection_details(dialect):
-    if dialect in ('sqlite', 'duckdb'):
-        return None
-    raw = os.environ.get(f'QUERYAPIGATE_IT_{dialect.upper()}')
-    if not raw:
-        raise SystemExit(f'QUERYAPIGATE_IT_{dialect.upper()} is not set - see benchmarks/run.py --help')
-    return json.loads(raw)
-
-
-def build_connections_file(home, dialect, details, file_path=None):
-    if dialect == 'sqlite':
-        entry = {'db': 'sqlite', 'database': file_path, 'active': True}
-    elif dialect == 'duckdb':
-        entry = {'db': 'duckdb', 'database': file_path, 'active': True}
-    else:
-        entry = {'db': dialect, 'host': details['host'], 'port': details.get('port'), 'user': details.get('user'),
-                 'password': details.get('password', ''), 'database': details['database'], 'active': True}
-    with open(home / 'db_connections.json', 'w') as f:
-        json.dump({'connections': {'bench': entry}}, f)
-
 
 def seed(dialect, details, home, rows, width):
     width_chars = dataset.WIDTHS[width]
