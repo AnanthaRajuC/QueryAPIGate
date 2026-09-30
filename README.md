@@ -45,6 +45,15 @@ Crimson Garden,Comedy,PG-13,631,2
   <sub>The built-in admin UI at <code>/ui</code> - syntax highlighting, a schema browser and one-click query history, no separate tool to install.</sub>
 </p>
 
+<p align="center">
+  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png">
+    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png"
+         alt="Home tab: at-a-glance stat tiles for connections, saved queries, API keys, roles, requests and error rate, a system health panel, recent audit activity, quick actions, and recent/slowest API requests" width="820">
+  </a>
+  <br>
+  <sub>Home: an at-a-glance overview - live totals, system health, recent activity and the slowest recent requests.</sub>
+</p>
+
 <table>
 <tr>
 <td width="25%">
@@ -99,11 +108,17 @@ Crimson Garden,Comedy,PG-13,631,2
 
 <table>
 <tr>
-<td width="60%">
+<td width="50%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/collections-move.png">
 <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/collections-move.png" alt="The Move to a collection drawer: choosing a collection previews which API keys will gain access to the query and which will lose it, and which roles will include it">
 </a>
 <br><sub>Collections: grant a key a whole group of queries - and see exactly which keys gain or lose access before a query moves</sub>
+</td>
+<td width="50%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png" alt="Caching screen: response cache backend, entry count, hit rate, hits and misses, and the list of saved queries with a cache_ttl set">
+</a>
+<br><sub>Caching: live hit rate for the response cache backing every saved query's <code>cache_ttl</code></sub>
 </td>
 </tr>
 </table>
