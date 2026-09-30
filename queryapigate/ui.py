@@ -4196,6 +4196,7 @@ function renderDetail() {
       metaItem('connection', v.connection_name || '—'), metaItem('collection', f.collection || '—'), metaItem('author', v.author || '—'),
       metaItem('modified', v.last_modified_at || v.created_at || '—'),
       tagsText ? metaItem('tags', tagsText) : null),
+    queryStatTilesRow(v),
     renderRequestsPerDayChart(v.execution_history),
     h('div', { className: 'subtabs', role: 'tablist' },
       subtab('run', 'Run'), subtab('sql', 'SQL'),
@@ -4399,17 +4400,16 @@ function renderHistoryTab(body, v) {
   paint();
 }
 
-/** A scoped-down renderMetrics(): the same stat-tiles/barCard building blocks, aggregated from just this
- * one version's execution_history (the same array History lists raw) instead of the server-wide /metrics
- * feed - no new fetch. A cache hit never appears in execution_history in the first place (see
+/** The stat-tiles row (total runs, success rate, avg/slowest duration, avg rows, last run) - shared between
+ * the always-visible meta area (above the requests-per-day chart, so it's on screen regardless of which
+ * subtab is open) and the Metrics subtab below, which adds the "Runs by caller" breakdown on top of the
+ * same row rather than duplicating its own copy. null when there's no history, so both callers can simply
+ * skip appending it - the same "no chart with nothing to show" rule renderRequestsPerDayChart() already
+ * follows. A cache hit never appears in execution_history in the first place (see
  * ExecutionHistoryInteractionTests), so every number here is already, correctly, about real runs only. */
-function renderQueryMetricsTab(body, v) {
+function queryStatTilesRow(v) {
   var hs = v.execution_history || [];
-  if (!hs.length) {
-    body.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No runs recorded' }),
-      h('span', { text: 'Runs of v' + v.version + ' through /q/ appear here.' })));
-    return;
-  }
+  if (!hs.length) return null;
   var successes = hs.filter(function (x) { return x.status === 'success'; });
   var errorRate = 100 * (hs.length - successes.length) / hs.length;
   var durations = hs.map(function (x) { return x.duration_ms; }).filter(function (d) { return d !== undefined && d !== null; });
@@ -4418,14 +4418,25 @@ function renderQueryMetricsTab(body, v) {
   var rowCounts = successes.map(function (x) { return x.rows; }).filter(function (r) { return r !== undefined && r !== null; });
   var avgRows = rowCounts.length ? Math.round(rowCounts.reduce(function (a, r) { return a + r; }, 0) / rowCounts.length) : null;
   var last = lastRun(v);
-
-  body.appendChild(h('div', { className: 'stat-tiles' },
+  return h('div', { className: 'stat-tiles' },
     statTile('Total runs', hs.length),
     statTile('Success rate', (100 - errorRate).toFixed(1) + '%', errorRate >= 5),
     statTile('Avg duration', avgDuration === null ? '—' : avgDuration + ' ms'),
     statTile('Slowest run', maxDuration === null ? '—' : maxDuration + ' ms'),
     statTile('Avg rows', avgRows === null ? '—' : avgRows),
-    statTile('Last run', last ? last.executed_at : '—')));
+    statTile('Last run', last ? last.executed_at : '—'));
+}
+/** The Metrics subtab: the same stat-tiles row queryStatTilesRow() also puts above the requests-per-day
+ * chart, plus a "Runs by caller" breakdown when more than one key has called this version. */
+function renderQueryMetricsTab(body, v) {
+  var hs = v.execution_history || [];
+  var tiles = queryStatTilesRow(v);
+  if (!tiles) {
+    body.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No runs recorded' }),
+      h('span', { text: 'Runs of v' + v.version + ' through /q/ appear here.' })));
+    return;
+  }
+  body.appendChild(tiles);
 
   var byCaller = {};
   hs.forEach(function (x) { var k = x.key_name || '-'; byCaller[k] = (byCaller[k] || 0) + 1; });
