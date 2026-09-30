@@ -80,8 +80,9 @@ for a different grouping/priority order.
 
 ## Live updates (SSE)
 
-28. **Build a client that watches your saved queries run in real time** (`GET /events`) - `fetch()` over
-    `EventSource`, reading `data:`/keepalive frames, reconnect-on-drop.
+28. ✅ **Build a client that watches your saved queries run in real time** (`GET /events`) - `fetch()` over
+    `EventSource`, reading `data:`/keepalive frames, reconnect-on-drop. See
+    [28-build-a-client-that-watches-queries-run.md](28-build-a-client-that-watches-queries-run.md).
 29. **Give each user of your own app (e.g. a mobile app) their own private activity feed** - per-key SSE
     filtering, one scoped key per login, verifying isolation between two users.
 

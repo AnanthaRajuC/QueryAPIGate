@@ -22,6 +22,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **The admin UI's Help > Docs browser now lists the `how-to/` guides too**, under a new "How-to guides"
+  section beneath the existing "Reference" docs - the same fetch-from-GitHub-at-the-running-version's-tag
+  mechanism already used for README/API/MCP/etc., no new plumbing. `DOCS` entries gained a `group` field;
+  the nav now renders a small section label whenever the group changes. Verified rendering for a real
+  how-to guide (headings, code blocks, links) with the fetch stubbed locally, since `how-to/` isn't pushed
+  to GitHub yet.
 - **`queryapigate examples load` now prints a ready-to-run SSE example too**, alongside the existing curl
   example - `curl -N http://127.0.0.1:5000/events -H 'X-API-Key: ...'` - so the live-events feature (see
   below) is discoverable the same way the REST endpoint already was, not just something you'd find by

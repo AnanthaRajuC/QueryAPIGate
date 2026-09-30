@@ -6121,14 +6121,24 @@ function renderRunHistory() {
 // documentation/ folder locally. Rendered client-side with marked.js (CDN, loaded lazily on first open -
 // the same CDN-script pattern /docs already uses for Swagger UI). ----
 var DOCS = [
-  { id: 'readme', title: 'Overview', path: 'README.md' },
-  { id: 'install', title: 'Installation & Setup', path: 'documentation/INSTALLATION_AND_SETUP.md' },
-  { id: 'api', title: 'API Reference', path: 'documentation/API.md' },
-  { id: 'deployment', title: 'Production Deployment', path: 'documentation/DEPLOYMENT.md' },
-  { id: 'mcp', title: 'MCP Server', path: 'documentation/MCP.md' },
-  { id: 'examples', title: 'Examples', path: 'documentation/EXAMPLES.md' },
-  { id: 'security', title: 'Security', path: 'SECURITY.md' },
-  { id: 'threatmodel', title: 'Threat Model', path: 'documentation/THREAT_MODEL.md' }
+  { id: 'readme', title: 'Overview', path: 'README.md', group: 'Reference' },
+  { id: 'install', title: 'Installation & Setup', path: 'documentation/INSTALLATION_AND_SETUP.md', group: 'Reference' },
+  { id: 'api', title: 'API Reference', path: 'documentation/API.md', group: 'Reference' },
+  { id: 'deployment', title: 'Production Deployment', path: 'documentation/DEPLOYMENT.md', group: 'Reference' },
+  { id: 'mcp', title: 'MCP Server', path: 'documentation/MCP.md', group: 'Reference' },
+  { id: 'examples', title: 'Examples', path: 'documentation/EXAMPLES.md', group: 'Reference' },
+  { id: 'security', title: 'Security', path: 'SECURITY.md', group: 'Reference' },
+  { id: 'threatmodel', title: 'Threat Model', path: 'documentation/THREAT_MODEL.md', group: 'Reference' },
+  { id: 'howto-index', title: 'All how-to guides', path: 'how-to/how-to.md', group: 'How-to guides' },
+  { id: 'howto-01', title: 'Your first SQL-to-API', path: 'how-to/01-turn-your-first-sql-query-into-a-rest-api.md', group: 'How-to guides' },
+  { id: 'howto-02', title: 'Connect a database', path: 'how-to/02-connect-a-database.md', group: 'How-to guides' },
+  { id: 'howto-04', title: 'Connect to MongoDB', path: 'how-to/04-connect-to-mongodb.md', group: 'How-to guides' },
+  { id: 'howto-05', title: 'Try the example APIs', path: 'how-to/05-try-the-built-in-example-apis.md', group: 'How-to guides' },
+  { id: 'howto-06', title: 'Use bound parameters safely', path: 'how-to/06-use-bound-parameters-safely.md', group: 'How-to guides' },
+  { id: 'howto-07', title: 'Group queries into a collection', path: 'how-to/07-group-queries-into-a-collection.md', group: 'How-to guides' },
+  { id: 'howto-08', title: 'Cache a saved query', path: 'how-to/08-cache-a-saved-query.md', group: 'How-to guides' },
+  { id: 'howto-24', title: 'Let an agent call queries via MCP', path: 'how-to/24-let-an-agent-call-your-queries-via-mcp.md', group: 'How-to guides' },
+  { id: 'howto-28', title: 'Build a client that watches queries run', path: 'how-to/28-build-a-client-that-watches-queries-run.md', group: 'How-to guides' }
 ];
 var docsNavBuilt = false;
 var docsActiveId = null;
@@ -6181,7 +6191,12 @@ function loadDoc(doc) {
 function initDocsBrowser() {
   docsNavBuilt = true;
   var nav = $('docs-nav');
+  var lastGroup = null;
   DOCS.forEach(function (d) {
+    if (d.group !== lastGroup) {
+      lastGroup = d.group;
+      nav.appendChild(h('div', { className: 'nav-label', style: 'padding:10px 10px 4px', text: d.group }));
+    }
     nav.appendChild(h('button', { type: 'button', 'data-doc': d.id, text: d.title, onclick: function () { loadDoc(d); } }));
   });
   loadDoc(DOCS[0]);
