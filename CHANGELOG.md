@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **"Save as New API" no longer leaves API Designer.** It used to navigate to API Repository and open the
+  side drawer; now a compact form opens in a box right below the SQL editor, on the same screen, with the
+  connection and query text read live from the editor above at save time (not frozen into the form) so
+  editing the query with the form open just works.
 - **Merged Home's "Recent API requests" and "Slowest queries" into one box with Recent/Slowest tabs**,
   instead of two separate panels - same underlying data (execution_history), shown two ways.
 

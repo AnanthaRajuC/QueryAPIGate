@@ -655,8 +655,9 @@ UI_HTML = r"""<!doctype html>
   .home-actions { display: flex; flex-direction: column; gap: 8px; }
   #home-health, #home-requests-panel { padding: 14px 16px; }
   #home-health h2, #home-requests-panel h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
-  #home-requests-panel .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-  #home-requests-panel .panel-head h2 { margin: 0; }
+  #run-save-panel { padding: 14px 16px; }
+  .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .panel-head h2 { margin: 0; }
   #home-requests-panel .panel-head .minitabs { padding: 0; }
   #home-requests-panel .panel-head .minitab { max-width: none; }
   .health-ok { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
@@ -970,6 +971,7 @@ UI_HTML = r"""<!doctype html>
         </div>
       </div>
     </form>
+    <div class="panel" id="run-save-panel" hidden style="margin-top:12px"></div>
     <div class="panel results" id="run-results-panel">
       <div class="resbar" id="run-status"></div>
       <div class="res-body" id="run-results"></div>
@@ -5512,12 +5514,19 @@ $('run-explain-button').onclick = function () {
   runSql({ explain: true, button: $('run-explain-button') });
 };
 /** "Save as New API": by the time someone reaches for this, the assumption is they've already tried the
- * query here and it does what they want - so this opens the same "New saved query" form the Saved Queries
- * screen's own button does (openQueryForm()), just pre-filled with what Run SQL already has: the query text
- * itself (SQL, or - unchanged either way - the mongo JSON convention text), the connection, and an empty
+ * query here and it does what they want - so this opens a compact form in a box right below the editor,
+ * on this same screen (never navigates to API Repository or opens the side drawer, unlike the "New API"
+ * button there - that one has no query in hand yet, so it needs its own full editor+schema browser; this
+ * one already has both, right above). Prefilled with what Run SQL already has: the connection and an empty
  * {name: {}} skeleton entry per detected bound parameter (mongoDocParams() for mongo, sqlParams() for SQL -
- * the same two functions the form's own "Bound in the query" hint already uses) so query_parameters starts
- * with every name ready to have a type/default added, not blank. */
+ * the same two functions the editor's own "Bound in the query" hint already uses) so query_parameters
+ * starts with every name ready to have a type/default added, not blank. The query text itself is read live
+ * from the editor at save time, not frozen into the form - editing SQL above with this box open just works. */
+function closeInlineSaveForm() {
+  var panel = $('run-save-panel');
+  panel.hidden = true;
+  clear(panel);
+}
 $('run-save-as-api-button').onclick = function () {
   var connection = $('run-connection').value;
   var text = $('run-sql').value;
@@ -5527,9 +5536,87 @@ $('run-save-as-api-button').onclick = function () {
   var names = isMongo ? mongoDocParams(text) : sqlParams(text);
   var queryParameters = {};
   names.forEach(function (n) { queryParameters[n] = {}; });
-  showTab('queries');
-  openQueryForm(null, { connection_name: connection, sql_query: text, query_parameters: queryParameters });
+
+  var panel = clear($('run-save-panel'));
+  panel.hidden = false;
+  function inp(id, ph, req) { return h('input', { id: id, placeholder: ph || null, required: req ? true : null, autocomplete: 'off', spellcheck: 'false' }); }
+  var collectionInput = h('input', { id: 'rs-collection', list: 'rs-collection-list', placeholder: 'optional — e.g. reporting', autocomplete: 'off', spellcheck: 'false' });
+  var collectionImpact = h('div', {});
+  collectionInput.addEventListener('input', function () { clear(collectionImpact).appendChild(collectionInput.value.trim() ? impactNode(null, collectionInput.value.trim()) : h('span')); });
+  var paramsTa = h('textarea', { id: 'rs-params', spellcheck: 'false', placeholder: '{"id": {"type": "int", "min": 1}}' });
+  paramsTa.value = Object.keys(queryParameters).length ? JSON.stringify(queryParameters, null, 2) : '';
+  var actions = formActions('Save', closeInlineSaveForm);
+  var form = h('form', { className: 'form', novalidate: true, onsubmit: function (e) { e.preventDefault(); saveInlineApi(actions.submit); } },
+    field('rs-filename', 'Filename', inp('rs-filename', 'films_by_rating', true), 'Letters, digits, spaces, “.”, “_” and “-”. Saving an existing name adds a version.'),
+    h('div', { className: 'grid2' }, field('rs-author', 'Author', inp('rs-author', '', true)), field('rs-description', 'Description', inp('rs-description', '', true))),
+    h('div', { className: 'field' }, h('label', { for: 'rs-collection' }, 'Collection'), collectionInput,
+      h('datalist', { id: 'rs-collection-list' }, collectionNames().map(function (c) { return h('option', { value: c }); })),
+      h('div', { className: 'hint', text: 'Optional. Lowercase letters, digits, “.”, “_” and “-”. Later, use “Move…” to change it.' }), collectionImpact),
+    field('rs-tags', 'Tags', inp('rs-tags', 'comma-separated')),
+    field('rs-params', 'query_parameters', paramsTa, 'JSON object: name → type, or {type, min, max, default, description}. Read from the editor above at save time.'),
+    actions.node);
+  panel.appendChild(h('div', { className: 'panel-head' }, h('h2', { text: 'Save as New API' }),
+    h('span', { className: 'spacer' }),
+    h('button', { type: 'button', className: 'btn sm ghost', text: '✕', title: 'Close', onclick: closeInlineSaveForm })));
+  panel.appendChild(form);
+  $('rs-filename').focus();
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
+/** Submits the inline "Save as New API" form (above) - the connection and query text are read live from
+ * the API Designer editor at this moment, exactly like runSql() does for a real run, rather than whatever
+ * they were when the form opened. Shape and validation mirror saveQuery() (the drawer form's own submit),
+ * duplicated rather than shared since the two forms don't share field ids or a SQL editor to read from. */
+async function saveInlineApi(btn) {
+  var connection = $('run-connection').value;
+  var text = $('run-sql').value;
+  var isMongo = (connectionsCache[connection] || {}).db === 'mongo';
+  var paramsText = $('rs-params').value.trim();
+  var queryParameters = {};
+  if (paramsText) {
+    try { queryParameters = JSON.parse(paramsText); }
+    catch (e) { showError('query_parameters is not valid JSON: ' + e.message, { errors: { query_parameters: e.message } }); return; }
+  }
+  var tags = $('rs-tags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+  var filename = $('rs-filename').value.trim();
+  var body = { filename: filename, author: $('rs-author').value, description: $('rs-description').value,
+    tags: tags, connection_name: connection || undefined, query_parameters: queryParameters };
+  if (isMongo) {
+    var doc;
+    try { doc = text.trim() ? JSON.parse(text) : {}; }
+    catch (e) { showError('The query must be valid JSON: ' + e.message, { errors: { sql_query: e.message } }); return; }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !doc.collection) {
+      showError('The query must be a JSON object with a "collection" field, e.g. {"collection": "users", "filter": {}}.',
+               { errors: { sql_query: 'collection is required' } });
+      return;
+    }
+    body.query_type = 'mongo';
+    body.mongo_collection = doc.collection;
+    body.mongo_filter = doc.filter || {};
+    if (doc.projection) body.mongo_projection = doc.projection;
+    if (doc.sort) body.mongo_sort = doc.sort;
+  } else {
+    body.sql_query = text;
+  }
+  var chosen = $('rs-collection').value.trim();
+  if (chosen) {
+    var already = findFile(filename);
+    if (already && (already.collection || '') !== chosen) {
+      showError('“' + filename + '” already exists' + (already.collection ? ' in collection ' + already.collection : ' with no collection') + '. Save it without a collection here, then use “Move…” — that shows which keys gain or lose access first.');
+      return;
+    }
+    if (!already) body.collection = chosen;
+  }
+  btn.disabled = true;
+  var res = await apiJson('save_sql_to_file', { method: 'PATCH', json: body });
+  btn.disabled = false;
+  if (res) {
+    showError('');
+    closeInlineSaveForm();
+    toast('Saved ' + filename + (res.version ? ' v' + res.version : ''));
+    selected.version = res.version || null;
+    loadQueries(filename);
+  }
+}
 function runSql(opts) {
   var connection = $('run-connection').value;
   if (!connection) { showError('Pick a connection first — add one on the Connections tab.'); return; }
