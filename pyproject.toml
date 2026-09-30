@@ -39,9 +39,11 @@ mongo = ["pymongo>=4.0"]
 flow = ["sqlglot>=23,<26"]  # best-effort table/join extraction for the Access tab - see sqlflow.py
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
-mcp = ["mcp>=1.9,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. Needs Python >=3.10 (the mcp
-                       # package's own floor), higher than this project's own >=3.9 - the same shape h2's
-                       # extra already needs a JVM beyond what `pip install` alone provides.
+mcp = ["mcp>=1.10,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. 1.10 is the floor because
+                        # that's where outputSchema/structuredContent support landed in the SDK (1.9 doesn't
+                        # have it). Needs Python >=3.10 (the mcp package's own floor), higher than this
+                        # project's own >=3.9 - the same shape h2's extra already needs a JVM beyond what
+                        # `pip install` alone provides.
 all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]

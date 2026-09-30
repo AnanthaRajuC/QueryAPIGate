@@ -28,6 +28,29 @@ from .errors import ApiError
 # same thing.
 RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql'})
 
+# Generic result-envelope outputSchemas, deliberately not per-query/per-column: a saved query's actual result
+# columns are only known once it runs, not from its stored definition, so declaring real per-column types
+# here would need a genuinely new admin-authored field (BACKLOG #42's own still-open note) - out of scope for
+# this slice. What every row-returning tool (a saved query, and execute_sql) *can* honestly promise ahead of
+# time is its envelope shape, which is exactly what a client needs to read structuredContent without parsing
+# the text block. Every one of these tools' results, structured or not, carries the same two fields.
+ROWS_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'rows': {'type': 'array', 'items': {'type': 'object'}},
+        'truncated': {'type': 'boolean'},
+    },
+    'required': ['rows', 'truncated'],
+}
+TABLES_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'tables': {'type': 'array', 'items': {'type': 'object'}},
+        'truncated': {'type': 'boolean'},
+    },
+    'required': ['tables', 'truncated'],
+}
+
 
 def _is_runnable(data):
     """Same test app._is_runnable() applies for GET /catalog - kept as a private copy here rather than an
@@ -74,6 +97,7 @@ def list_tools_for(permission):
             'name': name,
             'description': data.get('description') or name,
             'inputSchema': input_schema(data),
+            'outputSchema': ROWS_OUTPUT_SCHEMA,
             'readOnlyHint': True,
             'idempotentHint': True,
         })
@@ -105,6 +129,7 @@ def fixed_tools_for(permission):
                 },
                 'required': ['connection_name'],
             },
+            'outputSchema': TABLES_OUTPUT_SCHEMA,
             'readOnlyHint': True,
             'idempotentHint': True,
         },
@@ -126,6 +151,7 @@ def fixed_tools_for(permission):
                 },
                 'required': ['connection_name', 'sql'],
             },
+            'outputSchema': ROWS_OUTPUT_SCHEMA,
             'readOnlyHint': True,
             'idempotentHint': True,
         },
@@ -142,9 +168,11 @@ def call_tool_for(flask_app, permission, name, arguments):
     since an LLM's context can't hold a large result the way a human paging through the admin UI can - a
     caller-supplied page_size smaller than the cap is still honoured, never a larger one.
 
-    Returns a plain dict shaped like an MCP tools/call result ({"content": [...]}, or {"isError": True,
-    "content": [...]} for a failed run) - translation into the mcp package's own result types happens at the
-    transport boundary in run(), not here, so this function stays importable/testable without that package."""
+    Returns a plain dict shaped like an MCP tools/call result ({"content": [...], "structuredContent": {...}},
+    or {"isError": True, "content": [...]} for a failed run - structuredContent is only ever present on
+    success, matching ROWS_OUTPUT_SCHEMA) - translation into the mcp package's own result types happens at
+    the transport boundary in run(), not here, so this function stays importable/testable without that
+    package."""
     from flask import g  # Flask itself is a core dependency (unlike the mcp package) - fine at call time
 
     arguments = dict(arguments or {})
@@ -164,11 +192,8 @@ def call_tool_for(flask_app, permission, name, arguments):
             response = app_module.run_saved(name, {}, arguments)
         except ApiError as error:
             return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
-        rows = response.get_json()
-        text = json.dumps(rows)
-        if response.headers.get('X-Has-More') == 'true':
-            text += f'\n\n(truncated to {page_size} rows)'
-        return {'content': [{'type': 'text', 'text': text}]}
+        structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
+        return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
 
 def _connection_error(permission, connection_name, database):
@@ -201,7 +226,7 @@ def list_tables_tool(permission, arguments):
         result = schema.fetch_schema(connection_name, database=database)
     except ApiError as error:
         return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
-    return {'content': [{'type': 'text', 'text': json.dumps(result)}]}
+    return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
 
 
 def execute_sql_tool(permission, arguments):
@@ -232,10 +257,8 @@ def execute_sql_tool(permission, arguments):
                                     allowed_tables=permission.allowed_tables)
     except ApiError as error:
         return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
-    text = json.dumps([dict(zip(result.columns, row)) for row in result.rows])
-    if result.has_more:
-        text += f'\n\n(truncated to {page_size} rows)'
-    return {'content': [{'type': 'text', 'text': text}]}
+    structured = {'rows': [dict(zip(result.columns, row)) for row in result.rows], 'truncated': result.has_more}
+    return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
 
 def dispatch_tool_call(flask_app, permission, name, arguments):
@@ -277,6 +300,7 @@ def build_server(flask_app):
         if permission is None:
             return []  # an unauthenticated client sees no tools, the same way an unauthenticated REST
         return [types.Tool(name=t['name'], description=t['description'], inputSchema=t['inputSchema'],
+                           outputSchema=t.get('outputSchema'),
                            annotations=types.ToolAnnotations(readOnlyHint=t['readOnlyHint'],
                                                              idempotentHint=t['idempotentHint']))
                 for t in list_tools_for(permission)]                          # caller sees an empty /catalog
@@ -291,6 +315,7 @@ def build_server(flask_app):
                 isError=True)
         result = dispatch_tool_call(flask_app, permission, name, arguments)
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
+                                    structuredContent=result.get('structuredContent'),
                                     isError=result.get('isError', False))
 
     return server

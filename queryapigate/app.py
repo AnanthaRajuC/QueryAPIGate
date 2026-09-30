@@ -4,6 +4,7 @@ import logging
 import math
 import queue
 import re
+import socket
 import time
 import uuid
 
@@ -24,6 +25,7 @@ from . import (
     engine,
     examples,
     logging_setup,
+    mcp_server,
     metrics,
     mongotools,
     openapi,
@@ -1121,6 +1123,41 @@ def settings_endpoint():
     never returned."""
     require_admin()
     return jsonify({'sections': config.describe_settings()}), 200
+
+
+@bp.route('/settings/mcp_status', methods=['GET'])
+def mcp_status_endpoint():
+    """An on-demand reachability probe for the separate `queryapigate mcp` process (BACKLOG #54's own
+    still-open "no reachability check" note) - a plain TCP connect attempt against its configured port, not
+    a full MCP handshake, so it costs nothing beyond a bounded-timeout socket connect. Deliberately never
+    run automatically alongside GET /settings, which is exactly why #54 skipped this originally (a probe's
+    own latency and failure mode added to every settings load) - the admin UI only calls this on an explicit
+    "Check now" click."""
+    require_admin()
+    port = config.mcp_port()
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=1.5):
+            reachable = True
+    except OSError:
+        reachable = False
+    return jsonify({'reachable': reachable, 'port': port}), 200
+
+
+@bp.route('/settings/mcp_tools', methods=['GET'])
+def mcp_tools_endpoint():
+    """What `tools/list` currently returns for an unrestricted (admin) caller, computed in-process via
+    mcp_server.list_tools_for() - the exact function the real MCP server itself calls - rather than a live
+    probe of that separate process, so this works whether or not `queryapigate mcp` actually happens to be
+    running right now. BACKLOG #54's own still-open "tool-listing panel" note."""
+    require_admin()
+    tools = mcp_server.list_tools_for(apikeys.OPEN)
+    return jsonify({'tools': [{
+        'name': t['name'],
+        'description': t['description'],
+        'kind': 'ad-hoc' if t['name'] in mcp_server.RESERVED_TOOL_NAMES else 'saved query',
+        'params': sorted(t['inputSchema'].get('properties', {}).keys()),
+        'read_only': t['readOnlyHint'],
+    } for t in tools]}), 200
 
 
 # --------------------------------------------------------------------------------------

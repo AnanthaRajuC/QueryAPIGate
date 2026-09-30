@@ -30,6 +30,23 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   end-to-end against a real running MCP server with a real client: tool listing, schema discovery, a real
   query, a refused write, and a refused unauthorized connection. See
   [documentation/MCP.md](documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql).
+- **`outputSchema`/`structuredContent` for every MCP tool** - a generic result-envelope schema
+  (`{"rows": [...], "truncated": bool}` for a saved query or `execute_sql`; `{"tables": [...], "truncated":
+  bool}` for `list_tables`), not per-column, since a saved query's actual columns are only known once it
+  runs. Verified round-tripping through the real `mcp` SDK's own client, not just this project's own dict
+  shape. **Breaking, per this release's own new versioning policy above, if you already call an MCP tool
+  and parse its result text**: a row-returning tool's text content used to be a bare JSON array with an
+  ad-hoc `"(truncated to N rows)"` suffix string when capped; it is now always the wrapped
+  `{"rows": [...], "truncated": bool}` object (or read `structuredContent` directly instead of parsing
+  text at all). The `mcp` extra's floor moves to `mcp>=1.10` (from `>=1.9`) - that's where the SDK's own
+  `outputSchema`/`structuredContent` support landed.
+- **Two on-demand MCP panels in the admin UI's Settings > MCP server section**: a "Reachability" check
+  (`GET /settings/mcp_status`, a plain TCP connect attempt against `QUERYAPIGATE_MCP_PORT`, only ever run on
+  an explicit "Check now" click - never automatically, preserving this project's original reasoning against
+  probing a separate process on every settings load) and a "Tools" panel (`GET /settings/mcp_tools`) listing
+  every tool `tools/list` currently returns for an unrestricted caller, computed in-process so it works
+  whether or not `queryapigate mcp` is actually running. Verified live against a real running MCP server in
+  both the reachable and unreachable states.
 - **A real versioning and compatibility policy** (see the "Versioning and compatibility" section above),
   replacing a bare "we use SemVer" line: what's covered by the version number, what isn't, and this
   project's pre-1.0 rule that only a minor release - never a patch - may carry a breaking change, always

@@ -510,6 +510,16 @@ def build_spec(version, saved_queries=None):
                            'from the environment or is the default (admin only, read-only; secrets are reported '
                            'as configured or not, never returned)', 'tags': ['Service'],
                 'responses': {'200': {'description': 'Settings grouped into sections'}, **_ERRORS}}},
+            '/settings/mcp_status': {'get': {
+                'summary': 'Whether the separate `queryapigate mcp` process is currently reachable on its '
+                           'configured port (admin only; a plain TCP connect attempt, not a full MCP '
+                           'handshake) - on demand only, never checked automatically', 'tags': ['Service'],
+                'responses': {'200': {'description': 'Reachable or not, and the port checked'}, **_ERRORS}}},
+            '/settings/mcp_tools': {'get': {
+                'summary': 'What `tools/list` currently returns for an unrestricted MCP caller - computed '
+                           "in-process, so this works whether or not `queryapigate mcp` is actually running "
+                           '(admin only)', 'tags': ['Service'],
+                'responses': {'200': {'description': 'Every MCP tool an admin key would see'}, **_ERRORS}}},
             '/cache/entries': {
                 'get': {'summary': 'Every live response-cache entry\'s metadata - name, version, connection, '
                            'format, content type, size and TTL remaining (admin only; never the cached body '

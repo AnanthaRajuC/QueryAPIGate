@@ -1300,6 +1300,16 @@ own client talking to a real running server - not just `tools/list`/`tools/call`
 ruff/mypy, and a real CLI run with `queryapigate mcp` and `queryapigate serve` running side by side against
 one `QUERYAPIGATE_HOME`, called from a real MCP client.
 
+**Two ad-hoc tools shipped as a follow-up**: `list_tables` (schema discovery) and `execute_sql` (read-only
+ad-hoc SQL), not tied to any saved query - the gap between "an agent can call queries a human already
+saved" and "an agent can work with a connection directly." Both gated by the same `connections` grant
+REST's `/connections/<name>/schema` and `/execute_sql` already check, reusing those exact permission checks
+and execution functions (`schema.fetch_schema()`, `engine.execute_sql()`) rather than a parallel path.
+`execute_sql` is hard-forced read-only regardless of the calling key's own `allow_writes` grant - the same
+read-only-over-MCP rule saved queries already follow, now applied to ad-hoc SQL too - and still honors a
+key's `allowed_tables` restriction if it has one. See
+[documentation/MCP.md](documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql).
+
 **Making a saved query a genuinely first-class MCP tool, not just a REST endpoint wrapped in MCP's shape:**
 real MCP tool concepts, and what each needs from a saved query's current definition - shipped/open status
 per item, now that v1 is built:
@@ -1308,9 +1318,15 @@ per item, now that v1 is built:
   v1 - still written for admins, not the model, but no new field invented for this slice.
 - **`inputSchema`** - **shipped.** `query_parameters` -> JSON Schema via `params.json_schema()`, the same
   translation `/openapi.json` already used. Zero new data, as scoped.
-- **`outputSchema`** - **still skipped**, per the spec's own allowance for a tool with no declared output
-  shape. A saved query's result columns still aren't statically known; a genuinely new
-  admin-declares-the-shape field remains real, un-started design work if this is ever wanted.
+- **`outputSchema`** - **shipped, as a generic result-envelope schema, not per-column.** Every row-returning
+  tool (a saved query, `execute_sql`) declares `{"rows": [...], "truncated": <bool>}`; `list_tables`
+  declares `{"tables": [...], "truncated": <bool>}`. Every successful call now also returns a matching
+  `structuredContent`, verified round-tripping through the real `mcp` SDK's own client, not just this
+  module's own dict shape. **Breaking change** to the text-content shape (a bare JSON array with an
+  ad-hoc truncation suffix string, before this) - flagged under this project's own versioning policy (see
+  CHANGELOG.md's "Versioning and compatibility" section). Real per-column types remain un-started design
+  work if ever wanted - a saved query's result columns are still only known once it runs, not from its
+  stored definition, and declaring them accurately would need a genuinely new admin-authored field.
 - **Annotations (`readOnlyHint`/`destructiveHint`/`idempotentHint`)** - **`readOnlyHint`/`idempotentHint`
   shipped** (both always `True` for the read-only-only v1 tool set). **`destructiveHint` still not built** -
   moot for now since nothing destructive is exposed at all; still no `DESTRUCTIVE_STATEMENTS` constant to
@@ -1323,9 +1339,10 @@ per item, now that v1 is built:
   version - the confirmation-flow decision this note flags stays exactly as open as it was, deferred to
   whatever follow-up adds write support.
 
-Net, updated: everything scoped as "close-to-free reuse" shipped; `outputSchema` and `destructiveHint` remain
-the real new design decisions this entry always said they'd be, both still open because both are only
-meaningful once write-capable (or result-shape-aware) tools exist - not needed for a read-only-only v1.
+Net, updated: everything scoped as "close-to-free reuse" shipped, plus the two ad-hoc tools and a generic
+`outputSchema`/`structuredContent`. `destructiveHint` and elicitation for writes remain the real new design
+decisions this entry always said they'd be, both still open because both are only meaningful once
+write-capable tools exist - not needed for a read-only-only version.
 
 ## 43. Server-Sent Events (SSE) for live updates, instead of polling
 
@@ -1658,6 +1675,16 @@ every `/settings` load - deliberately not done). **No tool-listing panel** eithe
 closer to how #48's Caching screen became its own panel) was scoped out in favor of the minimal row-only
 version. Both remain open, smaller follow-ups if wanted later, not started.
 
+**Both follow-ups shipped later.** A "Reachability" panel with a "Check now" button (`GET
+/settings/mcp_status`, a plain TCP connect attempt against `QUERYAPIGATE_MCP_PORT` - not a full MCP
+handshake) - on demand only, exactly preserving the original reasoning against an automatic check: it never
+runs as part of loading `/settings`, only on an explicit click. A "Tools" panel (`GET /settings/mcp_tools`)
+listing every tool `list_tools_for(apikeys.OPEN)` currently returns - name, kind (saved query vs. ad-hoc),
+declared params, description - computed in-process from the same function the real MCP server calls, so it
+works whether or not `queryapigate mcp` actually happens to be running. Both admin-only, both verified live
+against a real running `queryapigate mcp` process (reachable/unreachable states) and a real saved-query
+catalog.
+
 **Impact:** `queryapigate mcp` (#42) is a separate process with no presence in `/ui` at all today - unlike
 the Redis-backed response cache (#47) and the SSE broadcaster (#43), both of which got a Settings-panel row
 showing their backend/status. An admin currently has no way to tell, from the UI, whether the MCP server is
@@ -1687,9 +1714,10 @@ out of scope for real parsing; #41, #42, #43, #44, #45, #46, #47, #48, #49, #50,
 shipped in full, both phases - every persistent store this app owns now lives in `queryapigate.db`, see its
 own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel, with the example
 dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
-own entry; #42 shipped for read-only saved queries only, with write-capable MCP tools - needing a
-`destructiveHint` classification and a write-confirmation decision - left explicitly open, see its own
-entry); #54 is shipped as a Settings-row-only slice, with a live reachability check and a tool-listing panel
-both left explicitly open, see its own entry. The "still
+own entry; #42 shipped for read-only saved queries only plus two ad-hoc tools (`list_tables`/`execute_sql`)
+and a generic `outputSchema`, with write-capable MCP tools - needing a `destructiveHint` classification and
+a write-confirmation decision - left explicitly open, see its own entry); #54 shipped in full, including
+its own two originally-deferred follow-ups (an on-demand reachability check and a tool-listing panel), see
+its own entry. The "still
 open" note under #9 (confirming its CI changes
 on a real run) is a smaller follow-up on finished work, not an open capability gap.

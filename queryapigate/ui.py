@@ -1416,6 +1416,49 @@ function renderSettings() {
         h('div', { className: 'set-val' }, h('span', { className: 'v', title: row.value, text: row.value }),
           h('span', { className: 'badge ' + row.source, text: row.source })));
     })));
+  if (sec.id === 'mcp') body.appendChild(renderMcpExtras());
+}
+
+// ---- MCP section extras: an on-demand reachability probe (never automatic - see #54's own reasoning) and
+// a live listing of what tools/list would currently return, loaded once per settings visit. ----
+var mcpStatus = null, mcpStatusChecking = false, mcpTools = null, mcpToolsLoading = false;
+async function checkMcpStatus() {
+  mcpStatusChecking = true;
+  renderSettings();
+  mcpStatus = await apiJson('settings/mcp_status');
+  mcpStatusChecking = false;
+  renderSettings();
+}
+async function loadMcpTools() {
+  mcpToolsLoading = true;
+  var body = await apiJson('settings/mcp_tools');
+  mcpTools = body ? body.tools : [];
+  mcpToolsLoading = false;
+  renderSettings();
+}
+function renderMcpExtras() {
+  if (mcpTools === null && !mcpToolsLoading) loadMcpTools();
+  var dot = mcpStatusChecking ? 'checking' : mcpStatus === null ? 'unknown' : mcpStatus.reachable ? 'ok' : 'bad';
+  var dotText = mcpStatusChecking ? 'Checking…' : mcpStatus === null ? 'Not checked yet'
+    : mcpStatus.reachable ? 'Reachable on port ' + mcpStatus.port : 'Not reachable on port ' + mcpStatus.port;
+  return h('div', { className: 'panel', style: 'margin-top:12px' },
+    h('div', { className: 'set-head' }, h('h2', { text: 'Reachability' }),
+      h('span', { text: 'A plain TCP connect attempt against the port above - not started or probed automatically.' })),
+    h('div', { className: 'set-row' },
+      h('div', { className: 'set-what' }, h('span', { className: 'dot ' + dot }), h('span', { className: 'set-label', text: dotText })),
+      h('button', { type: 'button', className: 'btn', disabled: mcpStatusChecking, onclick: checkMcpStatus, text: 'Check now' })),
+    h('div', { className: 'set-head', style: 'margin-top:14px' }, h('h2', { text: 'Tools' }),
+      h('span', { text: 'What tools/list currently returns for an unrestricted MCP caller.' })),
+    mcpToolsLoading || mcpTools === null ? h('div', { className: 'hint' }, 'Loading…')
+      : !mcpTools.length ? h('div', { className: 'hint' }, 'No saved queries or connections are reachable yet.')
+      : h('table', { className: 'grid' },
+          h('thead', {}, h('tr', {}, h('th', { text: 'Name' }), h('th', { text: 'Kind' }), h('th', { text: 'Params' }), h('th', { text: 'Description' }))),
+          h('tbody', {}, mcpTools.map(function (t) {
+            return h('tr', {}, h('td', { className: 'mono', text: t.name }),
+              h('td', {}, h('span', { className: 'tag', text: t.kind })),
+              h('td', { className: 'mono', text: t.params.length ? t.params.join(', ') : '—' }),
+              h('td', { text: t.description }));
+          }))));
 }
 $('copy-env').onclick = function () {
   var lines = [];

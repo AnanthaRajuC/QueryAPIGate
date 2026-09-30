@@ -77,5 +77,85 @@ class SettingsTests(unittest.TestCase):
         self.assertIsNone(rows['QUERYAPIGATE_SECRET_KEY']['env_value'])
 
 
+class McpStatusEndpointTests(unittest.TestCase):
+    """GET /settings/mcp_status - an on-demand TCP reachability probe against QUERYAPIGATE_MCP_PORT, never
+    run automatically (BACKLOG #54's own reasoning for skipping this originally)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_API_KEY': 'admin-key'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin-key'}
+
+    def test_requires_the_admin_key(self):
+        self.assertEqual(self.client.get('/settings/mcp_status').status_code, 401)
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
+        key = scoped.get_json()['key']
+        self.assertEqual(self.client.get('/settings/mcp_status', headers={'X-API-Key': key}).status_code, 403)
+
+    def test_reports_unreachable_when_nothing_listens_on_the_port(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '18321'}):
+            res = self.client.get('/settings/mcp_status', headers=self.admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json(), {'reachable': False, 'port': 18321})
+
+    def test_reports_reachable_when_something_listens_on_the_port(self):
+        import socket
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.bind(('127.0.0.1', 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        self.addCleanup(server.close)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': str(port)}):
+            res = self.client.get('/settings/mcp_status', headers=self.admin)
+        self.assertEqual(res.get_json(), {'reachable': True, 'port': port})
+
+
+class McpToolsEndpointTests(unittest.TestCase):
+    """GET /settings/mcp_tools - what tools/list would return for an unrestricted MCP caller, computed
+    in-process via mcp_server.list_tools_for() rather than a live probe of the separate MCP process."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_API_KEY': 'admin-key'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin-key'}
+
+    def test_requires_the_admin_key(self):
+        self.assertEqual(self.client.get('/settings/mcp_tools').status_code, 401)
+        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
+        key = scoped.get_json()['key']
+        self.assertEqual(self.client.get('/settings/mcp_tools', headers={'X-API-Key': key}).status_code, 403)
+
+    def test_always_lists_the_two_ad_hoc_tools(self):
+        res = self.client.get('/settings/mcp_tools', headers=self.admin)
+        self.assertEqual(res.status_code, 200)
+        tools = {t['name']: t for t in res.get_json()['tools']}
+        self.assertEqual(tools['list_tables']['kind'], 'ad-hoc')
+        self.assertEqual(tools['execute_sql']['kind'], 'ad-hoc')
+
+    def test_lists_a_saved_query_with_its_params_and_kind(self):
+        self.client.patch('/save_sql_to_file', json={
+            'author': 'a', 'description': 'By id', 'sql_query': 'SELECT * FROM t WHERE id = :id',
+            'filename': 'q1', 'connection_name': 'nope'}, headers=self.admin)
+        res = self.client.get('/settings/mcp_tools', headers=self.admin)
+        tools = {t['name']: t for t in res.get_json()['tools']}
+        self.assertEqual(tools['q1']['kind'], 'saved query')
+        self.assertEqual(tools['q1']['description'], 'By id')
+        self.assertEqual(tools['q1']['params'], ['id'])
+        self.assertTrue(tools['q1']['read_only'])
+
+    def test_works_whether_or_not_the_mcp_process_is_actually_running(self):
+        # No real MCP process is ever started in this test suite - the endpoint must not depend on one.
+        res = self.client.get('/settings/mcp_tools', headers=self.admin)
+        self.assertEqual(res.status_code, 200)
+
+
 if __name__ == '__main__':
     unittest.main()

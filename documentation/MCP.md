@@ -26,6 +26,21 @@ connection-grant check, parameter validation, `cache_ttl` caching, `execution_hi
 trail. A run triggered over MCP shows up in the admin UI's History tab and the Home tab's live feed exactly
 like a REST call would - there is no separate, parallel execution path to keep in sync.
 
+## Structured results (`outputSchema`)
+
+Every tool - a saved query, `list_tables`, or `execute_sql` - declares an `outputSchema`, and every
+successful call returns a matching `structuredContent` alongside the usual text content (the text is a
+serialized copy of the same object, kept for clients that don't read `structuredContent`). A row-returning
+tool (a saved query or `execute_sql`) always returns `{"rows": [...], "truncated": <bool>}`; `list_tables`
+returns `{"tables": [...], "truncated": <bool>}`. This is deliberately a generic envelope, not a per-column
+schema - a saved query's actual result columns are only known once it runs, not from its stored definition,
+so declaring real per-column types would need a new admin-authored field this version doesn't add.
+
+**Breaking, if you already have an MCP integration**: before this, a row-returning tool's text content was
+a bare JSON array of rows with an ad-hoc `"(truncated to N rows)"` suffix string when capped. It is now
+always the wrapped `{"rows": [...], "truncated": <bool>}` object - read `structuredContent` directly rather
+than parsing the text block, or parse the text block as this new object shape instead of a bare array.
+
 ## Ad-hoc tools: `list_tables` and `execute_sql`
 
 Not every question an agent needs to answer has a saved query behind it yet. Two fixed tools - not tied to

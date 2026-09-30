@@ -138,6 +138,7 @@ class ListToolsForTests(McpTestCase):
         tool = next(t for t in tools if t['name'] == 'q1')
         self.assertEqual(tool['description'], 'd')
         self.assertEqual(tool['inputSchema']['required'], ['id'])
+        self.assertEqual(tool['outputSchema'], mcp_server.ROWS_OUTPUT_SCHEMA)
         self.assertTrue(tool['readOnlyHint'])
         self.assertTrue(tool['idempotentHint'])
 
@@ -147,14 +148,15 @@ class CallToolForTests(McpTestCase):
         self.save('q1')
         rest_rows = self.client.get('/q/q1', headers=self.admin_headers).get_json()
         result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'q1', {})
-        mcp_rows = json.loads(result['content'][0]['text'])
-        self.assertEqual(mcp_rows, rest_rows)
+        self.assertEqual(result['structuredContent']['rows'], rest_rows)
+        # The text block is a serialized copy of the same structuredContent, per the MCP spec's own
+        # backwards-compatibility convention for a tool with an outputSchema - not something separate.
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
 
     def test_parameters_are_bound(self):
         self.save('by_id', sql='SELECT * FROM t WHERE id = :id')
         result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'by_id', {'id': 3})
-        rows = json.loads(result['content'][0]['text'])
-        self.assertEqual(rows, [{'id': 3, 'name': 'row3'}])
+        self.assertEqual(result['structuredContent']['rows'], [{'id': 3, 'name': 'row3'}])
 
     def test_a_connection_grant_violation_is_reported_as_an_error_result(self):
         self.save('q1')
@@ -172,15 +174,13 @@ class CallToolForTests(McpTestCase):
         self.save('all_rows')
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_MAX_ROWS': '2'}):
             result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'all_rows', {})
-        rows = json.loads(result['content'][0]['text'].split('\n\n')[0])
-        self.assertEqual(len(rows), 2)
-        self.assertIn('truncated to 2 rows', result['content'][0]['text'])
+        self.assertEqual(len(result['structuredContent']['rows']), 2)
+        self.assertTrue(result['structuredContent']['truncated'])
 
     def test_an_explicit_smaller_page_size_is_honored(self):
         self.save('all_rows')
         result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'all_rows', {'page_size': 1})
-        rows = json.loads(result['content'][0]['text'].split('\n\n')[0])
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(result['structuredContent']['rows']), 1)
 
     def test_the_run_is_recorded_in_execution_history(self):
         self.save('q1')
@@ -228,8 +228,8 @@ class FixedToolsTests(McpTestCase):
     def test_list_tables_returns_the_table_and_its_columns(self):
         result = mcp_server.list_tables_tool(apikeys.OPEN, {'connection_name': 'a'})
         self.assertNotIn('isError', result)
-        body = json.loads(result['content'][0]['text'])
-        table = next(t for t in body['tables'] if t['name'] == 't')
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+        table = next(t for t in result['structuredContent']['tables'] if t['name'] == 't')
         self.assertEqual({c['name'] for c in table['columns']}, {'id', 'name'})
 
     def test_list_tables_is_refused_for_a_connection_the_key_cannot_use(self):
@@ -245,14 +245,14 @@ class FixedToolsTests(McpTestCase):
 
     def test_execute_sql_returns_rows(self):
         result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
-        rows = json.loads(result['content'][0]['text'])
-        self.assertEqual(len(rows), 5)
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+        self.assertEqual(len(result['structuredContent']['rows']), 5)
+        self.assertFalse(result['structuredContent']['truncated'])
 
     def test_execute_sql_binds_parameters(self):
         result = mcp_server.execute_sql_tool(apikeys.OPEN, {
             'connection_name': 'a', 'sql': 'SELECT * FROM t WHERE id = :id', 'params': {'id': 3}})
-        rows = json.loads(result['content'][0]['text'])
-        self.assertEqual(rows, [{'id': 3, 'name': 'row3'}])
+        self.assertEqual(result['structuredContent']['rows'], [{'id': 3, 'name': 'row3'}])
 
     def test_execute_sql_is_always_read_only_even_for_a_writes_allowed_key(self):
         key = self.create_scoped_key(connections=['a'], allow_writes=True)
@@ -286,9 +286,8 @@ class FixedToolsTests(McpTestCase):
     def test_execute_sql_result_is_capped_to_mcp_max_rows_and_marked_truncated(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_MAX_ROWS': '2'}):
             result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
-        rows = json.loads(result['content'][0]['text'].split('\n\n')[0])
-        self.assertEqual(len(rows), 2)
-        self.assertIn('truncated to 2 rows', result['content'][0]['text'])
+        self.assertEqual(len(result['structuredContent']['rows']), 2)
+        self.assertTrue(result['structuredContent']['truncated'])
 
     def test_dispatch_routes_fixed_tools_and_falls_back_to_saved_queries(self):
         self.save('q1')
@@ -335,9 +334,14 @@ class EndToEndMcpTests(McpTestCase):
 
         names, result = asyncio.run(talk())
         self.assertIn('q1', names)
+        self.assertIn('list_tables', names)
+        self.assertIn('execute_sql', names)
         self.assertFalse(result.isError)
-        rows = json.loads(result.content[0].text)
-        self.assertEqual(len(rows), 5)
+        # structuredContent proves outputSchema round-trips through the real SDK's own validation/parsing,
+        # not just this module's own plain-dict shape.
+        self.assertEqual(len(result.structuredContent['rows']), 5)
+        self.assertFalse(result.structuredContent['truncated'])
+        self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
 
 
 if __name__ == '__main__':
