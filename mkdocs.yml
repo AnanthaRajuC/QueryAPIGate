@@ -25,6 +25,7 @@ nav:
   - Query metadata: documentation/QUERY_METADATA_MANAGEMENT.md
   - Technology stack: documentation/TECHNOLOGY_STACK.MD
   - Security: SECURITY.md
+  - Threat model: documentation/THREAT_MODEL.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

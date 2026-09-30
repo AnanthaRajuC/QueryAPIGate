@@ -6081,7 +6081,8 @@ var DOCS = [
   { id: 'deployment', title: 'Production Deployment', path: 'documentation/DEPLOYMENT.md' },
   { id: 'mcp', title: 'MCP Server', path: 'documentation/MCP.md' },
   { id: 'examples', title: 'Examples', path: 'documentation/EXAMPLES.md' },
-  { id: 'security', title: 'Security', path: 'SECURITY.md' }
+  { id: 'security', title: 'Security', path: 'SECURITY.md' },
+  { id: 'threatmodel', title: 'Threat Model', path: 'documentation/THREAT_MODEL.md' }
 ];
 var docsNavBuilt = false;
 var docsActiveId = null;

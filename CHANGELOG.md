@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`documentation/THREAT_MODEL.md`** - a threat model and security architecture reference, distinct from
+  SECURITY.md's operational checklist: what's actually at risk, who might attack it, and how each existing
+  control (auth, the scoped-key grant model, the SQL guard's real limitations including a documented past
+  bypass, secrets at rest, rate limiting, audit logging) works and where it stops. Linked from SECURITY.md,
+  README's security section, the mkdocs nav, and the admin UI's new Docs browser (see below).
 - **A "Docs" tab inside Help**, open by default and sized to fill the window (the same full-width treatment
   the API Designer's Run tab already gets), a real in-app browser over this project's markdown docs (README,
   Installation, API Reference, Production Deployment, MCP Server, Examples, Security) - a sidebar list on the

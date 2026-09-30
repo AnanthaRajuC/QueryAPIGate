@@ -579,7 +579,8 @@ QueryAPIGate runs whatever SQL it is given against your databases, so it ships l
 - Plan for backup and recovery of `queryapigate.db` (`QUERYAPIGATE_HOME`), and put QueryAPIGate behind your
   normal reverse-proxy/TLS-termination setup rather than exposing it directly.
 
-See [SECURITY.md](SECURITY.md) to report a vulnerability.
+See [documentation/THREAT_MODEL.md](documentation/THREAT_MODEL.md) for the reasoning behind these controls -
+what's actually defended against and where it stops - and [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ### Calling the API from a browser
 

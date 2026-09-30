@@ -1,0 +1,1 @@
+--8<-- "documentation/THREAT_MODEL.md"

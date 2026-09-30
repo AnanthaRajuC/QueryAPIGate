@@ -1,6 +1,8 @@
 # Security Policy
 
 QueryAPIGate executes SQL on behalf of whoever can reach it, so please treat it as a sensitive piece of infrastructure.
+This page is an operational checklist; for the reasoning behind each control - what's actually being defended
+against, how it works, and where it stops - see [documentation/THREAT_MODEL.md](documentation/THREAT_MODEL.md).
 
 ## Reporting a vulnerability
 
