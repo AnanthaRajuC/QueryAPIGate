@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Type/Host/Database filters on the API Repository screen.** Three cascading dropdowns above the
+  Collections/Queries list (same cascading idea as API Designer's own Type → Host → Connection picker) narrow
+  the list to queries saved against a matching connection - a collection with nothing left after filtering
+  just disappears rather than showing up empty. Combines with the existing name/description/tag text search.
 - **A cache-entries browser on the Caching screen.** Lists every live response-cache entry (query, version,
   connection, format, content type, size, TTL remaining) for whichever backend is configured - in-process or
   Redis, both now implementing the same `list_entries()`/`get_body()`/`delete()`/`clear()` shape. A "Preview"

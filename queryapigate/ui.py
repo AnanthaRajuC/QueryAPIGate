@@ -483,6 +483,8 @@ UI_HTML = r"""<!doctype html>
   #queries-panel { position: sticky; top: 76px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; }
   .qsearch { padding: 10px; border-bottom: 1px solid var(--line); }
   .qsearch .search { width: 100%; }
+  .qfilters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 10px; border-bottom: 1px solid var(--line); }
+  .qfilters select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 4px 6px; }
   #queries-subtabs:not(:empty) { border-bottom: 1px solid var(--line); }
   #queries-table { overflow: auto; }
   .qcoll-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line);
@@ -818,6 +820,11 @@ UI_HTML = r"""<!doctype html>
     <div class="split">
       <div id="queries-panel" class="panel">
         <div class="qsearch"><input id="query-filter" class="search" type="search" placeholder="Filter by name, description, tag…"></div>
+        <div class="qfilters">
+          <select id="qf-type" aria-label="Filter by database type"></select>
+          <select id="qf-host" aria-label="Filter by host"></select>
+          <select id="qf-database" aria-label="Filter by database"></select>
+        </div>
         <div id="queries-subtabs"></div>
         <div id="queries-table"><div class="loading"><span class="spin"></span>Loading…</div></div>
       </div>
@@ -1932,8 +1939,10 @@ async function loadConnections() {
   }
   connectionsCache = data.connections || {};
   populateConnectionSelect();
+  paintQueryFilters();
   renderConnections();
   renderHome();
+  renderQueryList();
 }
 // A key's usage has no avg_duration_ms (request/query latency isn't split by key - see metrics.py); a
 // connection's does, since a connection has exactly one dialect and its latency histogram is keyed by it.
@@ -3515,6 +3524,51 @@ function collectionHeader(name) {
     h('a', { href: '#', title: 'Download this collection as a Postman Collection file (one request per query; holds no API key)', text: 'Postman', onclick: function (e) { e.preventDefault(); downloadPostman(name); } }),
     h('a', { href: '#', title: 'Rename this collection, carrying every key and role grant with it', text: 'Rename', onclick: function (e) { e.preventDefault(); openRenameCollectionForm(name); } }));
 }
+// ---- API Repository's own Type/Host/Database filters - same cascading idea as API Designer's Type/Host/
+// Connection picker (populateConnectionSelect() above), but narrowing the query/collection list shown here
+// rather than picking one connection to run against. A query matches when the connection it's saved
+// against matches every filter currently set; "All ..." (empty value) matches everything. ----
+function paintQueryFilters() {
+  var typeSel = $('qf-type'), hostSel = $('qf-host'), dbSel = $('qf-database');
+  var curType = typeSel.value, curHost = hostSel.value, curDb = dbSel.value;
+  var names = Object.keys(connectionsCache);
+
+  var types = Array.from(new Set(names.map(function (n) { return connectionsCache[n].db; }))).sort();
+  clear(typeSel).appendChild(h('option', { value: '', text: 'All types' }));
+  types.forEach(function (t) { typeSel.appendChild(h('option', { value: t, text: t })); });
+  typeSel.value = types.indexOf(curType) !== -1 ? curType : '';
+
+  var hosts = Array.from(new Set(names
+    .filter(function (n) { return !typeSel.value || connectionsCache[n].db === typeSel.value; })
+    .map(function (n) { return runConnHostLabel(connectionsCache[n]); }))).sort();
+  clear(hostSel).appendChild(h('option', { value: '', text: 'All hosts' }));
+  hosts.forEach(function (host) { hostSel.appendChild(h('option', { value: host, text: host })); });
+  hostSel.value = hosts.indexOf(curHost) !== -1 ? curHost : '';
+
+  var dbs = Array.from(new Set(names
+    .filter(function (n) { var c = connectionsCache[n]; return (!typeSel.value || c.db === typeSel.value)
+      && (!hostSel.value || runConnHostLabel(c) === hostSel.value); })
+    .map(function (n) { return connectionsCache[n].database || ''; }).filter(Boolean))).sort();
+  clear(dbSel).appendChild(h('option', { value: '', text: 'All databases' }));
+  dbs.forEach(function (d) { dbSel.appendChild(h('option', { value: d, text: d })); });
+  dbSel.value = dbs.indexOf(curDb) !== -1 ? curDb : '';
+}
+['qf-type', 'qf-host', 'qf-database'].forEach(function (id) {
+  $(id).onchange = function () { paintQueryFilters(); renderQueryList(); };
+});
+/** Whether `connectionName`'s own connection matches every Type/Host/Database filter currently set - a
+ * query whose connection no longer exists (deleted since) never matches a filter, but always matches when
+ * every filter is at "All ..." (empty), same as no filtering at all. */
+function queryConnMatchesFilters(connectionName) {
+  var type = $('qf-type').value, host = $('qf-host').value, db = $('qf-database').value;
+  if (!type && !host && !db) return true;
+  var c = connectionsCache[connectionName];
+  if (!c) return false;
+  if (type && c.db !== type) return false;
+  if (host && runConnHostLabel(c) !== host) return false;
+  if (db && (c.database || '') !== db) return false;
+  return true;
+}
 function renderQueryList() {
   var subtabs = clear($('queries-subtabs'));
   var box = clear($('queries-table'));
@@ -3526,19 +3580,27 @@ function renderQueryList() {
     return;
   }
   var q = $('query-filter').value.trim().toLowerCase();
-  var list = filesCache.filter(function (f) {
+  // Type/Host/Database filters narrow the pool before the text search and before grouping into
+  // collections, so a collection with no query on a matching connection just disappears from the list
+  // rather than showing up empty.
+  var connFiltered = filesCache.filter(function (f) { return queryConnMatchesFilters(latestOf(f).connection_name); });
+  var list = connFiltered.filter(function (f) {
     var l = latestOf(f);
     return !q || [f.filename, f.collection, l.description, (l.tags || []).join(' '), l.connection_name, l.author].join(' ').toLowerCase().indexOf(q) !== -1;
   });
-  if (!list.length) { box.appendChild(h('div', { className: 'empty' }, h('span', { text: 'Nothing matches “' + q + '”.' }))); return; }
+  if (!list.length) {
+    box.appendChild(h('div', { className: 'empty' }, h('span', { text: q ? 'Nothing matches “' + q + '”.' : 'No saved query matches these filters.' })));
+    return;
+  }
   // A search in progress overrides Collections/Queries entirely - matches can span any number of
   // collections, so a flat list (each item labelled with its own collection) beats a two-level drill-down.
   if (q) { list.forEach(function (f) { box.appendChild(queryItem(f, true)); }); return; }
-  // Grouping is decided from the whole list, not the filtered one (moot here since q is empty, but keeps
-  // the collection tab list stable rather than recomputed from a possibly-filtered set).
-  if (!filesCache.some(function (f) { return f.collection; })) { list.forEach(function (f) { box.appendChild(queryItem(f)); }); return; }
+  // Grouping is decided from the whole connection-filtered list, not the text-filtered one (moot here
+  // since q is empty, but keeps the collection tab list stable rather than recomputed from a possibly
+  // text-filtered set).
+  if (!connFiltered.some(function (f) { return f.collection; })) { connFiltered.forEach(function (f) { box.appendChild(queryItem(f)); }); return; }
   var groups = {};
-  filesCache.forEach(function (f) { var c = f.collection || ''; (groups[c] = groups[c] || []).push(f); });
+  connFiltered.forEach(function (f) { var c = f.collection || ''; (groups[c] = groups[c] || []).push(f); });
   var names = Object.keys(groups).filter(Boolean).sort();
   if (groups['']) names.push('');
   // The active collection can vanish out from under this view (renamed, or its last query moved/deleted
