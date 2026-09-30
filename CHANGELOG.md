@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Three API Designer improvements**, addressing the screen feeling sparse compared to API Repository:
+  - A connection context strip under the Type/Host/Connection bar - active/inactive, host/database, and the
+    same live usage summary (queries/failed/avg latency) the Connections tab's own table shows per row.
+  - A per-run quick-stats strip pinned right after the editor (status, rows, duration, format, and the
+    widest column on the page) - stays visible without scrolling past a long results table.
+  - The Recent Queries side tab now shows each past run's outcome (rows, duration, or "failed (4xx/5xx)")
+    under its SQL, not just the query text.
+
 ### Changed
 - **"Save as New API" no longer leaves API Designer.** It used to navigate to API Repository and open the
   side drawer; now a compact form opens in a box right below the SQL editor, on the same screen, with the

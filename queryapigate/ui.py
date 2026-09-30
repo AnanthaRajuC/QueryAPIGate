@@ -260,9 +260,11 @@ UI_HTML = r"""<!doctype html>
   .run-row .field { width: 150px; }
   .sub-h { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
   .history-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 320px; overflow: auto; }
-  .history-item { border: 0; background: none; color: var(--ink-2); font: 11.5px var(--mono); text-align: left; padding: 4px 6px; border-radius: 4px;
-    cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-item { display: block; width: 100%; border: 0; background: none; color: var(--ink-2); font: 11.5px var(--mono); text-align: left;
+    padding: 4px 6px; border-radius: 4px; cursor: pointer; }
   .history-item:hover { background: var(--surface-2); color: var(--ink); }
+  .history-sql { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-meta { display: block; color: var(--ink-3); font-size: 10.5px; margin-top: 1px; }
 
   /* ---- SQL editor (hand-rolled highlighting: a <pre> painted behind a transparent <textarea>) ---- */
   .editor { position: relative; min-height: 110px; height: 150px; resize: vertical; overflow: hidden; background: var(--surface); }
@@ -293,6 +295,13 @@ UI_HTML = r"""<!doctype html>
   .runner-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
   .runner-bar select { width: auto; height: 28px; font-size: 12.5px; }
   .runner-bar .lbl { font-size: 11.5px; color: var(--ink-3); }
+  .runner-conn-context { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line);
+    background: var(--surface-2); font-size: 11.5px; color: var(--ink-2); flex-wrap: wrap; }
+  .runner-conn-context .dot { width: 7px; height: 7px; }
+  .runner-conn-context .dim { color: var(--ink-3); }
+  #run-quick-stats:not(:empty) { display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin-top: 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+  #run-quick-stats b { color: var(--ink); font: 600 12px var(--mono); }
   .runner-splitter { position: relative; cursor: col-resize; background: var(--surface); touch-action: none; }
   .runner-splitter::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line); transform: translateX(-50%); }
   .runner-splitter:hover::after, .runner-splitter.dragging::after { width: 3px; background: var(--accent); }
@@ -936,6 +945,7 @@ UI_HTML = r"""<!doctype html>
           <button type="button" class="btn ghost md" id="run-explain-button" title="Run EXPLAIN on this query">Explain</button>
           <button type="submit" class="btn primary md" id="run-button" style="padding:0 16px">Run</button>
         </div>
+        <div class="runner-conn-context" id="run-conn-context"></div>
         <div class="editor" id="run-editor">
           <div class="editor-gutter" id="run-sql-gutter" aria-hidden="true"></div>
           <pre class="hl" id="run-sql-hl" aria-hidden="true"></pre>
@@ -971,6 +981,7 @@ UI_HTML = r"""<!doctype html>
         </div>
       </div>
     </form>
+    <div id="run-quick-stats"></div>
     <div class="panel" id="run-save-panel" hidden style="margin-top:12px"></div>
     <div class="panel results" id="run-results-panel">
       <div class="resbar" id="run-status"></div>
@@ -1951,13 +1962,18 @@ async function loadConnections() {
 }
 // A key's usage has no avg_duration_ms (request/query latency isn't split by key - see metrics.py); a
 // connection's does, since a connection has exactly one dialect and its latency histogram is keyed by it.
-function usageCell(usage) {
-  if (!usage || !usage.queries) return h('td', { className: 'dim', style: 'white-space:nowrap', text: 'No activity yet' });
+function usageSummaryText(usage) {
+  if (!usage || !usage.queries) return null;
   var parts = [usage.queries + (usage.queries === 1 ? ' query' : ' queries')];
   if (usage.errors) parts.push(usage.errors + ' failed');
   if (usage.avg_duration_ms !== undefined && usage.avg_duration_ms !== null) parts.push(usage.avg_duration_ms + 'ms avg');
+  return parts.join(' · ');
+}
+function usageCell(usage) {
+  var text = usageSummaryText(usage);
+  if (!text) return h('td', { className: 'dim', style: 'white-space:nowrap', text: 'No activity yet' });
   var title = usage.rows + (usage.rows === 1 ? ' row' : ' rows') + ' returned in total · since this process started';
-  return h('td', { title: title, style: 'white-space:nowrap', text: parts.join(' · ') });
+  return h('td', { title: title, style: 'white-space:nowrap', text: text });
 }
 var connFilter = 'all';
 /** Every 'delete_connection' audit entry, newest first - the Deleted tab's whole data source. There is no
@@ -2099,6 +2115,23 @@ function paintRunConnection() {
   runSchema.setConnection(select.value || '');
   paintRunDatabase();
   paintRunEditorMode();
+  paintRunConnectionContext();
+}
+/** A thin strip under the Type/Host/Connection bar showing the picked connection's own live state - active/
+ * inactive, host, and the same usage summary (queries/failed/avg latency) the Connections tab's own table
+ * shows per row - so "is this the right connection, and does it actually work" doesn't need a trip over to
+ * that tab first. Rebuilt on every connection pick and every connectionsCache refresh (paintRunConnection()
+ * already runs on both), never a separate fetch of its own. */
+function paintRunConnectionContext() {
+  var box = clear($('run-conn-context'));
+  var name = $('run-connection').value;
+  var c = connectionsCache[name];
+  if (!c) return;
+  box.appendChild(h('span', { className: 'dot ' + (c.active ? 'ok' : 'bad'), title: c.active ? 'Active' : 'Inactive' }));
+  box.appendChild(h('span', { text: name }));
+  box.appendChild(h('span', { className: 'dim', text: c.host ? c.host + (c.port ? ':' + c.port : '') + ' · ' + (c.database || '?') : (c.database || '(local file)') }));
+  var usage = usageSummaryText(c.usage);
+  box.appendChild(h('span', { className: 'dim', text: usage || 'No activity yet' }));
 }
 // ---- Run SQL's own "browse a different database on this same server" picker - separate from the tree-based
 // schema browser above, which always shows the connection's own configured database and is unaffected by it. ----
@@ -5051,6 +5084,7 @@ async function renderResponse(res, o) {
     var msg = errorMessage(res.status, body, text);
     showError(msg, { status: res.status, errors: body && body.errors });
     box.appendChild(h('div', { className: 'res-note err' }, h('span', { className: 'eb-code', text: String(res.status) }), msg));
+    if (o.onResult) o.onResult({ status: res.status, rowCount: null, elapsedMs: o.elapsed, format: o.format, largestColumn: null });
     return;
   }
   var page = Number(res.headers.get('x-page')) || o.page || 1;
@@ -5100,6 +5134,10 @@ async function renderResponse(res, o) {
   }
   box.appendChild(headersBox);
   if (chartPanel) box.appendChild(chartPanel);
+  if (o.onResult) {
+    o.onResult({ status: res.status, rowCount: rowCount, elapsedMs: o.elapsed, format: format,
+      largestColumn: tableData ? widestColumn(tableData) : null });
+  }
 }
 
 /** A collapsible list of every header the response actually carries - X-Page, X-RateLimit-*, X-Request-Id,
@@ -5116,6 +5154,44 @@ function columnsOf(rows) {
   var cols = [], seen = {};
   rows.forEach(function (r) { Object.keys(r || {}).forEach(function (c) { if (!seen[c]) { seen[c] = true; cols.push(c); } }); });
   return cols;
+}
+/** Which column holds the widest values on this page, by stringified length - a cheap eyeball hint for
+ * "which column would blow up a fixed-width table/CSV" without opening every row. null for an empty page. */
+function widestColumn(rows) {
+  var cols = columnsOf(rows);
+  if (!cols.length || !rows.length) return null;
+  var best = null;
+  cols.forEach(function (c) {
+    var max = 0;
+    rows.forEach(function (r) {
+      var v = r ? r[c] : undefined;
+      var len = v === null || v === undefined ? 0 : (typeof v === 'object' ? JSON.stringify(v).length : String(v).length);
+      if (len > max) max = len;
+    });
+    if (!best || max > best.maxLen) best = { column: c, maxLen: max };
+  });
+  return best;
+}
+/** A one-line "was this any good" summary pinned right after the editor/runner form - status, rows,
+ * duration, format and the widest column - so it stays visible without scrolling past a long results
+ * table below. Only wired for real Run SQL/API Designer runs (runSql()/runMongo()'s own onResult), not the
+ * saved-query Run tab or the cache-entry preview drawer, which reuse the same renderResponse() but have no
+ * matching strip of their own. */
+function renderRunQuickStats(meta) {
+  var box = clear($('run-quick-stats'));
+  if (meta.status === undefined || meta.status === null) return;
+  var ok = meta.status < 400;
+  box.appendChild(h('span', { className: 'dot ' + (ok ? 'ok' : 'bad') }));
+  box.appendChild(h('span', {}, h('b', { text: String(meta.status) }), ok ? ' OK' : ' error'));
+  if (meta.rowCount !== null && meta.rowCount !== undefined) {
+    box.appendChild(h('span', {}, h('b', { text: String(meta.rowCount) }), meta.rowCount === 1 ? ' row' : ' rows'));
+  }
+  if (meta.elapsedMs !== undefined && meta.elapsedMs !== null) box.appendChild(h('span', {}, h('b', { text: String(meta.elapsedMs) }), ' ms'));
+  if (meta.format) box.appendChild(h('span', { className: 'dim', text: meta.format }));
+  if (meta.largestColumn) {
+    box.appendChild(h('span', { className: 'dim',
+      text: 'Widest column: ' + meta.largestColumn.column + ' (~' + meta.largestColumn.maxLen + ' chars)' }));
+  }
 }
 
 function rowsToTsv(rows) {
@@ -5498,7 +5574,7 @@ var runSchema = schemaBrowser(function (text) { insertAtCursor($('run-sql'), tex
   },
   function (tableName, filenames) { showTableUsage($('run-connection').value, tableName, filenames); });
 $('run-schema-slot').appendChild(schemaField(runSchema));
-$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); };
+$('run-connection').onchange = function () { runSchema.setConnection($('run-connection').value); paintRunDatabase(); paintRunEditorMode(); paintRunConnectionContext(); };
 function keyRun(e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('run-form').requestSubmit ? $('run-form').requestSubmit() : $('run-form').onsubmit(e); } }
 $('run-sql').addEventListener('keydown', keyRun);
 $('run-params').addEventListener('keydown', keyRun);
@@ -5649,7 +5725,8 @@ function runSql(opts) {
     filename: opts.explain ? 'explain' : 'query', format: format,
     sql: sqlToRun, connection: connection, params: params, timeout: timeout,
     onPage: function (n) { runPage = n; runSql(opts); },
-    onPageSize: function (n) { $('run-page-size').value = String(n); runPage = 1; runSql(opts); }
+    onPageSize: function (n) { $('run-page-size').value = String(n); runPage = 1; runSql(opts); },
+    onResult: function (meta) { renderRunQuickStats(meta); if (!opts.explain) updateRunHistoryResult(meta); }
   });
 }
 
@@ -5690,7 +5767,8 @@ function runMongo(opts) {
     filename: 'query', format: format, connection: connection, params: params, timeout: timeout,
     mongo: true, mongoBody: body,
     onPage: function (n) { runPage = n; runMongo(opts); },
-    onPageSize: function (n) { $('run-page-size').value = String(n); runPage = 1; runMongo(opts); }
+    onPageSize: function (n) { $('run-page-size').value = String(n); runPage = 1; runMongo(opts); },
+    onResult: function (meta) { renderRunQuickStats(meta); updateRunHistoryResult(meta); }
   });
 }
 
@@ -5853,10 +5931,26 @@ function loadRunHistory() {
 function recordRunHistory() {
   var sql = $('run-sql').value.trim();
   if (!sql) return;
-  var entry = { sql: sql, connection: $('run-connection').value, format: $('run-format').value };
+  // status/rows/duration_ms start null - filled in by updateRunHistoryResult() once the run actually
+  // completes, so an entry always exists (in case the request never comes back) but reads as "ran just now,
+  // outcome pending" until it does.
+  var entry = { sql: sql, connection: $('run-connection').value, format: $('run-format').value,
+    status: null, rows: null, duration_ms: null };
   var list = loadRunHistory().filter(function (e) { return !(e.sql === entry.sql && e.connection === entry.connection); });
   list.unshift(entry);
   if (list.length > RUN_HISTORY_MAX) list = list.slice(0, RUN_HISTORY_MAX);
+  try { sessionStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
+  renderRunHistory();
+}
+/** Fills in the result of the run recordRunHistory() just started - the entry it unshifted is always
+ * list[0] at this point, since nothing else writes to run history between the two calls (both only ever
+ * fire from the same synchronous Run submit handler). */
+function updateRunHistoryResult(meta) {
+  var list = loadRunHistory();
+  if (!list.length) return;
+  list[0].status = meta.status;
+  list[0].rows = meta.rowCount === undefined ? null : meta.rowCount;
+  list[0].duration_ms = meta.elapsedMs === undefined ? null : meta.elapsedMs;
   try { sessionStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
   renderRunHistory();
 }
@@ -5865,12 +5959,18 @@ function renderRunHistory() {
   var list = loadRunHistory();
   if (!list.length) { box.appendChild(h('div', { className: 'hint', text: 'Queries you run will show up here.' })); return; }
   box.appendChild(h('div', { className: 'history-list' }, list.map(function (entry) {
+    var meta = [];
+    if (entry.status !== null && entry.status !== undefined && entry.status >= 400) meta.push('failed (' + entry.status + ')');
+    if (entry.rows !== null && entry.rows !== undefined) meta.push(entry.rows + (entry.rows === 1 ? ' row' : ' rows'));
+    if (entry.duration_ms !== null && entry.duration_ms !== undefined) meta.push(entry.duration_ms + ' ms');
     return h('button', { type: 'button', className: 'history-item', title: entry.sql, onclick: function () {
       $('run-sql').value = entry.sql;
       if ($('run-sql').repaint) $('run-sql').repaint();
       if (entry.connection && connectionsCache[entry.connection]) selectRunConnection(entry.connection);
       if (entry.format) $('run-format').value = entry.format;
-    } }, entry.sql.length > 64 ? entry.sql.slice(0, 64) + '…' : entry.sql);
+    } },
+      h('span', { className: 'history-sql', text: entry.sql.length > 64 ? entry.sql.slice(0, 64) + '…' : entry.sql }),
+      meta.length ? h('span', { className: 'history-meta', text: meta.join(' · ') }) : null);
   })));
 }
 
