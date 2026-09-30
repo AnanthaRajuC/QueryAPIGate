@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Renamed the "Saved queries" and "Run SQL" admin UI sections to "API Repository" and "API Designer"**
+  - the sidebar nav, breadcrumb, page heading, Home stat tile, quick actions, Ctrl-K search group, and every
+  button/hint/tooltip that names the section (e.g. "New saved query" → "New API", "Open in Saved queries" →
+  "Open in API Repository"). Scoped to UI chrome only: internal ids (`data-tab="queries"`/`"run"`), routes
+  (`/q/<name>`), JSON field names, CLI output, and the generic noun "a saved query" used elsewhere in hints
+  and docs are all unchanged.
+
 ### Added
 - **The admin UI's Settings screen now has an "MCP server" section (BACKLOG #54)**, showing
   `QUERYAPIGATE_MCP_PORT`/`QUERYAPIGATE_MCP_MAX_ROWS` in the same read-only "effective value and whether it's

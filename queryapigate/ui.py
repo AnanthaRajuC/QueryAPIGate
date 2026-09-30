@@ -723,8 +723,8 @@ UI_HTML = r"""<!doctype html>
     </div>
     <div class="nav-group"><div class="nav-label">Data</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="connections" data-group="Data" data-label="Connections" title="Connections"><span class="nav-abbr">Cn</span><span class="nav-text">Connections</span><span class="count" id="count-connections"></span></button>
-      <button type="button" role="tab" data-tab="queries" data-group="Data" data-label="Saved queries" title="Saved queries"><span class="nav-abbr">Sq</span><span class="nav-text">Saved queries</span><span class="count" id="count-queries"></span></button>
-      <button type="button" role="tab" data-tab="run" data-group="Data" data-label="Run SQL" title="Run SQL"><span class="nav-abbr">Rn</span><span class="nav-text">Run SQL</span></button>
+      <button type="button" role="tab" data-tab="queries" data-group="Data" data-label="API Repository" title="API Repository"><span class="nav-abbr">Ar</span><span class="nav-text">API Repository</span><span class="count" id="count-queries"></span></button>
+      <button type="button" role="tab" data-tab="run" data-group="Data" data-label="API Designer" title="API Designer"><span class="nav-abbr">Ad</span><span class="nav-text">API Designer</span></button>
     </div>
     <div class="nav-group"><div class="nav-label">Access</div><div class="nav-rule"></div>
       <button type="button" role="tab" data-tab="apikeys" data-group="Access" data-label="API keys" title="API keys"><span class="nav-abbr">Ky</span><span class="nav-text">API keys</span><span class="count" id="count-apikeys"></span></button>
@@ -805,10 +805,10 @@ UI_HTML = r"""<!doctype html>
   <section id="tab-queries">
     <div id="examples-strip" class="panel" hidden></div>
     <div class="page-head">
-      <div class="titles"><h1>Saved queries</h1><span class="sub" id="queries-sub">Each one is published at <code>/q/&lt;name&gt;</code>.</span></div>
+      <div class="titles"><h1>API Repository</h1><span class="sub" id="queries-sub">Each one is published at <code>/q/&lt;name&gt;</code>.</span></div>
       <span class="spacer"></span>
       <button id="new-collection" type="button" class="btn">New collection</button>
-      <button id="new-query" type="button" class="btn primary">New saved query</button>
+      <button id="new-query" type="button" class="btn primary">New API</button>
     </div>
     <div class="split">
       <div id="queries-panel" class="panel">
@@ -894,7 +894,7 @@ UI_HTML = r"""<!doctype html>
 
   <section id="tab-run">
     <div class="page-head">
-      <div class="titles"><h1>Run SQL</h1><span class="sub">Ad-hoc statements against any active connection. Nothing here is saved.</span></div>
+      <div class="titles"><h1>API Designer</h1><span class="sub">Ad-hoc statements against any active connection. Nothing here is saved.</span></div>
     </div>
     <form id="run-form" class="panel runner" novalidate>
       <div class="runner-main">
@@ -915,7 +915,7 @@ UI_HTML = r"""<!doctype html>
           </select>
           <span class="spacer"></span>
           <span class="hint hide-sm"><kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
-          <button type="button" class="btn ghost md" id="run-save-as-api-button" title="Save this query as a new saved query">Save as New API</button>
+          <button type="button" class="btn ghost md" id="run-save-as-api-button" title="Save this query as a new API">Save as New API</button>
           <button type="button" class="btn ghost md" id="run-explain-button" title="Run EXPLAIN on this query">Explain</button>
           <button type="submit" class="btn primary md" id="run-button" style="padding:0 16px">Run</button>
         </div>
@@ -981,7 +981,7 @@ UI_HTML = r"""<!doctype html>
         <h3>Getting started</h3>
         <ol>
           <li>Add a <b>connection</b> to your database on the <b>Connections</b> tab.</li>
-          <li>Try a query in <b>Run SQL</b> - browse its schema, then Run.</li>
+          <li>Try a query in <b>API Designer</b> - browse its schema, then Run.</li>
           <li>Click <b>Save as New API</b> to turn a working query into a saved endpoint.</li>
           <li>Create a scoped <b>API key</b> (or a <b>role</b> to create several from) with only the access it needs.</li>
           <li>Check the <b>Access map</b> any time to see exactly which keys can reach which queries.</li>
@@ -993,8 +993,8 @@ UI_HTML = r"""<!doctype html>
           <tbody>
             <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>K</kbd></td><td>Search queries, connections and keys</td></tr>
             <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>B</kbd></td><td>Collapse or expand the sidebar</td></tr>
-            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>Enter</kbd></td><td>Run the current query (Run SQL)</td></tr>
-            <tr><td>Double-click a column</td><td>Turn it into a bound parameter (Run SQL)</td></tr>
+            <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd> <kbd>Enter</kbd></td><td>Run the current query (API Designer)</td></tr>
+            <tr><td>Double-click a column</td><td>Turn it into a bound parameter (API Designer)</td></tr>
           </tbody>
         </table>
       </div>
@@ -1213,7 +1213,7 @@ function paletteEntries() {
   });
   filesCache.forEach(function (f) {
     var l = latestOf(f);
-    out.push({ group: 'Saved queries', name: f.filename, desc: l.description || '', extra: [f.collection, (l.tags || []).join(' ')].join(' '), go: function () {
+    out.push({ group: 'API Repository', name: f.filename, desc: l.description || '', extra: [f.collection, (l.tags || []).join(' ')].join(' '), go: function () {
       showTab('queries'); $('query-filter').value = ''; selected.name = f.filename; selected.version = l.version; selected.tab = 'run';
       queriesView = 'queries'; queriesActiveCollection = f.collection || '';
       renderQueryList(); renderDetail(); flashRow('queries-table', f.filename); } });
@@ -1280,7 +1280,7 @@ function setPref(key, value) {
 var PREF_ROWS = [
   ['theme', 'Theme', 'Follows your operating system unless set.', ['System', 'Light', 'Dark']],
   ['density', 'Table density', 'Row height in lists and result grids.', ['Compact', 'Comfortable']],
-  ['format', 'Default result format', 'Pre-selected format in Run SQL.', ['json', 'csv', 'ndjson', 'tsv', 'xml', 'yaml', 'xlsx']]
+  ['format', 'Default result format', 'Pre-selected format in API Designer.', ['json', 'csv', 'ndjson', 'tsv', 'xml', 'yaml', 'xlsx']]
 ];
 
 // ---- settings: a read-only view of GET /settings (environment variables), plus the interface preferences ----
@@ -1575,7 +1575,7 @@ function schemaBrowser(insertFn, previewFn, selectFn, ddlFn, usageFn) {
           h('span', { className: 'name', text: t.name }), h('span', { className: 'tag', text: t.type })),
         selectFn ? h('button', { type: 'button', className: 'schema-select', title: 'Copy a starter query for ' + t.name + ' into the editor', 'aria-label': 'Copy a starter query for ' + t.name,
           onclick: function () { selectFn(t); } }, '⧉') : null,
-        previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in Run SQL', 'aria-label': 'Preview ' + t.name,
+        previewFn ? h('button', { type: 'button', className: 'schema-preview', title: 'Preview ' + t.name + ' in API Designer', 'aria-label': 'Preview ' + t.name,
           onclick: function () { previewFn(t.name); } }, '👁') : null,
         showDdl ? h('button', { type: 'button', className: 'schema-ddl', title: 'Show ' + t.name + '’s CREATE TABLE statement', 'aria-label': 'Show ' + t.name + '’s CREATE TABLE statement',
           onclick: function () { ddlFn(t.name); } }, '⌸') : null,
@@ -2018,7 +2018,7 @@ function renderConnections() {
       h('td', { className: 'mono dim', style: 'white-space:nowrap', text: c.created_at || '—' }),
       h('td', { className: 'mono dim', style: 'white-space:nowrap', text: c.updated_at || '—' }),
       h('td', {}, h('div', { className: 'actions' },
-        h('button', { type: 'button', className: 'btn sm outlined', text: 'Query', disabled: !c.active, title: 'Open in Run SQL', onclick: function () {
+        h('button', { type: 'button', className: 'btn sm outlined', text: 'Query', disabled: !c.active, title: 'Open in API Designer', onclick: function () {
           showTab('run'); selectRunConnection(name); $('run-sql').focus(); } }),
         h('button', { type: 'button', className: 'btn ghost sm', text: 'Edit', onclick: function () { openConnectionForm(name, c); } }),
         h('button', { type: 'button', className: 'btn ghost sm danger', text: 'Delete', onclick: function () { openDeleteConnectionForm(name); } }))));
@@ -2346,7 +2346,7 @@ function openRoleForm(name, existing) {
     queryWriteChecks[qname] = writeCb;
     return h('label', { className: 'switch', style: 'font-weight:400' }, cb, qname,
       h('span', { className: 'switch', style: 'font-weight:400;margin-left:6px' }, writeCb, 'write'));
-  }) : h('span', { className: 'hint', text: 'No saved queries exist yet — add one on the Saved Queries tab first.' }));
+  }) : h('span', { className: 'hint', text: 'No saved queries exist yet — add one on the API Repository tab first.' }));
   function paintQueryMode() { queryBox.style.opacity = allQueriesCheckbox.checked ? '0.4' : '1'; queryBox.style.pointerEvents = allQueriesCheckbox.checked ? 'none' : 'auto'; }
   allQueriesCheckbox.onchange = paintQueryMode;
   paintQueryMode();
@@ -2632,7 +2632,7 @@ function renderHome() {
   var rateLimitRejections = metricSum(metricsSeries, 'queryapigate_rate_limit_rejections_total');
   clear($('home-stats')).appendChild(h('div', { className: 'stat-tiles' },
     statTile('Connections', activeConns + ' / ' + Object.keys(connectionsCache).length),
-    statTile('Saved queries', filesCache.length),
+    statTile('API Repository', filesCache.length),
     statTile('API keys', Object.keys(apiKeysCache).length),
     statTile('Roles', Object.keys(rolesCache).length),
     statTile('Requests', totalRequests),
@@ -2663,8 +2663,8 @@ function renderHome() {
   var actionsBox = clear($('home-actions'));
   actionsBox.appendChild(h('h2', { text: 'Quick actions' }));
   actionsBox.appendChild(h('div', { className: 'home-actions' },
-    h('button', { type: 'button', className: 'btn', text: 'Run SQL', onclick: function () { showTab('run'); } }),
-    h('button', { type: 'button', className: 'btn', text: 'New saved query', onclick: function () { showTab('queries'); openQueryForm(); } }),
+    h('button', { type: 'button', className: 'btn', text: 'API Designer', onclick: function () { showTab('run'); } }),
+    h('button', { type: 'button', className: 'btn', text: 'New API', onclick: function () { showTab('queries'); openQueryForm(); } }),
     h('button', { type: 'button', className: 'btn', text: 'New connection', onclick: function () { showTab('connections'); openConnectionForm(null, {}); } }),
     h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
 
@@ -2743,7 +2743,7 @@ function renderRecentRequests() {
   var rows = aggregateRecentExecutions(20);
   if (!rows.length) {
     box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved-query runs recorded yet' }),
-      h('span', { text: 'Ad-hoc Run SQL calls aren’t tracked here - only runs of a saved query through /q/<name>.' })));
+      h('span', { text: 'Ad-hoc API Designer calls aren’t tracked here - only runs of a saved query through /q/<name>.' })));
     return;
   }
   box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
@@ -3042,7 +3042,7 @@ function openApiKeyForm(name, existing, fromRole) {
     queryWriteChecks[qname] = writeCb;
     return h('label', { className: 'switch', style: 'font-weight:400' }, cb, qname,
       h('span', { className: 'switch', style: 'font-weight:400;margin-left:6px' }, writeCb, 'write'));
-  }) : h('span', { className: 'hint', text: 'No saved queries exist yet — add one on the Saved Queries tab first.' }));
+  }) : h('span', { className: 'hint', text: 'No saved queries exist yet — add one on the API Repository tab first.' }));
   function paintQueryMode() { queryBox.style.opacity = allQueriesCheckbox.checked ? '0.4' : '1'; queryBox.style.pointerEvents = allQueriesCheckbox.checked ? 'none' : 'auto'; }
   allQueriesCheckbox.onchange = paintQueryMode;
   paintQueryMode();
@@ -3428,7 +3428,7 @@ function renderQueryList() {
   if (!filesCache.length) {
     box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved queries yet' }),
       h('span', { text: 'Saved queries become GET /q/<name> endpoints with typed parameters.' }),
-      h('button', { type: 'button', className: 'btn primary', text: 'New saved query', onclick: function () { openQueryForm(); } }),
+      h('button', { type: 'button', className: 'btn primary', text: 'New API', onclick: function () { openQueryForm(); } }),
       h('button', { type: 'button', className: 'btn', text: 'Load example APIs', title: 'Install four worked scenarios (reporting, dashboard, export, partner) you can try and remove again', onclick: loadExampleData })));
     return;
   }
@@ -3787,7 +3787,7 @@ async function openQueryInfo(f) {
       })))),
     h('div', { className: 'form-actions' },
       h('button', { type: 'button', className: 'btn', text: 'Close', onclick: closeDrawer }),
-      h('button', { type: 'button', className: 'btn primary', text: 'Open in Saved queries', onclick: function () {
+      h('button', { type: 'button', className: 'btn primary', text: 'Open in API Repository', onclick: function () {
         closeDrawer(); openSavedQuery(f);
       } }))));
   var c = await getContent(f.filename);
@@ -4056,7 +4056,7 @@ function renderAccessMap() {
       : 'Nothing matches these filters.';
     var empty = h('div', { className: 'empty' }, h('span', { text: reason }));
     if (!q && amapConnFilter) {
-      empty.appendChild(h('button', { type: 'button', className: 'btn primary', text: 'New saved query' + (amapTableFilter ? ' on ' + amapTableFilter : ''), onclick: function () {
+      empty.appendChild(h('button', { type: 'button', className: 'btn primary', text: 'New API' + (amapTableFilter ? ' on ' + amapTableFilter : ''), onclick: function () {
         var conn = amapConnFilter, table = amapTableFilter;
         var isMongo = (connectionsCache[conn] || {}).db === 'mongo';
         var starter = table && isMongo ? JSON.stringify({ collection: table, filter: {} }, null, 2)
@@ -4126,7 +4126,7 @@ function renderAccessMap() {
     return h('tr', {},
       h('td', { className: 'amap-query' },
         h('div', { className: 'amap-q-row' },
-          h('button', { type: 'button', className: 'amap-q-name', title: 'Open ' + f.filename + ' in Saved queries', text: f.filename,
+          h('button', { type: 'button', className: 'amap-q-name', title: 'Open ' + f.filename + ' in API Repository', text: f.filename,
             onclick: function () { openSavedQuery(f); } }),
           h('button', { type: 'button', className: 'amap-info', title: 'Details for ' + f.filename, 'aria-label': 'Details for ' + f.filename,
             onclick: function () { openQueryInfo(f); } }, 'i')),
@@ -4584,7 +4584,7 @@ function renderCacheTab(body, f, v) {
 }
 
 async function openQueryForm(baseName, baseVersion) {
-  var slot = openDrawer('query-form-slot', baseName ? 'New version' : 'New saved query',
+  var slot = openDrawer('query-form-slot', baseName ? 'New version' : 'New API',
     baseName ? baseName + ' · from v' + baseVersion.version : 'PATCH /save_sql_to_file');
   var prefill = baseVersion || {};
   var sql = '';

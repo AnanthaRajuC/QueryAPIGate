@@ -48,7 +48,7 @@ Crimson Garden,Comedy,PG-13,631,2
 <p align="center">
   <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png"
-         alt="Home tab: at-a-glance stat tiles for connections, saved queries, API keys, roles, requests and error rate, a system health panel, recent audit activity, quick actions, and recent/slowest API requests" width="820">
+         alt="Home tab: at-a-glance stat tiles for connections, the API Repository, API keys, roles, requests and error rate, a system health panel, recent audit activity, quick actions, and recent/slowest API requests" width="820">
   </a>
   <br>
   <sub>Home: an at-a-glance overview - live totals, system health, recent activity and the slowest recent requests.</sub>
@@ -64,7 +64,7 @@ Crimson Garden,Comedy,PG-13,631,2
 </td>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png" alt="Saved queries grouped into collapsible collections, each with its key count and Postman/Rename actions, beside the selected query's connection, collection, Run/SQL/History/Curl tabs and generated GET /q/ endpoint">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png" alt="The API Repository: saved queries grouped into collapsible collections, each with its key count and Postman/Rename actions, beside the selected query's connection, collection, Run/SQL/History/Curl tabs and generated GET /q/ endpoint">
 </a>
 <br><sub>Every saved query becomes a documented REST endpoint - grouped into collections</sub>
 </td>
