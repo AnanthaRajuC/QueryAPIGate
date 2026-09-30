@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Merged Home's "Recent API requests" and "Slowest queries" into one box with Recent/Slowest tabs**,
+  instead of two separate panels - same underlying data (execution_history), shown two ways.
+
 ### Added
 - **Type/Host/Database filters on the API Repository screen.** Three cascading dropdowns above the
   Collections/Queries list (same cascading idea as API Designer's own Type → Host → Connection picker) narrow

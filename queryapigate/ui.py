@@ -653,8 +653,12 @@ UI_HTML = r"""<!doctype html>
   .home-activity-row time { color: var(--ink-3); font: 11px var(--mono); white-space: nowrap; }
   .home-activity-row .target { font-weight: 600; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
   .home-actions { display: flex; flex-direction: column; gap: 8px; }
-  #home-health, #home-recent-requests, #home-slowest-queries { padding: 14px 16px; }
-  #home-health h2, #home-recent-requests h2, #home-slowest-queries h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+  #home-health, #home-requests-panel { padding: 14px 16px; }
+  #home-health h2, #home-requests-panel h2 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+  #home-requests-panel .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  #home-requests-panel .panel-head h2 { margin: 0; }
+  #home-requests-panel .panel-head .minitabs { padding: 0; }
+  #home-requests-panel .panel-head .minitab { max-width: none; }
   .health-ok { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
   .health-warn { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .health-danger { background: color-mix(in oklab, var(--danger) 16%, transparent); color: var(--danger); }
@@ -789,8 +793,7 @@ UI_HTML = r"""<!doctype html>
       <div class="panel" id="home-activity"></div>
       <div class="panel" id="home-actions"></div>
     </div>
-    <div class="panel" id="home-recent-requests" style="margin-top:16px"></div>
-    <div class="panel" id="home-slowest-queries" style="margin-top:16px"></div>
+    <div class="panel" id="home-requests-panel" style="margin-top:16px"></div>
   </section>
   <section id="tab-connections">
     <div class="page-head">
@@ -2706,8 +2709,7 @@ function renderHome() {
     h('button', { type: 'button', className: 'btn', text: 'New connection', onclick: function () { showTab('connections'); openConnectionForm(null, {}); } }),
     h('button', { type: 'button', className: 'btn', text: 'Help', onclick: function () { showTab('help'); } })));
 
-  renderRecentRequests();
-  renderSlowestQueries();
+  renderHomeRequestsPanel();
 }
 /** true once a key's expires_at date is within the next 7 days but hasn't passed yet - isKeyExpired()'s
  * "already gone" counterpart, so Home's health panel can tell "act now" apart from "act soon." */
@@ -2771,17 +2773,28 @@ function aggregateRecentExecutions(limit) {
   rows.sort(function (a, b) { return a.entry.executed_at < b.entry.executed_at ? 1 : -1; });
   return rows.slice(0, limit || 20);
 }
-/** The Home tab's "Recent API requests" panel - a live-ish tail of saved-query runs, refreshed by
- * pollRecentRequests() every 5s while Home is the visible tab. */
-function renderRecentRequests() {
-  var box = $('home-recent-requests');
-  if (!box) return;
-  clear(box);
-  box.appendChild(h('h2', { text: 'Recent API requests' }));
-  var rows = aggregateRecentExecutions(20);
+/** Same source as aggregateRecentExecutions(), sorted by duration instead of time - entries with no
+ * duration_ms (an error caught before timing, or a stream that never reports one) are left out, since
+ * there's nothing to rank them by. */
+function aggregateSlowestExecutions(limit) {
+  var rows = [];
+  filesCache.forEach(function (f) {
+    f.versions.forEach(function (v) {
+      (v.execution_history || []).forEach(function (e) {
+        if (e.duration_ms !== undefined && e.duration_ms !== null) {
+          rows.push({ filename: f.filename, version: v.version, connection: v.connection_name, entry: e });
+        }
+      });
+    });
+  });
+  rows.sort(function (a, b) { return b.entry.duration_ms - a.entry.duration_ms; });
+  return rows.slice(0, limit || 10);
+}
+/** The shared table both Home requests views render - same columns/row shape either way, only which rows
+ * and which empty state differ. */
+function renderHomeRequestsTable(box, rows, emptyTitle, emptyHint) {
   if (!rows.length) {
-    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No saved-query runs recorded yet' }),
-      h('span', { text: 'Ad-hoc API Designer calls aren’t tracked here - only runs of a saved query through /q/<name>.' })));
+    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: emptyTitle }), h('span', { text: emptyHint })));
     return;
   }
   box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
@@ -2802,53 +2815,30 @@ function renderRecentRequests() {
         h('td', { className: 'mono num', text: e.duration_ms === undefined ? '' : e.duration_ms + ' ms' }));
     })))));
 }
-/** Same source as aggregateRecentExecutions(), sorted by duration instead of time - entries with no
- * duration_ms (an error caught before timing, or a stream that never reports one) are left out, since
- * there's nothing to rank them by. */
-function aggregateSlowestExecutions(limit) {
-  var rows = [];
-  filesCache.forEach(function (f) {
-    f.versions.forEach(function (v) {
-      (v.execution_history || []).forEach(function (e) {
-        if (e.duration_ms !== undefined && e.duration_ms !== null) {
-          rows.push({ filename: f.filename, version: v.version, connection: v.connection_name, entry: e });
-        }
-      });
-    });
-  });
-  rows.sort(function (a, b) { return b.entry.duration_ms - a.entry.duration_ms; });
-  return rows.slice(0, limit || 10);
-}
-/** The Home tab's "Slowest queries" panel - the same execution_history renderRecentRequests() shows,
- * ranked by duration instead of time, refreshed on the same 5s cadence. */
-function renderSlowestQueries() {
-  var box = $('home-slowest-queries');
+/** The Home tab's requests panel - "Recent" (a live-ish tail of saved-query runs) and "Slowest" (the same
+ * execution_history, ranked by duration) as two tabs sharing one box instead of two separate panels, since
+ * they're the same underlying data shown two ways. Refreshed by pollRecentRequests() every 5s (or a live
+ * event, see handleLiveEvent()) while Home is the visible tab. */
+var homeRequestsView = 'recent';
+function renderHomeRequestsPanel() {
+  var box = $('home-requests-panel');
   if (!box) return;
   clear(box);
-  box.appendChild(h('h2', { text: 'Slowest queries' }));
-  var rows = aggregateSlowestExecutions(10);
-  if (!rows.length) {
-    box.appendChild(h('div', { className: 'empty' }, h('strong', { text: 'No timed runs recorded yet' }),
-      h('span', { text: 'Shows up once a saved query has run through /q/<name> at least once.' })));
-    return;
+  box.appendChild(h('div', { className: 'panel-head' },
+    h('h2', { text: homeRequestsView === 'recent' ? 'Recent API requests' : 'Slowest queries' }),
+    h('div', { className: 'minitabs' },
+      h('button', { type: 'button', className: 'minitab' + (homeRequestsView === 'recent' ? ' active' : ''),
+        onclick: function () { homeRequestsView = 'recent'; renderHomeRequestsPanel(); } }, 'Recent'),
+      h('button', { type: 'button', className: 'minitab' + (homeRequestsView === 'slowest' ? ' active' : ''),
+        onclick: function () { homeRequestsView = 'slowest'; renderHomeRequestsPanel(); } }, 'Slowest')),
+    h('span', { className: 'spacer' })));
+  if (homeRequestsView === 'recent') {
+    renderHomeRequestsTable(box, aggregateRecentExecutions(20), 'No saved-query runs recorded yet',
+      'Ad-hoc API Designer calls aren’t tracked here - only runs of a saved query through /q/<name>.');
+  } else {
+    renderHomeRequestsTable(box, aggregateSlowestExecutions(10), 'No timed runs recorded yet',
+      'Shows up once a saved query has run through /q/<name> at least once.');
   }
-  box.appendChild(h('div', { style: 'overflow-x:auto' }, h('table', { className: 'grid' },
-    h('thead', {}, h('tr', {}, ['', 'Time', 'Query', 'Connection', 'Caller', 'Rows', 'Duration'].map(function (t, i) {
-      return h('th', { className: i === 5 || i === 6 ? 'num' : '', text: t });
-    }))),
-    h('tbody', {}, rows.map(function (r) {
-      var e = r.entry, good = e.status === 'success';
-      return h('tr', {},
-        h('td', { style: 'width:20px;padding-right:0' }, h('span', { className: 'dot ' + (good ? 'ok' : 'bad'), title: String(e.status || '') })),
-        h('td', { className: 'mono dim', style: 'white-space:nowrap', text: String(e.executed_at || '') }),
-        h('td', {}, h('button', { type: 'button', className: 'target', text: r.filename, onclick: function () {
-          showTab('queries'); selected.name = r.filename; selected.version = r.version; selected.tab = 'history'; renderQueryList(); renderDetail();
-        } })),
-        h('td', { className: 'mono dim', text: r.connection || '' }),
-        h('td', { className: 'mono', text: String(e.key_name || '') }),
-        h('td', { className: 'mono num', text: e.rows === undefined || e.rows === null ? '—' : String(e.rows) }),
-        h('td', { className: 'mono num', text: e.duration_ms + ' ms' }));
-    })))));
 }
 /** A one-shot GET /list_files - a plain fetch (the same endpoint loadQueries() already uses) rather than
  * calling loadQueries() itself, which also drives the whole Saved Queries screen's own state/DOM even when
@@ -2858,8 +2848,7 @@ async function pollRecentRequests() {
   var data = await apiJson('list_files');
   if (!data) return;
   filesCache = (data.files || []).slice().sort(function (a, b) { return a.filename < b.filename ? -1 : 1; });
-  renderRecentRequests();
-  renderSlowestQueries();
+  renderHomeRequestsPanel();
 }
 /** Applies one live execution event (from startEventStream() below) straight onto the already-loaded
  * filesCache and re-renders, instead of re-fetching /list_files - BACKLOG #43's whole point. An execution
@@ -2871,8 +2860,7 @@ function handleLiveEvent(event) {
   var v = f && f.versions.find(function (x) { return x.version === event.version; });
   if (!v) return;
   v.execution_history = [event.entry].concat(v.execution_history || []).slice(0, 50);
-  renderRecentRequests();
-  renderSlowestQueries();
+  renderHomeRequestsPanel();
 }
 var pollTimer = null;
 /** The polling fallback (today's pre-SSE behavior, unchanged) - used only when GET /events can't be
