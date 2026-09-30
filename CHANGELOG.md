@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Real-time connection-pool numbers on Home and Metrics.** `pool.py` gained an `active_count()` alongside
+  the existing `idle_count()` (a new `queryapigate_pool_active_connections` gauge, next to
+  `queryapigate_pool_idle_connections`) - the pool tracked idle connections only before, with no visibility
+  into how many are checked out right now. Both tiles carry a small pulsing "live" indicator and refresh
+  every 2 seconds via a light, targeted poll (just these two numbers, not a full metrics reload) whenever
+  the Home or Metrics tab is visible.
 - **Three new benchmark scripts (BACKLOG #25): `benchmarks/latency.py`, `pooling.py`, `caching.py`**,
   alongside the existing buffered-vs-streamed `run.py`, sharing new common plumbing in `benchmarks/common.py`.
   `latency.py` measures p50/p95/p99 for a small `GET /q/<name>`/`POST /execute_sql` call against a fixed

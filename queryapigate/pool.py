@@ -47,6 +47,7 @@ def fingerprint(details, read_only):
 class ConnectionPool:
     def __init__(self):
         self._idle = {}  # key -> deque of Sessions, least recently used on the left
+        self._active = 0  # checked out right now (not capped - see module docstring), for observability only
         self._lock = threading.Lock()
 
     @contextmanager
@@ -55,11 +56,16 @@ class ConnectionPool:
         session = self._acquire(key)
         if session is None:
             session = Session(driver.connect(details, read_only), driver)
+        with self._lock:
+            self._active += 1
         try:
             yield session
         except BaseException:
             session.close()  # after an error its state is unknown - never reuse it
             raise
+        finally:
+            with self._lock:
+                self._active -= 1
         self._release(key, session)
 
     # ---- internals ------------------------------------------------------------------
@@ -123,6 +129,12 @@ class ConnectionPool:
     def idle_count(self):
         with self._lock:
             return sum(len(q) for q in self._idle.values())
+
+    def active_count(self):
+        """Connections checked out right now - across every distinct connection, like idle_count(). Not a
+        capacity figure (nothing here is capped - see module docstring): purely for observability."""
+        with self._lock:
+            return self._active
 
     def close_all(self):
         with self._lock:

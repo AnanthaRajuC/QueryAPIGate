@@ -227,6 +227,11 @@ def render(cache=None):
     shared = pool.get_pool()
     lines.append(f'queryapigate_pool_idle_connections {shared.idle_count() if shared else 0}')
 
+    lines.append('# HELP queryapigate_pool_active_connections Pooled database connections checked out right '
+                 'now (not capped - see pool.py - purely observability).')
+    lines.append('# TYPE queryapigate_pool_active_connections gauge')
+    lines.append(f'queryapigate_pool_active_connections {shared.active_count() if shared else 0}')
+
     lines.append('# HELP queryapigate_rate_limit_rejections_total Requests rejected by the rate limiter.')
     lines.append('# TYPE queryapigate_rate_limit_rejections_total counter')
     lines.append(f'queryapigate_rate_limit_rejections_total {rejections}')

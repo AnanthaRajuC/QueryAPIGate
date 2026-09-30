@@ -494,12 +494,17 @@ class MetricsRenderTests(unittest.TestCase):
     def test_pool_occupancy_reflects_the_shared_pool(self):
         fake_pool = mock.MagicMock()
         fake_pool.idle_count.return_value = 7
+        fake_pool.active_count.return_value = 3
         with mock.patch('queryapigate.metrics.pool.get_pool', return_value=fake_pool):
-            self.assertIn('queryapigate_pool_idle_connections 7', metrics.render())
+            body = metrics.render()
+            self.assertIn('queryapigate_pool_idle_connections 7', body)
+            self.assertIn('queryapigate_pool_active_connections 3', body)
 
     def test_pool_occupancy_is_zero_when_pooling_is_disabled(self):
         with mock.patch('queryapigate.metrics.pool.get_pool', return_value=None):
-            self.assertIn('queryapigate_pool_idle_connections 0', metrics.render())
+            body = metrics.render()
+            self.assertIn('queryapigate_pool_idle_connections 0', body)
+            self.assertIn('queryapigate_pool_active_connections 0', body)
 
     def test_cache_entries_reflects_a_live_cache_instance(self):
         from queryapigate import cache

@@ -637,6 +637,8 @@ UI_HTML = r"""<!doctype html>
   .stat-tile .label { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-tile .value { font: 600 22px var(--mono); color: var(--ink); }
   .stat-tile .value.warn { color: var(--danger); }
+  .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; animation: live-pulse 2s ease-in-out infinite; }
+  @keyframes live-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
   .metrics-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }
   .chart-card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
 
@@ -2586,10 +2588,12 @@ async function loadMetrics() {
 $('refresh-metrics').onclick = loadMetrics;
 $('refresh-caching').onclick = loadMetrics;
 
-function statTile(label, value, warn) {
+function statTile(label, value, warn, valueId, live) {
+  var valueAttrs = { className: 'value' + (warn ? ' warn' : ''), text: String(value) };
+  if (valueId) valueAttrs.id = valueId;
   return h('div', { className: 'stat-tile' },
-    h('div', { className: 'label', text: label }),
-    h('div', { className: 'value' + (warn ? ' warn' : ''), text: String(value) }));
+    h('div', { className: 'label' }, label, live ? h('span', { className: 'live-dot', title: 'Updates every 2s' }) : null),
+    h('div', valueAttrs));
 }
 /** One card of horizontal bars: label, a track filled in proportion to the largest value, and the number. */
 function barCard(title, rows, colorOf) {
@@ -2609,6 +2613,24 @@ function paintMetricsAge() {
   $('metrics-updated').textContent = secs < 5 ? 'Updated just now' : 'Updated ' + (secs < 90 ? secs + 's' : Math.round(secs / 60) + ' min') + ' ago';
 }
 setInterval(paintMetricsAge, 5000);
+
+// ---- real-time connection-pool numbers: a light, targeted poll (just the two pool gauges, not a full
+// loadMetrics() re-render) so "Pool active/idle connections" stays live on Home and Metrics without the
+// cost or flicker of re-fetching and re-rendering everything else those tabs show. Only polls while one of
+// those two tabs is actually visible - no point spending a request every 2s on a tab nobody's looking at. ----
+async function pollPoolStats() {
+  var activeSection = document.querySelector('main > section.active');
+  if (!activeSection || (activeSection.id !== 'tab-home' && activeSection.id !== 'tab-metrics')) return;
+  var res;
+  try { res = await apiFetch('metrics'); } catch (e) { return; }
+  if (!res.ok) return;
+  var series = parseMetricsText(await res.text());
+  var active = metricGauge(series, 'queryapigate_pool_active_connections');
+  var idle = metricGauge(series, 'queryapigate_pool_idle_connections');
+  ['home-pool-active', 'metrics-pool-active'].forEach(function (id) { var el = $(id); if (el) el.textContent = String(active); });
+  ['home-pool-idle', 'metrics-pool-idle'].forEach(function (id) { var el = $(id); if (el) el.textContent = String(idle); });
+}
+setInterval(pollPoolStats, 2000);
 
 // ---- home: an at-a-glance overview, built entirely from caches the other tabs' own loaders already
 // populate (connectionsCache, filesCache, apiKeysCache, rolesCache, auditLogCache, metricsSeries) - no
@@ -2641,7 +2663,8 @@ function renderHome() {
     statTile('Requests', totalRequests),
     statTile('Error rate', errorRate.toFixed(1) + '%', errorRate >= 5),
     statTile('Active queries', metricGauge(metricsSeries, 'queryapigate_active_queries')),
-    statTile('Pool idle connections', metricGauge(metricsSeries, 'queryapigate_pool_idle_connections')),
+    statTile('Pool active connections', metricGauge(metricsSeries, 'queryapigate_pool_active_connections'), false, 'home-pool-active', true),
+    statTile('Pool idle connections', metricGauge(metricsSeries, 'queryapigate_pool_idle_connections'), false, 'home-pool-idle', true),
     statTile('Rate limit rejections', rateLimitRejections, rateLimitRejections > 0)));
 
   renderHomeHealth();
@@ -2913,7 +2936,8 @@ function renderMetrics(series) {
     statTile('Requests', totalRequests),
     statTile('Error rate', errorRate.toFixed(1) + '%', errorRate >= 5),
     statTile('Active queries', metricGauge(series, 'queryapigate_active_queries')),
-    statTile('Pool idle connections', metricGauge(series, 'queryapigate_pool_idle_connections')),
+    statTile('Pool active connections', metricGauge(series, 'queryapigate_pool_active_connections'), false, 'metrics-pool-active', true),
+    statTile('Pool idle connections', metricGauge(series, 'queryapigate_pool_idle_connections'), false, 'metrics-pool-idle', true),
     statTile('Rate limit rejections', metricGauge(series, 'queryapigate_rate_limit_rejections_total')),
     statTile('Rows returned', metricSum(series, 'queryapigate_rows_returned_total'))));
 
