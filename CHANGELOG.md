@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
   and docs are all unchanged.
 - **Regrouped the admin UI sidebar**: API Repository and API Designer moved out of "Data" into their own new
   "API" section; Caching moved from "Observability" into "Data", alongside Connections.
+- **Collapsed-sidebar nav items now show an inline SVG icon instead of a two-letter abbreviation** (e.g.
+  "Sq"/"Rn" → a house for Home, a key for API keys, a shield for Roles, ...). Self-contained, no icon font or
+  external library - matches the page's existing "no build step, no external script" design.
 
 ### Added
 - **The admin UI's Settings screen now has an "MCP server" section (BACKLOG #54)**, showing
