@@ -448,8 +448,11 @@ class MetricsEndpointTests(AppTestCase):
         self.assertIsInstance(usage['avg_duration_ms'], float)
 
     def test_api_keys_list_carries_each_keys_live_usage(self):
+        # metrics.py's per-key counters are process-global, not reset between tests - a key name reused
+        # across test files (like the generic 'scoped' many other tests use) would leak counts here, so
+        # this test asserts against a name unique to it.
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        created = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']},
+        created = self.client.post('/api_keys', json={'name': 'metrics-usage-key', 'connections': ['lite']},
                                    headers={'X-API-Key': 'k3y'}).get_json()
         secret = created['key']
         self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'lite'},
@@ -457,7 +460,7 @@ class MetricsEndpointTests(AppTestCase):
         self.client.post('/execute_sql', json={'sql': 'SELECT this is not sql', 'connection_name': 'lite'},
                          headers={'X-API-Key': secret})
         keys = self.client.get('/api_keys', headers={'X-API-Key': 'k3y'}).get_json()['keys']
-        self.assertEqual(keys['scoped']['usage'], {'queries': 2, 'errors': 1, 'rows': 1})
+        self.assertEqual(keys['metrics-usage-key']['usage'], {'queries': 2, 'errors': 1, 'rows': 1})
 
     def test_serialization_metric_is_not_recorded_for_a_streamed_response(self):
         # Other tests elsewhere may legitimately produce format="csv" via a *paged* csv response, so this

@@ -3,9 +3,38 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## Versioning and compatibility
+
+**Covered by the version number** - won't change without it being called out here as a breaking change:
+REST API endpoints and response shapes, CLI commands and flags, environment variables, the on-disk storage
+format (a newer version can always read a database an older version wrote), the API-key/role grant fields,
+the saved-query definition format, and the MCP tool contract. **Not covered** - can change in any release,
+including a patch: the admin UI's internal markup/JS structure, exact error-message or log-line wording,
+and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
+`__version__` are public Python API).
+
+**Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
+take that license casually. A patch release (`0.10.0` -> `0.10.1`) never breaks a covered surface. A minor
+release (`0.10.x` -> `0.11.0`) is this project's pre-1.0 equivalent of a major bump and may - rarely, and
+always called out under its own **Breaking** note in that release's entry below, never left to be
+discovered. Once a 1.0 ships, that same rule simply moves to major versions, as SemVer intends.
+
 ## [Unreleased]
 
 ### Added
+- **Two ad-hoc MCP tools, `list_tables` and `execute_sql`**, alongside the existing per-saved-query tools -
+  schema discovery and read-only ad-hoc SQL for an agent, gated by the same `connections` grant REST's own
+  `/connections/<name>/schema` and `/execute_sql` already check, reusing their exact permission checks and
+  execution code. `execute_sql` is always forced read-only over MCP regardless of the calling key's own
+  `allow_writes` grant, and still honors a key's `allowed_tables` restriction if it has one. Verified
+  end-to-end against a real running MCP server with a real client: tool listing, schema discovery, a real
+  query, a refused write, and a refused unauthorized connection. See
+  [documentation/MCP.md](documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql).
+- **A real versioning and compatibility policy** (see the "Versioning and compatibility" section above),
+  replacing a bare "we use SemVer" line: what's covered by the version number, what isn't, and this
+  project's pre-1.0 rule that only a minor release - never a patch - may carry a breaking change, always
+  flagged as one. CONTRIBUTING.md and DEPLOYMENT.md's upgrade guidance now point at it instead of restating
+  it.
 - **`documentation/THREAT_MODEL.md`** - a threat model and security architecture reference, distinct from
   SECURITY.md's operational checklist: what's actually at risk, who might attack it, and how each existing
   control (auth, the scoped-key grant model, the SQL guard's real limitations including a documented past

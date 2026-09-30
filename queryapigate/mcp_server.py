@@ -1,7 +1,10 @@
-"""An MCP (Model Context Protocol) server exposing saved queries as tools (BACKLOG #42) - read-only saved
-queries only in this first version (see is_read_only() below); a write-capable slice is real, separately-
-scoped follow-up work needing a destructiveHint classification and a confirmation-flow decision this
-codebase doesn't have yet.
+"""An MCP (Model Context Protocol) server exposing saved queries as tools (BACKLOG #42), plus two ad-hoc
+tools - ``list_tables`` (schema discovery) and ``execute_sql`` (read-only ad-hoc SQL) - gated by a key's
+existing ``connections`` grant, the same permission REST's own /connections/<name>/schema and /execute_sql
+already check. Both ad-hoc tools are forced read-only regardless of the key's own ``allow_writes`` grant:
+read-only saved queries only in this first version (see is_read_only() below); a write-capable slice - for
+saved queries and for ad-hoc SQL alike - is real, separately-scoped follow-up work needing a
+destructiveHint classification and a confirmation-flow decision this codebase doesn't have yet.
 
 A separate process on its own port (``queryapigate mcp``, config.mcp_port()), not bridged into the Flask/
 gunicorn REST server: MCP's Streamable HTTP transport is ASGI-native, this app is WSGI, and bridging the two
@@ -17,8 +20,13 @@ package isn't."""
 import json
 import urllib.parse
 
-from . import apikeys, config, definitions, params, sqltools, store
+from . import apikeys, config, definitions, engine, params, schema, sqltools, store
 from .errors import ApiError
+
+# A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
+# hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
+# same thing.
+RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql'})
 
 
 def _is_runnable(data):
@@ -57,7 +65,7 @@ def list_tools_for(permission):
     fresh on every call, never cached: two different API keys reach different queries."""
     tools = []
     for name, _number, data, collection in store.latest_versions():
-        if not _is_runnable(data) or not is_read_only(data):
+        if name in RESERVED_TOOL_NAMES or not _is_runnable(data) or not is_read_only(data):
             continue
         connection_name = data.get('connection_name')
         if not apikeys.can_run_saved(permission, name, collection, connection_name):
@@ -69,7 +77,59 @@ def list_tools_for(permission):
             'readOnlyHint': True,
             'idempotentHint': True,
         })
-    return tools
+    return tools + fixed_tools_for(permission)
+
+
+def fixed_tools_for(permission):
+    """The two ad-hoc tools, not tied to any saved query - schema discovery and read-only SQL, each gated by
+    the same ``connections`` grant REST's own /connections/<name>/schema and /execute_sql already check.
+    Listed only when this caller has any connection-level access at all (admin, "*", or a non-empty
+    ``connections`` list) - a query/collection-only key would never pass either tool's own permission check,
+    so listing them anyway would just be a tool guaranteed to error, the same reasoning list_tools_for()
+    already applies to a saved query the caller can't reach."""
+    if not (permission.admin or permission.connections):
+        return []
+    max_rows = config.mcp_max_rows()
+    return [
+        {
+            'name': 'list_tables',
+            'description': "List the tables/views (or Mongo collections) and their columns on a connection "
+                          "this key can use.",
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'connection_name': {'type': 'string',
+                                        'description': 'A connection name this key is permitted to use.'},
+                    'database': {'type': 'string',
+                                'description': 'Browse a different database on the same server - admin key only.'},
+                },
+                'required': ['connection_name'],
+            },
+            'readOnlyHint': True,
+            'idempotentHint': True,
+        },
+        {
+            'name': 'execute_sql',
+            'description': "Run a single read-only SQL statement against a connection this key can use. "
+                          "Always read-only over MCP, regardless of the key's own write permission.",
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'connection_name': {'type': 'string',
+                                        'description': 'A connection name this key is permitted to use.'},
+                    'sql': {'type': 'string',
+                           'description': 'A single SELECT/WITH/SHOW/DESCRIBE/EXPLAIN statement.'},
+                    'params': {'type': 'object', 'description': 'Values for any :name bound parameters in the SQL.'},
+                    'page_size': {'type': 'integer', 'description': f'Row cap, up to {max_rows} (the server default).'},
+                    'database': {'type': 'string',
+                                'description': 'Query a different database on the same server - admin key only.'},
+                },
+                'required': ['connection_name', 'sql'],
+            },
+            'readOnlyHint': True,
+            'idempotentHint': True,
+        },
+    ]
 
 
 def call_tool_for(flask_app, permission, name, arguments):
@@ -109,6 +169,83 @@ def call_tool_for(flask_app, permission, name, arguments):
         if response.headers.get('X-Has-More') == 'true':
             text += f'\n\n(truncated to {page_size} rows)'
         return {'content': [{'type': 'text', 'text': text}]}
+
+
+def _connection_error(permission, connection_name, database):
+    """The shared connection-grant/database-override checks list_tables and execute_sql both need, as an
+    error result (or None if the call may proceed) - the same two rules /connections/<name>/schema and
+    /execute_sql already enforce over REST (require_connection(), and "only the admin key may browse/query a
+    different database on this connection"), reused here rather than re-derived."""
+    if not connection_name:
+        return {'isError': True, 'content': [{'type': 'text', 'text': 'connection_name is required'}]}
+    if not apikeys.can_use(permission, connection_name):
+        return {'isError': True, 'content': [{'type': 'text',
+                'text': f"This API key is not permitted to use the connection '{connection_name}'"}]}
+    if database and not permission.admin:
+        return {'isError': True, 'content': [{'type': 'text',
+                'text': 'Only the admin key may browse or query a different database on this connection'}]}
+    return None
+
+
+def list_tables_tool(permission, arguments):
+    """schema.fetch_schema() is plain Python with no Flask ``g`` dependency (unlike call_tool_for()'s saved-
+    query path, which needs a synthetic request context because run_saved() touches caching/audit/history),
+    so this needs nothing beyond the permission check itself."""
+    arguments = arguments or {}
+    connection_name = arguments.get('connection_name')
+    database = arguments.get('database') or None
+    error = _connection_error(permission, connection_name, database)
+    if error is not None:
+        return error
+    try:
+        result = schema.fetch_schema(connection_name, database=database)
+    except ApiError as error:
+        return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
+    return {'content': [{'type': 'text', 'text': json.dumps(result)}]}
+
+
+def execute_sql_tool(permission, arguments):
+    """engine.execute_sql() is likewise plain Python, no Flask ``g`` dependency - no synthetic request
+    context needed here either. ``allow_writes=False`` is hard-coded, not taken from ``permission`` - ad-hoc
+    SQL over MCP is read-only in this version regardless of what the key would otherwise be allowed to do
+    over REST (see module docstring). ``allowed_tables`` is still honoured, so a table-restricted key can't
+    use this tool to reach a table its REST access already refuses it."""
+    arguments = dict(arguments or {})
+    connection_name = arguments.pop('connection_name', None)
+    sql = arguments.pop('sql', None)
+    database = arguments.pop('database', None) or None
+    error = _connection_error(permission, connection_name, database)
+    if error is not None:
+        return error
+    if not sql:
+        return {'isError': True, 'content': [{'type': 'text', 'text': 'sql is required'}]}
+    query_params = arguments.pop('params', None) or {}
+    requested_page_size = arguments.pop('page_size', None)
+    try:
+        page_size = min(int(requested_page_size), config.mcp_max_rows()) if requested_page_size is not None \
+            else config.mcp_max_rows()
+    except (TypeError, ValueError):
+        page_size = config.mcp_max_rows()
+    try:
+        result = engine.execute_sql(sql, connection_name, page_size, 0, query_params, None, allow_writes=False,
+                                    key_name=permission.name or '-', database=database,
+                                    allowed_tables=permission.allowed_tables)
+    except ApiError as error:
+        return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
+    text = json.dumps([dict(zip(result.columns, row)) for row in result.rows])
+    if result.has_more:
+        text += f'\n\n(truncated to {page_size} rows)'
+    return {'content': [{'type': 'text', 'text': text}]}
+
+
+def dispatch_tool_call(flask_app, permission, name, arguments):
+    """Routes to a fixed tool's own handler, or falls back to call_tool_for() for a saved-query tool -
+    RESERVED_TOOL_NAMES guarantees these two names are never also a saved query's."""
+    if name == 'list_tables':
+        return list_tables_tool(permission, arguments)
+    if name == 'execute_sql':
+        return execute_sql_tool(permission, arguments)
+    return call_tool_for(flask_app, permission, name, arguments)
 
 
 def _permission_for(request):
@@ -152,7 +289,7 @@ def build_server(flask_app):
             return types.CallToolResult(
                 content=[types.TextContent(type='text', text='Unauthorized: missing or invalid X-API-Key')],
                 isError=True)
-        result = call_tool_for(flask_app, permission, name, arguments)
+        result = dispatch_tool_call(flask_app, permission, name, arguments)
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
                                     isError=result.get('isError', False))
 

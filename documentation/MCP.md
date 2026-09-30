@@ -2,7 +2,10 @@
 
 `queryapigate mcp` exposes your saved queries as [MCP](https://modelcontextprotocol.io/) tools, so an AI
 agent can list and call them directly - the same way `/catalog`/`/openapi.json` already let a human or a
-REST client discover the same thing - instead of shelling out to `curl` against the REST API.
+REST client discover the same thing - instead of shelling out to `curl` against the REST API. Two more
+tools, not tied to any saved query, let an agent work with a connection directly: `list_tables` (schema
+discovery) and `execute_sql` (read-only ad-hoc SQL) - see [Ad-hoc tools](#ad-hoc-tools-list_tables-and-execute_sql)
+below.
 
 ## What's exposed
 
@@ -10,7 +13,8 @@ Only **read-only** saved queries (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`, a
 the same classification the REST API's own write guard already uses) become MCP tools. A write-capable saved
 query stays reachable over REST as always, just not over MCP yet - calling a write through an MCP tool needs
 a considered decision on confirming an LLM-initiated write before it executes, which this first version
-doesn't make for you.
+doesn't make for you. The same is true of ad-hoc SQL: `execute_sql` (below) always runs read-only over MCP,
+regardless of what the calling key would otherwise be allowed to do over REST.
 
 Tool listing (`tools/list`) honors the exact same per-key scoping `GET /catalog` does -
 `connections`/`queries`/`collections` grants, `apikeys.can_run_saved()` - so an agent's key never sees or
@@ -21,6 +25,25 @@ Calling a tool (`tools/call`) runs the query through the exact same code path `G
 connection-grant check, parameter validation, `cache_ttl` caching, `execution_history` recording and audit
 trail. A run triggered over MCP shows up in the admin UI's History tab and the Home tab's live feed exactly
 like a REST call would - there is no separate, parallel execution path to keep in sync.
+
+## Ad-hoc tools: `list_tables` and `execute_sql`
+
+Not every question an agent needs to answer has a saved query behind it yet. Two fixed tools - not tied to
+any saved query - are listed for a key whenever it has any connection-level access at all (the same
+`connections` grant `/execute_sql` and `/connections/<name>/schema` already check over REST; a key scoped
+only to specific queries or collections never sees these two, the same way it can't reach those REST
+endpoints either):
+
+- **`list_tables`** - `{"connection_name": "...", "database": "..."}` (`database` is admin-key only, same
+  as REST). Returns the same shape `GET /connections/<name>/schema` does: each table/view (or Mongo
+  collection) with its columns, types, nullability, and primary/foreign keys where the dialect supports it.
+- **`execute_sql`** - `{"connection_name": "...", "sql": "...", "params": {...}, "page_size": N,
+  "database": "..."}`. Runs a single read-only statement - **always read-only over MCP**, regardless of the
+  calling key's own `allow_writes` grant; a key's `allowed_tables` restriction, if it has one, is still
+  enforced. Results are capped to `QUERYAPIGATE_MCP_MAX_ROWS` the same way a saved-query tool call is.
+
+Both reuse the exact permission checks and execution code the REST API already has - there is no separate
+ad-hoc-SQL path for MCP to drift out of sync with REST's own.
 
 ## Running it
 

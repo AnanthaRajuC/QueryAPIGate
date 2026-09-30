@@ -1284,12 +1284,17 @@ class SavedQueryOpenApiTests(ApiTestCase):
         sections = set(re.findall(r'<section id="tab-(\w+)"', page))
         self.assertEqual(buttons, sections)
 
-    def test_admin_ui_never_assigns_innerhtml(self):
-        # the DOM-builder helper (h()) is the only place server response data is turned into elements;
-        # assigning .innerHTML anywhere would bypass that and risk rendering a cell's content as markup
-        # (the script's own comments mention the word "innerHTML" while explaining this, hence the regex)
+    def test_admin_ui_never_assigns_innerhtml_unsanitized(self):
+        # the DOM-builder helper (h()) is the only place server/query response data is turned into elements
+        # - assigning .innerHTML to that data would bypass it and risk rendering a value as markup. The one
+        # deliberate exception is the Help > Docs browser, which renders fetched markdown (no DOM-API
+        # equivalent for that) - every .innerHTML assignment in the page must be wrapped in
+        # DOMPurify.sanitize(...), never assigned raw.
         page = self.client.get('/ui').get_data(as_text=True)
-        self.assertNotRegex(page, r'\.innerHTML\s*=')
+        assignments = re.findall(r'\.innerHTML\s*=\s*([^;\n]+)', page)
+        self.assertTrue(assignments, 'expected to find the sanitized Docs-browser assignment')
+        for rhs in assignments:
+            self.assertTrue(rhs.strip().startswith('DOMPurify.sanitize('), rhs)
 
 
 class ParameterTests(ApiTestCase):

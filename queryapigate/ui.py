@@ -1,10 +1,13 @@
 """A small admin UI at /ui: connections, saved queries and an ad-hoc SQL runner.
 
-Self-contained (no build step, no external script or stylesheet - unlike /docs, which needs the real
-Swagger UI library, this page is simple enough to write by hand). It is a client of the existing JSON API
-only; there is no server-side logic here beyond serving this one static page. Query results are always
-rendered through DOM APIs (createElement/textContent), never innerHTML, so a value coming back from a
-database can never execute as markup.
+Mostly self-contained (no build step; unlike /docs, which needs the real Swagger UI library, most of this
+page is simple enough to write by hand) - the one exception is the Help > Docs browser, which lazily loads
+marked.js and DOMPurify from a CDN to render this project's own markdown docs. It is a client of the
+existing JSON API only; there is no server-side logic here beyond serving this one static page. Query
+results are always rendered through DOM APIs (createElement/textContent), never innerHTML, so a value
+coming back from a database can never execute as markup - the Docs browser is the one deliberate exception
+(rendering fetched markdown as HTML has no DOM-API equivalent), and even there the rendered HTML is passed
+through DOMPurify.sanitize() before it ever reaches innerHTML, never assigned raw.
 """
 
 UI_HTML = r"""<!doctype html>
@@ -6086,18 +6089,26 @@ var DOCS = [
 ];
 var docsNavBuilt = false;
 var docsActiveId = null;
-var markedPromise = null;
-function loadMarked() {
-  if (markedPromise) return markedPromise;
-  markedPromise = new Promise(function (resolve, reject) {
-    if (window.marked) return resolve();
+var markdownRendererPromise = null;
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
     var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+    s.src = src;
     s.onload = resolve;
     s.onerror = reject;
     document.head.appendChild(s);
   });
-  return markedPromise;
+}
+function loadMarked() {
+  // Loads both marked.js (markdown -> HTML) and DOMPurify (HTML sanitizer) - fetched markdown is treated
+  // as untrusted content, so its rendered HTML is always passed through DOMPurify.sanitize() before it
+  // reaches innerHTML, never assigned raw; see loadDoc() below.
+  if (markdownRendererPromise) return markdownRendererPromise;
+  markdownRendererPromise = Promise.all([
+    window.marked ? Promise.resolve() : loadScript('https://cdn.jsdelivr.net/npm/marked/marked.min.js'),
+    window.DOMPurify ? Promise.resolve() : loadScript('https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js'),
+  ]);
+  return markdownRendererPromise;
 }
 function docsRawUrl(path, ref) {
   return 'https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/' + encodeURIComponent(ref) + '/' + path;
@@ -6116,7 +6127,7 @@ function loadDoc(doc) {
     return res.text();
   }).then(function (md) {
     if (docsActiveId !== doc.id) return;
-    clear(box).innerHTML = window.marked.parse(md);
+    clear(box).innerHTML = DOMPurify.sanitize(window.marked.parse(md));
   }).catch(function (err) {
     if (docsActiveId !== doc.id) return;
     clear(box).appendChild(h('div', { className: 'docs-error' },

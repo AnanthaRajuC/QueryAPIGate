@@ -105,8 +105,10 @@ class ListToolsForTests(McpTestCase):
         self.save('q2', sql='SELECT id FROM t WHERE id = :id')
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
         catalog_names = {q['name'] for q in self.catalog(self.admin_headers)}
-        self.assertEqual(tool_names, catalog_names)
-        self.assertEqual(tool_names, {'q1', 'q2'})
+        # The admin key also always sees the two fixed, ad-hoc tools (list_tables/execute_sql) - catalog
+        # has no equivalent concept, so they're the one expected difference here.
+        self.assertEqual(tool_names, catalog_names | {'list_tables', 'execute_sql'})
+        self.assertEqual(tool_names, {'q1', 'q2', 'list_tables', 'execute_sql'})
 
     def test_matches_catalog_for_a_scoped_key(self):
         self.save('reachable')
@@ -122,7 +124,7 @@ class ListToolsForTests(McpTestCase):
         self.save('reader', sql='SELECT * FROM t')
         self.save('writer', sql='DELETE FROM t')
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
-        self.assertEqual(tool_names, {'reader'})
+        self.assertEqual(tool_names, {'reader', 'list_tables', 'execute_sql'})
 
     def test_an_unauthenticated_caller_via_the_server_sees_nothing(self):
         # _permission_for()'s own contract, exercised at the mcp_server level rather than apikeys directly:
@@ -205,6 +207,98 @@ class CallToolForTests(McpTestCase):
         # A cache hit returns early in run_saved(), before execution_history is ever touched - so exactly
         # one entry (not two) is the direct evidence the second call was actually served from cache.
         self.assertEqual(len(content['1']['execution_history']), 1)
+
+
+class FixedToolsTests(McpTestCase):
+    """list_tables/execute_sql: the two ad-hoc tools gated by a key's ``connections`` grant rather than any
+    saved query."""
+
+    def test_a_query_only_key_sees_neither_fixed_tool(self):
+        key = self.create_scoped_key(connections=[], queries=['*'])
+        permission = apikeys.authenticate(key)
+        tool_names = {t['name'] for t in mcp_server.fixed_tools_for(permission)}
+        self.assertEqual(tool_names, set())
+
+    def test_a_connection_scoped_key_sees_both_fixed_tools(self):
+        key = self.create_scoped_key(connections=['a'])
+        permission = apikeys.authenticate(key)
+        tool_names = {t['name'] for t in mcp_server.fixed_tools_for(permission)}
+        self.assertEqual(tool_names, {'list_tables', 'execute_sql'})
+
+    def test_list_tables_returns_the_table_and_its_columns(self):
+        result = mcp_server.list_tables_tool(apikeys.OPEN, {'connection_name': 'a'})
+        self.assertNotIn('isError', result)
+        body = json.loads(result['content'][0]['text'])
+        table = next(t for t in body['tables'] if t['name'] == 't')
+        self.assertEqual({c['name'] for c in table['columns']}, {'id', 'name'})
+
+    def test_list_tables_is_refused_for_a_connection_the_key_cannot_use(self):
+        key = self.create_scoped_key(connections=[])
+        permission = apikeys.authenticate(key)
+        result = mcp_server.list_tables_tool(permission, {'connection_name': 'a'})
+        self.assertTrue(result['isError'])
+        self.assertIn('not permitted', result['content'][0]['text'])
+
+    def test_list_tables_requires_connection_name(self):
+        result = mcp_server.list_tables_tool(apikeys.OPEN, {})
+        self.assertTrue(result['isError'])
+
+    def test_execute_sql_returns_rows(self):
+        result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        rows = json.loads(result['content'][0]['text'])
+        self.assertEqual(len(rows), 5)
+
+    def test_execute_sql_binds_parameters(self):
+        result = mcp_server.execute_sql_tool(apikeys.OPEN, {
+            'connection_name': 'a', 'sql': 'SELECT * FROM t WHERE id = :id', 'params': {'id': 3}})
+        rows = json.loads(result['content'][0]['text'])
+        self.assertEqual(rows, [{'id': 3, 'name': 'row3'}])
+
+    def test_execute_sql_is_always_read_only_even_for_a_writes_allowed_key(self):
+        key = self.create_scoped_key(connections=['a'], allow_writes=True)
+        permission = apikeys.authenticate(key)
+        result = mcp_server.execute_sql_tool(permission, {'connection_name': 'a', 'sql': "DELETE FROM t"})
+        self.assertTrue(result['isError'])
+
+    def test_execute_sql_is_refused_for_a_connection_the_key_cannot_use(self):
+        key = self.create_scoped_key(connections=[])
+        permission = apikeys.authenticate(key)
+        result = mcp_server.execute_sql_tool(permission, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        self.assertTrue(result['isError'])
+
+    def test_execute_sql_honours_a_key_s_allowed_tables(self):
+        conn = store.get_connection('a')
+        raw = sqlite3.connect(conn['database'])
+        raw.execute('CREATE TABLE other (id INTEGER)')
+        raw.commit()
+        raw.close()
+        key = self.create_scoped_key(connections=['a'], allowed_tables=['t'])
+        permission = apikeys.authenticate(key)
+        allowed = mcp_server.execute_sql_tool(permission, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        self.assertNotIn('isError', allowed)
+        refused = mcp_server.execute_sql_tool(permission, {'connection_name': 'a', 'sql': 'SELECT * FROM other'})
+        self.assertTrue(refused['isError'])
+
+    def test_execute_sql_requires_sql(self):
+        result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a'})
+        self.assertTrue(result['isError'])
+
+    def test_execute_sql_result_is_capped_to_mcp_max_rows_and_marked_truncated(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_MAX_ROWS': '2'}):
+            result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        rows = json.loads(result['content'][0]['text'].split('\n\n')[0])
+        self.assertEqual(len(rows), 2)
+        self.assertIn('truncated to 2 rows', result['content'][0]['text'])
+
+    def test_dispatch_routes_fixed_tools_and_falls_back_to_saved_queries(self):
+        self.save('q1')
+        tables = mcp_server.dispatch_tool_call(self.app, apikeys.OPEN, 'list_tables', {'connection_name': 'a'})
+        self.assertNotIn('isError', tables)
+        rows = mcp_server.dispatch_tool_call(self.app, apikeys.OPEN, 'execute_sql',
+                                             {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        self.assertNotIn('isError', rows)
+        saved = mcp_server.dispatch_tool_call(self.app, apikeys.OPEN, 'q1', {})
+        self.assertNotIn('isError', saved)
 
 
 @unittest.skipUnless(HAVE_MCP_SDK, 'queryapigate[mcp] not installed')

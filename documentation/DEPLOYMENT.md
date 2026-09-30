@@ -23,7 +23,8 @@ docker pull ghcr.io/anantharajuc/queryapigate:latest
 
 **Pin to `X.Y.Z` in production, not `latest`.** An upgrade should be a deliberate, one-line version bump you
 control, not something that happens on the next `docker compose pull`. Bump it the same way you'd bump any
-other dependency - read the [Changelog](../CHANGELOG.md) first, especially around a major version.
+other dependency - read the [Changelog](../CHANGELOG.md) first, especially around a minor version bump
+(this project's pre-1.0 [equivalent of a major one](../CHANGELOG.md#versioning-and-compatibility)).
 
 The image already does the things a production container should: runs as a non-root user (`uid 1000`),
 ships a `HEALTHCHECK` against `/health`, and starts gunicorn with `--worker-class gthread` and one worker
