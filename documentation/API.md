@@ -756,6 +756,41 @@ rows returned, active queries, pool occupancy and rate-limit rejections. Each Qu
 scrape target; the dashboard doesn't aggregate across instances, matching the in-memory, per-process nature
 of the metrics themselves.
 
+## Live events (Server-Sent Events)
+
+`GET /events` streams one `data: {...}` line per saved-query execution as it happens - the same feed the
+admin UI's Home tab uses instead of polling `/list_files` every 5 seconds, and usable directly by your own
+client (a mobile app, a dashboard) rather than only the built-in UI. Requires a real API key like any other
+functional endpoint - never public.
+
+**Each key gets its own view, not a shared firehose.** The admin key sees every execution on the server; a
+scoped key sees only executions triggered by that same key - its own personal activity feed. This is exactly
+right for a mobile app where each user logs in with their own scoped key and only cares about their own
+requests finishing, not everyone else's:
+
+```
+GET /events
+X-API-Key: <a scoped key's own secret>
+
+data: {"type": "execution", "filename": "monthly_revenue", "version": 3, "connection_name": "warehouse",
+       "entry": {"executed_at": "2026-09-30 12:00:00", "status": "success", "rows": 42,
+                 "duration_ms": 118.4, "key_name": "mobile-alice", "request_id": "a1b2c3d4e5f6"}}
+```
+
+A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client
+library doesn't time it out as idle - not a real event, safe to ignore.
+
+**Use `fetch()` with a streamed response body, not a plain `new EventSource(...)`.** `EventSource` can't set
+custom request headers, and there's no cookie-based auth to fall back on - the key has to travel in
+`X-API-Key` like every other request, never as a URL parameter (which would leak it into access logs and
+browser history). Any HTTP client capable of reading a chunked response as it arrives - which every mobile
+platform's own networking library can do - works the same way; `EventSource` is a browser-specific
+convenience this API doesn't rely on.
+
+This is in-process, per-server state (see [Observability](#observability) above) - a connected client only
+ever sees events from the one process it's connected to, and there's no cross-instance fan-out behind a load
+balancer yet.
+
 ## Audit log
 
 `GET /audit_log` (admin only) is a durable record of administrative changes - distinct from

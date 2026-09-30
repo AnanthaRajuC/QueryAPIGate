@@ -22,6 +22,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **`GET /events` (live SSE feed) opened to any authenticated key, each getting its own personal activity
+  feed** - previously admin-only, broadcasting every execution to that one connection. A scoped key can now
+  connect and receives only executions it triggered itself (`broadcast.Broadcaster` gained a per-subscriber
+  `key_name` filter); the admin key's subscription is unchanged, still seeing everything. Documented for the
+  first time - see [API.md](documentation/API.md#live-events-server-sent-events). Verified: two scoped keys
+  running the same saved query each see only their own event; the admin key still sees both.
 - **Two ad-hoc MCP tools, `list_tables` and `execute_sql`**, alongside the existing per-saved-query tools -
   schema discovery and read-only ad-hoc SQL for an agent, gated by the same `connections` grant REST's own
   `/connections/<name>/schema` and `/execute_sql` already check, reusing their exact permission checks and

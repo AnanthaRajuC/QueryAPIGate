@@ -189,7 +189,9 @@ def build_spec(version, saved_queries=None):
             '/events': {'get': {
                 'summary': 'Live saved-query execution events (Server-Sent Events)', 'tags': ['Saved queries'],
                 'description': 'One `data: {...}` line per saved-query execution as it happens - feeds the '
-                    'admin UI\'s Home tab instead of it polling /list_files. Admin only.',
+                    'admin UI\'s Home tab instead of it polling /list_files. Any authenticated key may '
+                    'connect: the admin key sees every execution; a scoped key sees only executions it '
+                    'triggered itself (its own personal activity feed, filtered by API key name).',
                 'responses': {'200': {'description': 'text/event-stream of execution events',
                                       'content': {'text/event-stream': {'schema': {'type': 'string'}}}},
                              **_ERRORS}}},

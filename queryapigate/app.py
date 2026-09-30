@@ -417,15 +417,18 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
 
 
 def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None):
-    """store.record_execution(), plus a live event for the admin UI's Home tab (BACKLOG #43) - every call
-    site that used to call record_execution() directly calls this instead. ``broadcaster`` defaults to the
-    current request's extension (the normal case); a caller running outside request/app context (see
-    _record_stream_history() below) must pass it in explicitly instead."""
+    """store.record_execution(), plus a live event for the admin UI's Home tab and any subscribed API key's
+    own personal feed (BACKLOG #43) - every call site that used to call record_execution() directly calls
+    this instead. ``broadcaster`` defaults to the current request's extension (the normal case); a caller
+    running outside request/app context (see _record_stream_history() below) must pass it in explicitly
+    instead. Published under ``entry['key_name']`` - the same value every subscriber's own filter (see
+    stream_events()) is compared against, so a run only ever reaches the key that actually triggered it,
+    plus the admin key's own unfiltered subscription."""
     store.record_execution(path, number, entry)
     if broadcaster is None:
         broadcaster = current_app.extensions['queryapigate_broadcaster']
     broadcaster.publish({'type': 'execution', 'filename': path, 'version': number,
-                        'connection_name': connection_name, 'entry': entry})
+                        'connection_name': connection_name, 'entry': entry}, entry['key_name'])
 
 
 def _record_stream_history(rows, path, number, connection_name, request_id, key_name, broadcaster):
@@ -857,17 +860,20 @@ _SSE_HEARTBEAT_SECONDS = 15  # module constant so tests can shrink it
 @bp.route('/events', methods=['GET'])
 def stream_events():
     """Server-Sent Events: one `data: {...}` line per live event (today: a saved-query execution, as
-    it's recorded - see _record_and_broadcast()) for the admin UI's Home tab (BACKLOG #43) - replaces
-    polling /list_files every 5s for that one panel. Admin only, matching /list_files itself.
+    it's recorded - see _record_and_broadcast()). Originally admin-only, feeding just the admin UI's Home
+    tab; open to any authenticated key now, each getting its own personal activity feed - a scoped key sees
+    only executions triggered by that same key (broadcast.Broadcaster's key_name filter), the admin key
+    keeps its original unfiltered view of everything, matching the admin-sees-all/scoped-sees-its-own
+    pattern /catalog already uses elsewhere. Still requires a real key or open-access mode - never public -
+    replaces polling /list_files every 5s for the admin UI's own panel.
 
     The client reads this with fetch()'s streamed response body rather than a plain `new EventSource(...)`:
     EventSource cannot set custom request headers, and this app has no cookie-based auth to fall back on -
-    every other admin request already authenticates via X-API-Key (see ui.py's apiFetch()). Putting the key
-    in the URL instead would put a secret in server access logs and browser history, which nothing else in
-    this app does. Same wire format either way, just read manually so header-based auth keeps working."""
-    require_admin()
+    every other request already authenticates via X-API-Key (see ui.py's apiFetch()). Putting the key in the
+    URL instead would put a secret in server access logs and browser history, which nothing else in this
+    app does. Same wire format either way, just read manually so header-based auth keeps working."""
     broadcaster = current_app.extensions['queryapigate_broadcaster']
-    subscriber = broadcaster.subscribe()
+    subscriber = broadcaster.subscribe(key_name=None if g.permission.admin else g.permission.name)
 
     def events():
         try:

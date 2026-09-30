@@ -1379,6 +1379,19 @@ consumer (the example dashboard's KPI queries, Metrics' manual refresh) is still
 not converted - the event's own shape (`{'type': 'execution', ...}`) leaves room for a future `'type': 'audit'`
 or similar to reuse the same connection, but nothing beyond saved-query executions is wired up yet.
 
+**`GET /events` opened to any authenticated key, filtered per subscriber** - was admin-only, broadcasting
+every execution to the one admin connection; a real question came up (a mobile app with per-user logins
+wanting its own live feed, not the whole server's) that exposed this as a real gap, not just an unasked-for
+extra. `Broadcaster.subscribe()` now takes an optional `key_name` filter (`broadcast.py`) - `None` for the
+admin key's own subscription, unchanged from before (still sees everything); any other value means "only
+events published under this exact key name." `publish()` now requires the triggering key's name as an
+explicit argument rather than inferring it from the event - `_record_and_broadcast()`'s callers already know
+it (`entry['key_name']`), so this is a pure threading-through, not new state. A scoped key now gets a real
+personal activity feed: its own saved-query runs, and nothing anyone else's key triggers. Documented in
+[API.md](documentation/API.md#live-events-server-sent-events), previously undocumented entirely. Verified:
+two scoped keys running the same query, each subscriber sees only its own key's event; the admin key's
+subscription still sees both.
+
 ## 44. Home tab: surface real health signals, not just counts
 
 **Status: shipped**, exactly the cheap slice this entry scoped - see below for what's still deferred.
@@ -1712,9 +1725,10 @@ on the Access tab, with only column lineage and write-target detection deferred,
 out of scope for real parsing; #41, #42, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52 and #53 are shipped
 (#45's "empty collections" item excepted - it doesn't apply to this app's data model, see its own entry; #53
 shipped in full, both phases - every persistent store this app owns now lives in `queryapigate.db`, see its
-own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel, with the example
-dashboard's KPI polling and Metrics' manual refresh left as explicit, not-yet-converted remainders, see its
-own entry; #42 shipped for read-only saved queries only plus two ad-hoc tools (`list_tables`/`execute_sql`)
+own entry; #43 shipped for its one scoped consumer, Home's recent-requests panel, plus later opened to any
+authenticated key with per-key event filtering (a scoped key's own personal activity feed, not the whole
+server's), with the example dashboard's KPI polling and Metrics' manual refresh left as explicit,
+not-yet-converted remainders, see its own entry; #42 shipped for read-only saved queries only plus two ad-hoc tools (`list_tables`/`execute_sql`)
 and a generic `outputSchema`, with write-capable MCP tools - needing a `destructiveHint` classification and
 a write-confirmation decision - left explicitly open, see its own entry); #54 shipped in full, including
 its own two originally-deferred follow-ups (an on-demand reachability check and a tool-listing panel), see

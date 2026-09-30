@@ -68,10 +68,13 @@ class EventsTests(unittest.TestCase):
         res = self.client.get('/events')
         self.assertEqual(res.status_code, 401)
 
-    def test_a_scoped_non_admin_key_is_forbidden(self):
+    def test_a_scoped_non_admin_key_may_connect(self):
+        # Was forbidden before per-subscriber filtering existed; a scoped key now gets its own personal
+        # feed, same as any other endpoint a real key can reach.
         key = self.create_scoped_key()
         res = self.client.get('/events', headers={'X-API-Key': key})
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 200)
+        res.close()
 
     def test_connecting_registers_a_subscriber_and_disconnecting_removes_it(self):
         self.assertEqual(self.broadcaster().subscriber_count(), 0)
@@ -98,6 +101,28 @@ class EventsTests(unittest.TestCase):
         gen = iter(res.response)
         frame = self.next_frame(gen)
         self.assertEqual(frame, ': keepalive\n\n')
+        res.close()
+
+    def test_a_scoped_key_receives_only_its_own_executions(self):
+        key_alice = self.create_scoped_key(name='alice', queries=['q1'])
+        key_bob = self.create_scoped_key(name='bob', queries=['q1'])
+        res = self.client.get('/events', headers={'X-API-Key': key_alice})
+        gen = iter(res.response)
+        self.client.get('/q/q1', headers={'X-API-Key': key_bob})   # someone else's run - must not arrive
+        self.client.get('/q/q1', headers={'X-API-Key': key_alice})  # alice's own run - the one she sees
+        frame = self.next_data_frame(gen)
+        event = json.loads(frame[len('data: '):].strip())
+        self.assertEqual(event['entry']['key_name'], 'alice')
+        res.close()
+
+    def test_the_admin_key_still_sees_a_scoped_key_s_execution(self):
+        key_alice = self.create_scoped_key(name='alice', queries=['q1'])
+        res = self.client.get('/events', headers=self.admin_headers)
+        gen = iter(res.response)
+        self.client.get('/q/q1', headers={'X-API-Key': key_alice})
+        frame = self.next_data_frame(gen)
+        event = json.loads(frame[len('data: '):].strip())
+        self.assertEqual(event['entry']['key_name'], 'alice')
         res.close()
 
 
