@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **A CLI tab on the API Repository screen**, next to Metrics. Shows the `queryapigate export` command for
+  that specific saved query - the one CLI command that's actually about a specific query (the
+  cron/systemd/Kubernetes CronJob path, running in-process against `QUERYAPIGATE_HOME` with no server or API
+  key needed) - with a Copy button. A declared parameter with a default becomes its real value; one without
+  becomes a `<placeholder>` to fill in, exactly the same convention the existing Curl tab already uses, off
+  the same parameter source, so the two never disagree about what a query's parameters are.
+
 ### Fixed
 - **`pip install -e ".[dev]"` was broken on Python 3.9**, failing CI on every matrix job at that version.
   The `dev` extra unconditionally pulled in `queryapigate[mcp]`, but the `mcp` package itself requires

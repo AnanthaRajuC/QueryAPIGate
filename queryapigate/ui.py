@@ -4384,7 +4384,8 @@ function renderDetail() {
       subtab('roles', 'Roles', h('span', { className: 'count', text: reach.roles.length ? String(reach.roles.length) : '' })),
       subtab('access', 'Access'),
       subtab('cache', 'Cache'),
-      subtab('metrics', 'Metrics')));
+      subtab('metrics', 'Metrics'),
+      subtab('cli', 'CLI')));
   var body = h('div', { className: 'd-body' });
   box.appendChild(head);
   box.appendChild(body);
@@ -4396,6 +4397,7 @@ function renderDetail() {
   else if (selected.tab === 'curl') renderCurlTab(body, f, v, isLatest);
   else if (selected.tab === 'cache') renderCacheTab(body, f, v);
   else if (selected.tab === 'metrics') renderQueryMetricsTab(body, v);
+  else if (selected.tab === 'cli') renderCliTab(body, f, v, isLatest);
   else renderRunTab(body, f, v, isLatest);
 }
 function metaItem(k, val) { return h('div', {}, h('dt', { text: k }), h('dd', { title: String(val), text: String(val) })); }
@@ -4730,6 +4732,33 @@ async function renderCurlTab(body, f, v, isLatest) {
   body.appendChild(h('pre', { className: 'curlbox', text: cmd }));
   body.appendChild(h('div', {}, h('button', { type: 'button', className: 'btn md', text: 'Copy command', onclick: function () { copyText(cmd); } })));
   if (params.length) body.appendChild(h('div', { className: 'hint', text: 'Replace the <placeholder> value(s) with real parameters before running it.' }));
+}
+
+/** The CLI tab: `queryapigate export` for this query, the one CLI command that's actually about a specific
+ * saved query (INSTALLATION_AND_SETUP.md's "Scheduled exports to a file" - the cron/systemd/Kubernetes
+ * CronJob path, running in-process against QUERYAPIGATE_HOME with no server or API key needed). Same
+ * parameter-declaration source and placeholder convention as the Curl tab above, so the two never disagree
+ * about what a query's parameters are. Only ever shown for the latest version - export runs a saved
+ * query's current SQL directly, with no --version flag of its own. */
+async function renderCliTab(body, f, v, isLatest) {
+  body.appendChild(loadingNode('Loading parameters…'));
+  var params = isLatest ? await fetchQueryParameters(f.filename) : null;
+  if (!params) params = paramsFromVersion(v);
+  if (selected.name !== f.filename || selected.tab !== 'cli') return;
+  clear(body);
+  if (!isLatest) {
+    body.appendChild(h('div', { className: 'hint', text: '`queryapigate export` always runs a saved query’s latest version - switch to it to see this command.' }));
+    return;
+  }
+  var cmd = asSavedQueryCli(f.filename, params);
+  body.appendChild(h('pre', { className: 'curlbox', text: cmd }));
+  body.appendChild(h('div', {}, h('button', { type: 'button', className: 'btn md', text: 'Copy command', onclick: function () { copyText(cmd); } })));
+  body.appendChild(h('div', { className: 'hint' },
+    'Runs entirely against ', h('code', { text: 'QUERYAPIGATE_HOME' }), ' - no server needs to be running, no API key needed. ',
+    h('code', { text: '{date}' }), ' and ', h('code', { text: '{name}' }), ' in ', h('code', { text: '--out' }), ' are filled in automatically.'));
+  if (params.length) body.appendChild(h('div', { className: 'hint', text: 'Replace the <placeholder> value(s) with real parameters before running it.' }));
+  body.appendChild(h('div', { className: 'hint' },
+    'See ', h('a', { href: 'https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/INSTALLATION_AND_SETUP.md#scheduled-exports-to-a-file', target: '_blank', rel: 'noopener', text: 'Scheduled exports to a file' }), ' for scheduling it with cron, systemd or a Kubernetes CronJob.'));
 }
 
 /** This version's cache_ttl, viewed and edited in place (PUT /saved_sql/<name>/cache_ttl) - not a new
@@ -5340,6 +5369,23 @@ function asSavedQueryCurl(name, params, version) {
   var url = query.length ? base + '?' + query.join('&') : base;
   var lines = ['curl ' + shQuote(url)];
   if (getKey()) lines.push("  -H 'X-API-Key: YOUR_KEY_HERE'  # replace with your own key");
+  return lines.join(' \\\n');
+}
+
+/** `queryapigate export <name>` for this saved query - the exact flags cli.py's own `export` subparser
+ * takes (--param, --format, --out; see cli.py). Same placeholder convention as asSavedQueryCurl() above: a
+ * parameter with no declared default becomes a <name> placeholder rather than a guessed value. No API key
+ * line - export never uses one, it runs in-process against QUERYAPIGATE_HOME directly (see cli.py's own
+ * _export() docstring). */
+function asSavedQueryCli(name, params) {
+  var lines = ['queryapigate export ' + shQuote(name)];
+  params.forEach(function (p) {
+    var sch = p.schema || {};
+    var value = sch.default !== undefined ? String(sch.default) : '<' + p.name + '>';
+    lines.push('  --param ' + shQuote(p.name + '=' + value));
+  });
+  lines.push('  --format csv');
+  lines.push('  --out ' + shQuote('/exports/' + name + '_{date}.csv'));
   return lines.join(' \\\n');
 }
 
