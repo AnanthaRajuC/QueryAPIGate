@@ -45,8 +45,8 @@ mcp = ["mcp>=1.9,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py.
 all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
-dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[mcp]", "ruff>=0.5", "openapi-spec-validator>=0.7",
-      "hypothesis>=6.100", "mypy>=1.10", "coverage>=7.4"]
+dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[mcp]; python_version>='3.10'", "ruff>=0.5",
+      "openapi-spec-validator>=0.7", "hypothesis>=6.100", "mypy>=1.10", "coverage>=7.4"]
 
 [project.urls]
 Homepage = "https://github.com/AnanthaRajuC/QueryAPIGate"

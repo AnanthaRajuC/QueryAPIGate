@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **`pip install -e ".[dev]"` was broken on Python 3.9**, failing CI on every matrix job at that version.
+  The `dev` extra unconditionally pulled in `queryapigate[mcp]`, but the `mcp` package itself requires
+  Python ≥3.10 - pip's resolver had no compatible version to install and failed before anything else ran.
+  `queryapigate[mcp]` in `dev` now carries a `python_version>='3.10'` marker, so it's simply skipped on 3.9
+  (matching how `mcp_server.py`'s own imports are already deferred and `test_mcp.py`'s SDK-dependent tests
+  already skip without the package) rather than breaking the install for every other dependency too.
+  Verified against a real Python 3.9 container: `pip install -e ".[dev]"`, `ruff`, `mypy` and the full test
+  suite (906 tests) all pass.
+
 ### Added
 - **`documentation/DEPLOYMENT.md`**: a production Docker deployment guide, distinct from the repo-root
   `docker-compose.yml` (a one-command, localhost-only demo). Covers pinning a real image tag, a
