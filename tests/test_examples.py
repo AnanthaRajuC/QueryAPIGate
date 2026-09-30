@@ -571,6 +571,8 @@ class CliTests(ExamplesTestCase):
         code, out, err = self.run_cli('examples', 'load')
         self.assertEqual(code, 0, err)
         self.assertIn('11 queries in 4 collections', out)
+        self.assertIn('Watch it live:', out)
+        self.assertIn('curl -N http://127.0.0.1:5000/events', out)
         code, out, _ = self.run_cli('examples', 'load')
         self.assertIn('already loaded', out)
         code, out, _ = self.run_cli('examples', 'status')

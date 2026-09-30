@@ -22,6 +22,11 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **`queryapigate examples load` now prints a ready-to-run SSE example too**, alongside the existing curl
+  example - `curl -N http://127.0.0.1:5000/events -H 'X-API-Key: ...'` - so the live-events feature (see
+  below) is discoverable the same way the REST endpoint already was, not just something you'd find by
+  reading the docs. Verified: the printed command really receives a live event when a query runs in another
+  terminal.
 - **`GET /events` (live SSE feed) opened to any authenticated key, each getting its own personal activity
   feed** - previously admin-only, broadcasting every execution to that one connection. A scoped key can now
   connect and receives only executions it triggered itself (`broadcast.Broadcaster` gained a per-subscriber

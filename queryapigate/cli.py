@@ -243,6 +243,8 @@ def _examples_load(args):
                 print(f'  {name}: {secret}')
         print('Try:  queryapigate serve   then open /ui, or  curl http://127.0.0.1:5000/q/example_top_films '
              "-H 'X-API-Key: <one of the secrets above>'")
+        print("Watch it live:  curl -N http://127.0.0.1:5000/events -H 'X-API-Key: <one of the secrets above>' "
+             '(then call a query in another terminal to see the event arrive)')
         print('Remove them again with:  queryapigate examples unload')
     else:
         print('The example APIs are already loaded - nothing changed.')
