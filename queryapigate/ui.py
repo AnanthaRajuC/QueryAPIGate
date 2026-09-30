@@ -163,6 +163,7 @@ UI_HTML = r"""<!doctype html>
   /* ---- layout ---- */
   main { padding: 24px 28px 48px; max-width: 1480px; }
   main:has(> #tab-run.active) { max-width: none; }
+  main:has(> #tab-help.active) { max-width: none; }
   main > section { display: none; }
   main > section.active { display: block; }
   .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -725,6 +726,32 @@ UI_HTML = r"""<!doctype html>
   .help-defs dd { margin: 2px 0 0; color: var(--ink-2); line-height: 1.5; }
   .help-links { list-style: none; }
   .help-links li { padding-left: 0; }
+  .docs-browser { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    background: var(--surface); height: calc(100vh - 210px); min-height: 480px; }
+  .docs-nav { width: 220px; flex: none; border-right: 1px solid var(--line); background: var(--surface-2);
+    padding: 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+  .docs-nav button { text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px;
+    font: 600 12px var(--sans); color: var(--ink-2); cursor: pointer; }
+  .docs-nav button:hover { background: var(--surface); color: var(--ink); }
+  .docs-nav button.active { background: var(--accent-soft); color: var(--accent); }
+  .docs-content { flex: 1; padding: 26px 40px; overflow-y: auto; font-size: 13px; line-height: 1.65; }
+  .docs-content .empty { color: var(--ink-3); font-size: 12.5px; }
+  .docs-content h1, .docs-content h2, .docs-content h3 { line-height: 1.3; margin: 22px 0 8px; }
+  .docs-content h1:first-child, .docs-content h2:first-child, .docs-content h3:first-child { margin-top: 0; }
+  .docs-content h1 { font-size: 19px; } .docs-content h2 { font-size: 15.5px; } .docs-content h3 { font-size: 13.5px; }
+  .docs-content p, .docs-content ul, .docs-content ol { margin: 0 0 12px; color: var(--ink-2); }
+  .docs-content ul, .docs-content ol { padding-left: 20px; }
+  .docs-content li { margin: 3px 0; }
+  .docs-content a { color: var(--accent); }
+  .docs-content code { font: 12px var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  .docs-content pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; margin: 0 0 14px; }
+  .docs-content pre code { background: none; padding: 0; }
+  .docs-content blockquote { margin: 0 0 12px; padding: 4px 14px; border-left: 3px solid var(--line-strong);
+    color: var(--ink-3); }
+  .docs-content table { border-collapse: collapse; margin: 0 0 14px; font-size: 12.5px; }
+  .docs-content th, .docs-content td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+  .docs-content .docs-error { color: var(--danger); font-size: 12.5px; }
   body.compact table.grid td { padding: 5px 14px; }
   body.compact table.rs td { padding: 2px 12px; }
   @media (max-width: 980px) { .split, .runner { grid-template-columns: minmax(0, 1fr); } #queries-panel { position: static; max-height: 320px; } .runner-splitter { display: none; } }
@@ -1005,7 +1032,11 @@ UI_HTML = r"""<!doctype html>
     <div class="page-head">
       <div class="titles"><h1>Help</h1><span class="sub">Quick reference for this admin UI - concepts, shortcuts and where to go for more.</span></div>
     </div>
-    <div class="help-grid">
+    <div class="minitabs" id="help-view-tabs" style="padding: 0 0 12px;">
+      <button type="button" class="minitab" data-help-view="quickref">Quick reference</button>
+      <button type="button" class="minitab active" data-help-view="docs">Docs</button>
+    </div>
+    <div class="help-grid" id="help-quickref" hidden>
       <div class="panel help-card">
         <h3>Getting started</h3>
         <ol>
@@ -1028,6 +1059,15 @@ UI_HTML = r"""<!doctype html>
         </table>
       </div>
       <div class="panel help-card">
+        <h3>Where to find things</h3>
+        <dl class="help-defs">
+          <dt>Data</dt><dd><b>Connections</b> - your databases. <b>Caching</b> - response cache settings and a live browser of what's cached right now.</dd>
+          <dt>API</dt><dd><b>API Repository</b> - every saved query: its versions, history, curl/CLI snippets and metrics. <b>API Designer</b> - write and run a query, then save it as a new endpoint.</dd>
+          <dt>Access</dt><dd><b>API keys</b> and <b>Roles</b> - credentials and the templates they're created from. <b>Access map</b> - which keys can reach which queries, at a glance.</dd>
+          <dt>Observability</dt><dd><b>Metrics</b> - request volume, latency and error rate across the server. <b>Audit log</b> - who changed what, when.</dd>
+        </dl>
+      </div>
+      <div class="panel help-card">
         <h3>Concepts</h3>
         <dl class="help-defs">
           <dt>Saved query</dt><dd>A SQL (or Mongo find) query saved under a name, published as <code>/q/&lt;name&gt;</code>.</dd>
@@ -1035,6 +1075,8 @@ UI_HTML = r"""<!doctype html>
           <dt>API key vs. role</dt><dd>A key is a real credential; a role is a template new keys can be created from - granting a role by itself grants nothing.</dd>
           <dt>Reach: Q · C · W</dt><dd>How a key reaches a query - named <b>Q</b>uery, <b>C</b>ollection, or <b>W</b>hole connection.</dd>
           <dt>Bound parameters</dt><dd>Write <code>:name</code> in a query; supply <code>name</code> as a request parameter at run time.</dd>
+          <dt>Response cache</dt><dd>A saved query can cache its result for a TTL, so repeat calls skip the database - see the <b>Caching</b> tab.</dd>
+          <dt>CLI export</dt><dd>Run <code>queryapigate export &lt;name&gt;</code> to pull a saved query straight to a file - no server or API key needed. Each query's <b>CLI</b> tab has the exact command.</dd>
         </dl>
       </div>
       <div class="panel help-card">
@@ -1043,11 +1085,17 @@ UI_HTML = r"""<!doctype html>
           <li><a href="docs" target="_blank" rel="noopener">API docs</a> - every endpoint this server exposes, generated from its own OpenAPI spec.</li>
           <li><a href="openapi.json" target="_blank" rel="noopener">OpenAPI spec</a> <span class="dim">(.json)</span></li>
           <li><a href="https://AnanthaRajuC.github.io/QueryAPIGate/" target="_blank" rel="noopener">Documentation site</a></li>
+          <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md" target="_blank" rel="noopener">Production Docker deployment guide</a></li>
+          <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md" target="_blank" rel="noopener">MCP server</a> <span class="dim">- let an AI assistant call your saved queries</span></li>
           <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate" target="_blank" rel="noopener">GitHub repository</a></li>
           <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/issues" target="_blank" rel="noopener">Report an issue</a></li>
           <li><a href="https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
         </ul>
       </div>
+    </div>
+    <div class="docs-browser" id="help-docs">
+      <nav class="docs-nav" id="docs-nav"></nav>
+      <div class="docs-content" id="docs-content"><div class="empty">Pick a doc on the left.</div></div>
     </div>
   </section>
 </main>
@@ -1196,6 +1244,7 @@ function showTab(name) {
   });
   document.querySelectorAll('main > section').forEach(function (s) { s.classList.toggle('active', s.id === 'tab-' + name); });
   try { sessionStorage.setItem('queryapigate-ui-tab', name); } catch (e) {}
+  if (name === 'help' && !docsNavBuilt && !$('help-docs').hidden) initDocsBrowser();
 }
 NAV_BUTTONS.forEach(function (btn) { btn.onclick = function () { showTab(btn.dataset.tab); }; });
 
@@ -6020,11 +6069,85 @@ function renderRunHistory() {
   })));
 }
 
+// ---- Help > Docs: an in-app browser over this project's own markdown docs, fetched straight from GitHub
+// at the tag matching the version this server is actually running (falls back to "main" for a dev build
+// with no matching tag) - so it works from a pip install or the Docker image, neither of which ships the
+// documentation/ folder locally. Rendered client-side with marked.js (CDN, loaded lazily on first open -
+// the same CDN-script pattern /docs already uses for Swagger UI). ----
+var DOCS = [
+  { id: 'readme', title: 'Overview', path: 'README.md' },
+  { id: 'install', title: 'Installation & Setup', path: 'documentation/INSTALLATION_AND_SETUP.md' },
+  { id: 'api', title: 'API Reference', path: 'documentation/API.md' },
+  { id: 'deployment', title: 'Production Deployment', path: 'documentation/DEPLOYMENT.md' },
+  { id: 'mcp', title: 'MCP Server', path: 'documentation/MCP.md' },
+  { id: 'examples', title: 'Examples', path: 'documentation/EXAMPLES.md' },
+  { id: 'security', title: 'Security', path: 'SECURITY.md' }
+];
+var docsNavBuilt = false;
+var docsActiveId = null;
+var markedPromise = null;
+function loadMarked() {
+  if (markedPromise) return markedPromise;
+  markedPromise = new Promise(function (resolve, reject) {
+    if (window.marked) return resolve();
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return markedPromise;
+}
+function docsRawUrl(path, ref) {
+  return 'https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/' + encodeURIComponent(ref) + '/' + path;
+}
+function loadDoc(doc) {
+  docsActiveId = doc.id;
+  document.querySelectorAll('#docs-nav button').forEach(function (b) { b.classList.toggle('active', b.dataset.doc === doc.id); });
+  var box = $('docs-content');
+  clear(box).appendChild(h('div', { className: 'empty', text: 'Loading…' }));
+  var ref = (serverVersion ? 'v' + serverVersion : 'main');
+  loadMarked().then(function () { return fetch(docsRawUrl(doc.path, ref)); }).then(function (res) {
+    if (res.status === 404 && ref !== 'main') return fetch(docsRawUrl(doc.path, 'main'));
+    return res;
+  }).then(function (res) {
+    if (!res.ok) throw new Error('GitHub returned ' + res.status);
+    return res.text();
+  }).then(function (md) {
+    if (docsActiveId !== doc.id) return;
+    clear(box).innerHTML = window.marked.parse(md);
+  }).catch(function (err) {
+    if (docsActiveId !== doc.id) return;
+    clear(box).appendChild(h('div', { className: 'docs-error' },
+      'Could not load this doc from GitHub (' + err.message + '). It needs a network connection to raw.githubusercontent.com - or read it directly at ',
+      h('a', { href: 'https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/' + doc.path, target: '_blank', rel: 'noopener', text: 'github.com' }), '.'));
+  });
+}
+function initDocsBrowser() {
+  docsNavBuilt = true;
+  var nav = $('docs-nav');
+  DOCS.forEach(function (d) {
+    nav.appendChild(h('button', { type: 'button', 'data-doc': d.id, text: d.title, onclick: function () { loadDoc(d); } }));
+  });
+  loadDoc(DOCS[0]);
+}
+document.querySelectorAll('#help-view-tabs .minitab').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('#help-view-tabs .minitab').forEach(function (x) { x.classList.toggle('active', x === b); });
+    var view = b.dataset.helpView;
+    $('help-quickref').hidden = view !== 'quickref';
+    $('help-docs').hidden = view !== 'docs';
+    if (view === 'docs' && !docsNavBuilt) initDocsBrowser();
+  };
+});
+
 // ---- startup ----
+var serverVersion = null;
 function refreshAll() { loadConnections(); loadQueries(); loadApiKeys(); loadRoles(); loadAuditLog(); loadMetrics(); loadExamples(); loadSettings(); }
 apiFetch('health').then(function (res) { return res.ok ? res.json() : null; }).then(function (info) {
   $('health-dot').className = 'dot ' + (info && info.status === 'ok' ? 'ok' : 'bad');
   $('version').textContent = info ? 'v' + info.version : 'unreachable';
+  serverVersion = info ? info.version : null;
 }, function () { $('health-dot').className = 'dot bad'; $('version').textContent = 'unreachable'; });
 try { var lastTab = sessionStorage.getItem('queryapigate-ui-tab'); if (lastTab && $('tab-' + lastTab)) showTab(lastTab); } catch (e) {}
 applyPrefs();

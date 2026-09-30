@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **A "Docs" tab inside Help**, open by default and sized to fill the window (the same full-width treatment
+  the API Designer's Run tab already gets), a real in-app browser over this project's markdown docs (README,
+  Installation, API Reference, Production Deployment, MCP Server, Examples, Security) - a sidebar list on the
+  left, rendered markdown (headings, tables, code blocks, links) on the right. Since `documentation/*.md` isn't shipped in the
+  pip package or the Docker image, each doc is fetched client-side straight from GitHub at the tag matching
+  the server's own running version, falling back to `main` if that tag isn't published (e.g. a dev build) -
+  so what's shown always matches, or is newer than, what's actually running, never older and never wrong for
+  the installed version. Markdown is rendered with marked.js, loaded lazily from a CDN on first open, the same
+  CDN-script pattern the existing `/docs` (Swagger UI) page already uses.
+- **A fuller Help screen.** New "Where to find things" card explains the sidebar's Data/API/Access/Observability
+  groups in one place; "Concepts" now covers the response cache and CLI export; "Resources" links the
+  production Docker deployment guide and the MCP server docs, neither of which was linked from the admin UI
+  anywhere before.
 - **A CLI tab on the API Repository screen**, next to Metrics. Shows the `queryapigate export` command for
   that specific saved query - the one CLI command that's actually about a specific query (the
   cron/systemd/Kubernetes CronJob path, running in-process against `QUERYAPIGATE_HOME` with no server or API
