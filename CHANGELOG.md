@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`documentation/DEPLOYMENT.md`**: a production Docker deployment guide, distinct from the repo-root
+  `docker-compose.yml` (a one-command, localhost-only demo). Covers pinning a real image tag, a
+  production compose file (reverse proxy/TLS via Caddy, secrets in `.env`, resource limits), backups
+  (`queryapigate.db` is SQLite in WAL mode - the published image has no `sqlite3` CLI, so the guide uses
+  Python's own backup API instead), Prometheus/Grafana wiring, the optional Redis-backed cache, and why the
+  image runs one gunicorn worker rather than a replica count. Every command in it was run against the real
+  published image while writing it - including a real ordering bug this caught: running `queryapigate init`
+  via `docker compose exec` *after* `up` writes the template connections file, but they don't actually
+  appear until the container restarts, since `serve` already initialized an empty `queryapigate.db` first;
+  the guide has readers run `init` before the first `up` instead, which sidesteps it entirely.
 - **Three API Designer improvements**, addressing the screen feeling sparse compared to API Repository:
   - A connection context strip under the Type/Host/Connection bar - active/inactive, host/database, and the
     same live usage summary (queries/failed/avg latency) the Connections tab's own table shows per row.

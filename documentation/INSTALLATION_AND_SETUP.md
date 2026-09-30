@@ -80,7 +80,8 @@ redirects use the real client address and scheme.
 Or use the published Docker image (`ghcr.io/anantharajuc/queryapigate`, with a `-h2` variant that includes Java) or the
 [Dockerfile](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/Dockerfile) - see the README. The image sets
 gunicorn's worker timeout to 120 seconds; keep it above
-`QUERYAPIGATE_QUERY_TIMEOUT` if you run your own gunicorn.
+`QUERYAPIGATE_QUERY_TIMEOUT` if you run your own gunicorn. For a full production Docker setup - reverse
+proxy, secrets, backups, monitoring - see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Shared response cache (Redis)
 

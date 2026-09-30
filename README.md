@@ -628,6 +628,9 @@ cross-worker aggregation) and a health check on `/health`. Behind a
 reverse proxy or load balancer, set `QUERYAPIGATE_TRUST_PROXY=1`. To build it yourself:
 `docker build -t queryapigate .` (add `--build-arg WITH_H2=true` for H2).
 
+For a real deployment - TLS via a reverse proxy, secrets in an env file, backups, Prometheus/Grafana - see
+[documentation/DEPLOYMENT.md](documentation/DEPLOYMENT.md).
+
 ### Try it with one command
 
 [`docker-compose.yml`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/docker-compose.yml) starts QueryAPIGate in front
