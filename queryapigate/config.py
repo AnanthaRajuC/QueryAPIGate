@@ -10,6 +10,10 @@ PASSWORD_MASK = '********'
 CONNECT_TIMEOUT = 10  # seconds
 HISTORY_LIMIT = 50  # executions remembered per saved-query version (QUERYAPIGATE_HISTORY_LIMIT)
 DEFAULT_HISTORY_FLUSH_INTERVAL = 1.0  # seconds between batched history writes
+DEFAULT_EVENTS_PORT = 5002  # `queryapigate events`
+DEFAULT_EVENTS_MAX_CONNECTIONS = 10_000
+DEFAULT_EVENTS_POLL_INTERVAL = 1.0  # seconds between `queryapigate events` checks for new runs
+DEFAULT_EVENTS_MAX_STREAMS = 4  # concurrent GET /events streams the main server itself will hold open
 AUDIT_LOG_LIMIT = 500  # administrative-action entries remembered across the whole server
 DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
 DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
@@ -283,6 +287,17 @@ def check_settings():
         raw = os.environ.get(name, '').strip()
         if raw and (not raw.isdigit() or int(raw) < 1):
             raise ValueError(f'{name} must be a positive integer')
+    for name in ('QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS'):
+        raw = os.environ.get(name, '').strip()
+        if raw and (not raw.isdigit() or int(raw) < 1):
+            raise ValueError(f'{name} must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_STREAMS', '').strip()
+    if raw and not raw.isdigit():
+        raise ValueError('QUERYAPIGATE_EVENTS_MAX_STREAMS must be a whole number (0 turns GET /events off on this '
+                         'server - use `queryapigate events` instead)')
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_POLL_INTERVAL', '').strip()
+    if raw and not _number_in(raw, lambda v: 0.05 <= v <= 60):
+        raise ValueError('QUERYAPIGATE_EVENTS_POLL_INTERVAL must be a number of seconds from 0.05 to 60')
     raw = os.environ.get('QUERYAPIGATE_HISTORY_SAMPLE_RATE', '').strip()
     if raw and not _number_in(raw, lambda v: 0 < v <= 1):
         raise ValueError('QUERYAPIGATE_HISTORY_SAMPLE_RATE must be a number above 0 and at most 1, e.g. 0.1 '
@@ -408,6 +423,34 @@ def stream_max_rows():
 def json_logs():
     """Emit structured (one JSON object per line) logs instead of plain text (QUERYAPIGATE_JSON_LOGS)."""
     return env_flag('QUERYAPIGATE_JSON_LOGS')
+
+
+def events_port():
+    """Bind port for `queryapigate events` (QUERYAPIGATE_EVENTS_PORT), default 5002 - see events.py."""
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_PORT', '').strip()
+    return int(raw) if raw else DEFAULT_EVENTS_PORT
+
+
+def events_max_connections():
+    """Open streams one `queryapigate events` process accepts before answering 503
+    (QUERYAPIGATE_EVENTS_MAX_CONNECTIONS) - each is a socket, so this also bounds file descriptors."""
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', '').strip()
+    return int(raw) if raw else DEFAULT_EVENTS_MAX_CONNECTIONS
+
+
+def events_poll_interval():
+    """Seconds between `queryapigate events` checks for newly recorded runs (QUERYAPIGATE_EVENTS_POLL_INTERVAL).
+    On PostgreSQL a NOTIFY wakes it as soon as a batch commits, so this is only the fallback there."""
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_POLL_INTERVAL', '').strip()
+    return float(raw) if raw else DEFAULT_EVENTS_POLL_INTERVAL
+
+
+def events_max_streams():
+    """Concurrent GET /events streams the main (WSGI) server holds open (QUERYAPIGATE_EVENTS_MAX_STREAMS). Each
+    one occupies a request thread for as long as it is open, so the default leaves most of the Docker image's 8
+    threads for requests; beyond it /events answers 503. `queryapigate events` has no such limit to speak of."""
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_STREAMS', '').strip()
+    return int(raw) if raw else DEFAULT_EVENTS_MAX_STREAMS
 
 
 def mcp_port():
@@ -540,10 +583,18 @@ def describe_settings():
                 'across instances.', 'QUERYAPIGATE_REDIS_URL',
                 'in-process' if redis_val is None else f'Redis ({redact_redis_url(redis_val)})',
                 secret=True),
-            row('Live updates', 'How GET /events (BACKLOG #43) fans a new query run out to connected admin '
-                'UI clients. In-process only for now - correct for the documented single-process deployment; '
-                'would need a Redis-pub/sub backend (not built yet) to work across several instances behind '
-                'a load balancer, same constraint the cache backend above already has.', '', 'in-process')]},
+            row('Live updates', 'GET /events on this server: live runs for the admin UI and light use, from '
+                'this process only.', '', 'in-process'),
+            row('Streams on this server', 'Concurrent GET /events streams this server holds open - each takes '
+                'a request thread. Beyond it, /events answers 503. 0 turns it off.',
+                'QUERYAPIGATE_EVENTS_MAX_STREAMS', str(events_max_streams())),
+            row('Events server port', 'Port of `queryapigate events`: a separate process for many clients '
+                '(apps, phones), every instance\'s runs, and resuming with Last-Event-ID.',
+                'QUERYAPIGATE_EVENTS_PORT', str(events_port())),
+            row('Events server connections', 'Open streams one `queryapigate events` process accepts.',
+                'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', str(events_max_connections())),
+            row('Events poll interval', 'Seconds between checks for new runs (on PostgreSQL a notification '
+                'usually arrives first).', 'QUERYAPIGATE_EVENTS_POLL_INTERVAL', _seconds(events_poll_interval()))]},
         {'id': 'mcp', 'title': 'MCP server',
          'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process, not started or '
              'checked for reachability by this one.', 'rows': [

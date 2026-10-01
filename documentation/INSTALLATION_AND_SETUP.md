@@ -153,8 +153,11 @@ queryapigate serve
 - Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
   PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
 
-What is **not** shared between instances yet: the rate limiter, `/metrics` and the live `GET /events` feed are
-still per process. Point every instance at the same `QUERYAPIGATE_REDIS_URL` to share the response cache too.
+What is **not** shared between instances yet: the rate limiter and `/metrics` are still per process, and so is the
+main server's own `GET /events`. For live events across instances, run
+[`queryapigate events`](API.md#queryapigate-events) - it reads every instance's runs from the shared store, and is
+woken by a PostgreSQL notification as soon as they are written. Point every instance at the same
+`QUERYAPIGATE_REDIS_URL` to share the response cache too.
 
 ## Scheduled exports to a file
 

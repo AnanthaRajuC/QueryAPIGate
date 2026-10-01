@@ -22,6 +22,18 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **`queryapigate events`: a live-events server for many clients.** A separate asyncio process (no new
+  dependency) serving `GET /events` on its own port (`QUERYAPIGATE_EVENTS_PORT`, default 5002) to thousands of
+  open streams - measured at 9,000 in one process, about 170 MB, every event reaching all of them within 0.75 s.
+  Events come from run history in the store, so it sees every worker's and instance's runs: woken by a PostgreSQL
+  `NOTIFY` (sent with each history batch) or checking every `QUERYAPIGATE_EVENTS_POLL_INTERVAL` seconds on
+  SQLite. Each event carries its history id, and a client reconnecting with `Last-Event-ID` (or
+  `?last_event_id=`) gets what it missed - filtered to its key - then the live stream, without gaps or repeats.
+  Same key rules as the main server's `/events` (admin sees everything, other keys their own runs); a revoked or
+  expired key's stream is closed within about a minute; a client that stops reading is disconnected so it can
+  resume; a client that hangs up frees its slot at once. `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` (default 10,000)
+  caps open streams; `QUERYAPIGATE_RATE_LIMIT`, `QUERYAPIGATE_CORS_ORIGINS` and `QUERYAPIGATE_TRUST_PROXY` apply.
+  Deployment: a second service from the same image, with `/events` routed to it (DEPLOYMENT.md section 9).
 - **Batched run history.** A saved-query run's history entry is queued in memory and written by a background
   thread in one transaction per batch (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, default 1 s; `0` restores writing
   inside the request), so a request never waits on it. A process always reads its own queued runs (they are written
@@ -67,6 +79,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   client that read `detail` from a saved-query error with a scoped key.
 
 ### Fixed
+- **The main server's `GET /events` can no longer starve it of request threads.** Each open stream holds a thread,
+  so a handful of clients could leave none for anything else (8 froze the Docker image's single worker entirely).
+  At most `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4) are now held at once; beyond that it answers `503` with
+  `Retry-After` and points to `queryapigate events`. `0` turns it off.
 - **A malformed JSON body on an endpoint whose body is optional (`POST /q/<name>`) is now a 400** (`Request
   body is not valid JSON`). It used to be silently treated as no body at all, so a typo turned into a
   misleading `<param> is required` - or, for a query whose parameters all have defaults, a successful run
