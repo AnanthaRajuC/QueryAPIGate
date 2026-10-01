@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Build with --build-arg WITH_H2=true to add Java and the H2 driver.
 ARG WITH_H2=false
