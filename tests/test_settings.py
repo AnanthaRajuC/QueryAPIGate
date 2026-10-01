@@ -34,7 +34,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 31)
+        self.assertEqual(len(rows), 38)
         if not TEST_DATABASE_URL:  # a suite run against Postgres (tests/__init__.py) reports that backend here
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'], 'SQLite (queryapigate.db)')
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['source'], 'default')

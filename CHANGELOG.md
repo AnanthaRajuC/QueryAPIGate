@@ -22,6 +22,20 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **Signed-in users (JWT).** `Authorization: Bearer <token>` is accepted as an alternative to an API key, verified
+  against your identity provider's signing keys (`QUERYAPIGATE_JWT_JWKS_URL`, RS256, with mandatory
+  `QUERYAPIGATE_JWT_ISSUER`/`QUERYAPIGATE_JWT_AUDIENCE`) or a shared secret (`QUERYAPIGATE_JWT_SECRET`, HS256).
+  `exp` is required; `none` and HMAC/public-key algorithm mixing are refused; JWKS keys are cached and refetched
+  on rotation. What users may do comes from a role (`QUERYAPIGATE_JWT_ROLE`, or per user via
+  `QUERYAPIGATE_JWT_ROLE_CLAIM`), read live, its rate limit counted per user. Callers are named `jwt:<sub>`
+  (`QUERYAPIGATE_JWT_USER_CLAIM`) in logs, run history and live events - so each user's event stream, on both the
+  main server and `queryapigate events`, carries only their own runs; `queryapigate events` closes a stream when
+  its token expires. `/metrics` counts all signed-in users under one `jwt` label. `/openapi.json` gains a
+  `BearerAuth` scheme. Unsafe settings stop startup. Needs `queryapigate[jwt]` (in the Docker image).
+- **`from_claim` parameter rule.** A saved-query parameter can take its value from the caller's verified token -
+  `{"customer_id": {"from_claim": "sub"}}` - so the query can only ever return that user's rows. Sending it is a
+  400, a token without the claim a 403, an API key other than admin a 403; it is left out of every caller-facing
+  description (OpenAPI, catalog, Postman, MCP).
 - **`queryapigate events`: a live-events server for many clients.** A separate asyncio process (no new
   dependency) serving `GET /events` on its own port (`QUERYAPIGATE_EVENTS_PORT`, default 5002) to thousands of
   open streams - measured at 9,000 in one process, about 170 MB, every event reaching all of them within 0.75 s.
@@ -79,6 +93,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   client that read `detail` from a saved-query error with a scoped key.
 
 ### Fixed
+- **Read-your-writes for run history could miss a batch still being written** (from the batched history in this
+  release): a read checked only whether the queue was empty, and the writer empties it before writing - so a read
+  in that window went ahead before the batch committed. It now waits while anything queued is unwritten. Seen as
+  intermittent failures of history-reading tests on PostgreSQL.
+- **A connection's audit entry no longer reports the store's own `updated_at`** as a change. It appeared whenever
+  two saves fell in different seconds, and an unchanged re-save a second later produced an empty update entry.
 - **The main server's `GET /events` can no longer starve it of request threads.** Each open stream holds a thread,
   so a handful of clients could leave none for anything else (8 froze the Docker image's single worker entirely).
   At most `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4) are now held at once; beyond that it answers `503` with

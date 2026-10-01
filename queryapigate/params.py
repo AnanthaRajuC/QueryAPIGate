@@ -24,7 +24,8 @@ from .errors import ApiError
 _TYPES = {'int': 'integer', 'integer': 'integer', 'float': 'number', 'number': 'number',
           'str': 'string', 'string': 'string', 'bool': 'boolean', 'boolean': 'boolean'}
 _RULE_KEYS = {'type', 'required', 'default', 'enum', 'min', 'max', 'min_length', 'max_length', 'pattern',
-              'description'}
+              'description', 'from_claim'}
+_MAX_CLAIM_NAME_LENGTH = 200
 _NAME_RE = re.compile(r'^[A-Za-z_]\w*$')
 _MAX_PATTERN_LENGTH = 500
 _INT64_MIN, _INT64_MAX = -2 ** 63, 2 ** 63 - 1
@@ -49,7 +50,8 @@ def _is_number(value):
 
 def _plain(spec):
     return {'type': None, 'required': True, 'has_default': False, 'default': None, 'enum': None, 'min': None,
-            'max': None, 'min_length': None, 'max_length': None, 'pattern': None, 'description': None, **spec}
+            'max': None, 'min_length': None, 'max_length': None, 'pattern': None, 'description': None,
+            'from_claim': None, **spec}
 
 
 def _coerce(type_name, value):
@@ -144,6 +146,16 @@ def _parse_strict(spec):
         if not isinstance(spec['description'], str):
             raise _Invalid("'description' must be text")
         parsed['description'] = spec['description']
+    if 'from_claim' in spec:
+        # The value comes from the caller's verified sign-in token (jwtauth.py), never from the request - so it is
+        # always required, and a default would be a way for a request without that claim to get a value anyway.
+        claim = spec['from_claim']
+        if not isinstance(claim, str) or not claim.strip() or len(claim) > _MAX_CLAIM_NAME_LENGTH:
+            raise _Invalid(f"'from_claim' must be a token claim name, e.g. \"sub\" (at most "
+                           f"{_MAX_CLAIM_NAME_LENGTH} characters)")
+        if 'default' in spec or spec.get('required') is False:
+            raise _Invalid("a 'from_claim' parameter is always required and cannot have a default")
+        parsed['from_claim'] = claim.strip()
 
     numeric = type_name in (None, 'integer', 'number')
     textual = type_name in (None, 'string')
@@ -214,12 +226,16 @@ def parse_definitions(query_parameters):
 
 
 def read_definition(spec):
-    """A definition as the normalised rule dict; anything unusable degrades to an untyped, required parameter."""
+    """A definition as the normalised rule dict; anything unusable degrades to an untyped, required parameter -
+    keeping a usable `from_claim` though: degrading that one would quietly let the request supply a value meant
+    to come only from the caller's token, so it fails closed instead."""
     try:
         return _parse_strict(spec)
     except _Invalid:
         if isinstance(spec, str):
             return _plain({'type': _TYPES.get(spec.lower())})
+        if isinstance(spec, dict) and isinstance(spec.get('from_claim'), str) and spec['from_claim'].strip():
+            return _plain({'from_claim': spec['from_claim'].strip()})
         return _plain({})
 
 

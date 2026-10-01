@@ -326,6 +326,7 @@ def check_settings():
                              'bytes, e.g. from `python -c "from cryptography.fernet import Fernet; '
                              'print(Fernet.generate_key().decode())"`') from None
     check_database_url()
+    check_jwt_settings()
     raw = os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip()
     if raw:
         if not _REDIS_SCHEME_RE.match(raw):
@@ -423,6 +424,110 @@ def stream_max_rows():
 def json_logs():
     """Emit structured (one JSON object per line) logs instead of plain text (QUERYAPIGATE_JSON_LOGS)."""
     return env_flag('QUERYAPIGATE_JSON_LOGS')
+
+
+JWT_ASYMMETRIC_ALGORITHMS = ('RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512',
+                             'EdDSA')
+JWT_SYMMETRIC_ALGORITHMS = ('HS256', 'HS384', 'HS512')
+_JWT_VARS = ('QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_JWT_JWKS_URL', 'QUERYAPIGATE_JWT_ISSUER',
+             'QUERYAPIGATE_JWT_AUDIENCE', 'QUERYAPIGATE_JWT_ALGORITHMS', 'QUERYAPIGATE_JWT_ROLE',
+             'QUERYAPIGATE_JWT_ROLE_CLAIM', 'QUERYAPIGATE_JWT_USER_CLAIM')
+
+
+def _env(name):
+    return os.environ.get(name, '').strip() or None
+
+
+def jwt_secret():
+    """QUERYAPIGATE_JWT_SECRET: verify `Authorization: Bearer` tokens signed with this shared secret (HS256 by
+    default) - for tokens your own backend issues. See jwtauth.py."""
+    return _env('QUERYAPIGATE_JWT_SECRET')
+
+
+def jwt_jwks_url():
+    """QUERYAPIGATE_JWT_JWKS_URL: verify tokens against your identity provider's published signing keys (RS256 by
+    default) - Auth0, Cognito, Firebase, Keycloak, Azure AD and the like."""
+    return _env('QUERYAPIGATE_JWT_JWKS_URL')
+
+
+def jwt_enabled():
+    return jwt_secret() is not None or jwt_jwks_url() is not None
+
+
+def jwt_issuer():
+    return _env('QUERYAPIGATE_JWT_ISSUER')
+
+
+def jwt_audience():
+    """Accepted `aud` values (comma-separated in QUERYAPIGATE_JWT_AUDIENCE), or None."""
+    raw = _env('QUERYAPIGATE_JWT_AUDIENCE')
+    return [part.strip() for part in raw.split(',') if part.strip()] if raw else None
+
+
+def jwt_algorithms():
+    raw = _env('QUERYAPIGATE_JWT_ALGORITHMS')
+    if raw:
+        return [part.strip() for part in raw.split(',') if part.strip()]
+    return ['RS256'] if jwt_jwks_url() else ['HS256']
+
+
+def jwt_role():
+    """QUERYAPIGATE_JWT_ROLE: the role whose grants every token caller gets (unless QUERYAPIGATE_JWT_ROLE_CLAIM picks
+    another for them)."""
+    return _env('QUERYAPIGATE_JWT_ROLE')
+
+
+def jwt_role_claim():
+    """QUERYAPIGATE_JWT_ROLE_CLAIM: a claim naming the role to use for that caller (a string, or a list - the first
+    that names an existing role wins). Falls back to jwt_role() when absent."""
+    return _env('QUERYAPIGATE_JWT_ROLE_CLAIM')
+
+
+def jwt_user_claim():
+    """QUERYAPIGATE_JWT_USER_CLAIM: the claim identifying the user - default `sub`."""
+    return _env('QUERYAPIGATE_JWT_USER_CLAIM') or 'sub'
+
+
+def check_jwt_settings():
+    """Part of check_settings(). Fails startup on anything that would make token checking unsafe or impossible -
+    a fail-open misconfiguration is far worse here than a server that refuses to start."""
+    if not any(_env(name) for name in _JWT_VARS):
+        return
+    secret, jwks = jwt_secret(), jwt_jwks_url()
+    if secret is None and jwks is None:
+        raise ValueError('QUERYAPIGATE_JWT_* settings are set but neither QUERYAPIGATE_JWT_SECRET nor '
+                         'QUERYAPIGATE_JWT_JWKS_URL is - tokens could not be verified')
+    if secret is not None and jwks is not None:
+        raise ValueError('Set QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL, not both')
+    try:
+        import jwt  # noqa: F401
+    except ImportError:
+        raise ValueError('JWT authentication is configured but the "PyJWT" package is not installed - '
+                         'run `pip install "queryapigate[jwt]"`') from None
+    algorithms = jwt_algorithms()
+    allowed = JWT_SYMMETRIC_ALGORITHMS if secret is not None else JWT_ASYMMETRIC_ALGORITHMS
+    wrong = [a for a in algorithms if a not in allowed]
+    if wrong or not algorithms:
+        # Mixing the two families is the classic "algorithm confusion" hole: a public key accepted as an HMAC secret.
+        raise ValueError(f"QUERYAPIGATE_JWT_ALGORITHMS may only list {', '.join(allowed)} with "
+                         f"{'QUERYAPIGATE_JWT_SECRET' if secret else 'QUERYAPIGATE_JWT_JWKS_URL'}, not "
+                         f"{', '.join(wrong) or 'nothing'}")
+    if secret is not None and len(secret.encode('utf-8')) < 32:
+        raise ValueError('QUERYAPIGATE_JWT_SECRET must be at least 32 bytes - a short HMAC secret can be brute-forced '
+                         'from any one token')
+    if jwks is not None:
+        if not jwks.lower().startswith('https://') and not jwks.lower().startswith('http://localhost') \
+                and not jwks.lower().startswith('http://127.0.0.1'):
+            raise ValueError('QUERYAPIGATE_JWT_JWKS_URL must be an https:// URL - signing keys fetched over plain HTTP '
+                             'could be swapped in transit')
+        if jwt_issuer() is None or jwt_audience() is None:
+            # An identity provider signs tokens for every application it serves: without these, a token issued for
+            # some other app, or by another tenant of a shared provider, would be accepted here too.
+            raise ValueError('QUERYAPIGATE_JWT_JWKS_URL needs QUERYAPIGATE_JWT_ISSUER and QUERYAPIGATE_JWT_AUDIENCE '
+                             "set too, so only tokens issued for this API are accepted")
+    if jwt_role() is None and jwt_role_claim() is None:
+        raise ValueError('JWT authentication needs QUERYAPIGATE_JWT_ROLE (the role every token caller gets) and/or '
+                         'QUERYAPIGATE_JWT_ROLE_CLAIM (a claim naming one)')
 
 
 def events_port():
@@ -533,6 +638,23 @@ def describe_settings():
                 'QUERYAPIGATE_SECRET_KEY', 'enabled' if secret_key() else 'off', secret=True),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',
                 'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops()))]},
+        {'id': 'jwt', 'title': 'Signed-in users (JWT)',
+         'description': 'Accept `Authorization: Bearer` tokens from your own login or identity provider, so each '
+             'app user calls the API as themselves - no API key per user. Off unless a secret or JWKS URL is set.',
+         'rows': [
+            row('Verification', 'A shared secret (tokens your backend signs) or your identity provider\'s JWKS URL.',
+                'QUERYAPIGATE_JWT_JWKS_URL' if jwt_jwks_url() else 'QUERYAPIGATE_JWT_SECRET',
+                'off' if not jwt_enabled() else ('shared secret' if jwt_secret() else f'JWKS ({jwt_jwks_url()})'),
+                secret=jwt_secret() is not None or not jwt_enabled()),
+            row('Issuer', 'Required `iss` claim.', 'QUERYAPIGATE_JWT_ISSUER', jwt_issuer() or 'not checked'),
+            row('Audience', 'Accepted `aud` values.', 'QUERYAPIGATE_JWT_AUDIENCE',
+                ', '.join(jwt_audience()) if jwt_audience() else 'not checked'),
+            row('Algorithms', 'Signature algorithms accepted.', 'QUERYAPIGATE_JWT_ALGORITHMS',
+                ', '.join(jwt_algorithms()) if jwt_enabled() else '-'),
+            row('Role', 'Role whose grants every token caller gets.', 'QUERYAPIGATE_JWT_ROLE', jwt_role() or 'not set'),
+            row('Role claim', 'Claim naming a caller\'s role instead.', 'QUERYAPIGATE_JWT_ROLE_CLAIM',
+                jwt_role_claim() or 'not set'),
+            row('User claim', 'Claim identifying the user.', 'QUERYAPIGATE_JWT_USER_CLAIM', jwt_user_claim())]},
         {'id': 'execution', 'title': 'Query execution',
          'description': 'Limits applied to every statement this server runs.', 'rows': [
             row('Query timeout', 'Server-wide statement limit. A request may ask for less, never more. '

@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
 from unittest import mock
@@ -73,6 +74,29 @@ class BatchingTests(HistoryTestCase):
         for _ in range(3):
             self.run_query()
         self.assertEqual(len(self.listed()), 3)  # flushed by the read itself, not by waiting for the interval
+
+    def test_a_read_waits_for_a_batch_the_writer_is_still_writing(self):
+        """The writer takes a batch off the queue before writing it, so mid-write the queue is empty - a read must
+        still wait for that batch to commit, or it misses the runs in it (an intermittent failure on Postgres)."""
+        real_write, entered, release = history.write, threading.Event(), threading.Event()
+
+        def slow_write(rows, target=None):
+            entered.set()
+            release.wait(5)
+            real_write(rows, target)
+        with mock.patch.object(history, 'write', side_effect=slow_write):
+            self.run_query()
+            history._writer().wake.set()
+            self.assertTrue(entered.wait(5))  # the batch is off the queue and being written
+            self.assertEqual(history.pending_count(), 0)
+            done = threading.Event()
+            reader = threading.Thread(target=lambda: (history.flush(), done.set()))
+            reader.start()
+            self.assertFalse(done.wait(0.3))  # still waiting: the batch hasn't committed yet
+            release.set()
+            self.assertTrue(done.wait(5))
+            reader.join(5)
+        self.assertEqual(self.stored(), 1)
 
     def test_a_flush_interval_of_zero_writes_inside_the_request(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0'}):

@@ -20,7 +20,7 @@ RUN if [ "$WITH_H2" = "true" ]; then \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY queryapigate ./queryapigate
-RUN pip install ".[mysql,postgres,clickhouse,server]" \
+RUN pip install ".[mysql,postgres,clickhouse,server,jwt]" \
     && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
 
 RUN useradd --create-home app && mkdir /data && chown app /data

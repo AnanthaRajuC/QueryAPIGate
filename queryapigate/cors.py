@@ -8,7 +8,7 @@ from flask import Response
 from . import config
 
 ALLOWED_METHODS = 'GET, POST, PATCH, DELETE, OPTIONS'
-ALLOWED_HEADERS = 'Content-Type, X-API-Key, X-Request-Id'
+ALLOWED_HEADERS = 'Content-Type, X-API-Key, Authorization, X-Request-Id'
 # Browsers hide response headers a page has not been told about, and pagination depends on these.
 EXPOSED_HEADERS = ('X-Page, X-Page-Size, X-Has-More, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, '
                    'X-Request-Id')

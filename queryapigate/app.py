@@ -27,6 +27,7 @@ from . import (
     engine,
     examples,
     history,
+    jwtauth,
     logging_setup,
     mcp_server,
     metrics,
@@ -287,9 +288,22 @@ def check_key_rate_limit():
 
 
 def resolve_permission():
-    """The caller's Permission: a matched key (admin or scoped), the unrestricted OPEN default when no key
-    is configured anywhere, or None when a key is required but missing or wrong."""
-    permission = apikeys.authenticate(request.headers.get('X-API-Key', ''), client_ip=request.remote_addr)
+    """The caller's Permission: a matched key (admin or scoped), a signed-in user's verified bearer token
+    (jwtauth.py), the unrestricted OPEN default when no key is configured anywhere, or None when a key is
+    required but missing or wrong. A request carrying an X-API-Key is judged on that key alone - a wrong key
+    never falls through to the token."""
+    return authenticate_headers(request.headers.get('X-API-Key', ''), request.headers.get('Authorization', ''),
+                                request.remote_addr)
+
+
+def authenticate_headers(api_key, authorization, client_ip):
+    """resolve_permission() without Flask - shared with `queryapigate events` (events.py)."""
+    if api_key:
+        permission = apikeys.authenticate(api_key, client_ip=client_ip)
+    elif authorization and config.jwt_enabled():
+        permission = jwtauth.authenticate(authorization, client_ip=client_ip)
+    else:
+        permission = None
     if permission is not None:
         return permission
     return None if apikeys.auth_required() else apikeys.OPEN
@@ -329,8 +343,12 @@ def _connection_audit_changes(before, after):
     value, before or after masking, since this is what gets persisted to the audit log. Every other field
     (host, port, user, db, database, active, ...) is not a secret and is shown as given. `before=None`
     means the connection didn't exist yet - the caller records that as a 'create_connection' snapshot
-    instead of calling this."""
+    instead of calling this.
+
+    `updated_at` is left out: it is the store's own bookkeeping, not something the caller changed, and it differs
+    whenever two saves fall in different seconds - which made it show up in some diffs and not others."""
     diff = _dict_diff(before, after)
+    diff.pop('updated_at', None)
     if 'password' in diff:
         diff['password'] = 'changed'
     return diff
@@ -572,6 +590,43 @@ def cache_store(cache_key, response, ttl, meta=None):
     return response
 
 
+def bind_claims(saved, raw):
+    """Fill every `from_claim` parameter (params.py) of a saved query from the caller's verified token claims -
+    the request has no say in them: `WHERE user_id = :user_id` with `"user_id": {"from_claim": "sub"}` can only
+    ever return the signed-in user's own rows. Returns the parameters to resolve.
+
+    - A signed-in user (jwtauth.py) gets each value from their token; sending one of these parameters anyway is a
+      400, and a token without the claim is a 403.
+    - The admin key (or open mode) has no token and supplies them like any other parameter - for testing and
+      server-side use.
+    - Any other API key can't run the query at all (403): it has no token to take the value from, and letting it
+      choose one would defeat the point."""
+    declared = param_rules.read_definitions(saved.get('query_parameters'))
+    bound = {name: spec['from_claim'] for name, spec in declared.items() if spec['from_claim']}
+    if not bound:
+        return raw
+    claims = g.permission.claims
+    if claims is None:
+        if g.permission.admin:
+            return raw
+        raise ApiError(f"This query takes {', '.join(sorted(bound))} from a signed-in user's token - call it with "
+                       '`Authorization: Bearer <token>`, not an API key', 403)
+    sent = sorted(set(bound) & set(raw))
+    if sent:
+        raise ApiError(f"{', '.join(sent)} {'comes' if len(sent) == 1 else 'come'} from your sign-in token and "
+                       "can't be set by the request", 400)
+    raw = dict(raw)
+    for name, claim_name in bound.items():
+        value = jwtauth.claim(claims, claim_name)
+        if value is None or isinstance(value, (dict, list)):
+            raise ApiError(f"Your sign-in token has no usable '{claim_name}' claim", 403)
+        if declared[name]['type'] in (None, 'string') and isinstance(value, (int, float)) and \
+                not isinstance(value, bool):
+            value = str(value)  # a numeric user id, bound to a text column
+        raw[name] = value
+    return raw
+
+
 def run_saved(ref, body, url_params):
     """Execute a saved query (latest version unless one is requested) and record the run - or, for one with
     a cache_ttl whose SQL is read-only, serve a cached response instead."""
@@ -597,6 +652,7 @@ def run_saved(ref, body, url_params):
 
     raw = {**url_params, **get_object(body.get('params'), 'params'),
            **get_object(body.get('placeholders'), 'placeholders')}
+    raw = bind_claims(saved, raw)
     output_format = get_output_format(body)
     timeout = get_timeout(body)
 

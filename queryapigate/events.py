@@ -32,7 +32,7 @@ import time
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
-from . import apikeys, config, cors, db, history
+from . import config, cors, db, history
 from .ratelimit import RateLimiter
 
 try:
@@ -98,11 +98,11 @@ def _replay(after, key_name):
         'ORDER BY rowid LIMIT ?', (after, key_name, _REPLAY_LIMIT)).fetchall()
 
 
-def _authenticate(secret, client_ip):
-    permission = apikeys.authenticate(secret, client_ip=client_ip)
-    if permission is not None:
-        return permission
-    return None if apikeys.auth_required() else apikeys.OPEN
+def _authenticate(credentials, client_ip):
+    """The caller's Permission from (X-API-Key, Authorization) - exactly the main server's rules
+    (app.authenticate_headers()): an API key, or a signed-in user's bearer token (jwtauth.py)."""
+    from .app import authenticate_headers  # imported here: app pulls in Flask, which `events` needs no more of
+    return authenticate_headers(credentials[0], credentials[1], client_ip)
 
 
 class _Client:
@@ -290,7 +290,7 @@ class EventServer:
             await _respond(writer, 503, {'error': 'Too many open event streams - try again shortly'}, allow_origin,
                            extra={'Retry-After': '5'})
             return
-        secret = headers.get('x-api-key', '')
+        secret = (headers.get('x-api-key', ''), headers.get('authorization', ''))
         permission = await asyncio.to_thread(_authenticate, secret, client_ip)
         if permission is None:
             await _respond(writer, 401, {'error': 'Unauthorized'}, allow_origin)
@@ -353,7 +353,7 @@ class EventServer:
             if time.monotonic() >= next_check:
                 next_check = time.monotonic() + _RECHECK_SECONDS
                 if await asyncio.to_thread(_authenticate, secret, client_ip) is None:
-                    return  # revoked, expired or deactivated since the stream opened
+                    return  # key revoked/expired/deactivated, or the bearer token expired, since the stream opened
 
 
 # ---- small HTTP helpers ----
@@ -386,7 +386,7 @@ async def _respond(writer, status, body, allow_origin, preflight=False, extra=No
         head += [f'Access-Control-Allow-Origin: {allow_origin}', 'Vary: Origin']
         if preflight:
             head += ['Access-Control-Allow-Methods: GET, OPTIONS',
-                     'Access-Control-Allow-Headers: X-API-Key, Last-Event-ID',
+                     'Access-Control-Allow-Headers: X-API-Key, Authorization, Last-Event-ID',
                      f'Access-Control-Max-Age: {cors.PREFLIGHT_MAX_AGE}']
     head += [f'{name}: {value}' for name, value in (extra or {}).items()]
     writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + payload)

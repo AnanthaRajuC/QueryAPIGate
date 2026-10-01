@@ -202,6 +202,7 @@ authorized caller could not already see by running the query itself.
 | `min_length`, `max_length` | text | Length bounds. |
 | `pattern` | text | A regular expression the whole value must match (at most 500 characters). |
 | `description` | any | Shown in `/docs`. |
+| `from_claim` | any | Take the value from a claim of the caller's [sign-in token](#signed-in-users-jwt) - e.g. `"sub"` - never from the request. Always required; no `default`. |
 
 Requests that break a rule are rejected with **400** before anything reaches the database, with every problem listed:
 
@@ -679,6 +680,68 @@ template.
 `PATCH /api_keys/<name>` for `rate_limit`, `allowed_ips`, `allowed_write_ops` and `allowed_tables`);
 `DELETE /roles/<name>` removes it - again, with zero effect on any key already created from it.
 
+### Signed-in users (JWT)
+
+An API key identifies an application. For an app whose *users* each sign in - a mobile app, a customer portal -
+QueryAPIGate can accept the token your app already has instead, so every user calls the API as themselves and
+nobody has to issue them keys:
+
+~~~http
+GET /q/my_orders
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+~~~
+
+Turn it on with **one** way to verify tokens, and a role saying what signed-in users may do:
+
+| Variable | Meaning |
+|----------|---------|
+| `QUERYAPIGATE_JWT_JWKS_URL` | Your identity provider's signing keys (Auth0, Cognito, Firebase, Keycloak, Azure AD, ...): `https://.../.well-known/jwks.json`. Default algorithm RS256. Requires `QUERYAPIGATE_JWT_ISSUER` and `QUERYAPIGATE_JWT_AUDIENCE`. |
+| `QUERYAPIGATE_JWT_SECRET` | Or: a shared secret, for tokens your own backend signs (HS256 by default; at least 32 bytes). |
+| `QUERYAPIGATE_JWT_ISSUER` | The `iss` every token must carry. |
+| `QUERYAPIGATE_JWT_AUDIENCE` | The `aud` value(s) accepted - this API's identifier at your provider (comma-separated for several). |
+| `QUERYAPIGATE_JWT_ALGORITHMS` | Signature algorithms accepted, if not the default. |
+| `QUERYAPIGATE_JWT_ROLE` | The [role](#permission-roles-templates) every signed-in user gets. |
+| `QUERYAPIGATE_JWT_ROLE_CLAIM` | Or: a claim naming each user's role (a string or a list - the first existing role wins; dotted paths such as `app_metadata.roles` work). Falls back to `QUERYAPIGATE_JWT_ROLE`. |
+| `QUERYAPIGATE_JWT_USER_CLAIM` | The claim identifying the user (default `sub`). |
+
+Needs `pip install "queryapigate[jwt]"` (included in the Docker image). Settings that would make checking unsafe
+stop startup: both or neither of a secret and a JWKS URL, a JWKS URL without issuer and audience (a provider
+signs tokens for every app it serves) or over plain `http://`, a short secret, mixing HMAC and public-key
+algorithms (the classic algorithm-confusion attack), or no role.
+
+**What is checked.** The signature; `exp` (required) and `nbf`/`iat`, with 30 seconds of leeway for clock skew;
+`iss` and `aud` when set; and only the configured algorithms - never `none`. A failure is a plain `401`, exactly
+like a wrong API key. Signing keys are fetched from the JWKS URL once and cached, and fetched again only for a key
+id not seen before - a provider rotating its keys just works.
+
+**What a user may do** is their role's grants - connections, queries, collections, writes, tables, `allowed_ips`,
+and `rate_limit`, counted per user. Unlike a key created from a role, which copies the role once, signed-in users
+use the role *live*: editing or deleting it applies on their next request. A token whose role doesn't exist is
+refused. When JWT is on, the server never runs in [open-access mode](#authentication-and-permissions): a request
+with neither a key nor a token is refused even if no API key is configured.
+
+**Who they are.** The caller's name is `jwt:<user claim>` - in logs, [run history](#run-history) (filter with
+`GET /history?key=jwt:alice`) and [live events](#live-events-server-sent-events), so each user's event stream
+carries only their own runs. (`/metrics` counts all signed-in users under one `jwt` label, so a large user base
+can't multiply its series.) A request carrying `X-API-Key` is judged on that key alone.
+
+**Their own rows, guaranteed.** A parameter with `from_claim` takes its value from the verified token, so a query
+can only ever see the caller's data - there is nothing in the request to change:
+
+~~~json
+{"filename": "my_orders",
+ "sql_query": "SELECT * FROM orders WHERE customer_id = :customer_id ORDER BY created_at DESC",
+ "query_parameters": {"customer_id": {"type": "str", "from_claim": "sub"}}}
+~~~
+
+- A signed-in user who sends `customer_id` anyway gets `400`; a token without the claim gets `403`.
+- The admin key has no token and supplies it like any other parameter (for testing). Any other API key - and any
+  MCP client using one - gets `403`: it has no token to take the value from.
+- It is left out of `/openapi.json`, `/catalog`, Postman exports and MCP tool schemas: callers never send it.
+
+A JWT can't be revoked before it expires, so keep token lifetimes short (minutes, refreshed by your app) - as
+identity providers do by default. Disabling a user's access at once means taking the query or the role away.
+
 ## Observability
 
 Every response carries `X-Request-Id` (12 hex characters by default); log lines written while handling that request
@@ -788,8 +851,10 @@ data: {"type": "execution", "filename": "monthly_revenue", "version": 3, "connec
 A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client library
 doesn't time it out as idle - not an event, safe to ignore.
 
-**Send the key in `X-API-Key`, never in the URL** (where it would leak into access logs and browser history). A
-browser's `EventSource` can't set request headers, so in a browser read the stream with `fetch()` and a streamed
+**Send the key in `X-API-Key` - or a signed-in user's token as `Authorization: Bearer` - never in the URL** (where
+it would leak into access logs and browser history). `queryapigate events` closes a stream once its token expires
+(checked every minute): reconnect with a fresh token and `Last-Event-ID`. A browser's `EventSource` can't set
+request headers, so in a browser read the stream with `fetch()` and a streamed
 response body; every mobile platform's own HTTP client can read a streamed response the same way.
 
 ### `queryapigate events`

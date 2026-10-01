@@ -34,12 +34,18 @@ def _bucket_index(elapsed):
     return bisect.bisect_left(_BUCKETS, elapsed)
 
 
+def _key_label(key):
+    """Every signed-in user (jwtauth.py: callers named `jwt:<user>`) is counted under one `jwt` label: one label
+    value per user would grow these counters - and every Prometheus series built on them - with the user base."""
+    return 'jwt' if isinstance(key, str) and key.startswith('jwt:') else key
+
+
 def observe_request(method, endpoint, status, elapsed, key='-'):
     """`key` is the calling API key's name ('admin' for QUERYAPIGATE_API_KEY, '-' when none is configured), kept
     on the request/query counters (audit: who did what) but not the latency histograms, so the number of
     distinct keys never multiplies the size of the bucketed output."""
     with _lock:
-        count_key = (method, endpoint, status, key)
+        count_key = (method, endpoint, status, _key_label(key))
         _request_counts[count_key] = _request_counts.get(count_key, 0) + 1
         hkey = (method, endpoint)
         counts = _request_hist.setdefault(hkey, [0] * (len(_BUCKETS) + 1))
@@ -49,7 +55,7 @@ def observe_request(method, endpoint, status, elapsed, key='-'):
 
 def observe_query(connection_name, dialect, status, elapsed, key='-'):
     with _lock:
-        count_key = (connection_name, dialect, status, key)
+        count_key = (connection_name, dialect, status, _key_label(key))
         _query_counts[count_key] = _query_counts.get(count_key, 0) + 1
         hkey = (connection_name, dialect)
         counts = _query_hist.setdefault(hkey, [0] * (len(_BUCKETS) + 1))
@@ -64,7 +70,7 @@ def observe_stream(connection_name, dialect, status, key='-'):
     equivalent streaming latency histogram here for the same reason - just how many started and how they
     ended."""
     with _lock:
-        count_key = (connection_name, dialect, status, key)
+        count_key = (connection_name, dialect, status, _key_label(key))
         _stream_counts[count_key] = _stream_counts.get(count_key, 0) + 1
 
 
@@ -73,7 +79,7 @@ def observe_rows(connection_name, dialect, key, count):
     out before a streaming export finished or failed partway through (see engine._drain()); not split by
     status, since a partial streamed count is still data that left the server, not nothing."""
     with _lock:
-        row_key = (connection_name, dialect, key)
+        row_key = (connection_name, dialect, _key_label(key))
         _row_counts[row_key] = _row_counts.get(row_key, 0) + count
 
 

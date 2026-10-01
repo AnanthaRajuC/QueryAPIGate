@@ -101,4 +101,7 @@ def effective_parameters(saved):
         names = mongotools.placeholder_names(saved.get('mongo_filter') or {})
     else:
         names = sqltools.placeholder_names(saved['sql_query'])
-    return {name: declared.get(name) or param_rules.read_definition({}) for name in names}
+    # A `from_claim` parameter is filled from the caller's sign-in token (app.bind_claims()), never supplied by
+    # the caller - so it is no part of what they are told to send.
+    return {name: declared.get(name) or param_rules.read_definition({}) for name in names
+            if not (declared.get(name) or {}).get('from_claim')}
