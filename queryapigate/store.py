@@ -370,12 +370,16 @@ def query_name(path):
     return path
 
 
-def load_versions(name):
+def load_versions(name, with_history=True):
     """Reconstruct the same nested dict shape a saved-query JSON file used to be:
     {"<version>": {...fields, execution_history}, ..., "collection"?: str, "example"?: bool} - every pure
     function downstream (version_numbers(), select_version(), read_collection(), read_example(),
     _apply_collection(), and so list_saved()/latest_versions() built on top of them) still operates on
-    exactly this shape unchanged, so this is the one function that needs to bridge SQL to it."""
+    exactly this shape unchanged, so this is the one function that needs to bridge SQL to it.
+
+    ``with_history=False`` leaves every version's execution_history empty instead of reading up to
+    config.HISTORY_LIMIT rows per version - for the request path that only runs a query (app.run_saved()),
+    which never reads its history but would otherwise load and JSON-decode all of it on every call."""
     row = db.connection().execute(
         'SELECT collection, example FROM saved_queries WHERE name = ?', (name,)).fetchone()
     if row is None:
@@ -397,7 +401,7 @@ def load_versions(name):
             raise ApiError('Saved query data has an unexpected structure', 500)
         history_rows = db.connection().execute(
             'SELECT entry_json FROM execution_history WHERE query_name = ? AND version = ? '
-            'ORDER BY executed_at, rowid', (name, v['version'])).fetchall()
+            'ORDER BY executed_at, rowid', (name, v['version'])).fetchall() if with_history else []
         content[str(v['version'])] = {
             'uuid': v['uuid'],
             **fields,

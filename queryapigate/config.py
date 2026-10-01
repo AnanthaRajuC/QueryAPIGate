@@ -1,4 +1,5 @@
 """Runtime configuration, read from environment variables at call time."""
+import functools
 import os
 import re
 from pathlib import Path
@@ -50,7 +51,16 @@ def load_examples():
 
 def home():
     """Folder holding db_connections.json and saved_sql/ (QUERYAPIGATE_HOME, default: current directory)."""
-    return Path(os.environ.get('QUERYAPIGATE_HOME') or os.getcwd()).resolve()
+    return _resolved_home(os.environ.get('QUERYAPIGATE_HOME') or '', os.getcwd())
+
+
+@functools.lru_cache(maxsize=32)
+def _resolved_home(raw, cwd):
+    """Path.resolve() walks every path component with lstat() - db.connection() calls home() several times
+    per request, so resolving it once per distinct (QUERYAPIGATE_HOME, cwd) pair, rather than every call,
+    takes that filesystem work off the hot path while still following a changed env var or cwd (every test
+    gets a fresh temp home)."""
+    return Path(raw or cwd).resolve()
 
 
 def connections_file():

@@ -82,6 +82,14 @@ class ResolveTests(unittest.TestCase):
         errors = resolve_error(declared, {'id': True, 'on': 1, 'name': 5, 'x': [1]}).extra['errors']
         self.assertEqual(sorted(errors), ['id', 'name', 'on', 'x'])  # a bool is not an integer, a number not text
 
+    def test_integers_must_fit_in_64_bits(self):
+        # No supported driver can bind a wider integer - it must fail here as a 400, not in the driver as a 500
+        declared = {'id': 'int'}
+        for ok in ('9223372036854775807', '-9223372036854775808', 2 ** 63 - 1):
+            self.assertEqual(params.resolve(declared, {'id': ok}), {'id': int(ok)})
+        for bad in ('9223372036854775808', '-9223372036854775809', 2 ** 63, '9' * 30):
+            self.assertEqual(resolve_error(declared, {'id': bad}).extra['errors'], {'id': 'must be a 64-bit integer'})
+
     def test_defaults_and_optional_parameters(self):
         declared = {'rating': {'type': 'str', 'default': 'PG'}, 'q': {'type': 'str', 'required': False}}
         self.assertEqual(params.resolve(declared, {}), {'rating': 'PG', 'q': None})

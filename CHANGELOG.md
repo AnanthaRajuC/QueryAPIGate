@@ -21,6 +21,33 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+### Changed
+- **Saved-query calls by a scoped key no longer receive the database's own error text.** A failed
+  `GET`/`POST /q/<name>` (or `/execute_sql_from_file`) made with any key other than the admin key now returns
+  only `{"error": "An error occurred while executing the SQL query"}` - the `detail` field is dropped, since a
+  driver message can name tables, columns, constraints or row values to a caller who didn't write the SQL
+  and can't fix it. The full message is still in the server log under the same request ID. The admin key
+  keeps `detail`, and so does `/execute_sql` for every key (its caller wrote the SQL). **Breaking** for a
+  client that read `detail` from a saved-query error with a scoped key.
+
+### Fixed
+- **A malformed JSON body on an endpoint whose body is optional (`POST /q/<name>`) is now a 400** (`Request
+  body is not valid JSON`). It used to be silently treated as no body at all, so a typo turned into a
+  misleading `<param> is required` - or, for a query whose parameters all have defaults, a successful run
+  with none of the values the caller sent.
+- **An `int` parameter outside the signed 64-bit range is now a 400** (`must be a 64-bit integer`) naming the
+  parameter, instead of a 500 raised from inside the database driver.
+
+### Performance
+- **API-key authentication is one indexed lookup**, no longer a scan of every stored key: per-request cost
+  stayed flat as keys were added (measured: 64 ms per request with 10,000 keys before, unaffected after).
+- **Running a saved query no longer loads its execution history** (up to 50 rows per version, each
+  JSON-decoded) only to ignore it.
+- **The home directory path is resolved once**, not on every metadata-store access (several per request).
+- **The metadata store uses `PRAGMA synchronous=NORMAL`**, SQLite's recommended setting under WAL: the file
+  still can't be corrupted, but the history row every saved-query run commits no longer waits on an
+  fsync. A power loss (not a process crash) can now lose the last few commits.
+
 ## [0.11.0] - 2026-10-01
 
 ### Added

@@ -27,6 +27,7 @@ _RULE_KEYS = {'type', 'required', 'default', 'enum', 'min', 'max', 'min_length',
               'description'}
 _NAME_RE = re.compile(r'^[A-Za-z_]\w*$')
 _MAX_PATTERN_LENGTH = 500
+_INT64_MIN, _INT64_MAX = -2 ** 63, 2 ** 63 - 1
 
 
 class _Invalid(Exception):
@@ -56,10 +57,14 @@ def _coerce(type_name, value):
     if type_name == 'integer':
         if isinstance(value, str):
             try:
-                return int(value)
+                value = int(value)
             except ValueError:
                 raise _Invalid('must be an integer') from None
         if isinstance(value, int) and not isinstance(value, bool):
+            # Outside a signed 64-bit integer, no supported driver can bind the value - it would fail inside
+            # the database call as a 500 instead of a 400 naming the parameter.
+            if not _INT64_MIN <= value <= _INT64_MAX:
+                raise _Invalid('must be a 64-bit integer')
             return value
         raise _Invalid('must be an integer')
     if type_name == 'number':

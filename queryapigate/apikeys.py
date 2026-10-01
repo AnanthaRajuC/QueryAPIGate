@@ -687,7 +687,15 @@ def authenticate(supplied, client_ip=None):
         return Permission(name='admin', admin=True, connections=ALL_CONNECTIONS, allow_writes=True,
                           queries=ALL_QUERIES, rate_limit=None, allowed_write_ops=None)
     supplied_hash = _hash(supplied)
-    for name, entry in _read().items():
+    # One indexed lookup (api_keys.hash is UNIQUE) instead of loading and scanning every key - a full scan
+    # made each request's cost grow linearly with the number of keys. Matching on the hash rather than the
+    # secret means the lookup's own timing can only ever reveal something about a SHA-256 digest, which is
+    # useless for guessing a secret; compare_digest() below stays as a belt-and-braces final check.
+    rows = db.connection().execute(
+        'SELECT name, hash, active, expires_at, created_at, details_json FROM api_keys WHERE hash = ?',
+        (supplied_hash,)).fetchall()
+    for row in rows:
+        name, entry = row['name'], _row_to_entry(row)
         if entry.get('active', True) and not is_expired(entry) and _ip_allowed(entry, client_ip) \
                 and hmac.compare_digest(supplied_hash, entry['hash']):
             _record_use(name)

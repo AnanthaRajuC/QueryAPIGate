@@ -64,9 +64,8 @@ CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_n
 
 CREATE TABLE IF NOT EXISTS api_keys (
   name TEXT PRIMARY KEY,
-  hash TEXT NOT NULL UNIQUE,  -- read by authenticate()'s per-row hmac.compare_digest() scan (apikeys.py) -
-                              -- a real column so that scan is a plain SELECT; UNIQUE is a free integrity
-                              -- bonus, never used to short-circuit the scan itself
+  hash TEXT NOT NULL UNIQUE,  -- authenticate() (apikeys.py) looks a supplied secret up by this column;
+                              -- UNIQUE gives it the index that keeps that a single lookup at any key count
   active INTEGER NOT NULL DEFAULT 1,
   expires_at TEXT,           -- checked in Python (apikeys.is_expired()), kept a real column anyway to match
                               -- active/created_at as a plausible future "keys expiring soon" filter target
@@ -98,6 +97,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 def _connect(path):
     conn = sqlite3.connect(path, isolation_level=None, timeout=5)
     conn.execute('PRAGMA journal_mode=WAL')
+    # NORMAL is SQLite's recommended setting under WAL: still never corrupts the file, but commits no longer
+    # fsync - which matters because every saved-query run commits a history row. The trade-off is that a
+    # power loss (not a process crash) can lose the last few commits.
+    conn.execute('PRAGMA synchronous=NORMAL')
     conn.execute('PRAGMA foreign_keys=ON')
     conn.execute('PRAGMA busy_timeout=5000')
     conn.row_factory = sqlite3.Row

@@ -196,6 +196,24 @@ class SavedQueryTests(ApiTestCase):
         self.assertEqual([f['filename'] for f in files], ['my query', 'another'])
         self.assertEqual(self.client.get('/list_files?sort_by=size').status_code, 400)
 
+    def test_malformed_json_body_is_rejected_not_ignored(self):
+        self.save('q', sql='SELECT * FROM actor WHERE actor_id = :id', connection_name='lite',
+                  query_parameters={'id': {'type': 'int', 'default': 1}})
+        # Ignoring it would quietly run with every parameter at its default
+        res = self.client.post('/q/q', data='{"params": {"id": 5', content_type='application/json')
+        self.assertEqual((res.status_code, res.get_json()), (400, {'error': 'Request body is not valid JSON'}))
+        # An absent body is still fine - the body is optional on this endpoint
+        res = self.client.post('/q/q', content_type='application/json')
+        self.assertEqual((res.status_code, res.get_json()[0]['actor_id']), (200, 1))
+
+    def test_running_a_saved_query_still_records_history(self):
+        # run_saved() loads the query without its history, which must not stop the run from being recorded
+        self.save('q', connection_name='lite')
+        for _ in range(3):
+            self.assertEqual(self.client.get('/q/q').status_code, 200)
+        self.assertEqual(len(store.load_versions('q')['1']['execution_history']), 3)
+        self.assertEqual(store.load_versions('q', with_history=False)['1']['execution_history'], [])
+
     def test_save_validation(self):
         self.assertEqual(self.client.patch('/save_sql_to_file', json={'author': 'a'}).status_code, 400)
         for name in ('../evil', 'a/b', '.hidden', ''):
