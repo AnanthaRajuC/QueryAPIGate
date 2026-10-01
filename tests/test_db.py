@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import redirect_stderr
 from unittest import mock
@@ -300,6 +301,20 @@ class PostgresDbTests(unittest.TestCase):
         store.record_execution('q', 1, {'executed_at': '2026-01-02 00:00:00'})  # the cap applies again
         history.flush()
         self.assertEqual(db.connection().execute(count).fetchone()[0], config.HISTORY_LIMIT)
+
+    def test_a_stuck_lock_holder_makes_writers_fail_not_hang(self):
+        holder = db._PgConnection(TEST_DATABASE_URL)
+        self.addCleanup(holder.close)
+        holder.execute('BEGIN')
+        holder.execute('SELECT pg_advisory_xact_lock(?)', (db._PG_LOCK_ID,))
+        started = time.monotonic()
+        with mock.patch.object(db, '_PG_LOCK_TIMEOUT', '500ms'), self.assertRaises(db.Error):
+            with db.transaction():
+                pass
+        self.assertLess(time.monotonic() - started, 10)
+        holder.execute('ROLLBACK')
+        with db.transaction():  # free again: works as before
+            pass
 
     def test_init_schema_is_safe_to_run_concurrently(self):
         """Several workers or instances start at once and each runs init_schema() against a fresh database."""

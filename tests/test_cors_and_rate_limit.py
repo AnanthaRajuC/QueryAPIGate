@@ -108,11 +108,12 @@ class CorsTests(AppTestCase):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = '*'
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
             create_app()
-        self.assertIn('without QUERYAPIGATE_API_KEY', logs.output[0])
+        # Any line, not the first: the shared logger may also carry another thread's warning (the history writer's)
+        self.assertTrue(any('QUERYAPIGATE_CORS_ORIGINS=*' in line for line in logs.output), logs.output)
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         with mock.patch('queryapigate.app.log.warning') as warning:  # assertNoLogs needs Python 3.10; CI also runs 3.9
             create_app()
-        warning.assert_not_called()
+        self.assertEqual([c for c in warning.call_args_list if 'QUERYAPIGATE_CORS_ORIGINS=*' in str(c)], [])
 
     def test_helpers(self):
         self.assertIsNone(cors.allow_origin_value(ORIGIN))  # off

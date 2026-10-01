@@ -181,6 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 # default locale collation would otherwise reorder every list the API and UI return.
 
 # Serialises every transaction() on Postgres, as SQLite's single write lock does - see the module docstring.
+_PG_LOCK_TIMEOUT = '30s'  # longest a transaction() waits for that lock (or a row lock inside it)
 _PG_LOCK_ID = 0x51A6  # "QAG": an arbitrary, fixed advisory-lock key this app owns in its database
 
 _INSERT_OR_IGNORE_RE = re.compile(r'^\s*INSERT\s+OR\s+IGNORE\s+INTO\b', re.I)
@@ -387,6 +388,9 @@ def transaction(append_only=False, target=None):
         if postgres and append_only:
             conn.execute('SET LOCAL synchronous_commit TO OFF')
         elif postgres:
+            # Bounded: should a session ever hold the lock and stall, writers fail after this long with a clear
+            # "lock timeout" error instead of every one of them hanging, and holding a request thread, forever.
+            conn.execute(f"SET LOCAL lock_timeout = '{_PG_LOCK_TIMEOUT}'")
             conn.execute('SELECT pg_advisory_xact_lock(?)', (_PG_LOCK_ID,))
         yield conn
         conn.execute('COMMIT')
