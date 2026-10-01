@@ -120,6 +120,19 @@ class ConnectionAuditTests(AppTestCase):
         entry = self.entries()[0]
         self.assertEqual(entry['changes'], {'active': {'from': True, 'to': False}})
 
+    def test_the_store_s_own_timestamp_is_not_reported_as_a_change(self):
+        # Two saves in different seconds used to add {'updated_at': {...}} to the diff - intermittently, depending
+        # on where the second boundary fell. Force them into different seconds.
+        times = iter(f'2026-01-01 00:00:{second:02d}' for second in range(60))
+        with mock.patch.object(store, 'now', side_effect=lambda: next(times)):
+            self.create_connection('a', active=True)
+            self.create_connection('a', active=False)
+            entry = self.entries()[0]
+            self.assertEqual(entry['changes'], {'active': {'from': True, 'to': False}})
+            count = len(self.entries())
+            self.create_connection('a', active=False)  # saved again, a second later, unchanged
+            self.assertEqual(len(self.entries()), count)  # nothing changed, so nothing is recorded
+
     def test_delete_is_recorded_with_the_password_masked(self):
         self.create_connection('a', password='super-secret')
         self.client.delete('/connections/a', json={'reason': 'retiring this database'}, headers=self.admin_headers)

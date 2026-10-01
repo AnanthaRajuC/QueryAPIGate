@@ -31,6 +31,9 @@ def _use_postgres(url):
         schema = schema_for(target[1])
         # Session-level lock: several threads of one test (e.g. a concurrency test) may open the same schema at
         # once, and CREATE SCHEMA IF NOT EXISTS itself is not safe against that race.
+        # Bounded, like db.transaction()'s lock: a stuck holder fails the test with a lock-timeout error naming
+        # this spot, rather than hanging the whole run.
+        conn.execute("SET lock_timeout = '30s'")
         conn.execute('SELECT pg_advisory_lock(?)', (_SCHEMA_LOCK_ID,))
         try:
             conn.execute(f'CREATE SCHEMA IF NOT EXISTS {schema}')

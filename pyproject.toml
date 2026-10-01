@@ -44,7 +44,10 @@ mcp = ["mcp>=1.10,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py
                         # have it). Needs Python >=3.10 (the mcp package's own floor), higher than this
                         # project's own >=3.9 - the same shape h2's extra already needs a JVM beyond what
                         # `pip install` alone provides.
-all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption]"]
+jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL is set - see jwtauth.py.
+                               # 2.14 is the floor because that is where PyJWKClient stops refetching the JWKS for
+                               # every unknown key id: before it, forged tokens could make the server hammer the provider.
+all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption,jwt]"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
 dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[mcp]; python_version>='3.10'", "ruff>=0.5",

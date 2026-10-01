@@ -106,8 +106,9 @@ _USE_RECORD_INTERVAL = 60.0  # seconds between last_used_at writes for the same 
 _last_recorded_use: dict[str, float] = {}  # key name -> time.monotonic() of the last last_used_at write
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
-                                       'allowed_write_ops', 'collections', 'allowed_tables'],
-                        defaults=(frozenset(), None))
+                                       'allowed_write_ops', 'collections', 'allowed_tables', 'claims'],
+                        defaults=(frozenset(), None, None))
+# `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
 
 # The unrestricted caller used when the server has no key configured at all (QUERYAPIGATE_API_KEY unset and no
 # scoped keys stored) - today's "open by design" behaviour, unchanged by this module. Its name is None (there
@@ -426,7 +427,8 @@ def any_configured():
 
 
 def auth_required():
-    return config.api_key() is not None or any_configured()
+    # JWT on means signed-in users only: without this, a server with no API keys would stay open to everyone
+    return config.api_key() is not None or any_configured() or config.jwt_enabled()
 
 
 def list_keys():
@@ -699,18 +701,37 @@ def authenticate(supplied, client_ip=None):
         if entry.get('active', True) and not is_expired(entry) and _ip_allowed(entry, client_ip) \
                 and hmac.compare_digest(supplied_hash, entry['hash']):
             _record_use(name)
-            connections = entry['connections']
-            queries = entry.get('queries', [])  # absent on a key stored before this field existed
-            return Permission(name=name, admin=False,
-                              connections=connections if connections == ALL_CONNECTIONS else frozenset(connections),
-                              allow_writes=bool(entry.get('allow_writes', False)),
-                              queries=queries if queries == ALL_QUERIES else _queries_map(queries),
-                              rate_limit=_parsed_rate_limit(entry),
-                              allowed_write_ops=entry.get('allowed_write_ops'),
-                              collections=frozenset(entry.get('collections', [])),
-                              allowed_tables=frozenset(entry['allowed_tables'])
-                              if entry.get('allowed_tables') is not None else None)
+            return permission_from_grants(name, entry)
     return None
+
+
+def permission_from_grants(name, entry, claims=None):
+    """A non-admin Permission from stored grants - an API key's own entry, or (jwtauth.py) the role a signed-in
+    user's token maps to, together with that token's verified ``claims``."""
+    connections = entry.get('connections', [])
+    queries = entry.get('queries', [])  # absent on a key stored before this field existed
+    return Permission(name=name, admin=False,
+                      connections=connections if connections == ALL_CONNECTIONS else frozenset(connections),
+                      allow_writes=bool(entry.get('allow_writes', False)),
+                      queries=queries if queries == ALL_QUERIES else _queries_map(queries),
+                      rate_limit=_parsed_rate_limit(entry),
+                      allowed_write_ops=entry.get('allowed_write_ops'),
+                      collections=frozenset(entry.get('collections', [])),
+                      allowed_tables=frozenset(entry['allowed_tables'])
+                      if entry.get('allowed_tables') is not None else None,
+                      claims=claims)
+
+
+def ip_allowed(entry, client_ip):
+    """Public form of _ip_allowed(), for a role's allowed_ips applied to a signed-in user (jwtauth.py)."""
+    return _ip_allowed(entry, client_ip)
+
+
+def get_role(name):
+    """One role's stored grants, or None."""
+    row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE name = ?',
+                                  (name,)).fetchone()
+    return _row_to_role(row) if row is not None else None
 
 
 def import_legacy_keys_if_empty():

@@ -81,6 +81,11 @@ class _Writer:
         if full:
             self.wake.set()
 
+    def unwritten(self):
+        """Runs queued but not yet handled - including a batch the writer thread is in the middle of writing."""
+        with self.cond:
+            return self.queued - self.written
+
     def wait_until_written(self, timeout=10.0):
         """Block until every run queued so far has been handled by the writer thread - or, if the store is so slow
         that ``timeout`` passes first, go ahead (logged): a history read then may not show the newest runs yet,
@@ -171,16 +176,20 @@ def record(name, version, entry, sample=True):
 
 def flush():
     """Have everything this process has queued written, now - called before every history read, so a process
-    always sees its own runs (read-your-writes). The writer thread does the writing; this only waits for it."""
+    always sees its own runs (read-your-writes). The writer thread does the writing; this only waits for it.
+
+    "Queued but not yet written" is queued > written, not "the queue isn't empty": the writer thread takes a batch
+    off the queue before it writes it, so a batch still being written leaves the queue empty - checking that
+    alone let a read go ahead before the batch's transaction committed, and miss the runs in it."""
     writer = _writer_instance
-    if writer is not None and writer.pid == os.getpid() and writer.pending:
+    if writer is not None and writer.pid == os.getpid() and writer.unwritten():
         writer.wait_until_written()
 
 
 @atexit.register
 def _flush_at_exit():
     writer = _writer_instance
-    if writer is None or writer.pid != os.getpid() or not writer.pending:
+    if writer is None or writer.pid != os.getpid() or not writer.unwritten():
         return
     if writer.thread is not None and writer.thread.is_alive():
         writer.wait_until_written()

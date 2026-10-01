@@ -103,11 +103,14 @@ def build_spec(version, saved_queries=None):
         'info': {'title': 'QueryAPIGate', 'version': version,
                  'description': 'Run SQL against configured databases and get the results back over HTTP.'},
         'components': {
-            'securitySchemes': {'ApiKey': {'type': 'apiKey', 'in': 'header', 'name': 'X-API-Key'}},
+            'securitySchemes': {'ApiKey': {'type': 'apiKey', 'in': 'header', 'name': 'X-API-Key'},
+                                **({'BearerAuth': {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT',
+                                                   'description': "A signed-in user's token (see jwtauth.py)"}}
+                                   if config.jwt_enabled() else {})},
             'responses': {'Error': {'description': 'Error', 'content': {'application/json': {'schema': {
                 'type': 'object', 'properties': {'error': {'type': 'string'}, 'detail': {'type': 'string'}}}}}}},
         },
-        'security': [{}, {'ApiKey': []}],
+        'security': [{}, {'ApiKey': []}, *([{'BearerAuth': []}] if config.jwt_enabled() else [])],
         'paths': {
             '/execute_sql': {'post': {
                 'summary': 'Execute SQL', 'tags': ['Query'],

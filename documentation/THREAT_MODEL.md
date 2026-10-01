@@ -54,9 +54,18 @@ Every request carries (or omits) an `X-API-Key` header, checked once per request
   lost scoped key cannot be recovered, only revoked and replaced, the same property a password reset flow
   gives you and a plaintext-stored secret never could.
 
+- **Signed-in users** (`Authorization: Bearer`, optional - `jwtauth.py`) carry a JWT from the deployer's own
+  login or identity provider instead of a key. The signature is verified against a shared secret or the
+  provider's JWKS; `exp` is required; `iss`/`aud` are enforced (mandatory with a JWKS URL, so a token minted for
+  another application by the same provider is refused); the accepted algorithms are fixed by configuration and
+  can't mix HMAC with public-key families (algorithm confusion), and `none` is never accepted. Grants come from
+  a role, read live. A saved-query parameter declared `from_claim` is bound from the verified token, never from
+  the request, which closes the "change `user_id` in the URL" class of bug (insecure direct object reference)
+  for queries written that way. Residual risk: a JWT can't be revoked before it expires.
+
 #### Open-access mode: a deliberate default worth understanding
 
-If `QUERYAPIGATE_API_KEY` is never set and no scoped keys exist, QueryAPIGate does not refuse requests -
+If `QUERYAPIGATE_API_KEY` is never set, no scoped keys exist and JWT is off, QueryAPIGate does not refuse requests -
 every caller authenticates as an implicit, unrestricted admin. This is intentional (the code calls it
 "open by design"), aimed at a local trial or a fully trusted internal network where standing up a key
 first would just be friction. It is **not** a safe default for anything reachable beyond a machine you

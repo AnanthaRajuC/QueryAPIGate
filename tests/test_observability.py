@@ -312,17 +312,22 @@ class SlowQueryLogTests(AppTestCase):
         self.assertEqual(warning.call_args[0][0], 'Slow query on %s (%s): %.1fms - %s')
         self.assertEqual(warning.call_args[0][1], 'lite')
 
+    def slow_query_warnings(self, warning):
+        # engine.log is the logger every module shares: another thread (the history writer) may log an unrelated
+        # warning while this runs, so only the slow-query warning itself counts here.
+        return [c for c in warning.call_args_list if c[0] and c[0][0].startswith('Slow query')]
+
     def test_no_warning_under_the_threshold(self):
         os.environ['QUERYAPIGATE_SLOW_QUERY_THRESHOLD'] = '60'
         with mock.patch('queryapigate.engine.log.warning') as warning:
             self.run_sql()
-        warning.assert_not_called()
+        self.assertEqual(self.slow_query_warnings(warning), [])
 
     def test_zero_disables_it_even_for_a_slow_query(self):
         os.environ['QUERYAPIGATE_SLOW_QUERY_THRESHOLD'] = '0'
         with mock.patch('queryapigate.engine.log.warning') as warning:
             self.run_sql()
-        warning.assert_not_called()
+        self.assertEqual(self.slow_query_warnings(warning), [])
 
 
 class MetricsEndpointTests(AppTestCase):
