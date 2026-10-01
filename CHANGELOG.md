@@ -21,6 +21,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-01
+
 ### Added
 - **The admin UI's Help > Docs browser now lists the `how-to/` guides too**, under a new "How-to guides"
   section beneath the existing "Reference" docs - the same fetch-from-GitHub-at-the-running-version's-tag
