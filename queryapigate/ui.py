@@ -6137,6 +6137,11 @@ var DOCS = [
   { id: 'howto-06', title: 'Use bound parameters safely', path: 'how-to/06-use-bound-parameters-safely.md', group: 'How-to guides' },
   { id: 'howto-07', title: 'Group queries into a collection', path: 'how-to/07-group-queries-into-a-collection.md', group: 'How-to guides' },
   { id: 'howto-08', title: 'Cache a saved query', path: 'how-to/08-cache-a-saved-query.md', group: 'How-to guides' },
+  { id: 'howto-09', title: 'Stream a large export', path: 'how-to/09-stream-a-large-export.md', group: 'How-to guides' },
+  { id: 'howto-10', title: 'Allow a query to write data', path: 'how-to/10-allow-a-saved-query-to-write-data.md', group: 'How-to guides' },
+  { id: 'howto-11', title: "Browse a connection's schema", path: 'how-to/11-browse-a-connections-schema.md', group: 'How-to guides' },
+  { id: 'howto-12', title: 'Export a Postman collection', path: 'how-to/12-export-a-postman-collection.md', group: 'How-to guides' },
+  { id: 'howto-13', title: 'Set up a scoped API key', path: 'how-to/13-set-up-a-scoped-api-key.md', group: 'How-to guides' },
   { id: 'howto-24', title: 'Let an agent call queries via MCP', path: 'how-to/24-let-an-agent-call-your-queries-via-mcp.md', group: 'How-to guides' },
   { id: 'howto-28', title: 'Build a client that watches queries run', path: 'how-to/28-build-a-client-that-watches-queries-run.md', group: 'How-to guides' }
 ];

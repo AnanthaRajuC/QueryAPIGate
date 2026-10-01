@@ -33,19 +33,22 @@ for a different grouping/priority order.
    [07-group-queries-into-a-collection.md](07-group-queries-into-a-collection.md).
 8. ✅ **Cache a saved query's response** (`cache_ttl`) - when it's worth it, how a hit differs from a miss,
    `X-Cache`/`ETag` behavior. See [08-cache-a-saved-query.md](08-cache-a-saved-query.md).
-9. **Export a large result without running out of memory** (`?stream=true`) - CSV/TSV/NDJSON, what makes a
-   query eligible, verifying it's actually constant-memory.
-10. **Allow a saved query to write data** (`INSERT`/`UPDATE`/`DELETE`) - `allow_writes`,
-    `allowed_write_ops`, the safety rails, and why this is off by default.
-11. **Browse a connection's schema before writing a query** - the API Designer schema browser, or the same
-    thing over the API (`GET /connections/<name>/schema`).
-12. **Export a Postman collection for a set of APIs** - one click, share with a team, no manual request
-    building.
+9. ✅ **Export a large result without running out of memory** (`?stream=true`) - CSV/TSV/NDJSON, what makes a
+   query eligible, verifying it's actually constant-memory. See
+   [09-stream-a-large-export.md](09-stream-a-large-export.md).
+10. ✅ **Allow a saved query to write data** (`INSERT`/`UPDATE`/`DELETE`) - `allow_writes`,
+    `allowed_write_ops`, the safety rails, and why this is off by default. See
+    [10-allow-a-saved-query-to-write-data.md](10-allow-a-saved-query-to-write-data.md).
+11. ✅ **Browse a connection's schema before writing a query** - the API Designer schema browser, or the same
+    thing over the API (`GET /connections/<name>/schema`). See
+    [11-browse-a-connections-schema.md](11-browse-a-connections-schema.md).
+12. ✅ **Export a Postman collection for a set of APIs** - one click, share with a team, no manual request
+    building. See [12-export-a-postman-collection.md](12-export-a-postman-collection.md).
 
 ## Security and access control
 
-13. **Set up your first scoped API key** - stop using the admin key for everything; create a key limited
-    to one connection, read-only.
+13. ✅ **Set up your first scoped API key** - stop using the admin key for everything; create a key limited
+    to one connection, read-only. See [13-set-up-a-scoped-api-key.md](13-set-up-a-scoped-api-key.md).
 14. **Give an external partner access to exactly one query, nothing else** (`queries` grant) - the
     narrowest possible scope, no connection access at all.
 15. **Create a role and stamp out several similarly-scoped keys from it** - roles vs. keys, what changing a
