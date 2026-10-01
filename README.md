@@ -551,6 +551,10 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_SECRET_KEY` | unset | A Fernet key encrypting connection passwords at rest. Off by default (stored as given); needs `queryapigate[encryption]`. A malformed value stops startup. |
 | `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |
 | `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` | `1` | Seconds a query may take before it is logged as a warning. `0` disables it. |
+| `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version (and shown in lists). |
+| `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /history`. Best with `QUERYAPIGATE_DATABASE_URL`. |
+| `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of successful runs recorded; failed runs always are. |
+| `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes; `0` writes inside each request. See [Run history](documentation/API.md#run-history). |
 | `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
 | `QUERYAPIGATE_LOAD_EXAMPLES` | unset | `yes` loads the [example APIs](documentation/EXAMPLES.md) (reporting, dashboard, export, partner) at startup - idempotent; a malformed value stops startup. Never removes anything: use `queryapigate examples unload`. |
 | `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` | unset | Path to also append every audit entry to, one JSON object per line, never capped - for retention beyond the rolling window above. |

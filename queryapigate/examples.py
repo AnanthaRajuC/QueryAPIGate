@@ -397,7 +397,7 @@ def _seed_execution_history(created_query_names, now=None, seed=42):
                 'rows': rng.randint(1, 50),
                 'duration_ms': rng.randint(2, 40),
             }
-            store.record_execution(name, version, entry)
+            store.record_execution(name, version, entry, sample=False)  # seeded, not live traffic
 
 
 def redact_for_audit(added):

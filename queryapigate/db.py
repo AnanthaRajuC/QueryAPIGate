@@ -26,7 +26,7 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # 3: execution_history gained status/key_name columns - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -71,9 +71,12 @@ CREATE TABLE IF NOT EXISTS execution_history (
   version INTEGER NOT NULL,
   executed_at TEXT NOT NULL,
   entry_json TEXT NOT NULL,
+  status TEXT,    -- copies of entry_json's own status/key_name, as real columns so GET /history can filter on
+  key_name TEXT,  -- them the same way on both backends (schema 3; see _upgrade())
   FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);
+CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   name TEXT PRIMARY KEY,
@@ -144,9 +147,12 @@ CREATE TABLE IF NOT EXISTS execution_history (
   version INTEGER NOT NULL,
   executed_at TEXT NOT NULL,
   entry_json TEXT NOT NULL,
+  status TEXT,
+  key_name TEXT,
   FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);
+CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   name TEXT COLLATE "C" PRIMARY KEY,
@@ -271,11 +277,18 @@ def _open(target):
     return _PgConnection(where) if kind == 'postgres' else _connect(where)
 
 
-def connection():
-    """This thread's connection to the current store - reopened automatically if the target has changed since
-    the last call (see _target()), or if a Postgres connection was lost (a server restart, a dropped network
-    link): the next call simply connects again instead of failing every later request on a dead socket."""
-    target = _target()
+def current_target():
+    """The store this thread would use right now - captured by history.py when it queues a run, so the batch
+    is later written to that same store even if the configuration has moved on by then."""
+    return _target()
+
+
+def connection(target=None):
+    """This thread's connection to the current store (or to ``target``, a current_target() value) - reopened
+    automatically if the target has changed since the last call (see _target()), or if a Postgres connection
+    was lost (a server restart, a dropped network link): the next call simply connects again instead of
+    failing every later request on a dead socket."""
+    target = target or _target()
     conn = getattr(_local, 'conn', None)
     if conn is not None and getattr(_local, 'pid', None) != os.getpid():
         # Inherited across a fork (e.g. gunicorn --preload): the parent still owns that socket or file handle.
@@ -313,11 +326,38 @@ def init_schema():
     if is_postgres():
         with transaction() as conn:
             conn.executescript(_PG_SCHEMA)
+            _upgrade(conn, postgres=True)
             _record_schema_version(conn)
         return
-    conn = connection()
-    conn.executescript(_SCHEMA)
-    _record_schema_version(conn)
+    connection().executescript(_SCHEMA)
+    with transaction() as conn:  # BEGIN IMMEDIATE: another process starting at once can't upgrade alongside
+        _upgrade(conn, postgres=False)
+        _record_schema_version(conn)
+
+
+def _columns(conn, table, postgres):
+    if postgres:
+        return {row[0] for row in conn.execute(
+            'SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() '
+            'AND table_name = ?', (table,)).fetchall()}
+    return {row[1] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
+
+
+def _upgrade(conn, postgres):
+    """Bring a store an older version of this app created up to SCHEMA_VERSION. CREATE TABLE IF NOT EXISTS
+    never alters a table that already exists, so a column added since has to be added here - each step checks
+    for itself rather than trusting the recorded version, so it is safe to re-run.
+
+    3: execution_history.status/key_name, backfilled from each row's own entry_json."""
+    if 'status' not in _columns(conn, 'execution_history', postgres):
+        conn.execute('ALTER TABLE execution_history ADD COLUMN status TEXT')
+        conn.execute('ALTER TABLE execution_history ADD COLUMN key_name TEXT')
+        if postgres:
+            conn.execute("UPDATE execution_history SET status = entry_json::json->>'status', "
+                         "key_name = entry_json::json->>'key_name'")
+        else:
+            conn.execute("UPDATE execution_history SET status = json_extract(entry_json, '$.status'), "
+                         "key_name = json_extract(entry_json, '$.key_name')")
 
 
 def _record_schema_version(conn):
@@ -329,7 +369,7 @@ def _record_schema_version(conn):
 
 
 @contextlib.contextmanager
-def transaction(append_only=False):
+def transaction(append_only=False, target=None):
     """BEGIN / COMMIT / ROLLBACK around a block of statements, holding the store's write lock for the whole
     block - SQLite's own via BEGIN IMMEDIATE, an advisory lock on Postgres (see the module docstring).
 
@@ -337,9 +377,11 @@ def transaction(append_only=False):
     can be invalidated by a concurrent writer, so on Postgres it skips the advisory lock - otherwise every
     query run in every instance would queue on that one lock - and commits without waiting for the WAL flush
     (synchronous_commit off), the same durability SQLite's synchronous=NORMAL gives: a crash can lose the last
-    few runs' history, never corrupt anything. On SQLite it changes nothing."""
-    conn = connection()
-    postgres = is_postgres()
+    few runs' history, never corrupt anything. On SQLite it changes nothing.
+
+    ``target`` (a current_target() value) runs the block against that store instead of the current one."""
+    conn = connection(target) if target else connection()
+    postgres = (target[0] == 'postgres') if target else is_postgres()
     conn.execute('BEGIN' if postgres else 'BEGIN IMMEDIATE')
     try:
         if postgres and append_only:
@@ -379,7 +421,7 @@ _MIGRATED_TABLES = (
     ('saved_queries', ('name', 'collection', 'example'), 'name'),
     ('saved_query_versions', ('query_name', 'version', 'uuid', 'status', 'created_at', 'last_modified_at',
                               'fields_json'), 'query_name, version'),
-    ('execution_history', ('query_name', 'version', 'executed_at', 'entry_json'), 'rowid'),
+    ('execution_history', ('query_name', 'version', 'executed_at', 'entry_json', 'status', 'key_name'), 'rowid'),
     ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json'), 'name'),
     ('roles', ('name', 'created_at', 'details_json'), 'name'),
     ('audit_log', ('timestamp', 'entry_json'), 'id'),

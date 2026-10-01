@@ -139,8 +139,10 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?stream=true&format=csv' \
 
 - The latest version runs unless `version` is given.
 - `connection_name` from the request wins over the saved default.
-- Each run is appended to that version's `execution_history` (last 50 runs: time, connection, status, rows,
-  duration, plus `request_id`/`key_name` - see [Observability](#observability)).
+- Each run is recorded in that version's `execution_history` (time, connection, status, rows, duration, plus
+  `request_id`/`key_name` - see [Observability](#observability)). Lists show a version's newest 50 runs
+  (`QUERYAPIGATE_HISTORY_LIMIT`); how many are kept, and for how long, is configurable - see
+  [Run history](#run-history).
 
 The older endpoints `POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file` do the same thing
 with the query named in the body:
@@ -790,6 +792,54 @@ convenience this API doesn't rely on.
 This is in-process, per-server state (see [Observability](#observability) above) - a connected client only
 ever sees events from the one process it's connected to, and there's no cross-instance fan-out behind a load
 balancer yet.
+
+## Run history
+
+Every saved-query run is recorded: when, against which connection, by which key, with what status, row count
+and duration. How that history is written and kept is configurable:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version, and how many of a version's newest runs `/list_files` and the admin UI show. |
+| `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep **every** run for this many days instead of a per-version count; a sweep every 10 minutes deletes older ones. Best with a [PostgreSQL metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
+| `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of *successful* runs recorded, e.g. `0.1` for one in ten on a very busy query. Failed runs are always recorded. |
+| `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes. `0` writes each run inside its own request. |
+
+**Batched writes.** A request never waits on its history entry: the run is queued in memory and a background
+thread writes everything queued in one transaction every `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` seconds. Reads in
+the same process always include its own queued runs (they are written first), so `/list_files` right after a run
+shows it; another worker or instance sees it within one interval. A normal shutdown writes what is queued; a
+process killed outright loses at most one interval's worth. If the store can't keep up, at most 10,000 runs are
+queued per process and newer ones are dropped rather than slowing requests - counted in `/metrics` as
+`queryapigate_history_runs_total{outcome="dropped"}`, alongside `recorded`, `sampled_out` and `failed`, with
+`queryapigate_history_pending` for the current queue.
+
+### `GET /history`
+
+Pages through every stored run of every saved query, newest first - the way to look beyond the newest runs a
+list shows, for example across a retention period. Admin only (it shows every key's activity).
+
+| Parameter | Meaning |
+|-----------|---------|
+| `query`, `version` | Only this saved query (and version). |
+| `status` | `success` or `error`. |
+| `key` | Only runs made with this API key (`admin` for the admin key). |
+| `since`, `until` | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`, in the server's local time; `since` inclusive, `until` exclusive. |
+| `limit` | Runs per page, 1-1000 (default 100). |
+| `cursor` | The previous page's `next`. |
+
+~~~bash
+curl -H 'X-API-Key: admin-key' 'localhost:5000/history?key=partner&status=error&since=2026-10-01'
+~~~
+
+~~~json
+{"entries": [{"query": "film_by_id", "version": 3, "executed_at": "2026-10-01 14:02:11", "status": "error",
+              "error": "An error occurred while executing the SQL query", "key_name": "partner",
+              "connection_name": "pg", "request_id": "9f2c41d07a1b"}],
+ "next": "WyIyMDI2LTEwLTAxIDE0OjAyOjExIiwgNDgxMl0"}
+~~~
+
+`next` is `null` on the last page.
 
 ## Audit log
 

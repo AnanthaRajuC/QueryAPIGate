@@ -22,6 +22,20 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
+- **Batched run history.** A saved-query run's history entry is queued in memory and written by a background
+  thread in one transaction per batch (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, default 1 s; `0` restores writing
+  inside the request), so a request never waits on it. A process always reads its own queued runs (they are written
+  before any history read); other workers/instances see them within one interval. At most 10,000 runs are queued
+  per process - beyond that new ones are dropped and counted rather than slowing requests. New `/metrics`:
+  `queryapigate_history_runs_total{outcome=recorded|sampled_out|dropped|failed}` and
+  `queryapigate_history_pending`.
+- **History retention and sampling.** `QUERYAPIGATE_HISTORY_RETENTION_DAYS` keeps every run for that many days
+  instead of each version's newest runs (a sweep every 10 minutes removes older ones) - meant for a PostgreSQL
+  store. `QUERYAPIGATE_HISTORY_SAMPLE_RATE` records only that fraction of successful runs; failed runs are always
+  recorded. `QUERYAPIGATE_HISTORY_LIMIT` makes the per-version count (50) configurable.
+- **`GET /history`** (admin): pages through every stored run, newest first, filtered by query, version, status,
+  key and time range - for looking past the newest runs a list shows.
+- Settings screen: a **Run history** section for the four new variables.
 - **PostgreSQL as an optional metadata store** (`QUERYAPIGATE_DATABASE_URL=postgresql://...`). Connections, saved
   queries and their run history, API keys, roles and the audit log can live in a PostgreSQL database instead of
   `queryapigate.db`, so several instances can share one store - a key created or revoked through one is
@@ -38,6 +52,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `tests/__init__.py`).
 
 ### Changed
+- Lists (`/list_files`, the admin UI) return a version's newest `QUERYAPIGATE_HISTORY_LIMIT` runs however many are
+  stored, so a long retention period never makes them larger.
+- **Schema version 3**: `execution_history` gains `status` and `key_name` columns (copies of each run's own entry,
+  so `GET /history` can filter on them on both backends) and an index on `executed_at`. Added and backfilled
+  automatically on first start; `migrate-to-postgres` needs its source at version 3, i.e. started once with this
+  release.
 - **Saved-query calls by a scoped key no longer receive the database's own error text.** A failed
   `GET`/`POST /q/<name>` (or `/execute_sql_from_file`) made with any key other than the admin key now returns
   only `{"error": "An error occurred while executing the SQL query"}` - the `detail` field is dropped, since a
