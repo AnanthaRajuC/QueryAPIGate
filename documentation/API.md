@@ -760,38 +760,78 @@ of the metrics themselves.
 
 ## Live events (Server-Sent Events)
 
-`GET /events` streams one `data: {...}` line per saved-query execution as it happens - the same feed the
-admin UI's Home tab uses instead of polling `/list_files` every 5 seconds, and usable directly by your own
-client (a mobile app, a dashboard) rather than only the built-in UI. Requires a real API key like any other
-functional endpoint - never public.
+Every saved-query run can be streamed to clients as it happens - a mobile app showing a user their own requests
+completing, a dashboard, the admin UI's Home tab. There are two ways to serve that stream, with the same format:
 
-**Each key gets its own view, not a shared firehose.** The admin key sees every execution on the server; a
-scoped key sees only executions triggered by that same key - its own personal activity feed. This is exactly
-right for a mobile app where each user logs in with their own scoped key and only cares about their own
-requests finishing, not everyone else's:
+| | `GET /events` on the main server | `queryapigate events` |
+|---|---|---|
+| For | the admin UI, a few clients | apps and phones - many clients |
+| Open streams | `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4) - each holds a request thread | thousands per process (`QUERYAPIGATE_EVENTS_MAX_CONNECTIONS`, default 10,000) |
+| Sees runs from | this process only | every worker and instance sharing the store |
+| Event ids and resume (`Last-Event-ID`) | no | yes |
+| Delay | immediate | up to `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 s), plus `QUERYAPIGATE_EVENTS_POLL_INTERVAL` on SQLite |
+
+**Each key gets its own view, not a shared firehose.** Either way, a real API key is required (unless the server
+runs with no keys at all). The admin key sees every run; any other key sees only the runs made with that same
+key - its own personal activity feed:
 
 ```
 GET /events
 X-API-Key: <a scoped key's own secret>
 
+id: 4812
 data: {"type": "execution", "filename": "monthly_revenue", "version": 3, "connection_name": "warehouse",
        "entry": {"executed_at": "2026-09-30 12:00:00", "status": "success", "rows": 42,
                  "duration_ms": 118.4, "key_name": "mobile-alice", "request_id": "a1b2c3d4e5f6"}}
 ```
 
-A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client
-library doesn't time it out as idle - not a real event, safe to ignore.
+A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client library
+doesn't time it out as idle - not an event, safe to ignore.
 
-**Use `fetch()` with a streamed response body, not a plain `new EventSource(...)`.** `EventSource` can't set
-custom request headers, and there's no cookie-based auth to fall back on - the key has to travel in
-`X-API-Key` like every other request, never as a URL parameter (which would leak it into access logs and
-browser history). Any HTTP client capable of reading a chunked response as it arrives - which every mobile
-platform's own networking library can do - works the same way; `EventSource` is a browser-specific
-convenience this API doesn't rely on.
+**Send the key in `X-API-Key`, never in the URL** (where it would leak into access logs and browser history). A
+browser's `EventSource` can't set request headers, so in a browser read the stream with `fetch()` and a streamed
+response body; every mobile platform's own HTTP client can read a streamed response the same way.
 
-This is in-process, per-server state (see [Observability](#observability) above) - a connected client only
-ever sees events from the one process it's connected to, and there's no cross-instance fan-out behind a load
-balancer yet.
+### `queryapigate events`
+
+A separate process, run beside `queryapigate serve` against the same `QUERYAPIGATE_HOME` or
+`QUERYAPIGATE_DATABASE_URL`, serving `GET /events` (and `GET /health`) on its own port:
+
+~~~bash
+queryapigate events --host 0.0.0.0 --port 5002
+~~~
+
+Put it behind the same reverse proxy as the main server, routing `/events` to it - see
+[DEPLOYMENT.md](DEPLOYMENT.md#9-live-events-for-many-clients-optional) - so clients keep one base URL.
+
+- **Every instance's runs.** Events come from run history in the store, not from one process's memory: each run
+  recorded there is an event, and its history id is the event's `id:`. On PostgreSQL the server is notified the
+  moment a batch is written; on SQLite it checks every `QUERYAPIGATE_EVENTS_POLL_INTERVAL` seconds (default 1). So
+  delivery takes up to one `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` - lower that (e.g. `0.2`) for snappier events.
+- **Resume.** Reconnect with a `Last-Event-ID` header (or `?last_event_id=` if the client can't set headers) and
+  the stream first replays every run after that id that the key may see - up to 1,000 - then continues live,
+  with nothing missed or repeated in between. `EventSource` sends the header by itself; with `fetch()`, remember
+  the last `id:` you read and send it when you reconnect.
+- **What isn't an event.** Runs history doesn't keep: those sampled out by `QUERYAPIGATE_HISTORY_SAMPLE_RATE` or
+  dropped under back-pressure. A replay can only reach runs still in history - a version keeps its newest
+  `QUERYAPIGATE_HISTORY_LIMIT` runs unless `QUERYAPIGATE_HISTORY_RETENTION_DAYS` is set.
+- **Limits.** A stream whose key is revoked, deactivated or expires is closed within about a minute (at most 75
+  seconds: the key is checked again every 60, at the stream's next write). A client that stops
+  reading is disconnected once 1,000 events are waiting for it - it reconnects with `Last-Event-ID` and catches up.
+  Beyond `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` open streams, new ones get `503` with `Retry-After`;
+  `QUERYAPIGATE_RATE_LIMIT` applies to connection attempts; `QUERYAPIGATE_CORS_ORIGINS` and
+  `QUERYAPIGATE_TRUST_PROXY` mean the same as on the main server.
+- **Scale.** Measured on a 4-core machine shared with PostgreSQL and the load generator: 9,000 concurrent streams
+  in one process (about 170 MB), every event reaching all 9,000 within 0.75 s of the request, with the main
+  server's own latency unaffected.
+
+### `GET /events` on the main server
+
+Immediate and needs no extra process, but each open stream occupies one of the main server's request threads for
+as long as it is open. So at most `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4, of the Docker image's 8 threads)
+are held at once; beyond that it answers `503` with `Retry-After`, rather than leave no threads for requests
+(`0` turns it off). It only sees runs handled by its own process, and has no event ids or resume. A client that
+disconnects frees its slot at the next keepalive, within 15 seconds.
 
 ## Run history
 

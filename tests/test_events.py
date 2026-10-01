@@ -126,5 +126,28 @@ class EventsTests(unittest.TestCase):
         res.close()
 
 
+    def test_streams_beyond_the_cap_get_a_503_instead_of_a_request_thread(self):
+        """Each open stream holds one of the WSGI server's request threads - unbounded, a few clients would
+        leave none for anything else (8 open streams froze the Docker image's single worker entirely)."""
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_MAX_STREAMS': '2'}):
+            first = self.client.get('/events', headers=self.admin_headers)
+            second = self.client.get('/events', headers=self.admin_headers)
+            third = self.client.get('/events', headers=self.admin_headers)
+            self.assertEqual((first.status_code, second.status_code, third.status_code), (200, 200, 503))
+            self.assertEqual(third.headers['Retry-After'], '5')
+            self.assertIn('queryapigate events', third.get_json()['error'])
+            first.close()  # a closed stream gives its slot back
+            fourth = self.client.get('/events', headers=self.admin_headers)
+            self.assertEqual(fourth.status_code, 200)
+            second.close()
+            fourth.close()
+        self.assertEqual(app_module._open_streams, 0)
+
+    def test_a_cap_of_zero_turns_streaming_off_on_this_server(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_MAX_STREAMS': '0'}):
+            self.assertEqual(self.client.get('/events', headers=self.admin_headers).status_code, 503)
+        self.assertEqual(app_module._open_streams, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

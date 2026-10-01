@@ -243,6 +243,41 @@ The image already includes the PostgreSQL driver. See
 [Shared metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql) for what it changes and what
 it doesn't.
 
+## 9. Live events for many clients (optional)
+
+The main server's own `GET /events` holds a request thread per open stream, so it serves only a few (see
+[Live events](API.md#live-events-server-sent-events)). For apps and phones, add the asyncio events server as a
+second service from the same image, and route `/events` to it:
+
+~~~yaml
+# docker-compose.yml - next to the queryapigate service
+  events:
+    image: ghcr.io/anantharajuc/queryapigate:1.2.3     # the same image and version as queryapigate
+    restart: unless-stopped
+    command: ["queryapigate", "events", "--host", "0.0.0.0"]
+    env_file: .env                                     # the same store: QUERYAPIGATE_DATABASE_URL, or ...
+    environment:
+      QUERYAPIGATE_TRUST_PROXY: "1"
+    volumes:
+      - queryapigate-data:/data                        # ... the same /data volume, for SQLite
+    healthcheck:                                       # the image's own check probes port 5000
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3)"]
+    networks:
+      - internal
+~~~
+
+~~~caddyfile
+# Caddyfile
+api.example.com {
+    reverse_proxy /events* events:5002
+    reverse_proxy queryapigate:5000
+}
+~~~
+
+Caddy streams `text/event-stream` responses without buffering. With nginx, use `proxy_buffering off;` and a
+`proxy_read_timeout` above the 15-second keepalive for that location. The events server sees runs from every
+instance sharing the store - one events service is enough for several `queryapigate` replicas.
+
 ## Why one worker (not a replica count)
 
 The image runs gunicorn with **one worker** on purpose, and that's not a knob to turn up for more capacity.
@@ -252,7 +287,7 @@ independently, silently doubling effective limits and splitting the numbers Graf
 store, two replicas each with their own `/data` volume are also two independent servers with their own
 connections, keys and audit log, not one logical service. A [shared metadata store](#8-shared-metadata-store-optional)
 fixes that part - replicas pointed at one PostgreSQL database share connections, saved queries and keys - but
-rate limits, `/metrics` and the live events feed stay per process until they get a shared backend too.
+rate limits and `/metrics` stay per process until they get a shared backend too (live events don't: see section 9).
 
 For more headroom on one instance, raise `--threads` (`gthread` already lets a slow request - a large
 export, a slow query - not block every other connection) or give the container more CPU. The image's `CMD`

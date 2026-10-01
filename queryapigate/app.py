@@ -5,6 +5,7 @@ import math
 import queue
 import re
 import socket
+import threading
 import time
 import uuid
 
@@ -12,6 +13,7 @@ from flask import Blueprint, Flask, Response, current_app, g, jsonify, redirect,
 from flask.json.provider import DefaultJSONProvider
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.wsgi import ClosingIterator
 
 from . import (
     apikeys,
@@ -173,7 +175,10 @@ def create_app():
             permission = g.get('permission')
             if permission is None or not permission.admin:
                 extra = {k: v for k, v in extra.items() if k != 'detail'}
-        return jsonify({'error': error.message, **extra}), error.status
+        response = jsonify({'error': error.message, **extra})
+        if 'retry_after' in extra:
+            response.headers['Retry-After'] = str(extra['retry_after'])
+        return response, error.status
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
@@ -878,6 +883,8 @@ def list_files():
 
 
 _SSE_HEARTBEAT_SECONDS = 15  # module constant so tests can shrink it
+_open_streams = 0  # GET /events streams this process holds open right now - see stream_events()
+_open_streams_lock = threading.Lock()
 
 
 @bp.route('/events', methods=['GET'])
@@ -894,9 +901,34 @@ def stream_events():
     EventSource cannot set custom request headers, and this app has no cookie-based auth to fall back on -
     every other request already authenticates via X-API-Key (see ui.py's apiFetch()). Putting the key in the
     URL instead would put a secret in server access logs and browser history, which nothing else in this
-    app does. Same wire format either way, just read manually so header-based auth keeps working."""
+    app does. Same wire format either way, just read manually so header-based auth keeps working.
+
+    Each open stream occupies one of this server's request threads for as long as it stays open, so at most
+    config.events_max_streams() are held at once (4 by default, of the Docker image's 8 threads); beyond that
+    this answers 503 rather than let streams starve every other request. Many clients - apps, phones - belong on
+    `queryapigate events` (events.py) instead: a separate asyncio process with no such limit, every instance's
+    runs, and Last-Event-ID resume."""
+    global _open_streams
+    with _open_streams_lock:
+        if _open_streams >= config.events_max_streams():
+            raise ApiError('Too many open event streams on this server - try again shortly, or connect to '
+                           '`queryapigate events` instead', 503, retry_after=5)
+        _open_streams += 1
     broadcaster = current_app.extensions['queryapigate_broadcaster']
     subscriber = broadcaster.subscribe(key_name=None if g.permission.admin else g.permission.name)
+
+    released = []
+
+    def release():
+        # Runs from the generator's own finally, or from the WSGI server closing a response whose generator never
+        # started (the client left before the first byte) - whichever comes first, exactly once.
+        global _open_streams
+        with _open_streams_lock:
+            if released:
+                return
+            released.append(True)
+            _open_streams -= 1
+        broadcaster.unsubscribe(subscriber)
 
     def events():
         try:
@@ -908,9 +940,9 @@ def stream_events():
                     continue
                 yield f'data: {json.dumps(event, default=json_default)}\n\n'
         finally:
-            broadcaster.unsubscribe(subscriber)
+            release()
 
-    response = Response(events(), mimetype='text/event-stream')
+    response = Response(ClosingIterator(events(), release), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # disable reverse-proxy response buffering (nginx, etc.)
     return response

@@ -44,6 +44,7 @@ _MAX_PENDING = 10_000      # queued runs per process before new ones are dropped
 _BATCH_SIZE = 500          # a batch this full is written straight away instead of waiting for the interval
 _SWEEP_INTERVAL = 600.0    # seconds between retention sweeps
 _SWEEP_CHUNK = 5_000       # rows deleted per sweep transaction, so a big backlog never holds one long transaction
+NOTIFY_CHANNEL = 'queryapigate_history'  # Postgres LISTEN/NOTIFY channel: "new runs were recorded"
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'  # executed_at's format (store.now()) - a string compare orders it correctly
 
 
@@ -204,6 +205,10 @@ def write(rows, target=None):
                     'SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS '
                     '(SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?)',
                     (name, version, executed_at, entry_json, status, key_name, name, version))
+            if (target or db.current_target())[0] == 'postgres':
+                # Wakes `queryapigate events` (events.py) in every instance. Sent inside the transaction, so
+                # Postgres delivers it only once these rows are committed and visible to a listener's query.
+                conn.execute(f'NOTIFY {NOTIFY_CHANNEL}')
     except (OSError, *db.Error):
         log.warning('Could not record %d history entries', len(rows), exc_info=True)
         metrics.inc_history('failed', len(rows))

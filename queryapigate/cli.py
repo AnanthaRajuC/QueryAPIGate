@@ -7,7 +7,7 @@ import os
 import sys
 from datetime import datetime
 
-from . import __version__, apikeys, bundle, config, db, examples, postman, store
+from . import __version__, apikeys, bundle, config, db, examples, logging_setup, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -65,6 +65,19 @@ def _migrate_to_postgres(args):
         print(f'  {table}: {count}')
     print(f'{source} was not changed. Keep QUERYAPIGATE_DATABASE_URL set from now on - every instance that '
           'shares it shares these connections, saved queries and keys.')
+    return 0
+
+
+def _events(args):
+    """`queryapigate events`: the standalone Server-Sent Events server for many clients - see events.py."""
+    try:
+        config.check_settings()
+    except ValueError as error:
+        print(f'queryapigate: {error}', file=sys.stderr)
+        return 2
+    logging_setup.configure(logging.getLogger('queryapigate'))
+    from .events import run
+    run(host=args.host, port=args.port)
     return 0
 
 
@@ -316,6 +329,13 @@ def build_parser():
     mcp_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
     mcp_parser.add_argument('--port', type=int, default=config.mcp_port())
     mcp_parser.set_defaults(func=_mcp)
+
+    events_parser = commands.add_parser('events', help='serve GET /events to many clients at once - apps, phones, '
+                                                       'dashboards - with resume (Last-Event-ID) and every '
+                                                       "instance's runs; run beside `queryapigate serve`")
+    events_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
+    events_parser.add_argument('--port', type=int, default=config.events_port())
+    events_parser.set_defaults(func=_events)
 
     init = commands.add_parser('init', help='create db_connections.json and saved_sql/ in the home folder')
     init.set_defaults(func=_init)
