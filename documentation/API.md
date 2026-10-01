@@ -962,7 +962,10 @@ use," which needs a resolved caller to mean anything.
 
 ## Errors
 
-Errors are returned as `{"error": "..."}`; failed queries also include `"detail"` with the database's message.
+Errors are returned as `{"error": "..."}`; failed queries also include `"detail"` with the database's message -
+except a saved query (`/q/<name>`, `/execute_sql_from_file`) called with a scoped key, which gets only the generic
+error, since the database's text can reveal schema details to a caller who didn't write the SQL. That full message
+is always in the server log, under the response's `X-Request-Id`.
 
 | Status | Meaning |
 |--------|---------|

@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import apikeys, create_app, db
+from queryapigate import apikeys, create_app, db, engine
 from tests.helpers import write_connections
 
 
@@ -110,6 +110,36 @@ class ApiKeyCrudTests(AppTestCase):
         for method, path, kwargs in cases:
             res = getattr(self.client, method)(path, headers=headers, **kwargs)
             self.assertEqual(res.status_code, 403, f'{method} {path}')
+
+
+class AuthenticateLookupTests(AppTestCase):
+    def test_the_right_key_is_found_among_many(self):
+        # authenticate() looks a secret up by its hash rather than scanning every key
+        keys = {f'k{i}': self.create_key(f'k{i}', connections=['a'] if i % 2 else ['b']) for i in range(20)}
+        for name in ('k0', 'k7', 'k19'):
+            self.assertEqual(apikeys.authenticate(keys[name]).name, name)
+        self.assertIsNone(apikeys.authenticate('sk_not-a-real-key'))
+        self.client.patch('/api_keys/k7', json={'active': False}, headers=self.admin_headers)
+        self.assertIsNone(apikeys.authenticate(keys['k7']))  # an inactive key still fails like a wrong one
+
+
+class DriverErrorDetailTests(AppTestCase):
+    def failing_runner(self, *args, **kwargs):
+        raise RuntimeError('no such column: internal_secret_col')
+
+    def test_saved_query_callers_other_than_admin_get_no_driver_detail(self):
+        self.save_query('q')
+        key = self.create_key('reporting', connections=['a'])
+        with mock.patch.dict(engine.RUNNERS, {'sqlite': self.failing_runner}):
+            scoped = self.client.get('/q/q', headers={'X-API-Key': key})
+            admin = self.client.get('/q/q', headers=self.admin_headers)
+            ad_hoc = self.client.post('/execute_sql', json={'sql': 'SELECT 1', 'connection_name': 'a'},
+                                      headers={'X-API-Key': key})
+        self.assertEqual((scoped.status_code, scoped.get_json()),
+                         (500, {'error': 'An error occurred while executing the SQL query'}))
+        self.assertEqual(admin.get_json()['detail'], 'no such column: internal_secret_col')
+        # /execute_sql's caller wrote the SQL, so it still needs the database's reason
+        self.assertEqual(ad_hoc.get_json()['detail'], 'no such column: internal_secret_col')
 
 
 class ConnectionScopingTests(AppTestCase):

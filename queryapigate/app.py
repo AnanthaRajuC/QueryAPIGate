@@ -51,6 +51,7 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
                     'api.metrics_endpoint'}
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint'}  # monitoring keeps working while a client is throttled
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
+SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
 
 
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
@@ -155,7 +156,16 @@ def create_app():
 
     @app.errorhandler(ApiError)
     def handle_api_error(error):
-        return jsonify({'error': error.message, **error.extra}), error.status
+        extra = error.extra
+        # A database's own error text can name tables, columns, constraints or even row values. A caller of a
+        # saved query didn't write its SQL and can't fix it, so a scoped key gets only the generic message;
+        # the full text is already in the server log (engine.execute_sql() logs it). The admin key - and
+        # /execute_sql, where the caller wrote the SQL and needs the reason - keep `detail`.
+        if 'detail' in extra and request.endpoint in SAVED_QUERY_ENDPOINTS:
+            permission = g.get('permission')
+            if permission is None or not permission.admin:
+                extra = {k: v for k, v in extra.items() if k != 'detail'}
+        return jsonify({'error': error.message, **extra}), error.status
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
@@ -316,6 +326,11 @@ def _connection_audit_changes(before, after):
 def get_json_body(required=True):
     data = request.get_json(silent=True)
     if data is None and not required:
+        # An optional body may be absent - but a body that was sent as JSON and fails to parse is a client
+        # error, not "no parameters": silently treating it as empty turns a typo into a misleading
+        # "<param> is required" (or, worse, a run with every parameter at its default).
+        if request.is_json and request.get_data(cache=True).strip():
+            raise ApiError('Request body is not valid JSON')
         return {}
     if not isinstance(data, dict):
         raise ApiError('Request body must be a JSON object')
@@ -548,7 +563,7 @@ def run_saved(ref, body, url_params):
     """Execute a saved query (latest version unless one is requested) and record the run - or, for one with
     a cache_ttl whose SQL is read-only, serve a cached response instead."""
     path = store.resolve_saved_file(ref)
-    content = store.load_versions(path)
+    content = store.load_versions(path, with_history=False)
     number, saved = store.select_version(content, get_int(request.args.get('version') or body.get('version'),
                                                             'version'))
     connection_name = request.args.get('connection_name') or body.get('connection_name') \
