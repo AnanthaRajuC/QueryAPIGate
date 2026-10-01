@@ -27,7 +27,7 @@ jobs:
       - if: matrix.python == '3.12'
         run: coverage xml
       - if: matrix.python == '3.12'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.xml
           # v4 needs the repository's upload token (Codecov -> the repo's Settings -> General, saved as the
