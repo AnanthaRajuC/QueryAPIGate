@@ -6,7 +6,9 @@ Cognito, Firebase, Keycloak or Azure AD (QUERYAPIGATE_JWT_JWKS_URL, RS256). Ever
 as themselves without anyone issuing them a key.
 
 **Verification** (authenticate()): the signature, against the secret or the provider's published keys (fetched
-from the JWKS URL and cached, refetched for an unknown key id); `exp` is required and checked, as are `nbf`/`iat`
+from the JWKS URL and cached; refetched for an unknown key id at most once per 30 seconds - PyJWT's own cooldown,
+so tokens with made-up key ids can't make this server hammer the provider; providers publish a new key well
+before signing with it, so a rotation is picked up in time); `exp` is required and checked, as are `nbf`/`iat`
 when present (30 s leeway for clock skew); `iss` and `aud` when configured - and with a JWKS URL they must be,
 see config.check_jwt_settings(). Only the configured algorithms are accepted, never `none`, and never an HMAC
 algorithm against a public key. Any failure is a plain 401, the same as a wrong API key - the caller learns
@@ -42,7 +44,7 @@ _jwks_lock = threading.Lock()
 
 def _jwks_client(url):
     """One cached PyJWKClient per URL: keys are fetched once and reused, and refetched only for a key id it hasn't
-    seen (a provider rotating its keys) - never per request."""
+    seen (a provider rotating its keys) - and then at most once per cooldown (PyJWT >= 2.14), never per request."""
     with _jwks_lock:
         client = _jwks_clients.get(url)
         if client is None:

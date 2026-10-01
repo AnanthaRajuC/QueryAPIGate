@@ -234,6 +234,7 @@ class JwksTests(unittest.TestCase):
         cls.keys = {'k1': rsa.generate_private_key(public_exponent=65537, key_size=2048),
                     'k2': rsa.generate_private_key(public_exponent=65537, key_size=2048)}
         cls.published = ['k1']
+        cls.fetches = 0
 
         def jwk(kid):
             numbers = cls.keys[kid].public_key().public_numbers()
@@ -244,6 +245,7 @@ class JwksTests(unittest.TestCase):
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
+                cls.fetches += 1
                 body = json.dumps({'keys': [jwk(kid) for kid in cls.published]}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -282,9 +284,20 @@ class JwksTests(unittest.TestCase):
         self.assertIsNone(jwtauth.verify(self.sign('k2')))
         type(self).published = ['k1', 'k2']  # the provider rotates a new key in
         try:
+            self.assertIsNone(jwtauth.verify(self.sign('k2')))  # within PyJWT's refetch cooldown: not fetched yet
+            jwtauth._jwks_client(self.url).cooldown_duration = 0  # ...the cooldown passes
             self.assertEqual(jwtauth.verify(self.sign('k2'))['sub'], 'alice')
         finally:
             type(self).published = ['k1']
+
+    def test_made_up_key_ids_cannot_make_the_server_hammer_the_provider(self):
+        self.assertEqual(jwtauth.verify(self.sign('k1'))['sub'], 'alice')  # keys fetched once
+        before = type(self).fetches
+        for i in range(20):
+            forged = token({'iss': 'https://login.example.com/', 'aud': 'queryapigate'}, key=self.keys['k2'],
+                           algorithm='RS256', headers={'kid': f'made-up-{i}'})
+            self.assertIsNone(jwtauth.verify(forged))
+        self.assertLessEqual(type(self).fetches - before, 1)
 
     def test_algorithm_confusion_is_refused(self):
         """An HMAC token "signed" with the provider's public key as its secret - the classic attack on servers that
