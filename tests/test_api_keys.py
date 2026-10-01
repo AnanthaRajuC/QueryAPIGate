@@ -808,13 +808,14 @@ class StartupWarningTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        with open(os.path.join(self.tmp.name, 'api_keys.json'), 'w') as f:
-            json.dump({'keys': {'x': {'hash': 'x', 'connections': '*', 'allow_writes': False,
-                                       'active': True, 'created_at': 'now'}}}, f)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        db.init_schema()
+        with db.transaction() as conn:
+            apikeys._upsert(conn, 'x', {'hash': 'x', 'connections': '*', 'allow_writes': False, 'active': True,
+                                        'created_at': 'now'})
 
     def test_warns_when_scoped_keys_exist_without_an_admin_key(self):
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:

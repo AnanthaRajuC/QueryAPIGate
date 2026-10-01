@@ -59,7 +59,7 @@ Behaviour is controlled by environment variables - see the table in the
 (`QUERYAPIGATE_HOME`, `QUERYAPIGATE_ALLOW_WRITES`, `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_MAX_PAGE_SIZE`, `QUERYAPIGATE_QUERY_TIMEOUT`,
 `QUERYAPIGATE_POOL_SIZE`, `QUERYAPIGATE_POOL_IDLE_TIMEOUT`, `QUERYAPIGATE_CORS_ORIGINS`, `QUERYAPIGATE_RATE_LIMIT`,
 `QUERYAPIGATE_TRUST_PROXY`, `QUERYAPIGATE_HOST`, `QUERYAPIGATE_PORT`, `QUERYAPIGATE_DEBUG`, `QUERYAPIGATE_H2_JAR`,
-`QUERYAPIGATE_REDIS_URL`).
+`QUERYAPIGATE_REDIS_URL`, `QUERYAPIGATE_DATABASE_URL`).
 
 ## Running in production
 
@@ -99,7 +99,7 @@ QUERYAPIGATE_REDIS_URL=redis://localhost:6379/0 queryapigate serve
 
 If Redis is briefly unreachable, a cached response is simply treated as a miss - the query still runs
 against the real database, it's just not served from cache for that one request. Nothing here changes the
-`--workers 1` recommendation above: that limit comes from the file-based connection/saved-query store, not
+`--workers 1` recommendation above: that limit comes from the per-process rate limiter and `/metrics`, not
 the cache, and is unaffected either way.
 
 An optional sidecar service for `docker-compose.yml`:
@@ -115,6 +115,42 @@ services:
     depends_on:
       - redis
 ~~~
+
+## Shared metadata store (PostgreSQL)
+
+Everything QueryAPIGate itself keeps - connections, saved queries and their run history, API keys, roles and the
+audit log - lives in `queryapigate.db`, a SQLite file in `QUERYAPIGATE_HOME`. That is the right default: nothing
+to install or run, and fast for a single server.
+
+Set `QUERYAPIGATE_DATABASE_URL` to keep all of it in a PostgreSQL database instead when you need:
+
+- **more than one instance** - every instance pointed at the same database serves the same connections, saved
+  queries and keys, and a key revoked through one is revoked on all of them at once;
+- **the store on a managed database** - backed up, replicated and failed over by your existing PostgreSQL
+  setup rather than by copying a file.
+
+~~~bash
+pip install "queryapigate[postgres]"
+export QUERYAPIGATE_DATABASE_URL=postgresql://queryapigate:secret@db.internal:5432/queryapigate
+queryapigate migrate-to-postgres   # once: copies this home's queryapigate.db across (optional)
+queryapigate serve
+~~~
+
+- The tables are created automatically on first start. Use a database (or schema) of its own: the account needs to
+  create tables there. To use a schema other than `public`, add `?options=-csearch_path%3Dmyschema` to the URL.
+- `migrate-to-postgres` copies everything in one transaction and only ever fills an **empty** database - it refuses,
+  changing nothing, if the target already holds data. `queryapigate.db` is opened read-only and left as it was;
+  `--from PATH` copies a different file.
+- Each process keeps one connection per worker thread, so plan PostgreSQL's `max_connections` for
+  `instances × workers × threads` (the Docker image: 1 worker × 8 threads per instance).
+- Run history writes skip the store-wide lock and don't wait for PostgreSQL's WAL flush (`synchronous_commit` off
+  for those writes only) - the same trade-off SQLite's default here makes: a crash of the database server can lose
+  the last few runs' history entries, never corrupt anything or lose a configuration change.
+- Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
+  PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
+
+What is **not** shared between instances yet: the rate limiter, `/metrics` and the live `GET /events` feed are
+still per process. Point every instance at the same `QUERYAPIGATE_REDIS_URL` to share the response cache too.
 
 ## Scheduled exports to a file
 

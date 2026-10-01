@@ -15,6 +15,7 @@ import duckdb
 from queryapigate import config, create_app, db, engine, metrics, pool, runners, schema, sqltools, store
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
+from tests import TEST_DATABASE_URL
 from tests.helpers import write_connections
 
 
@@ -341,6 +342,7 @@ class ConnectionTests(ApiTestCase):
         self.assertNotEqual(stored['created_at'], '2000-01-01 00:00:00')
 
 
+@unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files are deliberately never imported into Postgres')
 class LegacyConnectionsImportTests(unittest.TestCase):
     """A still-present db_connections.json (an upgrade from before the SQLite store existed, or a
     read-only seed file like the docker-compose demo's) must still be picked up on first boot - the exact
@@ -391,6 +393,25 @@ class LegacyConnectionsImportTests(unittest.TestCase):
         self.assertNotIn('from_json', conns)
 
 
+@unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
+class LegacyFilesIgnoredOnPostgresTests(unittest.TestCase):
+    """Legacy JSON files are never deleted after their one-time import into queryapigate.db, so an old home
+    still holds a stale copy. On Postgres they must be ignored - its data arrives through
+    `queryapigate migrate-to-postgres`, from queryapigate.db, never from these."""
+
+    def test_stale_legacy_files_are_not_imported(self):
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):
+            with open(os.path.join(home, 'db_connections.json'), 'w') as f:
+                json.dump({'connections': {'stale': {'db': 'sqlite', 'database': 'x.db', 'active': True}}}, f)
+            with open(os.path.join(home, 'api_keys.json'), 'w') as f:
+                json.dump({'keys': {'stale': {'hash': 'h', 'connections': '*', 'created_at': 'now'}}}, f)
+            create_app()
+            self.assertEqual(store.read_connections(), {})
+            self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM api_keys').fetchone()[0], 0)
+            db.close()
+
+
+@unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files are deliberately never imported into Postgres')
 class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
     """Same first-boot bootstrap as LegacyConnectionsImportTests above, for the three files Phase 2 of the
     SQLite migration (BACKLOG #53) moved: api_keys.json, roles.json, audit_log.json."""

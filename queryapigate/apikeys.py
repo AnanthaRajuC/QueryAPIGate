@@ -716,8 +716,9 @@ def authenticate(supplied, client_ip=None):
 def import_legacy_keys_if_empty():
     """First-boot bootstrap for api_keys.json, the same shape as store.py's own
     import_legacy_connections_if_empty(): only runs while api_keys is completely empty, reads the legacy
-    file directly, and never touches or deletes it afterward."""
-    if db.connection().execute('SELECT 1 FROM api_keys LIMIT 1').fetchone() is not None:
+    file directly, and never touches or deletes it afterward. Skipped on Postgres - see
+    store.import_legacy_data_if_empty()."""
+    if db.is_postgres() or db.connection().execute('SELECT 1 FROM api_keys LIMIT 1').fetchone() is not None:
         return
     try:
         with open(config.api_keys_file(), 'r') as f:
@@ -732,7 +733,7 @@ def import_legacy_keys_if_empty():
 
 def import_legacy_roles_if_empty():
     """Same bootstrap shape as import_legacy_keys_if_empty(), for roles.json/roles."""
-    if db.connection().execute('SELECT 1 FROM roles LIMIT 1').fetchone() is not None:
+    if db.is_postgres() or db.connection().execute('SELECT 1 FROM roles LIMIT 1').fetchone() is not None:
         return
     try:
         with open(config.roles_file(), 'r') as f:

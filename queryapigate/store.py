@@ -9,7 +9,6 @@ filesystem path.
 import json
 import os
 import re
-import sqlite3
 import threading
 import uuid
 from datetime import datetime
@@ -58,7 +57,7 @@ def record_audit(actor, action, target, changes=None):
                     SELECT rowid FROM audit_log ORDER BY timestamp DESC, rowid DESC LIMIT -1 OFFSET ?
                 )
             """, (config.audit_log_limit(),))
-    except (OSError, sqlite3.Error):
+    except (OSError, *db.Error):
         pass
     export_path = config.audit_log_export_file()
     if export_path is not None:
@@ -606,7 +605,7 @@ def record_execution(path, version, entry):
     record_audit() makes."""
     name = path
     try:
-        with db.transaction() as conn:
+        with db.transaction(append_only=True) as conn:
             exists = conn.execute(
                 'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
                 (name, version)).fetchone()
@@ -615,15 +614,21 @@ def record_execution(path, version, entry):
             conn.execute(
                 'INSERT INTO execution_history (query_name, version, executed_at, entry_json) VALUES (?, ?, ?, ?)',
                 (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
-            # keep only the newest HISTORY_LIMIT rows for this version - same "keep last N" cap
-            # config.HISTORY_LIMIT always meant, now enforced per-insert instead of on a whole-file rewrite.
+    except (OSError, ApiError, *db.Error):
+        return
+    # Keep only the newest HISTORY_LIMIT rows for this version - same "keep last N" cap config.HISTORY_LIMIT
+    # always meant, enforced per insert. Its own transaction, after the run is safely recorded: on Postgres two
+    # concurrent trims of the same version can contend for the same rows, and losing that race must never
+    # cost the run its history row. A trim that loses is harmless - the next run's trim catches up.
+    try:
+        with db.transaction(append_only=True) as conn:
             conn.execute("""
                 DELETE FROM execution_history WHERE rowid IN (
                     SELECT rowid FROM execution_history WHERE query_name = ? AND version = ?
                     ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
                 )
             """, (name, version, config.HISTORY_LIMIT))
-    except (OSError, ApiError, sqlite3.Error):
+    except (OSError, ApiError, *db.Error):
         pass
 
 
@@ -705,7 +710,13 @@ def import_legacy_data_if_empty():
     bootstrap this module owns, so every caller only needs to remember one name. apikeys.py's own
     import_legacy_keys_if_empty()/import_legacy_roles_if_empty() are called separately by the same
     callers - store.py cannot import apikeys here without creating an import cycle (apikeys.py already
-    imports store)."""
+    imports store).
+
+    Skipped entirely on Postgres: those legacy files predate SQLite and are never deleted after import, so an
+    old home folder still holds a stale copy - data reaches Postgres from queryapigate.db, through
+    `queryapigate migrate-to-postgres`, never from them."""
+    if db.is_postgres():
+        return
     import_legacy_connections_if_empty()
     import_legacy_saved_queries_if_empty()
     import_legacy_audit_log_if_empty()

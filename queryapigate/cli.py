@@ -1,4 +1,5 @@
-"""Command line entry point: ``queryapigate serve``, ``init``, ``export`` and ``collection export|import``."""
+"""Command line entry point: ``queryapigate serve``, ``init``, ``migrate-to-postgres``, ``export`` and
+``collection export|import``."""
 import argparse
 import json
 import logging
@@ -23,7 +24,7 @@ def _serve(args):
         logging.getLogger('queryapigate').warning(
             'Listening on %s without QUERYAPIGATE_API_KEY set: anyone who can reach this port can run SQL '
             'on your active connections.', args.host)
-    logging.getLogger('queryapigate').info('Using %s (connections: %s)', config.home(), config.connections_file().name)
+    logging.getLogger('queryapigate').info('Using %s (metadata: %s)', config.home(), db.describe())
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0
 
@@ -50,6 +51,23 @@ def _mcp(args):
     return 0
 
 
+def _migrate_to_postgres(args):
+    """`queryapigate migrate-to-postgres`: copy this home's queryapigate.db into the PostgreSQL database
+    QUERYAPIGATE_DATABASE_URL names - see db.migrate_sqlite_to_postgres()."""
+    source = args.source or str(config.db_file())
+    try:
+        copied = db.migrate_sqlite_to_postgres(source)
+    except ValueError as error:
+        print(f'queryapigate: {error}', file=sys.stderr)
+        return 2
+    print(f'Copied {source} into {db.describe()}:')
+    for table, count in copied.items():
+        print(f'  {table}: {count}')
+    print(f'{source} was not changed. Keep QUERYAPIGATE_DATABASE_URL set from now on - every instance that '
+          'shares it shares these connections, saved queries and keys.')
+    return 0
+
+
 def _init(args):
     """Scaffold a fresh home: just queryapigate.db (with the example connection templates seeded in, all
     inactive) now that connections are SQLite-backed - no more db_connections.json/saved_sql/ for a new
@@ -60,10 +78,10 @@ def _init(args):
     home = config.home()
     home.mkdir(parents=True, exist_ok=True)
     if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
-        print(f'{config.db_file()} already has connections - left untouched')
+        print(f'{db.describe()} already has connections - left untouched')
         return 0
     store.update_connections(config.EXAMPLE_CONNECTIONS['connections'])
-    print(f'Created {config.db_file()}\nEdit it (queryapigate serve, then the admin UI, or PATCH /connections) - '
+    print(f'Created {db.describe()}\nEdit it (queryapigate serve, then the admin UI, or PATCH /connections) - '
           'set "active": true on the connections you want, then run: queryapigate serve')
     return 0
 
@@ -302,6 +320,14 @@ def build_parser():
     init = commands.add_parser('init', help='create db_connections.json and saved_sql/ in the home folder')
     init.set_defaults(func=_init)
 
+    migrate = commands.add_parser('migrate-to-postgres',
+                                  help='copy queryapigate.db (connections, saved queries and their history, '
+                                       'API keys, roles, audit log) into the empty PostgreSQL database '
+                                       'QUERYAPIGATE_DATABASE_URL names')
+    migrate.add_argument('--from', dest='source', metavar='PATH',
+                         help='the queryapigate.db to copy (default: the one in the home folder)')
+    migrate.set_defaults(func=_migrate_to_postgres)
+
     export = commands.add_parser('export', help='run a saved query and write the full result to a file '
                                                '(for cron/systemd/Kubernetes CronJob, not a scheduler itself)')
     export.add_argument('query', help='saved query name (as used in a GET /q/<name> request)')
@@ -372,7 +398,15 @@ def main(argv=None):
         args = parser.parse_args(['serve', *(argv or [])])
     if getattr(args, 'home', None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
-    db.init_schema()
+    try:
+        config.check_database_url()
+        db.init_schema()
+    except ValueError as error:
+        print(f'queryapigate: {error}', file=sys.stderr)
+        return 2
+    except db.Error as error:  # e.g. QUERYAPIGATE_DATABASE_URL names a server that isn't reachable
+        print(f'queryapigate: cannot open the metadata database {db.describe()}: {error}'.rstrip(), file=sys.stderr)
+        return 2
     store.import_legacy_data_if_empty()
     apikeys.import_legacy_keys_if_empty()
     apikeys.import_legacy_roles_if_empty()
