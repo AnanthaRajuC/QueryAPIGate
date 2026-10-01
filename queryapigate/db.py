@@ -29,7 +29,7 @@ from . import config
 SCHEMA_VERSION = 2
 
 _local = threading.local()
-_inherited = []  # connections a forked child must neither use nor close - see connection()
+_inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
