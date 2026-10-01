@@ -502,8 +502,9 @@ class RenameTests(AppTestCase):
         every one of them back, so a partial move (the old "half done" state this test used to assert)
         can no longer happen at all. Injects the failure on the *second* UPDATE inside the transaction -
         proving the first row's change is undone too, not just that the second one never landed.
-        sqlite3.Connection is a C type (its methods can't be monkeypatched directly), so this wraps it in a
-        thin proxy instead - transparent for everything except the one statement being made flaky."""
+        A database connection's methods can't be monkeypatched directly (sqlite3.Connection is a C type), so
+        this wraps it in a thin proxy instead - transparent for everything except the one statement being made
+        flaky, and backend-neutral, so it proves the same rollback on SQLite and Postgres."""
         real_conn = db.connection()
 
         class FlakyConn:
@@ -513,14 +514,14 @@ class RenameTests(AppTestCase):
                 if sql.strip().startswith('UPDATE saved_queries SET collection'):
                     FlakyConn.calls += 1
                     if FlakyConn.calls == 2:
-                        raise sqlite3.OperationalError('interrupted')
+                        raise ConnectionError('interrupted')
                 return real_conn.execute(sql, *args, **kwargs)
 
             def __getattr__(self, attr):
                 return getattr(real_conn, attr)
 
         with mock.patch.object(db, 'connection', return_value=FlakyConn()):
-            with self.assertRaises(sqlite3.OperationalError):
+            with self.assertRaises(ConnectionError):
                 collection_admin.rename_collection('old', 'new')
         self.assertEqual(store.collection_members(), {'old': ['q1', 'q2'], 'keep': ['q3']})  # nothing moved
         self.assertEqual(self._reach(), [200, 200])  # and the key still reaches both

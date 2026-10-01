@@ -266,6 +266,7 @@ def check_settings():
             raise ValueError('QUERYAPIGATE_SECRET_KEY must be a valid Fernet key - 32 url-safe base64-encoded '
                              'bytes, e.g. from `python -c "from cryptography.fernet import Fernet; '
                              'print(Fernet.generate_key().decode())"`') from None
+    check_database_url()
     raw = os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip()
     if raw:
         if not _REDIS_SCHEME_RE.match(raw):
@@ -286,6 +287,31 @@ def secret_key():
 
 
 _REDIS_SCHEME_RE = re.compile(r'^(rediss?|unix)://', re.I)
+_POSTGRES_SCHEME_RE = re.compile(r'^postgres(ql)?://', re.I)
+
+
+def check_database_url():
+    """Part of check_settings(), callable on its own: the CLI opens the store (db.init_schema()) before any
+    command runs, so a malformed QUERYAPIGATE_DATABASE_URL must be reported there, not as a driver traceback."""
+    raw = os.environ.get('QUERYAPIGATE_DATABASE_URL', '').strip()
+    if not raw:
+        return
+    if not _POSTGRES_SCHEME_RE.match(raw):
+        raise ValueError("QUERYAPIGATE_DATABASE_URL must start with postgres:// or postgresql://, not "
+                         f"'{raw.split('://')[0]}://' - leave it unset to keep queryapigate.db (SQLite)")
+    try:
+        import psycopg2  # noqa: F401
+    except ImportError:
+        raise ValueError('QUERYAPIGATE_DATABASE_URL is set but the "psycopg2" package is not installed - '
+                         'run `pip install "queryapigate[postgres]"`') from None
+
+
+def database_url():
+    """QUERYAPIGATE_DATABASE_URL: keep connections, saved queries, API keys, roles, run history and the audit
+    log in this PostgreSQL database instead of queryapigate.db in the home folder - so several instances
+    behind a load balancer can share them (see db.py). None (the default) keeps SQLite. Validated as a
+    postgres:// URL, and that psycopg2 is installed, at startup by check_settings()."""
+    return os.environ.get('QUERYAPIGATE_DATABASE_URL', '').strip() or None
 
 
 def redis_url():
@@ -297,7 +323,7 @@ def redis_url():
     return os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip() or None
 
 
-def redact_redis_url(url):
+def redact_url(url):
     """`url` with any password hidden, for safe logging and the Settings panel - same spirit as
     store.mask_passwords() for a connection's own password."""
     from urllib.parse import urlsplit, urlunsplit
@@ -306,6 +332,9 @@ def redact_redis_url(url):
         return url
     netloc = parts.netloc.replace(parts.password, PASSWORD_MASK, 1)
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+redact_redis_url = redact_url
 
 
 def max_page_size():
@@ -388,7 +417,13 @@ def describe_settings():
         {'id': 'general', 'title': 'General',
          'description': 'Where this server keeps its files and what it loads at startup.', 'rows': [
             row('Home directory', 'Folder holding queryapigate.db (connections, saved queries, API keys, '
-                'roles and the audit log).', 'QUERYAPIGATE_HOME', str(home())),
+                'roles and the audit log), unless a metadata database is set below.', 'QUERYAPIGATE_HOME',
+                str(home())),
+            row('Metadata database', 'Where connections, saved queries, API keys, roles, run history and the '
+                'audit log are kept: queryapigate.db in the home directory (default), or a shared PostgreSQL '
+                'database so several instances can run side by side.', 'QUERYAPIGATE_DATABASE_URL',
+                'SQLite (queryapigate.db)' if database_url() is None
+                else f'PostgreSQL ({redact_url(database_url())})', secret=True),
             row('Load examples', 'Load the example APIs at startup. Idempotent.',
                 'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples())),
             row('H2 driver', 'JAR used for h2 connections.', 'QUERYAPIGATE_H2_JAR',

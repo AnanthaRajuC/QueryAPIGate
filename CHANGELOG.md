@@ -21,6 +21,22 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+### Added
+- **PostgreSQL as an optional metadata store** (`QUERYAPIGATE_DATABASE_URL=postgresql://...`). Connections, saved
+  queries and their run history, API keys, roles and the audit log can live in a PostgreSQL database instead of
+  `queryapigate.db`, so several instances can share one store - a key created or revoked through one is
+  live on all of them at once. Unset (the default) keeps SQLite exactly as before. Needs
+  `queryapigate[postgres]` (already in the Docker image). Tables are created on first start; writes that read
+  before they modify are serialised with an advisory lock, giving the same guarantees SQLite's single write
+  lock did. Legacy pre-SQLite JSON files are never imported into PostgreSQL.
+- **`queryapigate migrate-to-postgres`** copies an existing `queryapigate.db` into the (empty) PostgreSQL
+  database in one transaction, keeping history and audit-log order; it refuses, changing nothing, if the target
+  already has data. `--from PATH` names another file. The server logs a hint at startup when PostgreSQL is
+  empty but the home folder still holds a `queryapigate.db` with data.
+- The admin UI's **Settings** screen shows which metadata store is in use (password masked).
+- CI runs the whole test suite a second time against PostgreSQL (`QUERYAPIGATE_TEST_DATABASE_URL`, see
+  `tests/__init__.py`).
+
 ### Changed
 - **Saved-query calls by a scoped key no longer receive the database's own error text.** A failed
   `GET`/`POST /q/<name>` (or `/execute_sql_from_file`) made with any key other than the admin key now returns
@@ -39,6 +55,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   parameter, instead of a 500 raised from inside the database driver.
 
 ### Performance
+- **Recording a run's history no longer holds the store's write lock while it trims older entries** - the
+  insert and the trim are separate transactions. On PostgreSQL, history writes also skip the store-wide lock
+  and the WAL flush wait (the durability SQLite's `synchronous=NORMAL` already gives), so concurrent runs
+  across workers and instances don't queue behind one another.
 - **API-key authentication is one indexed lookup**, no longer a scan of every stored key: per-request cost
   stayed flat as keys were added (measured: 64 ms per request with 10,000 keys before, unaffected after).
 - **Running a saved query no longer loads its execution history** (up to 50 rows per version, each

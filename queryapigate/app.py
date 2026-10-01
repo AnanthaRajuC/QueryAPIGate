@@ -126,6 +126,13 @@ def create_app():
         log.info('Response cache: Redis (%s)', config.redact_redis_url(redis_url))
     else:
         app.extensions['queryapigate_cache'] = cache.ResponseCache()
+    if db.is_postgres():
+        log.info('Metadata store: %s', db.describe())
+        if config.db_file().exists() and db.connection().execute(
+                'SELECT 1 FROM connections LIMIT 1').fetchone() is None:
+            log.warning('%s holds this home\'s connections, saved queries and keys, but the PostgreSQL metadata '
+                        'database is empty - run `queryapigate migrate-to-postgres` to copy them across.',
+                        config.db_file())
     if config.cors_origins() == '*' and not config.api_key():
         log.warning('QUERYAPIGATE_CORS_ORIGINS=* without QUERYAPIGATE_API_KEY: any website a user visits can call '
                     'this API from their browser and reach every active connection. Set an API key or list the '

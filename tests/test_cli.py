@@ -10,7 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest import mock
 
-from queryapigate import cli, config
+from queryapigate import cli, config, store
 from tests.helpers import write_connections
 
 
@@ -31,18 +31,14 @@ class ExportTests(unittest.TestCase):
         for name in ('QUERYAPIGATE_STREAM_MAX_ROWS', 'QUERYAPIGATE_QUERY_TIMEOUT', 'QUERYAPIGATE_AUDIT_LOG_LIMIT'):
             os.environ.pop(name, None)
         self._write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
-        os.makedirs(os.path.join(self.home, 'saved_sql'))
         self.save('all_rows', 'SELECT id, name FROM t ORDER BY id', connection_name='lite')
 
     def _write_connections(self, connections):
         write_connections(connections)
 
     def save(self, filename, sql, connection_name=None, query_parameters=None):
-        entry = {'1': {'sql_query': sql, 'author': 'a', 'description': 'd', 'connection_name': connection_name,
-                       'query_parameters': query_parameters, 'status': 'active', 'version': 1,
-                       'execution_history': []}}
-        with open(os.path.join(self.home, 'saved_sql', f'{filename}.json'), 'w') as f:
-            json.dump(entry, f)
+        store.save_version(filename, {'sql_query': sql, 'author': 'a', 'description': 'd',
+                                      'connection_name': connection_name, 'query_parameters': query_parameters})
 
     def run_cli(self, argv):
         out, err = io.StringIO(), io.StringIO()

@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import create_app
+from queryapigate import config, create_app
+from tests import TEST_DATABASE_URL
 
 
 class SettingsTests(unittest.TestCase):
@@ -33,7 +34,10 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 22)
+        self.assertEqual(len(rows), 23)
+        if not TEST_DATABASE_URL:  # a suite run against Postgres (tests/__init__.py) reports that backend here
+            self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'], 'SQLite (queryapigate.db)')
+            self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['source'], 'default')
         self.assertEqual(rows['']['label'], 'Live updates')  # GET /events (BACKLOG #43) has no env var of its own
         self.assertEqual(rows['QUERYAPIGATE_HOME']['source'], 'env')
         self.assertEqual(rows['QUERYAPIGATE_HOME']['value'], os.path.realpath(self.tmp.name))
@@ -75,6 +79,17 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(rows['QUERYAPIGATE_SECRET_KEY']['value'], 'enabled')
         self.assertIsNone(rows['QUERYAPIGATE_API_KEY']['env_value'])
         self.assertIsNone(rows['QUERYAPIGATE_SECRET_KEY']['env_value'])
+
+    def test_metadata_database_url_password_is_masked(self):
+        url = 'postgresql://qag:s3cret-pw@db.internal:5432/meta'
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATABASE_URL': url}), \
+                mock.patch.object(config, 'database_url', return_value=url):
+            res = self.client.get('/settings', headers=self.admin)
+        rows = {row['env']: row for section in res.get_json()['sections'] for row in section['rows']}
+        self.assertNotIn('s3cret-pw', res.get_data(as_text=True))
+        self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'],
+                         'PostgreSQL (postgresql://qag:********@db.internal:5432/meta)')
+        self.assertIsNone(rows['QUERYAPIGATE_DATABASE_URL']['env_value'])  # never offered for "copy as .env"
 
 
 class McpStatusEndpointTests(unittest.TestCase):

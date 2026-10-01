@@ -222,15 +222,37 @@ See [Shared response cache](INSTALLATION_AND_SETUP.md#shared-response-cache-redi
 Redis outage degrades to a cache miss, never a failed request) and browse what's actually cached from the
 admin UI's **Caching** tab.
 
+## 8. Shared metadata store (optional)
+
+By default connections, saved queries, keys, roles, history and the audit log live in `queryapigate.db` on the
+`/data` volume - see section 5 for backing it up. To keep them in PostgreSQL instead (a managed database you
+already back up, or a store several instances share), add to `.env`:
+
+~~~bash
+# .env
+QUERYAPIGATE_DATABASE_URL=postgresql://queryapigate:<password>@db.internal:5432/queryapigate
+~~~
+
+then copy the existing store across once, before switching traffic:
+
+~~~bash
+docker compose run --rm queryapigate queryapigate migrate-to-postgres
+~~~
+
+The image already includes the PostgreSQL driver. See
+[Shared metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql) for what it changes and what
+it doesn't.
+
 ## Why one worker (not a replica count)
 
 The image runs gunicorn with **one worker** on purpose, and that's not a knob to turn up for more capacity.
 The rate limiter and `/metrics` are per-process, in-memory state with no cross-worker or cross-replica
 aggregation - two workers (or two containers) would each enforce rate limits and count metrics
-independently, silently doubling effective limits and splitting the numbers Grafana shows. Every *durable*
-store (`queryapigate.db`) is safe to read concurrently, but nothing here makes a second full instance a
-horizontal-scaling story: two replicas each with their own `/data` volume are two independent servers with
-their own connections, keys and audit log, not one logical service.
+independently, silently doubling effective limits and splitting the numbers Grafana shows. With the default
+store, two replicas each with their own `/data` volume are also two independent servers with their own
+connections, keys and audit log, not one logical service. A [shared metadata store](#8-shared-metadata-store-optional)
+fixes that part - replicas pointed at one PostgreSQL database share connections, saved queries and keys - but
+rate limits, `/metrics` and the live events feed stay per process until they get a shared backend too.
 
 For more headroom on one instance, raise `--threads` (`gthread` already lets a slow request - a large
 export, a slow query - not block every other connection) or give the container more CPU. The image's `CMD`
