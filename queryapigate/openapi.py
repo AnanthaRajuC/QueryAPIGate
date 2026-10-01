@@ -507,6 +507,25 @@ def build_spec(version, saved_queries=None):
                 'summary': 'A durable record of administrative changes - API keys, roles, connections and '
                            'saved queries created, changed or removed (admin only)', 'tags': ['API keys'],
                 'responses': {'200': {'description': 'Newest entry first, capped at 500 entries'}, **_ERRORS}}},
+            '/history': {'get': {
+                'summary': 'Every stored saved-query run, newest first and paged - for looking past the newest '
+                           'runs per version that /list_files shows (admin only)', 'tags': ['Saved queries'],
+                'parameters': [
+                    {'name': 'query', 'in': 'query', 'schema': {'type': 'string'}, 'description': 'Saved query name'},
+                    {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'}},
+                    {'name': 'status', 'in': 'query', 'schema': {'type': 'string', 'enum': ['success', 'error']}},
+                    {'name': 'key', 'in': 'query', 'schema': {'type': 'string'},
+                     'description': 'API key name (admin for the admin key)'},
+                    {'name': 'since', 'in': 'query', 'schema': {'type': 'string'},
+                     'description': 'YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, inclusive'},
+                    {'name': 'until', 'in': 'query', 'schema': {'type': 'string'},
+                     'description': 'YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, exclusive'},
+                    {'name': 'limit', 'in': 'query',
+                     'schema': {'type': 'integer', 'minimum': 1, 'maximum': 1000, 'default': 100}},
+                    {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'},
+                     'description': "The previous page's next"}],
+                'responses': {'200': {'description': 'One page of runs, and the cursor for the next (null on the '
+                                                     'last page)'}, **_ERRORS}}},
             '/settings': {'get': {
                 'summary': "The server's own configuration: each setting's effective value and whether it comes "
                            'from the environment or is the default (admin only, read-only; secrets are reported '

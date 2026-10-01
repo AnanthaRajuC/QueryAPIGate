@@ -1,5 +1,6 @@
 """Runtime configuration, read from environment variables at call time."""
 import functools
+import math
 import os
 import re
 from pathlib import Path
@@ -7,7 +8,8 @@ from pathlib import Path
 SUPPORTED_DB_TYPES = ('mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'jdbc', 'duckdb', 'mongo')
 PASSWORD_MASK = '********'
 CONNECT_TIMEOUT = 10  # seconds
-HISTORY_LIMIT = 50  # executions remembered per saved-query version
+HISTORY_LIMIT = 50  # executions remembered per saved-query version (QUERYAPIGATE_HISTORY_LIMIT)
+DEFAULT_HISTORY_FLUSH_INTERVAL = 1.0  # seconds between batched history writes
 AUDIT_LOG_LIMIT = 500  # administrative-action entries remembered across the whole server
 DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
 DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
@@ -99,6 +101,36 @@ def audit_log_limit():
     (check_settings()), the same "fail loudly on a typo" treatment stream_max_rows() gets."""
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_LIMIT', '').strip()
     return int(raw) if raw else AUDIT_LOG_LIMIT
+
+
+def history_limit():
+    """Runs kept per saved-query version (QUERYAPIGATE_HISTORY_LIMIT), default HISTORY_LIMIT (50) - and, whatever
+    the retention, how many of a version's newest runs list endpoints and the admin UI are given (the full
+    history is paged through GET /history). Validated at startup by check_settings()."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_LIMIT', '').strip()
+    return int(raw) if raw else HISTORY_LIMIT
+
+
+def history_retention_days():
+    """QUERYAPIGATE_HISTORY_RETENTION_DAYS: keep every run for this many days instead of only each version's newest
+    history_limit() runs - for watching API behaviour over time, best on a PostgreSQL store. None (the
+    default) keeps the per-version cap. Validated at startup by check_settings()."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_RETENTION_DAYS', '').strip()
+    return int(raw) if raw else None
+
+
+def history_sample_rate():
+    """QUERYAPIGATE_HISTORY_SAMPLE_RATE: the fraction (0 < rate <= 1) of *successful* runs written to history;
+    failed runs are always written, since those are the ones worth looking into. Default 1 (every run)."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_SAMPLE_RATE', '').strip()
+    return float(raw) if raw else 1.0
+
+
+def history_flush_interval():
+    """QUERYAPIGATE_HISTORY_FLUSH_INTERVAL: seconds between batched history writes (history.py). 0 writes each
+    run's entry inside its own request instead, as before batching existed. Default 1."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_FLUSH_INTERVAL', '').strip()
+    return float(raw) if raw else DEFAULT_HISTORY_FLUSH_INTERVAL
 
 
 def audit_log_export_file():
@@ -247,6 +279,18 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_LIMIT', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_AUDIT_LOG_LIMIT must be a positive integer')
+    for name in ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS'):
+        raw = os.environ.get(name, '').strip()
+        if raw and (not raw.isdigit() or int(raw) < 1):
+            raise ValueError(f'{name} must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_SAMPLE_RATE', '').strip()
+    if raw and not _number_in(raw, lambda v: 0 < v <= 1):
+        raise ValueError('QUERYAPIGATE_HISTORY_SAMPLE_RATE must be a number above 0 and at most 1, e.g. 0.1 '
+                         'to record one successful run in ten (failed runs are always recorded)')
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_FLUSH_INTERVAL', '').strip()
+    if raw and not _number_in(raw, lambda v: 0 <= v <= 60):
+        raise ValueError('QUERYAPIGATE_HISTORY_FLUSH_INTERVAL must be a number of seconds from 0 to 60 '
+                         '(0 writes each run inside its own request)')
     raw = os.environ.get('QUERYAPIGATE_MCP_PORT', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_PORT must be a positive integer')
@@ -288,6 +332,14 @@ def secret_key():
 
 _REDIS_SCHEME_RE = re.compile(r'^(rediss?|unix)://', re.I)
 _POSTGRES_SCHEME_RE = re.compile(r'^postgres(ql)?://', re.I)
+
+
+def _number_in(raw, accept):
+    try:
+        value = float(raw)
+    except ValueError:
+        return False
+    return math.isfinite(value) and accept(value)
 
 
 def check_database_url():
@@ -469,6 +521,18 @@ def describe_settings():
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
+        {'id': 'history', 'title': 'Run history',
+         'description': 'What each saved-query run leaves behind in its history, and for how long. Lists and the '
+             'admin UI always show a version\'s newest runs; GET /history pages through everything kept.', 'rows': [
+            row('History limit', 'Runs kept per saved-query version - unless a retention period is set - and how '
+                'many of the newest each list shows.', 'QUERYAPIGATE_HISTORY_LIMIT', f'{history_limit()} runs'),
+            row('History retention', 'Keep every run for this many days instead of a per-version count. Best '
+                'with a PostgreSQL metadata store.', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS',
+                'per-version limit' if history_retention_days() is None else f'{history_retention_days()} days'),
+            row('Sample rate', 'Fraction of successful runs recorded; failed runs are always recorded.',
+                'QUERYAPIGATE_HISTORY_SAMPLE_RATE', f'{history_sample_rate():g}'),
+            row('Flush interval', 'Seconds between batched history writes; 0 writes inside each request.',
+                'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL', _seconds(history_flush_interval()))]},
         {'id': 'cache', 'title': 'Response cache & live updates',
          'description': 'Where cache_ttl-carrying saved queries store their cached responses, and how the '
              'admin UI\'s Home tab is notified of new query runs.', 'rows': [

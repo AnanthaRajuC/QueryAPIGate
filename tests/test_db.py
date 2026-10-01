@@ -269,9 +269,9 @@ class PostgresDbTests(unittest.TestCase):
         self.assertEqual(parent.execute('SELECT 1').fetchone()[0], 1)  # the parent's is still usable
 
     def test_concurrent_history_writes_are_all_recorded_then_trimmed(self):
-        """record_execution() skips the store-wide lock on Postgres (transaction(append_only=True)): every
-        concurrent run must still land, and the per-version cap must still hold afterwards."""
-        from queryapigate import store
+        """Runs recorded from many threads at once (queued, then batched by history.py, whose writes skip the
+        store-wide lock on Postgres) must all land, and the per-version cap must still hold afterwards."""
+        from queryapigate import history, store
         store.save_version('q', {'sql_query': 'SELECT 1', 'author': 'a', 'description': 'd'})
         home = os.environ['QUERYAPIGATE_HOME']
         start = threading.Barrier(8)
@@ -293,10 +293,12 @@ class PostgresDbTests(unittest.TestCase):
                 t.start()
             for t in threads:
                 t.join()
+            history.flush()
         self.assertEqual(errors, [])
         count = 'SELECT COUNT(*) FROM execution_history'
         self.assertEqual(db.connection().execute(count).fetchone()[0], 160)
         store.record_execution('q', 1, {'executed_at': '2026-01-02 00:00:00'})  # the cap applies again
+        history.flush()
         self.assertEqual(db.connection().execute(count).fetchone()[0], config.HISTORY_LIMIT)
 
     def test_init_schema_is_safe_to_run_concurrently(self):
@@ -385,6 +387,8 @@ class MigrateToPostgresTests(unittest.TestCase):
         self.assertEqual((copied['saved_queries'], copied['api_keys'], copied['roles'], copied['execution_history']),
                          (2, 1, 1, 3))
         self.assertEqual(self.snapshot(), self.snapshot_sqlite)  # history order, audit order, keys - all alike
+        self.assertEqual(db.connection().execute(  # and the filterable copies of each run's status and caller
+            "SELECT COUNT(*) FROM execution_history WHERE status = 'success' AND key_name = 'admin'").fetchone()[0], 3)
         self.assertEqual((os.path.getmtime(self.sqlite_path), os.path.getsize(self.sqlite_path)), before)
 
     def test_refuses_to_fill_a_store_that_already_has_data(self):

@@ -27,6 +27,7 @@ _active_queries = 0                     # queries currently executing (paged or 
 _rate_limit_rejections = 0
 _cache_hits = 0                         # responses served from cache.ResponseCache/rediscache.RedisResponseCache
 _cache_misses = 0
+_history_runs: dict[tuple, int] = {}  # (outcome,) -> runs: recorded / sampled_out / dropped / failed
 
 
 def _bucket_index(elapsed):
@@ -116,6 +117,11 @@ def inc_cache_hit():
         _cache_hits += 1
 
 
+def inc_history(outcome, count=1):
+    with _lock:
+        _history_runs[(outcome,)] = _history_runs.get((outcome,), 0) + count
+
+
 def inc_cache_miss():
     global _cache_misses
     with _lock:
@@ -200,6 +206,7 @@ def render(cache=None):
         rejections = _rate_limit_rejections
         cache_hits = _cache_hits
         cache_misses = _cache_misses
+        history_runs = dict(_history_runs)
 
     lines = []
     _render_counter(lines, 'queryapigate_requests_total', 'Total HTTP requests.',
@@ -217,6 +224,15 @@ def render(cache=None):
     _render_histogram(lines, 'queryapigate_serialization_duration_seconds',
                       'Response body serialization latency in seconds, by output format (paged responses only).',
                       ('format',), serialization_hist, serialization_sum)
+
+    _render_counter(lines, 'queryapigate_history_runs_total',
+                    'Saved-query runs by what happened to their history entry: recorded, sampled_out (not kept '
+                    'by QUERYAPIGATE_HISTORY_SAMPLE_RATE), dropped (the write queue was full) or failed (the '
+                    'write itself failed).', ('outcome',), history_runs)
+    from . import history  # imported here: history imports this module
+    lines.append('# HELP queryapigate_history_pending Saved-query runs queued for the next batched history write.')
+    lines.append('# TYPE queryapigate_history_pending gauge')
+    lines.append(f'queryapigate_history_pending {history.pending_count()}')
 
     lines.append('# HELP queryapigate_active_queries SQL queries currently executing (paged or mid-stream).')
     lines.append('# TYPE queryapigate_active_queries gauge')

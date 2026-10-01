@@ -24,6 +24,7 @@ from . import (
     definitions,
     engine,
     examples,
+    history,
     logging_setup,
     mcp_server,
     metrics,
@@ -1141,6 +1142,23 @@ def audit_log_endpoint():
     server's own configuration; newest entry first, capped at config.audit_log_limit()."""
     require_admin()
     return jsonify({'entries': list(reversed(store.read_audit_log()))}), 200
+
+
+@bp.route('/history', methods=['GET'])
+def history_endpoint():
+    """Every stored run of every saved query, newest first and paged - for looking past the newest runs per
+    version that /list_files and the admin UI show, e.g. "every failed call by the partner key last week" over
+    a retention period's worth of history (QUERYAPIGATE_HISTORY_RETENTION_DAYS). Filters: query, version,
+    status (success|error), key, since (inclusive) and until (exclusive) - a date or a time. Admin only: it
+    reveals every key's activity. Pass the response's `next` back as ?cursor= for the following page."""
+    require_admin()
+    args = request.args
+    limit = get_int(args.get('limit'), 'limit')
+    entries, next_cursor = history.search(
+        query=args.get('query'), version=get_int(args.get('version'), 'version'), status=args.get('status'),
+        key=args.get('key'), since=args.get('since'), until=args.get('until'),
+        limit=100 if limit is None else limit, cursor=args.get('cursor'))
+    return jsonify({'entries': entries, 'next': next_cursor}), 200
 
 
 @bp.route('/settings', methods=['GET'])

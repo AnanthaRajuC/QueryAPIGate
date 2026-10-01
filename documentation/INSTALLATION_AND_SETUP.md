@@ -146,6 +146,10 @@ queryapigate serve
 - Run history writes skip the store-wide lock and don't wait for PostgreSQL's WAL flush (`synchronous_commit` off
   for those writes only) - the same trade-off SQLite's default here makes: a crash of the database server can lose
   the last few runs' history entries, never corrupt anything or lose a configuration change.
+- To keep every run for a while rather than each version's newest 50 - for tracking down an API problem after the
+  fact - set `QUERYAPIGATE_HISTORY_RETENTION_DAYS` (e.g. `30`) and browse it with
+  [`GET /history`](API.md#get-history). On a very busy server, `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps a fraction
+  of successful runs while still recording every failure.
 - Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
   PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
 

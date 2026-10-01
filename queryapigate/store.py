@@ -13,7 +13,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db
+from . import config, db, history
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -376,9 +376,13 @@ def load_versions(name, with_history=True):
     _apply_collection(), and so list_saved()/latest_versions() built on top of them) still operates on
     exactly this shape unchanged, so this is the one function that needs to bridge SQL to it.
 
-    ``with_history=False`` leaves every version's execution_history empty instead of reading up to
-    config.HISTORY_LIMIT rows per version - for the request path that only runs a query (app.run_saved()),
-    which never reads its history but would otherwise load and JSON-decode all of it on every call."""
+    Each version's execution_history holds its newest config.history_limit() runs, oldest first, however many
+    are stored - with a retention period (history.py) a version can keep far more, paged through GET /history
+    instead. Runs this process has queued but not written yet are written first, so a caller always sees its
+    own. ``with_history=False`` leaves every execution_history empty instead - for the request path that only
+    runs a query (app.run_saved()), which never reads its history but would otherwise load it on every call."""
+    if with_history:
+        history.flush()
     row = db.connection().execute(
         'SELECT collection, example FROM saved_queries WHERE name = ?', (name,)).fetchone()
     if row is None:
@@ -399,8 +403,10 @@ def load_versions(name, with_history=True):
         if not isinstance(fields, dict):
             raise ApiError('Saved query data has an unexpected structure', 500)
         history_rows = db.connection().execute(
-            'SELECT entry_json FROM execution_history WHERE query_name = ? AND version = ? '
-            'ORDER BY executed_at, rowid', (name, v['version'])).fetchall() if with_history else []
+            'SELECT entry_json FROM (SELECT entry_json, executed_at, rowid FROM execution_history '
+            'WHERE query_name = ? AND version = ? ORDER BY executed_at DESC, rowid DESC LIMIT ?) AS newest '
+            'ORDER BY executed_at, rowid', (name, v['version'], config.history_limit())
+        ).fetchall() if with_history else []
         content[str(v['version'])] = {
             'uuid': v['uuid'],
             **fields,
@@ -599,37 +605,11 @@ def delete_saved(ref, version=None):
             conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
 
 
-def record_execution(path, version, entry):
-    """Append to a saved version's execution_history (newest last, capped at config.HISTORY_LIMIT). Never
-    raises - a failure here must never block the request it's logging for, the same trade-off
-    record_audit() makes."""
-    name = path
-    try:
-        with db.transaction(append_only=True) as conn:
-            exists = conn.execute(
-                'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
-                (name, version)).fetchone()
-            if exists is None:
-                return
-            conn.execute(
-                'INSERT INTO execution_history (query_name, version, executed_at, entry_json) VALUES (?, ?, ?, ?)',
-                (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
-    except (OSError, ApiError, *db.Error):
-        return
-    # Keep only the newest HISTORY_LIMIT rows for this version - same "keep last N" cap config.HISTORY_LIMIT
-    # always meant, enforced per insert. Its own transaction, after the run is safely recorded: on Postgres two
-    # concurrent trims of the same version can contend for the same rows, and losing that race must never
-    # cost the run its history row. A trim that loses is harmless - the next run's trim catches up.
-    try:
-        with db.transaction(append_only=True) as conn:
-            conn.execute("""
-                DELETE FROM execution_history WHERE rowid IN (
-                    SELECT rowid FROM execution_history WHERE query_name = ? AND version = ?
-                    ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
-                )
-            """, (name, version, config.HISTORY_LIMIT))
-    except (OSError, ApiError, *db.Error):
-        pass
+def record_execution(path, version, entry, sample=True):
+    """Record one run in a saved version's execution_history - queued and written in the background, sampled
+    and kept as configured: see history.py. Never raises and never blocks the request it's logging for, the
+    same trade-off record_audit() makes."""
+    history.record(path, version, entry, sample=sample)
 
 
 def import_legacy_saved_queries_if_empty():
@@ -680,9 +660,10 @@ def import_legacy_saved_queries_if_empty():
                     if not isinstance(entry, dict):
                         continue
                     conn.execute(
-                        'INSERT INTO execution_history (query_name, version, executed_at, entry_json) '
-                        'VALUES (?, ?, ?, ?)',
-                        (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str)))
+                        'INSERT INTO execution_history (query_name, version, executed_at, entry_json, status, '
+                        'key_name) VALUES (?, ?, ?, ?, ?, ?)',
+                        (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str),
+                         entry.get('status'), entry.get('key_name')))
 
 
 def import_legacy_audit_log_if_empty():

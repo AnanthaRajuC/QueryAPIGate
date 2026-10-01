@@ -34,13 +34,17 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 23)
+        self.assertEqual(len(rows), 27)
         if not TEST_DATABASE_URL:  # a suite run against Postgres (tests/__init__.py) reports that backend here
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'], 'SQLite (queryapigate.db)')
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['source'], 'default')
         self.assertEqual(rows['']['label'], 'Live updates')  # GET /events (BACKLOG #43) has no env var of its own
         self.assertEqual(rows['QUERYAPIGATE_HOME']['source'], 'env')
         self.assertEqual(rows['QUERYAPIGATE_HOME']['value'], os.path.realpath(self.tmp.name))
+        self.assertEqual(rows['QUERYAPIGATE_HISTORY_LIMIT']['value'], '50 runs')
+        self.assertEqual(rows['QUERYAPIGATE_HISTORY_RETENTION_DAYS']['value'], 'per-version limit')
+        self.assertEqual(rows['QUERYAPIGATE_HISTORY_SAMPLE_RATE']['value'], '1')
+        self.assertEqual(rows['QUERYAPIGATE_HISTORY_FLUSH_INTERVAL']['value'], '1 s')
         self.assertEqual(rows['QUERYAPIGATE_QUERY_TIMEOUT']['source'], 'default')
         self.assertEqual(rows['QUERYAPIGATE_QUERY_TIMEOUT']['value'], '30 s')
         self.assertEqual(rows['QUERYAPIGATE_STREAM_MAX_ROWS']['value'], 'unbounded')
