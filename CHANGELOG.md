@@ -34,6 +34,20 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   The Console is served with a strict Content-Security-Policy, and loading its static files doesn't count toward
   `QUERYAPIGATE_RATE_LIMIT`.
 - `GET /health`'s response is now described in the OpenAPI document (`status`, `version`).
+- **Drafts and publishing for saved queries.** Each query now has at most one published version, which is the only
+  one served (`/q/<name>`, MCP, catalog, `/openapi.json`, Postman, bundle export, `queryapigate export`). Newer
+  versions are drafts: only the admin key can run them, by number, to test before publishing; other keys get the
+  same 404 as for a version that doesn't exist. Rolling back means publishing an older version. `GET /list_files`
+  shows `published_version`. See [Drafts and publishing](documentation/API.md#drafts-and-publishing).
+
+### Changed
+- **The metadata store moves to schema 4** (`saved_queries.published_version`). On first start, every existing
+  query is published at its newest version, so nothing a caller sees changes. The legacy save route,
+  `collection import` and `examples load` keep publishing what they save. The new Management API, starting with
+  #72, is what creates drafts. A store must be on schema 4 before `migrate-to-postgres` (starting the server once
+  upgrades it). Deleting a query's published version now publishes the newest *older* version, never a newer one;
+  before, deleting the newest version simply made the next-newest live, which is the same outcome whenever no
+  drafts exist.
 
 ## [0.12.0] - 2026-10-03
 

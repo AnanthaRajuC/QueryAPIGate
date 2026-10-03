@@ -90,7 +90,7 @@ def _request(name, version, data):
 
 def build_collection(collection, base_url=DEFAULT_BASE_URL):
     store.validate_collection_name(collection)
-    members = sorted((n, v, d) for n, v, d, c in store.latest_versions()
+    members = sorted((n, v, d) for n, v, d, c in store.live_versions()
                      if c == collection and isinstance(d.get('sql_query'), str))
     if not members:
         raise ApiError(f"Collection '{collection}' not found or empty", 404)

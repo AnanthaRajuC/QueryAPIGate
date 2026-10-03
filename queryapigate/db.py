@@ -26,7 +26,7 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 3  # 3: execution_history gained status/key_name columns - see _upgrade()
+SCHEMA_VERSION = 4  # 3: execution_history.status/key_name; 4: saved_queries.published_version - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS connections (
 CREATE TABLE IF NOT EXISTS saved_queries (
   name TEXT PRIMARY KEY,
   collection TEXT,
-  example INTEGER NOT NULL DEFAULT 0
+  example INTEGER NOT NULL DEFAULT 0,
+  published_version INTEGER  -- the version /q/<name> serves; NULL = not published (schema 4; see _upgrade())
 );
 
 CREATE TABLE IF NOT EXISTS saved_query_versions (
@@ -125,7 +126,8 @@ CREATE TABLE IF NOT EXISTS connections (
 CREATE TABLE IF NOT EXISTS saved_queries (
   name TEXT COLLATE "C" PRIMARY KEY,
   collection TEXT COLLATE "C",
-  example INTEGER NOT NULL DEFAULT 0
+  example INTEGER NOT NULL DEFAULT 0,
+  published_version INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS saved_query_versions (
@@ -349,7 +351,9 @@ def _upgrade(conn, postgres):
     never alters a table that already exists, so a column added since has to be added here - each step checks
     for itself rather than trusting the recorded version, so it is safe to re-run.
 
-    3: execution_history.status/key_name, backfilled from each row's own entry_json."""
+    3: execution_history.status/key_name, backfilled from each row's own entry_json.
+    4: saved_queries.published_version. Before it, the newest version was always the one served, so every
+       existing query is published at its newest version: an upgrade changes nothing a caller can see."""
     if 'status' not in _columns(conn, 'execution_history', postgres):
         conn.execute('ALTER TABLE execution_history ADD COLUMN status TEXT')
         conn.execute('ALTER TABLE execution_history ADD COLUMN key_name TEXT')
@@ -359,6 +363,10 @@ def _upgrade(conn, postgres):
         else:
             conn.execute("UPDATE execution_history SET status = json_extract(entry_json, '$.status'), "
                          "key_name = json_extract(entry_json, '$.key_name')")
+    if 'published_version' not in _columns(conn, 'saved_queries', postgres):
+        conn.execute('ALTER TABLE saved_queries ADD COLUMN published_version INTEGER')
+        conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
+                     'WHERE saved_query_versions.query_name = saved_queries.name)')
 
 
 def _record_schema_version(conn):
@@ -422,7 +430,7 @@ Error = _error_types()
 # copies - execution_history's and audit_log's own row ids are left for Postgres to assign, in source order.
 _MIGRATED_TABLES = (
     ('connections', ('name', 'db', 'active', 'created_at', 'updated_at', 'details_json'), 'name'),
-    ('saved_queries', ('name', 'collection', 'example'), 'name'),
+    ('saved_queries', ('name', 'collection', 'example', 'published_version'), 'name'),
     ('saved_query_versions', ('query_name', 'version', 'uuid', 'status', 'created_at', 'last_modified_at',
                               'fields_json'), 'query_name, version'),
     ('execution_history', ('query_name', 'version', 'executed_at', 'entry_json', 'status', 'key_name'), 'rowid'),

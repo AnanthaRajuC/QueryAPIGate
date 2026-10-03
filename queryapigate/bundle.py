@@ -26,7 +26,7 @@ ENTRY_FIELDS = {'name', 'sql_query', 'query_type', 'mongo_collection', 'mongo_fi
 def export_bundle(collection):
     store.validate_collection_name(collection)
     queries = []
-    for name, _, data, member_of in store.latest_versions():
+    for name, _, data, member_of in store.live_versions():
         if member_of != collection:
             continue
         entry = {'name': name}

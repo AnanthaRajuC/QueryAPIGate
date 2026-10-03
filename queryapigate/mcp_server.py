@@ -87,7 +87,7 @@ def list_tools_for(permission):
     and missed by another" - this is that same call, so MCP tool listing is no exception either). Computed
     fresh on every call, never cached: two different API keys reach different queries."""
     tools = []
-    for name, _number, data, collection in store.latest_versions():
+    for name, _number, data, collection in store.live_versions():
         if name in RESERVED_TOOL_NAMES or not _is_runnable(data) or not is_read_only(data):
             continue
         connection_name = data.get('connection_name')

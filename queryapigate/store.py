@@ -384,7 +384,7 @@ def load_versions(name, with_history=True):
     if with_history:
         history.flush()
     row = db.connection().execute(
-        'SELECT collection, example FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        'SELECT collection, example, published_version FROM saved_queries WHERE name = ?', (name,)).fetchone()
     if row is None:
         raise ApiError('File not found', 404)
     content = {}
@@ -392,6 +392,8 @@ def load_versions(name, with_history=True):
         content['collection'] = row['collection']
     if row['example']:
         content['example'] = True
+    if row['published_version'] is not None:
+        content['published_version'] = row['published_version']
     version_rows = db.connection().execute(
         'SELECT version, uuid, status, created_at, last_modified_at, fields_json '
         'FROM saved_query_versions WHERE query_name = ? ORDER BY version', (name,)).fetchall()
@@ -423,13 +425,35 @@ def version_numbers(content):
     return [int(v) for v in content if v.isdigit()]
 
 
-def select_version(content, version=None):
-    """Return (number, data) for the requested version, or the latest one when none is given."""
+def read_published(content):
+    """The version number a loaded saved query serves (/q/<name>, MCP, the catalog), or None when it has no
+    published version - every newer version is a draft until published."""
+    value = content.get('published_version')
+    return value if isinstance(value, int) and str(value) in content else None
+
+
+def is_draft(content, version):
+    """Whether ``version`` was never live: newer than the published version, or the query has none. Versions older
+    than the published one were each live once (the newest version used to always be served), so they stay
+    runnable with ?version=, as before."""
+    published = read_published(content)
+    return published is None or version > published
+
+
+def select_version(content, version=None, default='published'):
+    """Return (number, data) for the requested version. With none requested: the published version
+    (``default='published'``, for everything that serves a query), or the newest one (``default='latest'``, for
+    admin tooling that works on the version being edited)."""
     if version is None:
         numbers = version_numbers(content)
         if not numbers:
             raise ApiError('No valid versions found in the file')
-        version = max(numbers)
+        if default == 'latest':
+            version = max(numbers)
+        else:
+            version = read_published(content)
+            if version is None:
+                raise ApiError('This query has no published version', 404)
     data = content.get(str(version))
     if not isinstance(data, dict):
         raise ApiError(f'Version {version} not found', 404)
@@ -465,8 +489,12 @@ def _apply_collection(content, collection):
         content['collection'] = collection
 
 
-def save_version(filename, fields, collection=_UNSET, example=False):
+def save_version(filename, fields, collection=_UNSET, example=False, publish=True):
     """Store ``fields`` as the next version of a saved query; returns (uuid, version number).
+
+    ``publish=True`` (every caller before ADR 0001's Management API: the legacy save route, collection import,
+    examples) makes the new version the one served at once - the behaviour those callers always had.
+    ``publish=False`` stores it as a draft, leaving the published version as it is.
 
     ``collection`` belongs to the query, not to a version: left out, the query's current collection is kept;
     a name sets it; None clears it. It is written in the same transaction as the new version, so a query is
@@ -496,7 +524,34 @@ def save_version(filename, fields, collection=_UNSET, example=False):
             conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (collection, name))
         if example:
             conn.execute('UPDATE saved_queries SET example = 1 WHERE name = ?', (name,))
+        if publish:
+            conn.execute('UPDATE saved_queries SET published_version = ? WHERE name = ?', (number, name))
     return query_uuid, number
+
+
+def publish_version(ref, version):
+    """Make ``version`` the one a saved query serves. Returns the previously published version (or None).
+    Any existing version can be published, older ones included - that is how a bad release is rolled back."""
+    name = resolve_saved_file(ref)
+    with db.transaction() as conn:
+        row = conn.execute('SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
+                           (name, version)).fetchone()
+        if row is None:
+            raise ApiError(f'Version {version} not found', 404)
+        previous = conn.execute('SELECT published_version FROM saved_queries WHERE name = ?',
+                                (name,)).fetchone()['published_version']
+        conn.execute('UPDATE saved_queries SET published_version = ? WHERE name = ?', (version, name))
+    return previous
+
+
+def unpublish(ref):
+    """Stop serving a saved query at all (it keeps every version). Returns the previously published version."""
+    name = resolve_saved_file(ref)
+    with db.transaction() as conn:
+        previous = conn.execute('SELECT published_version FROM saved_queries WHERE name = ?',
+                                (name,)).fetchone()['published_version']
+        conn.execute('UPDATE saved_queries SET published_version = NULL WHERE name = ?', (name,))
+    return previous
 
 
 def set_collection(ref, collection):
@@ -603,6 +658,12 @@ def delete_saved(ref, version=None):
             'SELECT 1 FROM saved_query_versions WHERE query_name = ? LIMIT 1', (name,)).fetchone()
         if remaining is None:
             conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
+            return
+        # Deleting the published version falls back to the newest version *older* than it - one that was live
+        # before - never to a newer draft; with none older, the query is left unpublished.
+        conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
+                     'WHERE query_name = ? AND version < ?) WHERE name = ? AND published_version = ?',
+                     (name, version, name, version))
 
 
 def record_execution(path, version, entry, sample=True):
@@ -664,6 +725,9 @@ def import_legacy_saved_queries_if_empty():
                         'key_name) VALUES (?, ?, ?, ?, ?, ?)',
                         (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str),
                          entry.get('status'), entry.get('key_name')))
+            # Legacy files predate publishing: their newest version was the one served, so it is the published one.
+            conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
+                         'WHERE query_name = ?) WHERE name = ? AND published_version IS NULL', (name, name))
 
 
 def import_legacy_audit_log_if_empty():
@@ -704,12 +768,22 @@ def import_legacy_data_if_empty():
 
 
 def latest_versions():
-    """(name, version number, data, collection) for the newest version of every saved query; unreadable
-    files are skipped."""
+    """(name, version number, data, collection) for the newest version of every saved query, published or
+    not - for admin tooling. Unreadable files are skipped."""
+    return _versions('latest')
+
+
+def live_versions():
+    """(name, version number, data, collection) for the published version of every saved query that has one -
+    what callers can actually run, so what the catalog, OpenAPI, MCP, Postman and bundle export describe."""
+    return _versions('published')
+
+
+def _versions(default):
     found = []
     for name, _, content in _saved_files():
         try:
-            number, data = select_version(content)
+            number, data = select_version(content, default=default)
         except ApiError:
             continue
         found.append((name, number, data, read_collection(content)))
@@ -739,5 +813,5 @@ def list_saved():
         } for version, data in content.items() if version.isdigit() and isinstance(data, dict)]
         versions.sort(key=lambda v: v['version'])
         files.append({'filename': name, 'collection': read_collection(content), 'example': read_example(content),
-                      'versions': versions})
+                      'published_version': read_published(content), 'versions': versions})
     return files

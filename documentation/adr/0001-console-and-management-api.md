@@ -69,7 +69,7 @@ happened.
 | Forms | React Hook Form + Zod |
 | Components and styling | shadcn/ui + Radix, Tailwind CSS (colour tokens carried over from `/ui`), lucide icons |
 | Tables | TanStack Table |
-| SQL editor | CodeMirror 6, expected to win over Monaco on size and CSP-compatibility; confirmed by a spike on the Queries slice |
+| SQL editor | CodeMirror 6 (`@codemirror/lang-sql`), chosen by spike - see Findings |
 | Charts | Recharts first; Apache ECharts only if monitoring grows into it |
 | Live events | a `fetch()` stream reader (`EventSource` can't send `X-API-Key`), honouring `Last-Event-ID` |
 | Tests | Vitest + React Testing Library; Playwright for end-to-end |
@@ -158,6 +158,23 @@ Until step 3, the Console ships marked experimental, alongside the existing UI.
   was documented as part of this step because the Console's shell needed it.
 - **`/ui` restores its last tab from sessionStorage,** so the Console's placeholder screens open the matching
   classic tab directly. That makes running both UIs side by side seamless for users.
+- **SQL editor spike (2026-10-03): CodeMirror 6 over Monaco.** Both were built with the same SQL text and a
+  two-table schema for completion, and both were served with the Console's exact CSP.
+
+  | | CodeMirror 6 | Monaco 0.57 |
+  |---|---|---|
+  | Size, gzipped | **135 KB** | **~778 KB** (672 KB main + 90 KB worker + 13 KB CSS) |
+  | Runs under the Console's CSP | Yes, no violations | Yes, no violations (worker bundled and served from `'self'`) |
+  | Schema-aware SQL completion | Built in (`sql({ schema, dialect })`), with PostgreSQL, MySQL, SQLite and other dialects | Custom completion provider needed |
+  | Mobile | Supported | Not supported upstream |
+
+  CSP turned out *not* to distinguish them, contrary to the original expectation. A logged deliberate violation
+  confirmed the check was real. The deciding factors are size (Monaco would make the Console's first load about
+  6 times heavier for one screen), built-in dialect- and schema-aware completion matching QueryAPIGate's
+  databases, and mobile support. Monaco's advantages (a VS Code feel, multi-cursor and minimap) don't outweigh
+  that. A diff view for query versions, its other strength, is available for CodeMirror as `@codemirror/merge`.
+  Note for anyone revisiting this: `@monaco-editor/react` loads Monaco from a CDN by default, which the Console's
+  CSP blocks by design. Monaco would have to be bundled directly, as the spike did.
 - **The root `.gitignore` ignored every `lib/` directory,** which would have silently excluded
   `frontend/src/lib/`. It now has an explicit exception.
 

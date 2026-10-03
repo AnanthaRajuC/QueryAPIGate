@@ -2136,8 +2136,16 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource
-at a time, driven by the Console's slices (#73). Belongs to the 1.0 milestone.
+**Status: open; prerequisite shipped.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md).
+Built one resource at a time, driven by the Console's slices (#73). Belongs to the 1.0 milestone.
+
+**Decided for `/api/v1/queries` (2026-10-03):**
+- `filename` is dropped from v1; `name` is the identity.
+- Publishing is a real state. *Shipped as the prerequisite (schema 4):* a version is a draft until published,
+  only the published version is served, drafts run only for the admin key by number, and legacy save paths
+  keep publishing on save. See API.md's "Drafts and publishing".
+- The read side ships first: list, detail, versions, history, plus publish, unpublish and rollback, with the
+  Console's Queries list and detail. Editing with CodeMirror follows in its own PR.
 
 **Impact:** the admin UI is already a pure client of the JSON API, but that API grew one feature at a time:
 - file-store-era names (`/list_files`, `/save_sql_to_file`, `/view_file_content`, `/saved_sql/<name>`,

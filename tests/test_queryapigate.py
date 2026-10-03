@@ -185,7 +185,8 @@ class SavedQueryTests(ApiTestCase):
         self.save('another')
 
         saved = store.load_versions('my query')
-        self.assertEqual(sorted(saved), ['1', '2'])
+        self.assertEqual(sorted(store.version_numbers(saved)), [1, 2])
+        self.assertEqual(store.read_published(saved), 2)  # the legacy save route publishes what it saves
         self.assertEqual(saved['2']['version'], 2)
         self.assertEqual(saved['2']['tags'], ['x'])
 

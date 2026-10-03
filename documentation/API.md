@@ -137,12 +137,33 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?stream=true&format=csv' \
 {"params": {"id": 7}, "connection_name": "examples", "version": 1}
 ~~~
 
-- The latest version runs unless `version` is given.
+- The **published** version runs unless `version` is given (see [Drafts and publishing](#drafts-and-publishing)).
 - `connection_name` from the request wins over the saved default.
 - Each run is recorded in that version's `execution_history` (time, connection, status, rows, duration, plus
   `request_id`/`key_name` - see [Observability](#observability)). Lists show a version's newest 50 runs
   (`QUERYAPIGATE_HISTORY_LIMIT`); how many are kept, and for how long, is configurable - see
   [Run history](#run-history).
+
+### Drafts and publishing
+
+Every saved query has at most one **published** version: the one `/q/<name>` runs, and the one the catalog,
+`/openapi.json`, MCP tools, Postman and bundle exports describe. A version newer than the published one is a
+**draft**, and so is every version of a query with nothing published. A query with nothing published isn't served
+at all: `/q/<name>` answers 404.
+
+- **Drafts are invisible to callers.** Only the admin key can run one, and only by asking for it by number
+  (`?version=3`), to test it before publishing. For any other key, a draft's number answers the same 404 as a
+  version that never existed.
+- **Older versions stay runnable** with `?version=`, as before: each was live once.
+- **Saving through `PATCH /save_sql_to_file`, `queryapigate collection import` or `examples load` publishes the
+  new version at once,** which is exactly how those always behaved. Drafts are created through the Management API
+  (`/api/v1`, ADR 0001), which also publishes, unpublishes and rolls back to any earlier version.
+- **Deleting the published version** falls back to the newest version older than it, never to a draft. With none
+  older, the query is left unpublished.
+- `GET /list_files` shows each query's `published_version` (`null` when nothing is published).
+
+Stores created before this (schema 3 and older) are upgraded on first start with every query published at its
+newest version, so nothing a caller sees changes.
 
 The older endpoints `POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file` do the same thing
 with the query named in the body:
@@ -225,12 +246,13 @@ value becomes part of the SQL it must be a number, a boolean, or a string made o
 ## List saved queries
 
 `GET /list_files?sort_by=name&sort_order=desc` - `sort_by` is `name` (default) or `modified`, `sort_order` is `asc`
-(default) or `desc`. Returns every query with its versions' metadata (not the SQL text).
+(default) or `desc`. Returns every query with its versions' metadata (not the SQL text) and its `published_version`.
 
 ## Delete a saved query
 
 `DELETE /saved_sql/film_by_id` removes the whole query; `DELETE /saved_sql/film_by_id?version=2` removes one
-version (the query goes with its last version).
+version (the query goes with its last version). Deleting the published version publishes the newest older one, if
+any - see [Drafts and publishing](#drafts-and-publishing).
 
 ## View a saved query's raw data
 

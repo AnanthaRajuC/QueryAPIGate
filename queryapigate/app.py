@@ -631,12 +631,18 @@ def bind_claims(saved, raw):
 
 
 def run_saved(ref, body, url_params):
-    """Execute a saved query (latest version unless one is requested) and record the run - or, for one with
-    a cache_ttl whose SQL is read-only, serve a cached response instead."""
+    """Execute a saved query (its published version unless one is requested) and record the run - or, for one
+    with a cache_ttl whose SQL is read-only, serve a cached response instead.
+
+    A draft - a version newer than the published one, or any version of a query with none published - runs only
+    for the admin key, and only when asked for by number (to test it before publishing). For anyone else it
+    doesn't exist: the same 404 as a version number that was never used, so drafts can't be discovered."""
     path = store.resolve_saved_file(ref)
     content = store.load_versions(path, with_history=False)
-    number, saved = store.select_version(content, get_int(request.args.get('version') or body.get('version'),
-                                                            'version'))
+    requested = get_int(request.args.get('version') or body.get('version'), 'version')
+    if requested is not None and store.is_draft(content, requested) and not g.permission.admin:
+        raise ApiError(f'Version {requested} not found', 404)
+    number, saved = store.select_version(content, requested)
     connection_name = request.args.get('connection_name') or body.get('connection_name') \
         or saved.get('connection_name')
     if not connection_name:
@@ -779,7 +785,7 @@ def query_flow():
     require_admin()
     path = store.resolve_saved_file(request.args.get('filename'))
     content = store.load_versions(path)
-    _, saved = store.select_version(content, get_int(request.args.get('version'), 'version'))
+    _, saved = store.select_version(content, get_int(request.args.get('version'), 'version'), default='latest')
     if saved.get('query_type') == 'mongo' or not isinstance(saved.get('sql_query'), str):
         return jsonify({'tables': [], 'joins': [], 'formatted': None,
                         'error': "SQL analysis isn't available for this query"}), 200
@@ -845,7 +851,7 @@ def move_query(name):
 def set_query_cache_ttl(name):
     """Set (``{"cache_ttl": <seconds>}``) or clear (``0`` or ``null``) one version's cache_ttl in place -
     not a new version, same treatment as move_query() above for a query's collection. ?version= targets a
-    specific version; omitted means the latest, same default select_version() itself uses."""
+    specific version; omitted means the newest one (published or a draft)."""
     require_admin()
     data = get_json_body()
     if 'cache_ttl' not in data:
@@ -1386,7 +1392,7 @@ def describe_saved_queries(permission):
     queries (see apikeys.py) sees only its own approved list here, not the whole internal catalogue; an
     unrestricted (admin, or connection-wide) key sees everything, unchanged from before this filter."""
     described = []
-    for name, number, data, collection in store.latest_versions():
+    for name, number, data, collection in store.live_versions():
         if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
@@ -1417,7 +1423,7 @@ def describe_catalog(permission):
     the governance facts OpenAPI has no field for: whether this query is cached, and whether *this specific
     caller* can write through it (apikeys.can_write_query() - independent of their blanket allow_writes)."""
     catalog = []
-    for name, number, data, collection in store.latest_versions():
+    for name, number, data, collection in store.live_versions():
         if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
