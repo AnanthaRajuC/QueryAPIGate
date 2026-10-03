@@ -21,6 +21,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-03
+
 ### Added
 - **Signed-in users (JWT).** `Authorization: Bearer <token>` is accepted as an alternative to an API key, verified
   against your identity provider's signing keys (`QUERYAPIGATE_JWT_JWKS_URL`, RS256, with mandatory
