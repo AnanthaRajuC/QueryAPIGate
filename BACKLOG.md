@@ -7,6 +7,46 @@ document, not a promise - items move, merge, or drop as the project's needs beco
 Each item has an **Impact** (why it matters for a production-grade, multi-user deployment) and, where the
 sizing isn't obvious, a **Notes** line on approach and what it can reuse from the existing code.
 
+## Milestone: 1.0
+
+1.0 is a promise, not a feature count. It freezes the surfaces CHANGELOG.md's "Versioning and compatibility"
+section already lists: REST endpoints and response shapes, CLI commands and flags, environment variables, the
+on-disk storage format, API-key/role grant fields, the saved-query definition format, and the MCP tool
+contract. After 1.0, breaking any of them needs 2.0. The aim is to make the breaking changes that are cheap now
+*before* the freeze, and to give anything still moving an explicit "experimental" status so it isn't frozen
+by accident.
+
+**Ship before the freeze** (breaking changes or contract decisions, cheap now, expensive after):
+
+| Item | Why before 1.0 |
+|---|---|
+| #61 One governed core for every front door | Applying rate limits to MCP calls, and accepting JWT there, changes MCP behaviour |
+| #62 Ad-hoc SQL runs in history and events | Touches the history schema and `GET /history` response shapes |
+| #59 Dedicated event log (*storage decision only*) | Decides where event ids come from; the full event log can ship later |
+| #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
+| #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
+| #72 Management API v1 (`/api/v1`) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
+
+**Needed for 1.0 to be a credible promise:**
+
+| Item | What |
+|---|---|
+| #64 Experimental features label | A documented way to ship outside the freeze; live events are the first candidate |
+| #65 Upgrade guarantee and upgrade CI | Every 0.x store upgrades automatically or refuses with a clear message |
+| #66 Database support matrix | Tier 1 vs experimental database types |
+| #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
+| #68 Supported Python versions | Raise the floor from 3.9 (end of life since October 2025) |
+| #71 PostgreSQL-store backup and restore | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
+
+**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #55-#58
+if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC discovery beyond the current
+JWKS support.
+
+**Suggested sequence:**
+1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision.
+2. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+3. **1.0.0.**
+
 ## 1. Per-key API permissions
 
 **Status: shipped** (first version - connections + write access; see below for what's still open).
@@ -1703,6 +1743,481 @@ the Redis-backed response cache (#47) and the SSE broadcaster (#43), both of whi
 showing their backend/status. An admin currently has no way to tell, from the UI, whether the MCP server is
 even configured to run, what port it's on, or that it's reachable - they have to know to run `queryapigate
 mcp` and check its own stdout/logs, or use an MCP client to probe it directly.
+
+## 55. Shared rate limiting across instances (Redis-backed)
+
+**Status: open.** The one correctness gap left before several instances can share a PostgreSQL metadata
+store behind a load balancer.
+
+**Impact:** `ratelimit.py` is an in-memory token bucket per process. That covers the server-wide IP limit
+(`QUERYAPIGATE_RATE_LIMIT`), each key's `rate_limit` grant (#15), and each signed-in JWT user's limit. With N
+instances, or N gunicorn workers, every limit is silently multiplied by N. Everything else an operator would
+expect to be shared already is: connections, saved queries, keys, roles, audit and history (PostgreSQL store),
+the response cache (#47), and live events (`queryapigate events`). Until this is fixed, DEPLOYMENT.md has to
+keep telling people to run one worker.
+
+**Notes:** a Redis backend behind the existing `hit()` interface, selected when `QUERYAPIGATE_REDIS_URL` is
+set. This mirrors how `rediscache.py` swaps in for `cache.py` with nothing downstream changing. Use an atomic
+Lua token bucket, so behaviour matches the in-memory one (bursts allowed, sustained rate capped), rather than
+a fixed window. Decide the failure policy explicitly: fail open, as the cache does, keeps serving when Redis is
+down, but then limits aren't enforced. Whichever is chosen, log it and count it in `/metrics`. Run the existing
+limiter tests against both backends, the way store tests already run against SQLite and PostgreSQL, using the
+in-memory fake Redis client #47's tests use. Estimate: 2-3 days.
+
+## 56. A reference multi-instance deployment, and DEPLOYMENT.md rewritten for it
+
+**Status: open.** Depends on #55 to be honest about rate limits.
+
+**Impact:** the pieces for running several instances shipped separately (PostgreSQL store, Redis cache,
+`queryapigate events`), but nothing shows them assembled. DEPLOYMENT.md's "Why one worker (not a replica
+count)" section still tells operators *not* to scale out. An organization evaluating QueryAPIGate needs one
+compose file that starts a working highly-available topology, and docs that explain it.
+
+**Notes:** a `docker-compose` example with 3 QueryAPIGate nodes + PostgreSQL + Redis + one `queryapigate
+events` service + Caddy (or nginx), with:
+- health checks on every service;
+- `/events` routed to the events service;
+- the rest load-balanced across the nodes.
+
+Rewrite "Why one worker" into a "Scaling out" section: what is shared, what is per node (see #58), and how
+many workers and threads per node. Estimate: 1-2 days.
+
+## 57. A multi-node integration test in CI
+
+**Status: open.** Should land before any release claims "multi-instance supported".
+
+**Impact:** every multi-instance property is currently tested in one process, at most with a second
+connection. Nothing proves two real servers sharing one store behave as one service. That proof is what
+separates "should work" from "supported".
+
+**Notes:** a CI job (alongside `Tests (PostgreSQL metadata store)`) that starts 2-3 server processes against
+one `postgres:16` and one Redis service container and asserts:
+- a key created or revoked through node 1 takes effect on node 2 on the next request;
+- a saved query edited on node 1 runs as the new version on node 2;
+- a rate limit is shared across nodes (#55);
+- history from both nodes appears in `GET /history`;
+- one `queryapigate events` stream receives runs from every node.
+
+Estimate: 1-2 days.
+
+## 58. Multi-instance operational polish
+
+**Status: open.** Smaller items found while assessing #55-#57; none blocks running several instances, but
+each is something an operator would trip over.
+
+**Impact and notes, per item:**
+- **Metrics across nodes.** `/metrics` is in-process, which is normal for Prometheus (scrape every node, sum
+  in queries), but it's undocumented and series carry no instance label. The in-app Metrics tab and each
+  key's "live usage" show only the node that served the page. Document the scrape model and add an aggregating
+  query to the Grafana dashboard (#29), and say plainly in the UI that its numbers are per node. Backing
+  the in-app numbers with a shared store is a larger, separate follow-up. About 1 day.
+- **Admin cache actions are node-local without Redis.** "Clear cache" and the cache entry list (#48) only act
+  on the serving node's in-process cache. Document Redis as required for several instances, and warn in the
+  UI when the store is PostgreSQL but the cache is in-process. About half a day.
+- **Rolling upgrades.** Schema upgrades run at startup under the store lock and are idempotent, but there's
+  no stated rule for an older node running against a schema a newer node just upgraded. Write the policy
+  (e.g. upgrades within a minor version are additive only; a release that isn't says so under **Breaking**
+  and needs all nodes stopped), and test old-code-on-new-schema once. About 1 day.
+- **Metadata-store connection budget.** `db.py` keeps one PostgreSQL connection per request thread
+  (`threading.local`). Per node that is workers × threads, plus the history writer, plus the events server.
+  3 nodes × 16 threads fits PostgreSQL's default `max_connections=100`; beyond that, document PgBouncer and
+  its caveat: transaction pooling vs the advisory lock `db.transaction()` takes. About half a day.
+- **Retention sweep on every node.** With `QUERYAPIGATE_HISTORY_RETENTION_DAYS` set, each process sweeps
+  every 10 minutes. That's harmless (chunked, idempotent deletes) but redundant; guard it with
+  `pg_try_advisory_lock` so one node does it. A couple of hours.
+
+## 59. A dedicated event log, so events stop being a view on run history
+
+**Status: open.** Prerequisite for #60 and for any event type other than "a query ran".
+
+**Impact:** live events (`GET /events`, `queryapigate events`) are rows of `execution_history`: the history
+id is the event id. That made resume and cross-instance delivery cheap, but it also ties delivery to history
+policy:
+- runs that `QUERYAPIGATE_HISTORY_SAMPLE_RATE` samples out, or the bounded queue drops, never become events;
+- a run trimmed by `QUERYAPIGATE_HISTORY_LIMIT` can't be replayed, so the replay window depends on how busy a
+  query is rather than on time;
+- there's no place for an event that isn't a query run, such as a data change (#60), a key revoked, or a
+  saved query published.
+
+**Notes:**
+- An `events` table: id, `type`, `source`, `occurred_at`, a JSON payload, and the fields access filtering
+  needs, such as key name, connection and table.
+- Time-based retention of its own (`QUERYAPIGATE_EVENTS_RETENTION_HOURS`), independent of history.
+- Query runs keep being recorded into history, and are also written as `type=query.run` events in the same
+  batch transaction.
+- The events server tails `events` instead of `execution_history`. Out-of-order handling, resume and
+  `NOTIFY` carry over unchanged.
+
+Related, in the same pass:
+- **Subscription filters:** `?type=`, `?query=`, `?connection=`, `?status=`, applied after the key's own
+  access filter, never instead of it.
+- **A documented, versioned payload contract.** CloudEvents format optional.
+- **`/metrics` on the events server:** open streams, replays, slow-client disconnects, and commit-to-delivery
+  lag.
+
+Webhook push delivery (signed, retried, dead-lettered) is the natural next consumer of this table. It was
+left out of #30 for being much bigger than its scope, and stays a separate item.
+
+## 60. Change data capture via Debezium: governed row-change events
+
+**Status: open.** Depends on #59. Nothing in QueryAPIGate captures data changes today; every event is a query
+run.
+
+**Impact:** organizations that already use, or would adopt, Debezium for CDC get raw change streams with no
+per-consumer access control. QueryAPIGate already knows who may see which connection and table: `connections`
+and `allowed_tables` grants, roles, JWT users. It also already delivers events at scale. Putting the two
+together gives "Debezium captures changes, QueryAPIGate decides who may see them and delivers them over SSE
+(and later MCP and webhooks)": a governance layer over CDC, not another CDC engine.
+
+**Notes:** three ingestion routes, in order of how little infrastructure each needs:
+1. **Debezium Server's HTTP sink** posts to a new authenticated ingest endpoint (e.g. `POST /ingest/cdc`,
+   requiring a dedicated ingest grant, never usable by ordinary keys). Each change is stored as a
+   `type=cdc.change` event (#59). No Kafka, and it reuses existing auth.
+2. **Debezium Server's Redis Streams sink**, read by the events server. It fits deployments that already run
+   Redis for #47/#55.
+3. **A Kafka consumer** for organizations already running Debezium on Kafka. This is the heaviest dependency,
+   so it belongs behind an optional extra.
+
+**The design question to settle first is access, not plumbing.** Which keys see which changes? The proposal:
+a change event to `connection.schema.table` is visible to a key only if that key could query that table (its
+`connections` grant plus `allowed_tables`). Unanswered so far:
+- column-level redaction in change payloads (`before`/`after` can contain columns a saved query would never
+  expose);
+- whether `from_claim`-style row filtering applies to change events for JWT users;
+- how a connection in QueryAPIGate is matched to a Debezium source, by name or by explicit mapping.
+
+Start with route 1 and table-level visibility only.
+
+## 61. One governed core for every front door: move rate limits, metrics and authentication out of REST's Flask hooks
+
+**Status: open, needs verification first.** Found by reading the code, not yet confirmed by a test. Step one
+is to prove or disprove gaps 1 and 2 below; implement only what the check confirms.
+
+**Impact:** the project's strongest architectural property is that REST and MCP share one execution path.
+MCP's saved-query tools call `app.run_saved()`, the same function behind `GET /q/<name>`, so grants,
+parameter rules (including `from_claim`), caching, run history and live events are shared, not reimplemented.
+The ad-hoc tools (`list_tables`, `execute_sql`) reuse REST's connection-grant checks and `engine.execute_sql()`.
+That is what lets "governed queries, delivered over REST, MCP and whatever comes next" be a real claim.
+
+Some governance, though, lives in Flask request hooks *around* REST rather than in the shared core, so a front
+door that doesn't go through those hooks may silently skip it.
+
+**Gaps to verify:**
+1. **MCP calls may bypass rate limits and request metrics.** The server-wide IP limit, each key's `rate_limit`
+   grant, and per-request metrics (`metrics.observe_request()`) all run in `@app.before_request` /
+   `@app.after_request` (`app.py`). MCP calls `run_saved()` inside `flask_app.test_request_context()`
+   (`mcp_server.call_tool_for()`), and `test_request_context()` doesn't run those hooks. If confirmed, an
+   agent over MCP has no rate limit and its calls are missing from `/metrics`. Agents are exactly the callers
+   that loop. Verify with a test: a key with `rate_limit` = 2/minute calls a tool over MCP 5 times, and
+   `/metrics` is checked before and after.
+2. **MCP accepts only `X-API-Key`, not JWT bearer tokens.** `mcp_server._permission_for()` calls
+   `apikeys.authenticate()` directly instead of the shared `app.authenticate_headers()` that REST and
+   `queryapigate events` use since #33's JWT work. Signed-in users therefore can't use MCP, and `from_claim`
+   queries (per-user, row-scoped access) are unreachable for AI agents acting on a user's behalf, arguably
+   the most compelling MCP use case.
+3. **The CLI is outside governance, by design.** `queryapigate export` reads the store and streams through
+   `engine.stream_sql()` directly: no key, no grants, no run history. That's defensible (a local operator
+   with filesystem access is already trusted), but it should be stated in the docs. Decide whether exports
+   should at least be recorded in run history (e.g. under `cli` as the caller) for observability.
+
+**Notes, if confirmed:**
+- Move rate limiting (IP and per-key/per-user), request metrics and authentication into functions the shared
+  core calls, so every front door gets them by default rather than by remembering to.
+- REST's hooks become thin callers of those functions. MCP calls the same ones in `call_tool_for()` and
+  `execute_sql_tool()`, with the client IP and headers taken from the Starlette request.
+- MCP metrics should be labelled by transport, so REST and MCP traffic can be told apart.
+- Add a parity test that runs the same scenario over REST and over MCP and asserts identical outcomes:
+  allowed, denied, rate-limited, counted, and recorded in history. That test is what keeps a future front door
+  (gRPC, GraphQL) from regressing this.
+- Interacts with #55: once rate limits move to the core and to Redis, the limit is shared across instances
+  *and* front doors.
+- Docs: `documentation/MCP.md` currently says nothing about rate limits, metrics or JWT. State the behaviour
+  explicitly either way.
+
+## 62. Record ad-hoc SQL runs (REST and MCP) in run history and live events
+
+**Status: open.** Probably the highest-value, lowest-effort item for "governed access for AI agents".
+
+**Impact:** only saved-query runs are recorded. Ad-hoc SQL (`POST /execute_sql`, and MCP's `execute_sql`
+tool) goes through `engine.execute_sql()`, which writes one `log.info` line to the server log and nothing
+else. It isn't in run history, `GET /history`, live events or per-key usage. Agent-written SQL is the
+riskiest traffic the server carries (free-form, generated by a model, possibly steered by prompt
+injection), and it's currently the least visible. An organization asking "what did the agents query last
+week, and with which key?" can't be answered from QueryAPIGate itself.
+
+**Notes:**
+- `execution_history` is keyed to a saved query version (`(query_name, version)` with a foreign key to
+  `saved_query_versions`), so ad-hoc runs need somewhere to live. Either a nullable key with an `ad_hoc` marker
+  and the SQL text (or its hash) stored in `entry_json`, or, more cleanly, `type=sql.adhoc` events in #59's
+  event log. Choose together with #59 to avoid two migrations.
+- Record:
+  - caller (key or `jwt:` user);
+  - transport (`rest` or `mcp`);
+  - connection and database;
+  - SQL text (subject to a size cap and an opt-out setting, since SQL can embed literal values);
+  - parameters' names but not their values by default;
+  - rows, duration, status and error.
+- Respect `QUERYAPIGATE_HISTORY_SAMPLE_RATE` (failures always kept), exactly like saved-query runs.
+- `GET /history` gains a filter that separates ad-hoc from saved runs. The admin UI's Home and History views
+  show them.
+- An events stream shows a key its own ad-hoc runs, under the same per-key rule as today.
+- Estimate: about a day on top of the storage decision.
+
+## 63. Column masking and PII redaction for query results, starting with agent-facing results
+
+**Status: open, needs design.** The question enterprise buyers ask first about letting AI agents near data.
+
+**Impact:** QueryAPIGate controls *which* connections, tables and saved queries a caller can reach
+(`connections`, `allowed_tables`, `queries`) and, for signed-in users, which rows (`from_claim`). It doesn't
+control *which columns' values* leave the server. Over MCP, every returned value enters the model's context,
+and often a third-party model provider's. A key allowed to query `customers` sees `email`, `phone` and
+`national_id` in full. Read-only plus table restrictions isn't enough to say "safe for agents" to a security
+team.
+
+**Notes:**
+- **A policy, not per-query code.** Per role or key, a list of column rules applied to results after
+  execution:
+  - `mask` (e.g. `j***@example.com`);
+  - `hash` (stable, so joins and grouping still work for the agent);
+  - `null`;
+  - `drop`.
+
+  Rules are matched by `connection.table.column` where the SQL parser can resolve the source (`tableguard.py`
+  and `sqlflow.py` already resolve tables), and by result-column name or pattern otherwise (e.g. `*email*`).
+- **Scope order:** MCP results first (`execute_sql` tool and saved-query tools), then REST as an opt-in per key.
+  It must apply equally to cached responses, so masking has to be part of the cache key or applied after the
+  cache.
+- **Fail closed where resolution is ambiguous.** If an ad-hoc query's column can't be traced to its source
+  (expressions, `SELECT *` through views), a pattern rule still applies. Optionally, a strict mode refuses
+  ad-hoc queries whose output columns can't be classified.
+- **Audit:** record which rules fired on a run (#62), so "was PII returned to an agent?" is answerable.
+- **Out of scope for a first version:** automatic PII detection by scanning values. Start with declared rules,
+  and consider detection later as an assistive "suggest rules" feature.
+- **Open design questions:**
+  - whether masking belongs on roles, keys, connections, or all three with the narrowest winning;
+  - how it interacts with `from_claim` (a user seeing their *own* row unmasked);
+  - whether saved-query authors can declare columns sensitive in the query definition.
+
+## 64. An "experimental" label for features outside the 1.0 freeze
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** once 1.0 freezes the covered surfaces, every new feature is frozen the day it ships unless there
+is a documented way to say "not yet". Without it, the project either stops shipping new things after 1.0 or
+breaks its own promise.
+
+**Notes:**
+- Define "experimental" in CHANGELOG.md's versioning section: it may change or be removed in any minor
+  release, always noted in the changelog.
+- Mark experimental surfaces consistently:
+  - docs (a badge or callout);
+  - OpenAPI (`x-experimental: true`);
+  - Settings screen rows;
+  - a one-time startup log line when an experimental env var is set.
+- Initial candidates:
+  - **live events** (`GET /events`, `queryapigate events`), since #59 will change where event ids come from;
+  - the H2/JDBC/Mongo runners, per #66;
+  - anything from #55-#58 or #60 not finished by 1.0.
+
+## 65. Upgrade guarantee: every 0.x store upgrades or refuses clearly, tested in CI
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** "a newer version can always read a database an older version wrote" is already in the versioning
+policy, but nothing tests it end to end. `db._upgrade()` handles the layouts it knows about. A store with an
+unexpected `execution_history` layout was seen to fail at request time with a 500 (`no such column:
+entry_json` from `/list_files` and `/collections`) rather than being upgraded at startup or refused with a
+message. For organizations, an upgrade that breaks on an old store is the fastest way to lose trust.
+
+**Notes:**
+- At startup, after `_upgrade()`, validate every table's columns against the expected schema. On a mismatch
+  that can't be upgraded, stop with a message naming the table, the missing columns, and what to do. Never
+  start and then 500 on first use.
+- CI job: commit fixture stores written by real released versions (0.8, 0.9, 0.10, 0.11, 0.12, both SQLite and,
+  from 0.12, a PostgreSQL dump), start the current code against each, and assert the admin API returns the
+  expected data. Each release adds its own fixture.
+- Also test the legacy JSON-file path (pre-SQLite) once, then mark it for deprecation per #67.
+
+## 66. A database support matrix: tier 1 vs experimental
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** QueryAPIGate supports 8 database types, with uneven depth. For example, `allowed_tables` covers
+MySQL, PostgreSQL, ClickHouse, SQLite and DuckDB, and fails closed on H2, JDBC and Mongo (#21). Promising all 8
+equally at 1.0 means freezing behaviour on the least-tested ones.
+
+**Notes:**
+- Proposed tiers:
+  - **tier 1** (every feature, integration-tested in CI, covered by the 1.0 promise): MySQL, PostgreSQL,
+    SQLite, DuckDB, ClickHouse;
+  - **experimental** (per #64): H2, JDBC, MongoDB.
+- Publish the matrix in README and `DATABASE_CONNECTION_CONFIGURATION.md`. Columns: feature (read, write
+  guard, `allowed_tables`, schema browser, streaming, caching, MCP `list_tables`) × database type.
+- The matrix also says what a database needs to graduate, which gives contributors a clear target.
+
+## 67. A deprecation policy
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** after 1.0, removing anything covered needs 2.0. A deprecation policy says how a surface gets there,
+so users have time to move and contributors know how to retire things.
+
+**Notes:**
+- A deprecated surface keeps working for at least one minor release (or N months), and logs a warning once
+  per process when used.
+- Deprecations are listed under a **Deprecated** heading in the changelog, plus an HTTP `Deprecation` header on
+  deprecated endpoints.
+- Candidates to deprecate before or at 1.0:
+  - the legacy pre-SQLite JSON import path;
+  - `/execute_sql_from_file` and `/execute_sql_with_parameters_from_file`, which duplicate `/q/<name>`;
+  - the startup check for leftover `SQL2API_*` variables (they are already not read; decide when the check
+    itself can go).
+
+## 68. Supported Python versions: raise the floor before 1.0
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** `requires-python = ">=3.9"`, ruff targets `py39`, and CI tests 3.9-3.14. Python 3.9 reached end of
+life in October 2025. Freezing 1.0 on an end-of-life floor means either carrying it for the whole 1.x line or
+breaking the promise to drop it.
+
+**Notes:**
+- Raise to `>=3.10` (or `>=3.11`, if a dependency or a language feature justifies it).
+- Update the pyproject classifiers, ruff `target-version` and the CI matrix.
+- State the policy: Python versions are supported until upstream end of life, and dropping one is a minor
+  release noted under **Breaking**.
+
+## 69. A consistent, machine-readable error format
+
+**Status: open.** 1.0 milestone, before the freeze.
+
+**Impact:** errors are `{"error": "<message>"}` plus optional extras (`detail`, and per-error fields), with
+messages free to change wording under the current policy. That leaves clients nothing stable to branch on.
+MCP returns errors as `isError` text with no structure at all. `detail` visibility changed in 0.12.0.
+Settling the shape now is cheap; changing it after 1.0 is breaking.
+
+**Notes:**
+- Add a stable `code` to every error response (e.g. `param_required`, `param_invalid`, `rate_limited`,
+  `forbidden_table`, `query_timeout`, `driver_error`), documented in `API.md` and covered by the freeze.
+  `error` stays human-readable and free to change.
+- Keep `request_id` in every error body, so a support conversation can find the log line.
+- Mirror `code` in MCP tool errors' `structuredContent`, so agents can branch on it too.
+- Audit every `ApiError` raise site and the generic `HTTPException` / `Exception` handlers (`app.py`), so
+  nothing reaches a client without a `code`.
+- Optionally use RFC 9457 (`application/problem+json`) as the shape. Decide once, before the freeze.
+
+## 70. Decide and document 1.0's deployment shape
+
+**Status: open.** 1.0 milestone, a decision rather than code.
+
+**Impact:** an organization reading "1.0" will assume a supported way to run it in production. Today one
+instance (SQLite or PostgreSQL store) is solid. Several instances work for stored state but not for rate
+limits or in-app metrics (#55-#58). If 1.0 says nothing, the promise is implicit and will be read generously.
+
+**Notes:** choose one and write it into DEPLOYMENT.md and the 1.0 changelog entry:
+- **Option A:** single instance supported (SQLite or PostgreSQL store); multi-instance experimental (#64)
+  until #55-#57 land.
+- **Option B:** multi-instance supported, which makes #55-#57 part of the 1.0 milestone.
+
+## 71. A tested backup and restore procedure for the PostgreSQL store
+
+**Status: open.** 1.0 milestone.
+
+**Impact:** DEPLOYMENT.md §5 covers backing up the SQLite store's volume. Since PR #30 added the PostgreSQL
+store, there's no documented procedure for it. A backup nobody has restored is not a backup.
+
+**Notes:**
+- Document `pg_dump` / `pg_restore` for the store's schema (including the `?options=-csearch_path` case),
+  what consistency it gives while the server runs, and the secrets that must be backed up separately
+  (`QUERYAPIGATE_SECRET_KEY`, if used: without it, encrypted connection passwords are unrecoverable).
+- Add a CI or scripted test: populate, dump, restore into an empty database, start against it, and compare the
+  admin API's output.
+- Do the same restore test once for the SQLite path.
+
+## 72. Management API v1: a versioned, resource-oriented `/api/v1`
+
+**Status: open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource
+at a time, driven by the Console's slices (#73). Belongs to the 1.0 milestone.
+
+**Impact:** the admin UI is already a pure client of the JSON API, but that API grew one feature at a time:
+- file-store-era names (`/list_files`, `/save_sql_to_file`, `/view_file_content`, `/saved_sql/<name>`,
+  `/execute_sql_from_file`);
+- RPC-style and resource-style routes mixed;
+- no version prefix;
+- management and runtime routes together in one `app.py`.
+
+A clean, versioned Management API turns administration into a product interface usable by the Console,
+scripts, Terraform or GitOps tooling, and other organizations' platforms. It also keeps 1.x from freezing the
+legacy names.
+
+**Notes:**
+- **Resources:** `/api/v1/queries` (with versions, parameters, cache settings and per-query history),
+  `/connections` (with schema), `/api-keys`, `/roles`, `/collections`, `/history`, `/audit`, `/settings`,
+  `/mcp`.
+- **Conventions, decided once:**
+  - plural nouns;
+  - cursor pagination (as `GET /history` already does);
+  - #69's error format;
+  - `ETag`/`If-Match` for safe concurrent edits.
+- **Grow a service layer underneath, one resource at a time,** rather than reorganising the package up front.
+  `app.py`'s route handlers become thin adapters.
+- **Add an OpenAPI conformance test before the first resource:** every route is in the spec, and responses
+  validate against their schemas. `openapi.py` is hand-written today, and the Console's TypeScript client
+  will be generated from it.
+- **Retire the old routes gradually.** Each one stays working and is deprecated (#67) once its `/api/v1`
+  replacement ships, with the `Deprecation` header and a changelog entry. Runtime routes (`/q/<name>`,
+  `/execute_sql`, `/events`, `/catalog`, `/health`, `/metrics`) are not renamed by this item; whether they also
+  move under `/api/v1` is an open question in the ADR.
+
+## 73. QueryAPIGate Console: a React/TypeScript frontend replacing `/ui`
+
+**Status: open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Additive; ships
+as experimental (#64) until it reaches parity with `/ui`.
+
+**Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
+with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the
+project is becoming:
+- a SQL editor with completion;
+- the guided connect → query → secure → publish → monitor workflow;
+- navigation by persona (API developer, data engineer, platform administrator, security administrator,
+  AI/agent developer);
+- consistent states and components throughout.
+
+**Notes:**
+- **Stack:**
+  - React, TypeScript and Vite, with React Router;
+  - TanStack Query for server state, React Hook Form + Zod for forms;
+  - shadcn/ui + Radix, and TanStack Table;
+  - CodeMirror 6 or Monaco for SQL, decided by a spike;
+  - a lightweight chart library first.
+
+  The client and types are generated from OpenAPI.
+- **Lives in this repository under `frontend/`,** with no separate repository (see the ADR for why).
+- **Packaging:**
+  - CI builds the assets into the wheel and the Docker image, which becomes a multi-stage build, and Flask
+    serves them at `/console`;
+  - users never need Node.js, and `docker compose up` still gives the whole product;
+  - for development, Vite's dev server proxies the API to a local `queryapigate serve`.
+- **Phases:**
+  1. Foundations: freeze `ui.py` to fixes only, add the conformance test, scaffold the frontend with CI, and
+     serve an empty `/console`.
+  2. Vertical slices, in this order:
+     1. Queries, the flagship;
+     2. Connections and Schema;
+     3. Keys and Roles;
+     4. History, Metrics and Audit;
+     5. MCP and Settings.
+
+     Each slice builds its `/api/v1` resource (#72).
+  3. Parity: `/ui` redirects to `/console`, and the Console leaves experimental.
+  4. Remove `ui.py` one minor release later.
+- **Carry over `/ui`'s security properties:**
+  - results are rendered as text, never as HTML;
+  - no runtime CDN dependencies, since everything is bundled (today's Help > Docs browser loads marked.js and
+    DOMPurify from a CDN; the Console bundles them);
+  - a strict Content-Security-Policy is now possible because nothing is inline.
+- **Open:** Console sign-in. Either the admin API key in session storage as today, or OIDC sign-in for
+  administrators. That decision ties into the JWT work (#33-era) and #61.
 
 ---
 
