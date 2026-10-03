@@ -171,8 +171,12 @@ SCHEMAS = {
                                        'description': 'Pass as ?cursor= for the next page; null on the last.'}},
     },
     'Connection': {
-        'type': 'object', 'required': ['name', 'db', 'active'],
-        'properties': {'name': {'type': 'string'}, 'db': {'type': 'string'}, 'active': {'type': 'boolean'}},
+        'type': 'object', 'required': ['name', 'db', 'active', 'host', 'port', 'database'],
+        'properties': {'name': {'type': 'string'}, 'db': {'type': 'string'}, 'active': {'type': 'boolean'},
+                       'host': _NULLABLE_STRING,
+                       'port': {'oneOf': [{'type': 'integer'}, {'type': 'string'}], 'nullable': True},
+                       'database': {'type': 'string', 'nullable': True,
+                                    'description': 'The database name, or the file path for SQLite/DuckDB.'}},
     },
     'ConnectionList': {
         'type': 'object', 'required': ['items'],

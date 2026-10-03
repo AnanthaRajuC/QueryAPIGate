@@ -26,17 +26,40 @@
           "active": {
             "type": "boolean"
           },
+          "database": {
+            "description": "The database name, or the file path for SQLite/DuckDB.",
+            "nullable": true,
+            "type": "string"
+          },
           "db": {
+            "type": "string"
+          },
+          "host": {
+            "nullable": true,
             "type": "string"
           },
           "name": {
             "type": "string"
+          },
+          "port": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
           }
         },
         "required": [
           "name",
           "db",
-          "active"
+          "active",
+          "host",
+          "port",
+          "database"
         ],
         "type": "object"
       },

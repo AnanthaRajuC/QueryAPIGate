@@ -190,7 +190,10 @@ def query_history(name):
 
 @bp.route('/connections', methods=['GET'])
 def list_connections():
-    items = [{'name': name, 'db': details.get('db'), 'active': bool(details.get('active', True))}
+    # Only what identifies a connection - never credentials or driver options.
+    items = [{'name': name, 'db': details.get('db'), 'active': bool(details.get('active', True)),
+              'host': details.get('host') or None, 'port': details.get('port') or None,
+              'database': details.get('database') if isinstance(details.get('database'), str) else None}
              for name, details in sorted(store.read_connections().items())]
     return jsonify({'items': items}), 200
 

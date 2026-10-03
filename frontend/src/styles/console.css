@@ -1,0 +1,63 @@
+/* Console-only additions on top of classic.css - kept to what a React app needs that the classic page didn't. */
+
+/* classic.css lays the page out as a grid on <body> (sidebar | content); React renders into #root, which must not
+   become a grid item of its own. */
+#root {
+  display: contents;
+}
+
+/* CodeMirror, dressed as the classic editor (.editor.boxed): same font, gutter, padding, border and focus ring. */
+.editor.cm-host {
+  height: auto;
+  min-height: 0;
+  resize: vertical;
+  overflow: auto;
+}
+.editor.cm-host .cm-editor {
+  height: 100%;
+  min-height: 168px;
+  background: var(--surface);
+  font: 13px/1.6 var(--mono);
+}
+.editor.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+.editor.cm-host .cm-scroller {
+  font: 13px/1.6 var(--mono);
+}
+.editor.cm-host .cm-content {
+  padding: 12px 0;
+  caret-color: var(--ink);
+}
+.editor.cm-host .cm-line {
+  padding: 0 14px;
+}
+.editor.cm-host .cm-gutters {
+  min-width: 42px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--line);
+  color: var(--ink-3);
+}
+.editor.cm-host .cm-gutterElement {
+  padding: 0 8px 0 0;
+}
+.editor.cm-host .cm-activeLine,
+.editor.cm-host .cm-activeLineGutter {
+  background: transparent;
+}
+.editor.cm-host .cm-selectionBackground,
+.editor.cm-host .cm-focused .cm-selectionBackground {
+  background: light-dark(oklch(0.52 0.11 170 / 0.22), oklch(0.78 0.11 170 / 0.25)) !important;
+}
+.editor.cm-host .cm-tooltip {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: 12.5px var(--mono);
+}
+.editor.cm-host .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--ink);
+}

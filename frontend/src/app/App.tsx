@@ -1,72 +1,30 @@
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router';
-
-import { ClassicScreen } from '@/features/classic/ClassicScreen';
-import { OverviewPage } from '@/features/overview/OverviewPage';
+import { Navigate, Route, Routes } from 'react-router';
 
 import { AppShell } from './AppShell';
-import { ALL_ITEMS } from './navigation';
-import { NotFound } from './NotFound';
+import { Loading } from './feedback';
 
-// The Queries screens carry the SQL editor, tables and forms - loaded on first visit, so the rest of the Console
-// stays small.
-const QueriesListPage = lazy(() =>
-  import('@/features/queries/QueriesListPage').then((m) => ({ default: m.QueriesListPage })),
+// The API Repository carries the SQL editor - loaded on first visit, so the shell stays small.
+const RepositoryPage = lazy(() =>
+  import('@/features/repository/RepositoryPage').then((m) => ({ default: m.RepositoryPage })),
 );
-const QueryDetailPage = lazy(() =>
-  import('@/features/queries/QueryDetailPage').then((m) => ({ default: m.QueryDetailPage })),
-);
-const QueryEditorPage = lazy(() =>
-  import('@/features/queries/QueryEditorPage').then((m) => ({ default: m.QueryEditorPage })),
-);
-
-function Loading() {
-  return <p className="text-sm text-ink-3">Loading…</p>;
-}
 
 export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<OverviewPage />} />
-        <Route path="queries">
-          <Route
-            index
-            element={
-              <Suspense fallback={<Loading />}>
-                <QueriesListPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="new"
-            element={
-              <Suspense fallback={<Loading />}>
-                <QueryEditorPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path=":name"
-            element={
-              <Suspense fallback={<Loading />}>
-                <QueryDetailPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path=":name/edit"
-            element={
-              <Suspense fallback={<Loading />}>
-                <QueryEditorPage />
-              </Suspense>
-            }
-          />
-        </Route>
-        {ALL_ITEMS.filter((item) => item.classicTab).map((item) => (
-          <Route key={item.path} path={item.path} element={<ClassicScreen item={item} />} />
-        ))}
-        <Route path="*" element={<NotFound />} />
+        {/* Every other screen still lives in the classic UI (the sidebar links there), so the Console opens on the
+            one it has rebuilt. */}
+        <Route index element={<Navigate to="/queries" replace />} />
+        <Route
+          path="queries/:name?"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RepositoryPage />
+            </Suspense>
+          }
+        />
+        <Route path="*" element={<Navigate to="/queries" replace />} />
       </Route>
     </Routes>
   );

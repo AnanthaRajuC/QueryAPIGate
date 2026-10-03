@@ -2218,14 +2218,23 @@ Phase 1 shipped:
 - `frontend/openapi.json` with a staleness test, and the route test extended to methods;
 - `ui.py` frozen.
 
-**Queries slice shipped (phases 2-3 for Queries):** list, detail (overview with `curl`, versions with publish,
-roll back and delete, run history) and the editor (CodeMirror 6 with dialect- and schema-aware completion, a
-parameter rules table that keeps rules it doesn't edit, live validation, a test run of the unsaved SQL, and Save as
-draft or Save and publish). It uses `/api/v1/queries` throughout, and route-level code-splitting keeps CodeMirror
-(145 KB gzipped) out of the main bundle. Tested with Vitest (the screens against a fake backend) and end to end in
-headless Chrome: completion, validation, test run, draft, publish, then a second draft while v1 keeps serving.
+**API Repository slice shipped, at visual parity (2026-10-03).** A first version used Tailwind/shadcn and a new
+navigation, and looked nothing like the classic UI. It was replaced by a parity pass:
+- the classic stylesheet, verbatim (`frontend/src/styles/classic.css`), plus the classic shell (sidebar, header,
+  Ctrl K, key panel, drawers, toasts, error banner);
+- the API Repository rebuilt from the classic markup on `/api/v1/queries`: list, detail and all ten tabs, plus the
+  New API / New version / Move / collection drawers;
+- drafts and publishing shown with classic components.
 
-Next slice: Connections and Schema.
+It was checked by side-by-side screenshots of every tab and drawer in light and dark mode, an end-to-end run in
+headless Chrome (create a draft, publish, add a second draft while v1 keeps serving), and Vitest. The rule for every
+later slice is in ADR 0001 ("Visual parity").
+
+Known gaps, still classic-only:
+- the schema browser's 👁 "preview in API Designer" (it opens the classic API Designer pre-filled);
+- the access map's own screen ("View in Access map" opens it in the classic UI).
+
+Next slice: API Designer, then Connections.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

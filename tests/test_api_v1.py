@@ -274,7 +274,9 @@ class HistoryAndConnectionTests(V1TestCase):
 
     def test_connections_and_their_schema(self):
         items = self.call('get', '/api/v1/connections', '/api/v1/connections', 200).get_json()['items']
-        self.assertEqual(items, [{'name': 'lite', 'db': 'sqlite', 'active': True}])
+        self.assertEqual(items, [{'name': 'lite', 'db': 'sqlite', 'active': True, 'host': None, 'port': None,
+                                  'database': self.db_path}])
+        self.assertNotIn('password', str(items))
         tables = self.call('get', '/api/v1/connections/lite/schema', '/api/v1/connections/{name}/schema',
                            200).get_json()['tables']
         self.assertEqual([t['name'] for t in tables], ['film'])

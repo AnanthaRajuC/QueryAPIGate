@@ -13,9 +13,11 @@ from flask import Response, send_from_directory
 
 DIST = Path(__file__).parent / 'console_dist'
 
-# No inline scripts and no third-party origins: everything is bundled. 'unsafe-inline' for styles only, because
-# Radix positions popovers and menus with inline style attributes.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+# No inline scripts and no third-party scripts: everything is bundled. 'unsafe-inline' for styles only (CodeMirror
+# injects its own, and a few classic components size themselves with style attributes); the one third-party origin
+# is img.shields.io, for the sidebar's GitHub-stars badge - an image, as on /ui.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: https://img.shields.io; "
        "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
        "form-action 'self'")
 

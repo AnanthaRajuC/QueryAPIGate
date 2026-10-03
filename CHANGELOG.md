@@ -24,11 +24,9 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ### Added
 - **QueryAPIGate Console (experimental), at `/console`.** The start of the new web UI that will replace `/ui` one
   screen at a time ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript
-  in `frontend/`, it is a client of the public JSON API only. This first release has:
-  - the workflow-based navigation (Build, Explore, Govern, Observe, AI, Admin);
-  - sign-in with an API key, shared with `/ui` and `/docs` in the same browser tab;
-  - an Overview of server status and your access.
-
+  in `frontend/`, it is a client of the public JSON API only, and looks exactly like `/ui`: the same stylesheet,
+  sidebar, header, search and API key panel (the key is shared with `/ui` and `/docs` in the same browser tab).
+  Its first rebuilt screen is the API Repository (below).
   Every other screen links straight to the matching tab of `/ui`, which is unchanged. The wheel and the Docker image
   include the built Console, so running it needs no Node.js; a source checkout without a build shows how to build it.
   The Console is served with a strict Content-Security-Policy, and loading its static files doesn't count toward
@@ -51,17 +49,19 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   and the `request_id`; edits honour `If-Match` against the query's `ETag` (412 when it changed meanwhile); every
   request and response is described in full in `/openapi.json`, and the tests validate real responses against it.
   See [Management API (v1)](documentation/API.md#management-api-v1).
-- **The Console's Queries screens** (`/console/queries`): a searchable list with publish state, a query's page
-  (published SQL, parameters, a ready-made `curl`, versions with publish, roll back and delete, and run history),
-  and the editor:
-  - SQL editing with completion that knows the connection's tables and columns and its SQL dialect;
-  - a parameter rules table;
-  - validation as you type;
-  - a test run of the unsaved SQL against the real database;
-  - Save as draft or Save and publish.
+- **The Console's API Repository** (`/console/queries`), rebuilt on the Management API and **identical in look and
+  feel to the classic one**. The Console now uses the classic UI's own stylesheet, sidebar, header, Ctrl K search,
+  API key panel, drawers and toasts (ADR 0001, "Visual parity"). What it has:
+  - the list (filter, Type/Host/Database filters, Collections/Queries, Postman, Rename);
+  - the detail panel: versions, meta, stat tiles, the requests-per-day chart, and the Run, SQL, History, Curl,
+    API Keys, Roles, Access, Cache, Metrics and CLI tabs;
+  - the New API, New version, Move, New collection and Rename collection drawers.
 
-  Queries moves out of "classic" in the Console's navigation. The Queries screens load on first visit, so the rest
-  of the Console stays light.
+  Drafts and publishing appear in the classic style: a Published / Draft / Previous pill; Publish, Roll back to and
+  Unpublish buttons; and Save as draft next to Save in the drawer (Save still publishes at once, as before). The SQL
+  editor is CodeMirror with completion that knows the connection's tables and columns, styled as the classic editor.
+  Every other sidebar item opens the classic UI on that tab. The API Repository loads on first visit, so the shell
+  stays light.
 
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,

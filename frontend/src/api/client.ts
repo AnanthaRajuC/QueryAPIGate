@@ -20,7 +20,28 @@ export const api = createClient<paths>({
   // Looked up per request rather than captured once, so tests can stub fetch.
   fetch: (request) => globalThis.fetch(request),
 });
+// The classic header's "rate N/M" chip follows the X-RateLimit headers of every response (ui.py noteRate).
+export type RateLimit = { limit: number; remaining: number };
+const rateListeners = new Set<(rate: RateLimit) => void>();
+export function onRateLimit(listener: (rate: RateLimit) => void): () => void {
+  rateListeners.add(listener);
+  return () => rateListeners.delete(listener);
+}
+export function noteRate(response: Response) {
+  const limit = response.headers.get('x-ratelimit-limit');
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  if (limit === null || remaining === null) return;
+  rateListeners.forEach((listener) => listener({ limit: Number(limit), remaining: Number(remaining) }));
+}
+const withRate: Middleware = {
+  onResponse({ response }) {
+    noteRate(response);
+    return response;
+  },
+};
+
 api.use(withApiKey);
+api.use(withRate);
 
 export type Schemas = components['schemas'];
 
@@ -65,4 +86,45 @@ export function unwrapEmpty(result: Result<unknown>): void {
 /** Like unwrap, also returning the response's ETag - send it back as If-Match to make a change conditional. */
 export function unwrapWithEtag<T>(result: Result<T>): { data: T; etag: string | null } {
   return { data: unwrap(result), etag: result.response.headers.get('ETag') };
+}
+
+/** A raw request with the API key - for responses the typed client doesn't model: a saved query's own output
+ * (any format, paged by headers) and the legacy management routes the Console still reads (/api_keys, /roles,
+ * /collections) until their /api/v1 resources exist. */
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const key = getApiKey();
+  if (key) headers.set('X-API-Key', key);
+  return globalThis
+    .fetch(
+      new Request(new URL(path, globalThis.location?.origin ?? 'http://localhost'), { ...init, headers }),
+    )
+    .then((response) => {
+      noteRate(response);
+      return response;
+    });
+}
+
+/** apiFetch, timed - for the result bar's "N ms". */
+export async function timedFetch(
+  path: string,
+  init?: RequestInit,
+): Promise<{ response: Response; elapsed: number }> {
+  const t0 = performance.now();
+  const response = await apiFetch(path, init);
+  return { response, elapsed: Math.round(performance.now() - t0) };
+}
+
+/** GET a JSON endpoint through apiFetch; an ApiError on failure. */
+export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, init);
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+  if (!response.ok) throw toError({ error: body ?? undefined, response });
+  return body as T;
 }

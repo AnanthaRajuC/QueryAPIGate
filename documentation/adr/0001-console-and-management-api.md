@@ -66,11 +66,10 @@ happened.
 | Framework and routing | React (single-page app), React Router |
 | Server state | TanStack Query; URL state next; a global store (Zustand) only if a real need appears |
 | API client and types | `openapi-typescript` + `openapi-fetch`, from `frontend/openapi.json` |
-| Forms | React Hook Form + Zod |
-| Components and styling | shadcn/ui + Radix, Tailwind CSS (colour tokens carried over from `/ui`), lucide icons |
-| Tables | TanStack Table |
-| SQL editor | CodeMirror 6 (`@codemirror/lang-sql`), chosen by spike - see Findings |
-| Charts | Recharts first; Apache ECharts only if monitoring grows into it |
+| Styling and components | **The classic UI's own stylesheet** (`frontend/src/styles/classic.css`, ported verbatim from `ui.py`) and its markup and class names - see "Visual parity" below |
+| Forms and tables | Plain React forms and `<table class="grid">` / `<table class="rs">`, as the classic screens use |
+| SQL editor | CodeMirror 6 (`@codemirror/lang-sql`), chosen by spike - see Findings - styled as the classic `.editor.boxed` |
+| Charts | Inline SVG, as the classic UI draws them; a library only if monitoring grows beyond that |
 | Live events | a `fetch()` stream reader (`EventSource` can't send `X-API-Key`), honouring `Last-Event-ID` |
 | Tests | Vitest + React Testing Library; Playwright for end-to-end |
 | Lint and format | ESLint + Prettier |
@@ -80,17 +79,22 @@ Version constraints found when scaffolding (2026-10-03): TypeScript is pinned to
 and `typescript-eslint` don't yet support TypeScript 6/7, and React Router 7 is used because 8 needs a newer Node 22
 patch release than some contributors have. Revisit both when those constraints lift.
 
-**Information architecture** follows workflows, not backend tables:
-- **Overview**
-- **Build:** Queries, APIs, Connections
-- **Explore:** Schema, API Explorer, Query History
-- **Govern:** API Keys, Roles & Access, Policies
-- **Observe:** Metrics, Audit, Events
-- **AI:** MCP
-- **Admin:** Settings, System
+**Visual parity (amended 2026-10-03).** Until a deliberate, separately decided redesign, the Console looks and feels
+exactly like the classic UI:
+- the same stylesheet, sidebar (groups, names, order, icons, counts), header, breadcrumbs, Ctrl K search, API key
+  panel, drawers, toasts and error banner;
+- each rebuilt screen uses the classic screen's markup and layout.
 
-The flagship workflow is: connect → explore schema → write query → test → define parameters → configure
-security → publish → test the API → monitor.
+Screens not yet rebuilt open in the classic UI on the matching tab, so moving between the two is seamless. New
+capabilities (drafts and publishing) are expressed with the classic components (pill, `btn md`, the drawer form),
+not a new visual language. Every slice is checked with side-by-side screenshots of the classic and Console screens,
+light and dark.
+
+This replaces the first-pass stack (Tailwind CSS + shadcn/ui + Radix, React Hook Form + Zod, TanStack Table, lucide
+icons) and the workflow-based navigation (Build / Explore / Govern / Observe / AI / Admin) that the first Queries
+slice used. Both made the Console look and behave unlike the classic UI, which was not the intent. The
+workflow-based information architecture and the flagship connect → query → secure → publish → monitor flow remain
+the direction for the redesign, when one is decided.
 
 ## Alternatives considered
 
@@ -177,6 +181,24 @@ Until step 3, the Console ships marked experimental, alongside the existing UI.
   CSP blocks by design. Monaco would have to be bundled directly, as the spike did.
 - **The root `.gitignore` ignored every `lib/` directory,** which would have silently excluded
   `frontend/src/lib/`. It now has an explicit exception.
+
+## Findings from the parity pass (2026-10-03)
+
+- **The first Queries slice looked nothing like the classic UI.** Only the colour tokens had been carried over;
+  type scale, spacing, components, navigation and layout came from Tailwind and shadcn defaults. The fix was to make
+  `ui.py`'s stylesheet the Console's stylesheet, verbatim, and rebuild the screens from the classic markup.
+- **The classic layout depends on page structure.** The body is a grid (sidebar | content), forms rely on their
+  slot wrapper, and the CSS keys on ids (`#tabs`, `#queries-panel`, `#key-panel`, ...). The Console reproduces that
+  structure exactly: `#root` is `display: contents`, drawer forms sit in a slot `<div>`, and components keep the
+  classic ids.
+- **Shared per-browser state carries over.** The API key (sessionStorage), the sidebar's collapsed state, the star
+  card's dismissal and the theme and density preferences (localStorage) use the classic keys, so both UIs stay in
+  step.
+- **Bugs found in the browser that the unit tests could not see:**
+  - Escape closing the completion popup also closed the drawer, so the drawer now ignores keys the editor
+    already handled.
+  - Header buttons wrapped differently with the extra Unpublish button, so they now wrap as one group.
+  - CodeMirror's fold gutter made the editor wider than the classic one, so it now uses a leaner setup without it.
 
 ## Open questions
 
