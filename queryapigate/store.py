@@ -609,6 +609,17 @@ def _saved_files():
         yield name, name, content
 
 
+def iter_saved(with_history=False):
+    """(name, content) for every saved query, by name - the public form of _saved_files() for the Management API,
+    which lists queries without their run history (load_versions()'s with_history)."""
+    rows = db.connection().execute('SELECT name FROM saved_queries ORDER BY name').fetchall()
+    for row in rows:
+        try:
+            yield row['name'], load_versions(row['name'], with_history=with_history)
+        except ApiError:
+            continue
+
+
 def example_query_names():
     """Names of the saved queries marked as examples - the only ones ``examples unload`` may remove."""
     return [name for name, _, content in _saved_files() if read_example(content)]

@@ -22,6 +22,10 @@
   --color-danger: light-dark(oklch(0.53 0.17 27), oklch(0.74 0.14 27));
   --color-danger-soft: light-dark(oklch(0.53 0.17 27 / 0.08), oklch(0.74 0.14 27 / 0.12));
   --color-warn: light-dark(oklch(0.6 0.13 75), oklch(0.8 0.12 80));
+  --color-syn-kw: light-dark(oklch(0.48 0.14 265), oklch(0.78 0.1 265));
+  --color-syn-str: light-dark(oklch(0.5 0.12 145), oklch(0.8 0.11 145));
+  --color-syn-num: light-dark(oklch(0.55 0.13 55), oklch(0.8 0.11 65));
+  --color-syn-param: light-dark(oklch(0.5 0.15 330), oklch(0.78 0.12 330));
   --font-sans: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }

@@ -25,6 +25,7 @@ by accident.
 | #59 Dedicated event log (*storage decision only*) | Decides where event ids come from; the full event log can ship later |
 | #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
 | #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
+| #74 Respect a saved query's own `LIMIT` | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
 | #72 Management API v1 (`/api/v1`) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
 
 **Needed for 1.0 to be a credible promise:**
@@ -2089,7 +2090,10 @@ breaking the promise to drop it.
 
 ## 69. A consistent, machine-readable error format
 
-**Status: open.** 1.0 milestone, before the freeze.
+**Status: partly shipped - in place for `/api/v1` (#72); the legacy routes and MCP are open.** 1.0 milestone, before
+the freeze. v1 errors are `{error, code, request_id}`, with a status-derived `code` whenever a raiser doesn't give
+its own (`app.error_body()`). What remains: decide whether the legacy routes adopt it (an additive change), and
+mirror `code` in MCP tool errors.
 
 **Impact:** errors are `{"error": "<message>"}` plus optional extras (`detail`, and per-error fields), with
 messages free to change wording under the current policy. That leaves clients nothing stable to branch on.
@@ -2136,8 +2140,25 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: open; prerequisite shipped.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md).
-Built one resource at a time, driven by the Console's slices (#73). Belongs to the 1.0 milestone.
+**Status: in progress - the queries resource shipped, plus the connections read side; the other resources are
+open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+driven by the Console's slices (#73). Belongs to the 1.0 milestone.
+
+Shipped:
+- **`/api/v1/queries`, complete:** list and filter, create, versions, publish, roll back, unpublish, delete,
+  collection, cache TTL, history, and validate.
+- **`GET /api/v1/connections`** and **`/api/v1/connections/{name}/schema`**.
+- **Conventions in place:**
+  - every response fully described in `/openapi.json` (`v1_spec.py`) and validated against it in
+    `tests/test_api_v1.py`;
+  - stable error `code` + `request_id` on every `/api/v1` error (#69's shape, applied to v1);
+  - `ETag`/`If-Match` on every change;
+  - unknown fields refused;
+  - the service layer started in `queryapigate/services/`;
+  - the replaced legacy routes send `Deprecation` and `Link` headers and are marked deprecated in the spec.
+
+Remaining resources: API keys, roles, collections, audit, settings and MCP, plus connection writes. Each arrives
+with its Console screen.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2197,7 +2218,14 @@ Phase 1 shipped:
 - `frontend/openapi.json` with a staleness test, and the route test extended to methods;
 - `ui.py` frozen.
 
-Next: the Queries slice, with the CodeMirror/Monaco spike and `/api/v1/queries` (#72).
+**Queries slice shipped (phases 2-3 for Queries):** list, detail (overview with `curl`, versions with publish,
+roll back and delete, run history) and the editor (CodeMirror 6 with dialect- and schema-aware completion, a
+parameter rules table that keeps rules it doesn't edit, live validation, a test run of the unsaved SQL, and Save as
+draft or Save and publish). It uses `/api/v1/queries` throughout, and route-level code-splitting keeps CodeMirror
+(145 KB gzipped) out of the main bundle. Tested with Vitest (the screens against a fake backend) and end to end in
+headless Chrome: completion, validation, test run, draft, publish, then a second draft while v1 keeps serving.
+
+Next slice: Connections and Schema.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the
@@ -2243,6 +2271,27 @@ project is becoming:
   - a strict Content-Security-Policy is now possible because nothing is inline.
 - **Open:** Console sign-in. Either the admin API key in session storage as today, or OIDC sign-in for
   administrators. That decision ties into the JWT work (#33-era) and #61.
+
+## 74. A saved query's own `LIMIT` is silently replaced by the page size
+
+**Status: open - a correctness bug, found 2026-10-03 while testing the Console's editor end to end.** Present since
+at least 0.7.0.
+
+**Impact:** `sqltools.paginate()` "replaces any trailing LIMIT/OFFSET on a SELECT with the requested window". So a
+saved query written as `... ORDER BY revenue DESC LIMIT 3` ("top 3") returns a whole page (10 rows by default, 50
+with `?page_size=50`). The author's intent is discarded with no warning. Reproduced on SQLite: `SELECT title FROM
+film ORDER BY title LIMIT 3` via `/execute_sql?page_size=5` returns 5 rows. It affects `/q/<name>`, `/execute_sql`,
+MCP and the Console's test run alike.
+
+**Notes:** respect the statement's own window and page *within* it.
+- With a trailing `LIMIT n [OFFSET m]` and a requested page `(limit, offset)`, send
+  `LIMIT min(limit + 1, max(0, n - offset)) OFFSET m + offset`. Report "has more" only while `offset + limit < n`.
+- Alternatively, wrap: `SELECT * FROM (<sql>) AS q LIMIT ... OFFSET ...`. That's simpler, but it changes plans on
+  some engines and doesn't work for every statement type the paginator accepts.
+- Test both against every tier-1 dialect (#66), including `LIMIT ... OFFSET ...`, MySQL's `LIMIT m, n`, and
+  `FETCH FIRST` where the guard allows it.
+- This is a behaviour change for anyone relying on today's behaviour, however unlikely, so note it under
+  **Changed** in the release.
 
 ---
 

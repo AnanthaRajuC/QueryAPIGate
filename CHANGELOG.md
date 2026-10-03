@@ -40,6 +40,35 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   same 404 as for a version that doesn't exist. Rolling back means publishing an older version. `GET /list_files`
   shows `published_version`. See [Drafts and publishing](documentation/API.md#drafts-and-publishing).
 
+- **Management API v1: `/api/v1/queries`** ([ADR 0001](documentation/adr/0001-console-and-management-api.md),
+  BACKLOG #72). A versioned, resource-oriented interface for saved queries:
+  - list, filter, create, add a version (a draft unless published), publish, roll back, unpublish and delete;
+  - change a query's collection or a version's cache TTL;
+  - page through a query's run history;
+  - validate a definition without saving it.
+
+  Also `GET /api/v1/connections` and `GET /api/v1/connections/{name}/schema`. Every error carries a stable `code`
+  and the `request_id`; edits honour `If-Match` against the query's `ETag` (412 when it changed meanwhile); every
+  request and response is described in full in `/openapi.json`, and the tests validate real responses against it.
+  See [Management API (v1)](documentation/API.md#management-api-v1).
+- **The Console's Queries screens** (`/console/queries`): a searchable list with publish state, a query's page
+  (published SQL, parameters, a ready-made `curl`, versions with publish, roll back and delete, and run history),
+  and the editor:
+  - SQL editing with completion that knows the connection's tables and columns and its SQL dialect;
+  - a parameter rules table;
+  - validation as you type;
+  - a test run of the unsaved SQL against the real database;
+  - Save as draft or Save and publish.
+
+  Queries moves out of "classic" in the Console's navigation. The Queries screens load on first visit, so the rest
+  of the Console stays light.
+
+### Deprecated
+- The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
+  `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,
+  `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow`. They keep working unchanged, and now send a `Deprecation`
+  header with a `Link` to their successor; `/openapi.json` marks them deprecated. `/ui` still uses them.
+
 ### Changed
 - **The metadata store moves to schema 4** (`saved_queries.published_version`). On first start, every existing
   query is published at its newest version, so nothing a caller sees changes. The legacy save route,

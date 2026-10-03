@@ -261,6 +261,67 @@ query always looked like as a file (see [Query metadata](QUERY_METADATA_MANAGEME
 "Show raw file" view. Only an existing saved query's own name/reference can be read (see `filepath` above
 for accepted forms).
 
+## Management API (v1)
+
+`/api/v1/...` is the versioned interface to QueryAPIGate's own configuration, built one resource at a time
+([ADR 0001](adr/0001-console-and-management-api.md)). The Console at `/console` uses it, and so can scripts,
+Terraform or GitOps tooling. It is admin-only, like the routes it replaces. Every request and response is described in
+full in `/openapi.json`, under the "Management API v1" tag.
+
+**Conventions, the same on every resource:**
+- **Errors** are `{"error": "...", "code": "...", "request_id": "..."}`. Branch on `code`, which is stable (for
+  example `query_not_found`, `query_exists`, `version_not_found`, `precondition_failed`, `unknown_field`,
+  `invalid_request`, `unauthorized`, `forbidden`). `error` is for people and its wording can change. `request_id`
+  matches the `X-Request-Id` header and the server log.
+- **Optimistic concurrency.** Reading a query returns an `ETag`. Send it back as `If-Match` on a change and the
+  change is refused with `412 precondition_failed` if the query changed in the meantime, through any route.
+- **Unknown fields are refused** (`unknown_field`), so a typo never silently does nothing.
+
+### Queries
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/queries` | Every saved query's summary. Filters: `search` (name, description or tag), `collection`, `connection`, `status` (`published`, `unpublished`, `draft`). |
+| `POST /api/v1/queries` | Create a query with its first version: `name`, `description`, `sql`, `connection_name`, `parameters`, `tags`, `cache_ttl`, `collection`. A draft unless `"publish": true`. 409 `query_exists` if the name is taken. |
+| `GET /api/v1/queries/{name}` | The query with every version, each with its `status`: `published`, `draft` or `previous`. |
+| `PATCH /api/v1/queries/{name}` | Change its `collection` (`null` removes it). |
+| `DELETE /api/v1/queries/{name}` | Delete it and every version. |
+| `POST /api/v1/queries/{name}/versions` | Add a version: a draft unless `"publish": true`. The published version keeps serving. |
+| `GET /api/v1/queries/{name}/versions/{n}` | One version. |
+| `PATCH /api/v1/queries/{name}/versions/{n}` | Change its `cache_ttl` in place. |
+| `DELETE /api/v1/queries/{name}/versions/{n}` | Delete one version; see [Drafts and publishing](#drafts-and-publishing) for what happens to the published one. |
+| `POST /api/v1/queries/{name}/publish` | `{"version": n}`: publish a draft, or an older version to roll back. |
+| `POST /api/v1/queries/{name}/unpublish` | Stop serving it; every version is kept. |
+| `GET /api/v1/queries/{name}/history` | Its runs, newest first. Paged with `limit` and `cursor` (`next_cursor` in the response); filters `version`, `status`, `key`, `since`, `until`. |
+| `POST /api/v1/queries/validate` | Check a definition without saving it. Returns every problem found, the parameters the SQL uses and the tables it reads. |
+
+v1 names fields for what they are: `sql` (not `sql_query`), `parameters` (not `query_parameters`), and no
+`filename`, because `name` is the identity. A parameter rule is the same object as in
+[Parameter rules](#parameter-rules), with type names `integer`, `number`, `string` and `boolean`. `author`
+defaults to the calling key's name.
+
+~~~bash
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
+     -d '{"name": "film_by_id", "description": "One film", "connection_name": "examples",
+          "sql": "SELECT * FROM film WHERE film_id = :id", "parameters": {"id": {"type": "integer"}}}'
+# a draft: /q/film_by_id answers 404 until it is published
+curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-Key: <admin key>' \
+     -H 'Content-Type: application/json' -d '{"version": 1}'
+~~~
+
+### Connections (read side)
+
+`GET /api/v1/connections` lists each connection's `name`, `db` and `active`. `GET /api/v1/connections/{name}/schema`
+returns its tables and columns. The rest of the connection resource arrives with the Console's Connections screen.
+
+### Deprecated routes
+
+The saved-query management routes replaced by `/api/v1/queries` keep working, unchanged. Their responses carry
+`Deprecation: true` and `Link: </api/v1/queries>; rel="successor-version"`, and `/openapi.json` marks them deprecated:
+`GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`,
+`PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl` and `GET /query_flow`. Runtime routes
+(`/q/<name>`, `/execute_sql`, `/catalog`, `/events`, `/history`) are not deprecated.
+
 ## Collections
 
 A **collection** is one named group a saved query belongs to - at most one, unlike `tags`, which are free-form

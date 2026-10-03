@@ -59,6 +59,14 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
+# Legacy saved-query management routes, each replaced by /api/v1/queries (v1.py, BACKLOG #72). They keep working;
+# responses say so (RFC 9745 Deprecation header, plus a Link to the successor) and /openapi.json marks them.
+DEPRECATED_ENDPOINTS = {'api.list_files', 'api.view_file_content', 'api.save_sql_to_file', 'api.delete_saved_query',
+                        'api.move_query', 'api.set_query_cache_ttl', 'api.query_flow'}
+# A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
+_V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
+                     405: 'method_not_allowed', 409: 'conflict', 412: 'precondition_failed', 413: 'payload_too_large',
+                     415: 'unsupported_media_type', 429: 'rate_limited', 500: 'internal_error', 504: 'query_timeout'}
 
 
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
@@ -179,19 +187,19 @@ def create_app():
             permission = g.get('permission')
             if permission is None or not permission.admin:
                 extra = {k: v for k, v in extra.items() if k != 'detail'}
-        response = jsonify({'error': error.message, **extra})
+        response = jsonify(error_body(error.message, error.status, extra))
         if 'retry_after' in extra:
             response.headers['Retry-After'] = str(extra['retry_after'])
         return response, error.status
 
     @app.errorhandler(HTTPException)
     def handle_http_error(error):
-        return jsonify({'error': error.description}), error.code
+        return jsonify(error_body(error.description, error.code)), error.code
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         log.exception('Unhandled error')
-        return jsonify({'error': 'An error occurred'}), 500
+        return jsonify(error_body('An error occurred', 500)), 500
 
     @app.before_request
     def gate():
@@ -207,7 +215,7 @@ def create_app():
             return limited
         g.permission = resolve_permission()
         if request.endpoint not in PUBLIC_ENDPOINTS and g.permission is None:
-            return jsonify({'error': 'Unauthorized'}), 401
+            return jsonify(error_body('Unauthorized', 401)), 401
         limited = check_key_rate_limit()
         if limited is not None:
             return limited
@@ -224,6 +232,9 @@ def create_app():
             response.headers['X-RateLimit-Key-Limit'] = str(limit)
             response.headers['X-RateLimit-Key-Remaining'] = str(remaining)
         response.headers['X-Request-Id'] = g.get('request_id', '-')
+        if request.endpoint in DEPRECATED_ENDPOINTS:
+            response.headers['Deprecation'] = 'true'
+            response.headers['Link'] = '</api/v1/queries>; rel="successor-version"'
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
         metrics.observe_request(request.method, endpoint, str(response.status_code), elapsed, caller_key_name())
@@ -242,7 +253,20 @@ def create_app():
         return response
 
     app.register_blueprint(bp)
+    from . import v1  # imports this module's request helpers, so only once it is fully loaded
+    app.register_blueprint(v1.bp)
     return app
+
+
+def error_body(message, status, extra=None):
+    """The JSON body of an error response. /api/v1 errors always carry a stable `code` (the raiser's own, or one
+    for the status) and the `request_id` to find the matching log line (BACKLOG #69); the legacy routes keep
+    their existing shape - `error` plus whatever extras the raiser attached."""
+    body = {'error': message, **(extra or {})}
+    if request.path.startswith('/api/v1/'):
+        body.setdefault('code', _V1_DEFAULT_CODES.get(status, 'error'))
+        body['request_id'] = g.get('request_id', '-')
+    return body
 
 
 # --------------------------------------------------------------------------------------

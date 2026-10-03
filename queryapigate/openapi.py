@@ -2,7 +2,7 @@
 import re
 from urllib.parse import quote
 
-from . import config, schema
+from . import config, schema, v1_spec
 from .params import json_schema
 
 _FORMAT_PARAM = {'name': 'format', 'in': 'query', 'schema': {
@@ -120,7 +120,7 @@ def build_spec(version, saved_queries=None, jwt=None):
                 'summary': 'Execute SQL', 'tags': ['Query'],
                 'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
                 'requestBody': _body({'sql': {'type': 'string'}, 'connection_name': {'type': 'string'},
-                                      'params': {'type': 'object',
+                                      'params': {'type': 'object', 'additionalProperties': True,
                                                  'description': 'Values for :name bound parameters.'},
                                       'database': {'type': 'string', 'description':
                                           'Run against a different database on the same server than this '
@@ -612,12 +612,24 @@ def build_spec(version, saved_queries=None, jwt=None):
                     'type': 'string'}}}}}}},
         },
     }
+    # The Management API (/api/v1, ADR 0001) - fully described, responses included.
+    spec['components']['schemas'] = dict(v1_spec.SCHEMAS)
+    spec['paths'].update(v1_spec.PATHS)
+    # The legacy saved-query management routes /api/v1/queries replaces: still working, marked deprecated.
+    for path, method in _DEPRECATED_OPERATIONS:
+        spec['paths'][path][method]['deprecated'] = True
     if saved_queries:
         spec['paths'].update(_saved_query_paths(saved_queries))
         spec['tags'] = [{'name': 'Saved queries (live)',
-                         'description': 'One endpoint per saved query, generated from its latest version: its '
+                         'description': 'One endpoint per saved query, generated from its published version: its '
                                         'declared parameters and their rules, and its default connection.'}]
     return spec
+
+
+# Kept in step with app.DEPRECATED_ENDPOINTS (the routes that send a Deprecation header) - tested.
+_DEPRECATED_OPERATIONS = (('/list_files', 'get'), ('/view_file_content', 'get'), ('/save_sql_to_file', 'patch'),
+                          ('/saved_sql/{name}', 'delete'), ('/saved_sql/{name}/collection', 'put'),
+                          ('/saved_sql/{name}/cache_ttl', 'put'), ('/query_flow', 'get'))
 
 
 DOCS_HTML = """<!doctype html>

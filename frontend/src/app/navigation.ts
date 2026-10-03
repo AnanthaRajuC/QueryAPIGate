@@ -24,7 +24,6 @@ export const NAVIGATION: NavSection[] = [
       {
         label: 'Queries',
         path: '/queries',
-        classicTab: 'queries',
         description: 'Write, test, version and publish saved queries.',
       },
       {
