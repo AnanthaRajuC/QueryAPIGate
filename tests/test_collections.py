@@ -537,18 +537,34 @@ class RenameTests(AppTestCase):
 
 
 class RouteDocumentationTests(AppTestCase):
-    """A route with no OpenAPI entry is documentation drift. Every route must be described, except the
-    handful of pages that are not part of the JSON API."""
-    NOT_API = {'/', '/docs', '/favicon.ico', '/openapi.json', '/ui'}
+    """A route with no OpenAPI entry is documentation drift. Every route and method must be described, except
+    the handful of pages that are not part of the JSON API. The spec is also the Console's contract (ADR 0001):
+    its TypeScript types are generated from the committed frontend/openapi.json, which must match it."""
+    NOT_API = {'/', '/docs', '/favicon.ico', '/openapi.json', '/ui', '/console', '/console/', '/console/<path:path>'}
 
-    def test_every_route_is_in_the_openapi_spec(self):
+    def test_every_route_and_method_is_in_the_openapi_spec(self):
         app = create_app()
-        documented = {re.sub(r'\{[^}]+\}', '{x}', path) for path in
-                      self.client.get('/openapi.json').get_json()['paths']}
-        missing = sorted(rule.rule for rule in app.url_map.iter_rules()
-                         if rule.endpoint != 'static' and rule.rule not in self.NOT_API
-                         and re.sub(r'<[^>]+>', '{x}', rule.rule) not in documented)
+        documented = {}
+        for path, item in self.client.get('/openapi.json').get_json()['paths'].items():
+            documented[re.sub(r'\{[^}]+\}', '{x}', path)] = {method.upper() for method in item}
+        missing = []
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == 'static' or rule.rule in self.NOT_API:
+                continue
+            path = re.sub(r'<[^>]+>', '{x}', rule.rule)
+            for method in sorted(rule.methods - {'HEAD', 'OPTIONS'}):
+                if method not in documented.get(path, set()):
+                    missing.append(f'{method} {rule.rule}')
         self.assertEqual(missing, [])
+
+    def test_frontend_openapi_json_is_up_to_date(self):
+        from pathlib import Path
+
+        from queryapigate.openapi import dump
+        committed = Path(__file__).resolve().parent.parent / 'frontend' / 'openapi.json'
+        self.assertTrue(committed.is_file(), 'frontend/openapi.json is missing')
+        self.assertEqual(committed.read_text(), dump(),
+                         'frontend/openapi.json is out of date - run: python frontend/scripts/dump_openapi.py')
 
 
 if __name__ == '__main__':

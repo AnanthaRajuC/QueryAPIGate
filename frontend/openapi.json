@@ -1,0 +1,3442 @@
+{
+  "components": {
+    "responses": {
+      "Error": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "description": "Error"
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Run SQL against configured databases and get the results back over HTTP.",
+    "title": "QueryAPIGate",
+    "version": "dev"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api_keys": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "API keys"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List API keys (admin only; never the key itself)",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "allow_writes": {
+                    "default": false,
+                    "description": "Never wider than the server-wide QUERYAPIGATE_ALLOW_WRITES.",
+                    "type": "boolean"
+                  },
+                  "allowed_ips": {
+                    "description": "IP addresses or CIDR ranges this key may be used from, e.g. [\"203.0.113.5\", \"10.0.0.0/8\"]. Omitted/null means no restriction.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowed_write_ops": {
+                    "description": "Write statement keywords this key may perform, e.g. [\"insert\", \"update\"] - never widens allow_writes, only narrows which write statements are permitted once it is on. Omitted/null means every write keyword is equally permitted (today's default behaviour).",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "collections": {
+                    "description": "Collection names this key may run every saved query in - read access only, never ad-hoc SQL, and no \"*\" wildcard. LIVE: it reaches whatever is in the collection now, including queries moved in later (see PUT /saved_sql/{name}/collection). Each newly granted name must be an existing collection (400 otherwise, listing them). Omitted means none.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "connections": {
+                    "description": "Allowed connection names, or omitted/\"*\" for all.",
+                    "oneOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "expires_at": {
+                    "description": "YYYY-MM-DD; the key stops authenticating after the end of this date. Omitted/null means no expiry.",
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "queries": {
+                    "description": "Saved-query names this key may run regardless of \"connections\" - additive, not a narrower version of it; omitted/[] grants none beyond what \"connections\" already allows, \"*\" grants every saved query by name (but never ad-hoc SQL, and never write access - see below). A list entry is either a plain name (read access) or {\"name\": ..., \"allow_writes\": true} (write access to that one query specifically, on top of whatever allow_writes already grants); \"*\" can never be combined with a write entry - wanting write access to a specific query means enumerating the whole list explicitly.",
+                    "oneOf": [
+                      {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "description": "A saved-query name - read access only.",
+                              "type": "string"
+                            },
+                            {
+                              "description": "Read access, plus write access to this one query specifically.",
+                              "properties": {
+                                "allow_writes": {
+                                  "type": "boolean"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "rate_limit": {
+                    "description": "This key's own limit, e.g. \"100/minute\" - same grammar as QUERYAPIGATE_RATE_LIMIT. Checked in addition to the server-wide limit, never instead of it. Omitted/null means no limit of its own.",
+                    "type": "string"
+                  },
+                  "role": {
+                    "description": "Create this key from a named role (see POST /roles) instead of specifying grants directly - copies the role's connections/allow_writes/queries/collections/rate_limit/allowed_ips/allowed_write_ops onto this key once, at creation. Cannot be combined with any of those fields in the same request (400); create the key from the role, then PATCH it afterward to customize. expires_at may still be set alongside a role.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The plaintext key, shown once - only its hash is stored."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create a scoped API key (admin only)",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/api_keys/{name}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Revoke an API key (admin only)",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "allow_writes": {
+                    "type": "boolean"
+                  },
+                  "allowed_ips": {
+                    "description": "IP addresses or CIDR ranges, or explicit null to clear the restriction. Omitted leaves it unchanged.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowed_write_ops": {
+                    "description": "Write statement keywords, or explicit null to clear the restriction. Omitted leaves it unchanged.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "collections": {
+                    "description": "Collection names this key may run every saved query in - read access only, never ad-hoc SQL, and no \"*\" wildcard. LIVE: it reaches whatever is in the collection now, including queries moved in later (see PUT /saved_sql/{name}/collection). Each newly granted name must be an existing collection (400 otherwise, listing them). Omitted leaves it unchanged; a list replaces it.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "connections": {
+                    "oneOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "expires_at": {
+                    "description": "YYYY-MM-DD, or explicit null to clear an existing expiry. Omitted leaves it unchanged.",
+                    "format": "date",
+                    "type": "string"
+                  },
+                  "queries": {
+                    "description": "Same shape as in POST /api_keys above. Omitted leaves it unchanged.",
+                    "oneOf": [
+                      {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "description": "A saved-query name - read access only.",
+                              "type": "string"
+                            },
+                            {
+                              "description": "Read access, plus write access to this one query specifically.",
+                              "properties": {
+                                "allow_writes": {
+                                  "type": "boolean"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "rate_limit": {
+                    "description": "e.g. \"100/minute\", or explicit null to clear it. Omitted leaves it unchanged.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update a key's permissions (admin only; the secret itself never changes)",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/audit_log": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Newest entry first, capped at 500 entries"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "A durable record of administrative changes - API keys, roles, connections and saved queries created, changed or removed (admin only)",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/cache/entries": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Cleared"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Evict every cache entry (admin only; not audited - a miss just re-populates from a real query)",
+        "tags": [
+          "Service"
+        ]
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Live entries, soonest-expiring first"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every live response-cache entry's metadata - name, version, connection, format, content type, size and TTL remaining (admin only; never the cached body itself - see GET /cache/entries/{key} for that)",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cache/entries/{key}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Deleted (also 200 if it was already gone)"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Evict one cache entry early (admin only; not audited)",
+        "tags": [
+          "Service"
+        ]
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "The cached body"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "One cache entry's cached response body, served with its real content type - exactly as a caller would have received it on a hit (admin only)",
+        "tags": [
+          "Service"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "key",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/catalog": {
+      "get": {
+        "description": "Not just what /openapi.json already documents (parameters, description, connection) but the governance half it has no field for: whether a response can be cached and for how long, whether this specific caller can write through this query (may differ per query - see per-query write curation under Authentication and permissions), and this caller's own rate limit alongside the server-wide one. Scoped the same way /openapi.json already scopes its saved-query list - a query this caller cannot reach through /q/<name> is never listed here either. Requires authentication like any other functional endpoint (unlike /openapi.json, this is never public), since the whole point is answering \"what can *I* use.\"",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "caller": {
+                      "properties": {
+                        "admin": {
+                          "type": "boolean"
+                        },
+                        "allow_writes": {
+                          "type": "boolean"
+                        },
+                        "allowed_write_ops": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "nullable": true,
+                          "type": "array"
+                        },
+                        "name": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "rate_limit": {
+                          "description": "This caller's own additional limit, e.g. \"100/minute\", or null when it has none of its own.",
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "server_rate_limit": {
+                          "description": "QUERYAPIGATE_RATE_LIMIT, checked in addition to rate_limit above, or null when the server has no limit configured.",
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "queries": {
+                      "items": {
+                        "properties": {
+                          "cache_ttl": {
+                            "description": "Seconds a response may be served from cache, or null when uncached.",
+                            "nullable": true,
+                            "type": "integer"
+                          },
+                          "can_write": {
+                            "description": "Whether this caller specifically can write through this query.",
+                            "type": "boolean"
+                          },
+                          "connection_name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "parameters": {
+                            "type": "object"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Reachable queries and this caller's own terms"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every saved query this caller can reach, and the terms it is offered under",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/collections": {
+      "get": {
+        "description": "Also lists a collection that only a grant still names (no queries left), and the queries in no collection, so an inert grant is visible rather than silent.",
+        "responses": {
+          "200": {
+            "description": "collections and uncollected"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every collection: its queries, and the keys and roles that reach it (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/collections/{name}": {
+      "patch": {
+        "description": "Resumable and never narrows access part-way. An existing target needs merge=true - which is also how to finish a rename that was interrupted.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "merge": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Renamed; lists the queries, keys and roles changed"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Rename a collection, carrying every key and role grant with it (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/collections/{name}/postman": {
+      "get": {
+        "description": "One GET /q/{name} request per query (latest version) with its parameters filled in from their own rules, authenticating from a {{apiKey}} variable left empty - the file never holds a key. A snapshot: export again after queries change.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A Postman Collection v2.1 JSON document"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Download a collection as a Postman Collection v2.1 file (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/connections": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Connections"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List connections (passwords masked)",
+        "tags": [
+          "Connections"
+        ]
+      },
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connections": {
+                    "additionalProperties": {
+                      "properties": {
+                        "active": {
+                          "type": "boolean"
+                        },
+                        "database": {
+                          "type": "string"
+                        },
+                        "db": {
+                          "enum": [
+                            "mysql",
+                            "postgres",
+                            "clickhouse",
+                            "sqlite",
+                            "h2",
+                            "jdbc",
+                            "duckdb",
+                            "mongo"
+                          ],
+                          "type": "string"
+                        },
+                        "driver_class": {
+                          "description": "db: 'jdbc' only - the driver's fully-qualified Java class name.",
+                          "type": "string"
+                        },
+                        "host": {
+                          "type": "string"
+                        },
+                        "jar": {
+                          "description": "db: 'jdbc' only - path to the vendor's JDBC driver .jar.",
+                          "type": "string"
+                        },
+                        "jdbc_url": {
+                          "description": "db: 'jdbc' only - the full JDBC connection URL.",
+                          "type": "string"
+                        },
+                        "password": {
+                          "type": "string"
+                        },
+                        "port": {
+                          "type": "integer"
+                        },
+                        "user": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "Map of name to connection details.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "connections"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Add or update connections",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/connections/databases": {
+      "post": {
+        "description": "Give 'name' alone for an already-saved connection - Run SQL's own database picker. Give the connection's own fields, as POST /connections/test does, to probe one that isn't saved yet - the New/Edit connection form's 'Default database' dropdown - or to try changed fields before saving them. Only supported for mysql, postgres and clickhouse connections; sqlite and duckdb are a single file, and h2/jdbc have no one catalogue query that works across every database reachable that way.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "database": {
+                    "type": "string"
+                  },
+                  "db": {
+                    "enum": [
+                      "mysql",
+                      "postgres",
+                      "clickhouse",
+                      "sqlite",
+                      "h2",
+                      "jdbc",
+                      "duckdb",
+                      "mongo"
+                    ],
+                    "type": "string"
+                  },
+                  "host": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "An already-saved connection to list databases for.",
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "user": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Database names"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List every database on a connection's server (admin only)",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/connections/test": {
+      "post": {
+        "description": "The same fields PATCH /connections takes for one connection, but tried immediately rather than saved - so a typo'd host or a firewalled port is found out before it becomes a saved connection. A password equal to the masked placeholder GET /connections returns is resolved to that connection's real stored password first, by 'name' if one is given.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "database": {
+                    "type": "string"
+                  },
+                  "db": {
+                    "enum": [
+                      "mysql",
+                      "postgres",
+                      "clickhouse",
+                      "sqlite",
+                      "h2",
+                      "jdbc",
+                      "duckdb",
+                      "mongo"
+                    ],
+                    "type": "string"
+                  },
+                  "driver_class": {
+                    "type": "string"
+                  },
+                  "host": {
+                    "type": "string"
+                  },
+                  "jar": {
+                    "type": "string"
+                  },
+                  "jdbc_url": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Only to resolve a masked password; not required otherwise.",
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "user": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "db"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Connected"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Try connecting with the given fields before saving them (admin only)",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/connections/{name}": {
+      "delete": {
+        "description": "A reason is required - deleting a connection breaks every saved query that used it, so it is not left to guesswork afterward. Recorded in the audit log's 'deleted_reason' field; there is no separate deleted-connections store.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete a connection",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/connections/{name}/schema": {
+      "get": {
+        "description": "'database' browses a different database on the same server than the connection's own configured one (admin only; a scoped key gets 403 on it, even one granted this connection) - Run SQL's own database picker, not a new grant.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "database",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "tables": {
+                      "items": {
+                        "properties": {
+                          "columns": {
+                            "items": {
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "nullable": {
+                                  "type": "boolean"
+                                },
+                                "position": {
+                                  "type": "integer"
+                                },
+                                "type": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "table",
+                              "view"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "truncated": {
+                      "description": "True if the schema has more than 5000 columns and was cut off.",
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Tables and columns"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List a connection's tables/views and their columns",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/connections/{name}/table_ddl": {
+      "get": {
+        "description": "Only 'mysql', 'sqlite' and 'clickhouse' connections support this - Postgres has no single-statement DDL dump, H2/DuckDB are unverified here, and Mongo has no DDL at all. 'database' is the same admin-only database-override as the schema endpoint above.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "table",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "database",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "ddl": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The real CREATE TABLE text"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "A table's real CREATE TABLE text",
+        "tags": [
+          "Connections"
+        ]
+      }
+    },
+    "/events": {
+      "get": {
+        "description": "One `data: {...}` line per saved-query execution as it happens - feeds the admin UI's Home tab instead of it polling /list_files. Any authenticated key may connect: the admin key sees every execution; a scoped key sees only executions it triggered itself (its own personal activity feed, filtered by API key name).",
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "text/event-stream of execution events"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Live saved-query execution events (Server-Sent Events)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/examples": {
+      "delete": {
+        "description": "Removes exactly what is marked as an example and nothing else, and lists any keys that were granted an example collection (now inert).",
+        "responses": {
+          "200": {
+            "description": "What was removed"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Remove the example APIs (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "loaded, partial, and the example queries, roles and collections present"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Which example APIs are installed (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      },
+      "post": {
+        "description": "Four worked scenarios - reporting, dashboard, export, partner - as saved queries in collections, matching roles and a small generated SQLite connection named \"examples\". Everything is marked as an example. Idempotent; 409 and nothing changed if something that is not an example already holds one of their names. No API key is created.",
+        "responses": {
+          "200": {
+            "description": "What was added, and the resulting status"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Install the example APIs (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/execute_mongo": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "collection": {
+                    "type": "string"
+                  },
+                  "connection_name": {
+                    "type": "string"
+                  },
+                  "filter": {
+                    "description": "A find() filter document. \":name\" string leaves are bound parameters, filled from params.",
+                    "type": "object"
+                  },
+                  "params": {
+                    "description": "Values for :name bound parameters.",
+                    "type": "object"
+                  },
+                  "projection": {
+                    "type": "object"
+                  },
+                  "sort": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "collection",
+                  "connection_name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Run a Mongo find() query - read-only (BACKLOG #36: find-only for now)",
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/execute_sql": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connection_name": {
+                    "type": "string"
+                  },
+                  "database": {
+                    "description": "Run against a different database on the same server than this connection's own configured one (admin only - 403 for a scoped key, even one already granted this connection).",
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "Values for :name bound parameters.",
+                    "type": "object"
+                  },
+                  "sql": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sql",
+                  "connection_name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Execute SQL",
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/execute_sql_from_file": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connection_name": {
+                    "type": "string"
+                  },
+                  "filepath": {
+                    "description": "Saved query name or path inside saved_sql/.",
+                    "type": "string"
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "Alias of placeholders.",
+                    "type": "object"
+                  },
+                  "placeholders": {
+                    "description": "Values for :name (bound) and {name} (text) parameters.",
+                    "type": "object"
+                  },
+                  "version": {
+                    "description": "Saved version to run (default: latest).",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "filepath"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Run the latest version of a saved query",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/execute_sql_with_parameters_from_file": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connection_name": {
+                    "type": "string"
+                  },
+                  "filepath": {
+                    "description": "Saved query name or path inside saved_sql/.",
+                    "type": "string"
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "Alias of placeholders.",
+                    "type": "object"
+                  },
+                  "placeholders": {
+                    "description": "Values for :name (bound) and {name} (text) parameters.",
+                    "type": "object"
+                  },
+                  "version": {
+                    "description": "Saved version to run (default: latest).",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "filepath"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Run a saved query with parameter values",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "ok"
+                      ],
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "Server version.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Liveness check",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/history": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Saved query name",
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "success",
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "API key name (admin for the admin key)",
+            "in": "query",
+            "name": "key",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, inclusive",
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, exclusive",
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The previous page's next",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of runs, and the cursor for the next (null on the last page)"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Every stored saved-query run, newest first and paged - for looking past the newest runs per version that /list_files shows (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/list_files": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "enum": [
+                "name",
+                "modified"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_order",
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved queries with version metadata"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List saved queries",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Metrics"
+          }
+        },
+        "summary": "Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/q/{name}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "connection_name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Run a saved query; extra query-string arguments become parameters",
+        "tags": [
+          "Saved queries"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "ndjson",
+                "csv",
+                "tsv",
+                "xml",
+                "yaml",
+                "xlsx"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Upper limit is QUERYAPIGATE_MAX_PAGE_SIZE (default 1000).",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Seconds the query may run before it is cancelled (504). Can lower, never raise, the server limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).",
+            "in": "query",
+            "name": "timeout",
+            "schema": {
+              "exclusiveMinimum": true,
+              "minimum": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "connection_name": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "Alias of placeholders.",
+                    "type": "object"
+                  },
+                  "placeholders": {
+                    "description": "Values for :name (bound) and {name} (text) parameters.",
+                    "type": "object"
+                  },
+                  "version": {
+                    "description": "Saved version to run (default: latest).",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The requested page. Header X-Has-More says whether another page follows.",
+            "headers": {
+              "X-Has-More": {
+                "schema": {
+                  "enum": [
+                    "true",
+                    "false"
+                  ],
+                  "type": "string"
+                }
+              },
+              "X-Page": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Page-Size": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Run a saved query with a JSON body of parameters",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/query_flow": {
+      "get": {
+        "description": "Real SQL parsing (via sqlglot) for the Access tab's query-flow panel; not available for h2, jdbc or mongo connections, or a query sqlglot cannot parse - those come back with an explanatory \"error\" and empty tables/joins rather than failing.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detected tables and joins, or an explanatory error"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Best-effort tables/joins a saved query's SQL touches",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/roles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Roles"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "List permission roles (admin only)",
+        "tags": [
+          "Roles"
+        ]
+      },
+      "post": {
+        "description": "A role is a reusable *template*: create_key with a \"role\" copies these fields onto the new key once, at creation time. Editing or deleting the role afterward never changes a key already created from it - the key is the sole source of truth for every authentication after that.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "allow_writes": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "allowed_ips": {
+                    "description": "IP addresses or CIDR ranges. Omitted/null means no restriction.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowed_write_ops": {
+                    "description": "Write statement keywords, e.g. [\"insert\", \"update\"]. Omitted/null means every write keyword is equally permitted.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "collections": {
+                    "description": "Same as in POST /api_keys. Copied onto a key at creation like every other field - the key's own grant is then live, the role is not.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "connections": {
+                    "description": "Same shape as in POST /api_keys.",
+                    "oneOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "queries": {
+                    "description": "Same shape as in POST /api_keys.",
+                    "oneOf": [
+                      {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "description": "A saved-query name - read access only.",
+                              "type": "string"
+                            },
+                            {
+                              "description": "Read access, plus write access to this one query specifically.",
+                              "properties": {
+                                "allow_writes": {
+                                  "type": "boolean"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "rate_limit": {
+                    "description": "e.g. \"100/minute\" - same grammar as QUERYAPIGATE_RATE_LIMIT. Omitted/null means no limit of its own.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Create a named permission role (admin only)",
+        "tags": [
+          "Roles"
+        ]
+      }
+    },
+    "/roles/{name}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete a role (admin only; keys already created from it are unaffected)",
+        "tags": [
+          "Roles"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "allow_writes": {
+                    "type": "boolean"
+                  },
+                  "allowed_ips": {
+                    "description": "Or explicit null to clear the restriction. Omitted leaves it unchanged.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "allowed_write_ops": {
+                    "description": "Or explicit null to clear the restriction. Omitted leaves it unchanged.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "collections": {
+                    "description": "Collection names; a list replaces the current one. Omitted leaves it unchanged.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "connections": {
+                    "oneOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "queries": {
+                    "oneOf": [
+                      {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "description": "A saved-query name - read access only.",
+                              "type": "string"
+                            },
+                            {
+                              "description": "Read access, plus write access to this one query specifically.",
+                              "properties": {
+                                "allow_writes": {
+                                  "type": "boolean"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "enum": [
+                          "*"
+                        ],
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "rate_limit": {
+                    "description": "e.g. \"100/minute\", or explicit null to clear it. Omitted leaves it unchanged.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Update a role (admin only; never affects a key already created from it)",
+        "tags": [
+          "Roles"
+        ]
+      }
+    },
+    "/save_sql_to_file": {
+      "patch": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "author": {
+                    "type": "string"
+                  },
+                  "cache_ttl": {
+                    "description": "Seconds to cache a response for; never used for a query that writes, and not yet supported for query_type mongo.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "collection": {
+                    "description": "The collection to file this query under (lowercase letters, digits, \".\", \"_\", \"-\"). Belongs to the query, not the version: omitted keeps the current one, null removes it. A key granted that collection reaches this query - see PUT /saved_sql/{name}/collection.",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "connection_name": {
+                    "description": "Default connection for /q/{name}.",
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "mongo_collection": {
+                    "description": "Required when query_type is mongo.",
+                    "type": "string"
+                  },
+                  "mongo_filter": {
+                    "description": "A find() filter document. \":name\" string leaves are bound parameters, the JSON-document equivalent of :name in sql_query.",
+                    "type": "object"
+                  },
+                  "mongo_projection": {
+                    "type": "object"
+                  },
+                  "mongo_sort": {
+                    "type": "object"
+                  },
+                  "query_parameters": {
+                    "example": {
+                      "actor_id": "int"
+                    },
+                    "type": "object"
+                  },
+                  "query_type": {
+                    "default": "sql",
+                    "description": "'sql' (the default) needs sql_query; 'mongo' needs mongo_collection and mongo_filter.",
+                    "enum": [
+                      "sql",
+                      "mongo"
+                    ],
+                    "type": "string"
+                  },
+                  "sql_query": {
+                    "description": "Required when query_type is sql.",
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "author",
+                  "description"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Save a query (creates the next version)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/saved_sql/{name}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Delete a saved query, or one version with ?version=",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/saved_sql/{name}/cache_ttl": {
+      "put": {
+        "description": "Not a new version - operational metadata, not the query definition. ?version= targets a specific version; omitted means the latest. 0 or null turns caching off for that version.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "cache_ttl": {
+                    "nullable": true,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cache_ttl"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated; includes the resolved version and cache_ttl"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Set or clear one version's cache_ttl in place (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/saved_sql/{name}/collection": {
+      "put": {
+        "description": "Not a new version. A key's collection grant is live, so this can change what other keys reach: the response and the audit log entry list exactly which keys and roles gain or lose access to this query.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "collection": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "collection"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Moved; includes from, to and the access gained or lost"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Move a saved query into a collection, or out of any (admin only)",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    },
+    "/settings": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Settings grouped into sections"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "The server's own configuration: each setting's effective value and whether it comes from the environment or is the default (admin only, read-only; secrets are reported as configured or not, never returned)",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/settings/mcp_status": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Reachable or not, and the port checked"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Whether the separate `queryapigate mcp` process is currently reachable on its configured port (admin only; a plain TCP connect attempt, not a full MCP handshake) - on demand only, never checked automatically",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/settings/mcp_tools": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Every MCP tool an admin key would see"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "What `tools/list` currently returns for an unrestricted MCP caller - computed in-process, so this works whether or not `queryapigate mcp` is actually running (admin only)",
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/view_file_content": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "summary": "Raw content of a saved query file",
+        "tags": [
+          "Saved queries"
+        ]
+      }
+    }
+  },
+  "security": [
+    {},
+    {
+      "ApiKey": []
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # ADR 0001: QueryAPIGate Console, a React/TypeScript frontend over a versioned Management API
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-03)
 - **Date:** 2026-10-03
 - **Backlog:** #72 (Management API v1), #73 (QueryAPIGate Console)
 
@@ -46,9 +46,12 @@ happened.
    roles, collections, history, audit, settings, MCP). It's a product interface in its own right: usable by
    the Console, scripts, Terraform or GitOps tooling, and other organizations' internal platforms.
 3. **Treat the OpenAPI document as the contract between the two.**
-   - A conformance test keeps it true: every route is documented, and real responses validate against their
-     schemas.
-   - TypeScript types and the API client are generated from it, never hand-copied.
+   - A conformance test keeps it true: every route and method is documented, and (as #72 adds response
+     schemas) real responses validate against them.
+   - A copy of the document is committed as `frontend/openapi.json`. Python regenerates it
+     (`frontend/scripts/dump_openapi.py`), and a backend test fails while it is stale. The frontend build turns it
+     into TypeScript types (`openapi-typescript`) and a typed client (`openapi-fetch`), never hand-copied. That
+     way the frontend build needs no Python, and backend contributors need no Node.
 4. **Ship one artifact.** CI builds the Console's static assets and includes them in the Python wheel and the
    Docker image. Flask serves them at `/console`. Users never need Node.js, and `docker run` or `docker compose
    up` still gives the complete product.
@@ -56,13 +59,26 @@ happened.
    Console reaches feature parity, and from now on receives bug fixes only.
 
 **Stack (deliberately conservative):**
-- **Core and data:** React, TypeScript, Vite, React Router, and TanStack Query for server state (no global
-  store until one is actually needed).
-- **Forms:** React Hook Form + Zod.
-- **UI:** shadcn/ui + Radix, and TanStack Table.
-- **SQL editor:** CodeMirror 6 or Monaco, decided by a size and feature spike. Monaco is several MB; CodeMirror
-  6 is much lighter and has good SQL support.
-- **Charts:** a lightweight library first; Apache ECharts only if monitoring grows into it.
+
+| Concern | Choice |
+|---|---|
+| Language and build | TypeScript + Vite (static output only; no server-side rendering, so no Node in production) |
+| Framework and routing | React (single-page app), React Router |
+| Server state | TanStack Query; URL state next; a global store (Zustand) only if a real need appears |
+| API client and types | `openapi-typescript` + `openapi-fetch`, from `frontend/openapi.json` |
+| Forms | React Hook Form + Zod |
+| Components and styling | shadcn/ui + Radix, Tailwind CSS (colour tokens carried over from `/ui`), lucide icons |
+| Tables | TanStack Table |
+| SQL editor | CodeMirror 6, expected to win over Monaco on size and CSP-compatibility; confirmed by a spike on the Queries slice |
+| Charts | Recharts first; Apache ECharts only if monitoring grows into it |
+| Live events | a `fetch()` stream reader (`EventSource` can't send `X-API-Key`), honouring `Last-Event-ID` |
+| Tests | Vitest + React Testing Library; Playwright for end-to-end |
+| Lint and format | ESLint + Prettier |
+| Toolchain | npm, Node.js 22 (`frontend/.nvmrc`) |
+
+Version constraints found when scaffolding (2026-10-03): TypeScript is pinned to 5.9 because `openapi-typescript`
+and `typescript-eslint` don't yet support TypeScript 6/7, and React Router 7 is used because 8 needs a newer Node 22
+patch release than some contributors have. Revisit both when those constraints lift.
 
 **Information architecture** follows workflows, not backend tables:
 - **Overview**
@@ -133,6 +149,17 @@ Until step 3, the Console ships marked experimental, alongside the existing UI.
     legacy management routes as first-class;
   - runtime routes (`/q/<name>`, `/execute_sql`, `/events`, `/openapi.json`, `/catalog`, `/health`,
     `/metrics`) are not renamed by this decision.
+
+## Findings from the foundations step
+
+- **36 of 47 API operations had no response schema** in the OpenAPI document, almost all of them management
+  endpoints. Route and method coverage was already complete. Types generated for those responses are therefore
+  empty, which confirms that #72 has to design every `/api/v1` resource with full response schemas. `GET /health`
+  was documented as part of this step because the Console's shell needed it.
+- **`/ui` restores its last tab from sessionStorage,** so the Console's placeholder screens open the matching
+  classic tab directly. That makes running both UIs side by side seamless for users.
+- **The root `.gitignore` ignored every `lib/` directory,** which would have silently excluded
+  `frontend/src/lib/`. It now has an explicit exception.
 
 ## Open questions
 

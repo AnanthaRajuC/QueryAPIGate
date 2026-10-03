@@ -119,6 +119,34 @@ against service containers. `tests/test_sql_guard_fuzz.py` property-tests the SQ
 it only catches genuine static errors, not missing annotations. `coverage run -m unittest discover -s tests -t .`
 followed by `coverage report` shows local coverage; CI uploads it to [Codecov](https://codecov.io/gh/AnanthaRajuC/QueryAPIGate).
 
+### Console (frontend)
+
+The QueryAPIGate Console - the new web UI at `/console`, replacing `/ui` one screen at a time - lives in `frontend/`
+(React + TypeScript + Vite; see [ADR 0001](documentation/adr/0001-console-and-management-api.md)). **Backend work
+never needs Node.js:** without a build, `/console` shows a short "not built" page and `/ui` keeps working, and the
+Console's CI only runs when `frontend/` changes.
+
+To work on it (Node.js 22, see `frontend/.nvmrc`), run the backend as usual, then in a second terminal:
+
+~~~bash
+cd frontend
+npm ci
+npm run dev        # http://localhost:5173/console/ - API calls are proxied to http://127.0.0.1:5000
+npm test           # also: npm run lint, npm run typecheck, npm run format:check
+npm run build      # writes queryapigate/console_dist/, served by the backend at /console
+~~~
+
+The Console's TypeScript types are generated from `frontend/openapi.json`, a committed copy of the backend's OpenAPI
+description. **If you change `queryapigate/openapi.py`, regenerate it** - Python only, no Node needed:
+
+~~~bash
+python frontend/scripts/dump_openapi.py
+~~~
+
+The backend test suite fails while the two disagree, and also checks that every route and method is documented.
+
+`queryapigate/ui.py` (the classic UI) is frozen: bug fixes only, no new screens. New UI work goes into the Console.
+
 ### Docs site
 
 The docs site (deployed to GitHub Pages) is built from this README and `documentation/` - there is nothing to edit

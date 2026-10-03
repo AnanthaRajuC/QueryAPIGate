@@ -21,6 +21,20 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+### Added
+- **QueryAPIGate Console (experimental), at `/console`.** The start of the new web UI that will replace `/ui` one
+  screen at a time ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript
+  in `frontend/`, it is a client of the public JSON API only. This first release has:
+  - the workflow-based navigation (Build, Explore, Govern, Observe, AI, Admin);
+  - sign-in with an API key, shared with `/ui` and `/docs` in the same browser tab;
+  - an Overview of server status and your access.
+
+  Every other screen links straight to the matching tab of `/ui`, which is unchanged. The wheel and the Docker image
+  include the built Console, so running it needs no Node.js; a source checkout without a build shows how to build it.
+  The Console is served with a strict Content-Security-Policy, and loading its static files doesn't count toward
+  `QUERYAPIGATE_RATE_LIMIT`.
+- `GET /health`'s response is now described in the OpenAPI document (`status`, `version`).
+
 ## [0.12.0] - 2026-10-03
 
 ### Added

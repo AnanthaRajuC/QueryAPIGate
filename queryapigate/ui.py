@@ -8,6 +8,9 @@ results are always rendered through DOM APIs (createElement/textContent), never 
 coming back from a database can never execute as markup - the Docs browser is the one deliberate exception
 (rendering fetched markdown as HTML has no DOM-API equivalent), and even there the rendered HTML is passed
 through DOMPurify.sanitize() before it ever reaches innerHTML, never assigned raw.
+
+**Frozen (ADR 0001):** bug fixes only, no new screens. The QueryAPIGate Console (frontend/, served at /console by
+console.py) replaces this page one screen at a time; this file is deleted once the Console reaches parity.
 """
 
 UI_HTML = r"""<!doctype html>

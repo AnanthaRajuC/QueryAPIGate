@@ -70,7 +70,7 @@ version = { attr = "queryapigate.__version__" }
 include = ["queryapigate*"]
 
 [tool.setuptools.package-data]
-queryapigate = ["lib/*.jar"]
+queryapigate = ["lib/*.jar", "console_dist/**/*"]
 
 [tool.ruff]
 line-length = 120

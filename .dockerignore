@@ -11,3 +11,5 @@ saved_sql
 dist
 build
 *.egg-info
+frontend/node_modules
+queryapigate/console_dist

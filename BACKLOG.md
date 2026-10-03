@@ -2161,9 +2161,10 @@ legacy names.
   - `ETag`/`If-Match` for safe concurrent edits.
 - **Grow a service layer underneath, one resource at a time,** rather than reorganising the package up front.
   `app.py`'s route handlers become thin adapters.
-- **Add an OpenAPI conformance test before the first resource:** every route is in the spec, and responses
-  validate against their schemas. `openapi.py` is hand-written today, and the Console's TypeScript client
-  will be generated from it.
+- **Conformance:** every route and method is in the spec (tested since #73's phase 1). The remaining gap is
+  response schemas: as of 0.12.0, **36 of 47 operations had none**, almost all of them management endpoints.
+  Each `/api/v1` resource ships with full response schemas, plus a test that validates real responses against
+  them. That's what makes the Console's generated types meaningful.
 - **Retire the old routes gradually.** Each one stays working and is deprecated (#67) once its `/api/v1`
   replacement ships, with the `Deprecation` header and a changelog entry. Runtime routes (`/q/<name>`,
   `/execute_sql`, `/events`, `/catalog`, `/health`, `/metrics`) are not renamed by this item; whether they also
@@ -2171,8 +2172,24 @@ legacy names.
 
 ## 73. QueryAPIGate Console: a React/TypeScript frontend replacing `/ui`
 
-**Status: open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Additive; ships
-as experimental (#64) until it reaches parity with `/ui`.
+**Status: phase 1 (foundations) shipped; phases 2-4 open.** Decided in
+[ADR 0001](documentation/adr/0001-console-and-management-api.md). Additive; ships as experimental (#64) until it
+reaches parity with `/ui`.
+
+Phase 1 shipped:
+- `frontend/` (React, TypeScript, Vite, Tailwind, React Router, TanStack Query, a typed `openapi-fetch` client);
+- served at `/console` by `queryapigate/console.py`, with a strict CSP, immutable caching for hashed assets, an
+  SPA fallback, a "not built" page, and exemption from the IP rate limit;
+- the workflow navigation;
+- API-key sign-in shared with `/ui` and `/docs`;
+- an Overview screen;
+- placeholders that open the matching `/ui` tab;
+- the multi-stage Dockerfile, the wheel including the build, the Console CI workflow (path-filtered), and release
+  and package checks that the wheel contains it;
+- `frontend/openapi.json` with a staleness test, and the route test extended to methods;
+- `ui.py` frozen.
+
+Next: the Queries slice, with the CodeMirror/Monaco spike and `/api/v1/queries` (#72).
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

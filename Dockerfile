@@ -1,3 +1,13 @@
+# Stage 1: build the QueryAPIGate Console (frontend/, ADR 0001). Only its static output is carried into the final
+# image, so the image itself contains no Node.js. frontend/openapi.json is committed, so this stage needs no Python.
+FROM node:22-slim AS console
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+# vite.config.ts writes to ../queryapigate/console_dist
+RUN npm run build
+
 FROM python:3.12-slim
 
 # Build with --build-arg WITH_H2=true to add Java and the H2 driver.
@@ -20,6 +30,7 @@ RUN if [ "$WITH_H2" = "true" ]; then \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY queryapigate ./queryapigate
+COPY --from=console /queryapigate/console_dist ./queryapigate/console_dist
 RUN pip install ".[mysql,postgres,clickhouse,server,jwt]" \
     && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
 

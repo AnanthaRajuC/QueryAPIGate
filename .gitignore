@@ -170,3 +170,8 @@ cython_debug/
 
 # Launch and marketing material (Hacker News kit, demo-video tooling): kept locally, never part of the product
 /marketing/
+
+# QueryAPIGate Console (frontend/, ADR 0001): its source lib/ is not a Python build directory, and its build output
+# lands in the package (queryapigate/console_dist/) only for release builds - never committed.
+!frontend/src/lib/
+queryapigate/console_dist/

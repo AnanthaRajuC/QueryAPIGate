@@ -1,0 +1,5 @@
+node_modules/
+# Generated from openapi.json by `npm run gen:api` (part of dev/build/test) - never edited by hand.
+src/api/schema.d.ts
+*.tsbuildinfo
+coverage/

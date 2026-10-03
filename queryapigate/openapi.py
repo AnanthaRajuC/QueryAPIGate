@@ -95,7 +95,11 @@ def _saved_query_paths(queries):
     return paths
 
 
-def build_spec(version, saved_queries=None):
+def build_spec(version, saved_queries=None, jwt=None):
+    """`jwt` (default: whether JWT is configured) adds the BearerAuth scheme - pinned by dump() so the committed
+    copy never depends on the environment it was generated in."""
+    if jwt is None:
+        jwt = config.jwt_enabled()
     saved = {'filepath': {'type': 'string', 'description': 'Saved query name or path inside saved_sql/.'},
              **_EXEC_PROPS}
     spec = {
@@ -106,11 +110,11 @@ def build_spec(version, saved_queries=None):
             'securitySchemes': {'ApiKey': {'type': 'apiKey', 'in': 'header', 'name': 'X-API-Key'},
                                 **({'BearerAuth': {'type': 'http', 'scheme': 'bearer', 'bearerFormat': 'JWT',
                                                    'description': "A signed-in user's token (see jwtauth.py)"}}
-                                   if config.jwt_enabled() else {})},
+                                   if jwt else {})},
             'responses': {'Error': {'description': 'Error', 'content': {'application/json': {'schema': {
                 'type': 'object', 'properties': {'error': {'type': 'string'}, 'detail': {'type': 'string'}}}}}}},
         },
-        'security': [{}, {'ApiKey': []}, *([{'BearerAuth': []}] if config.jwt_enabled() else [])],
+        'security': [{}, {'ApiKey': []}, *([{'BearerAuth': []}] if jwt else [])],
         'paths': {
             '/execute_sql': {'post': {
                 'summary': 'Execute SQL', 'tags': ['Query'],
@@ -597,7 +601,10 @@ def build_spec(version, saved_queries=None):
                                 'QUERYAPIGATE_RATE_LIMIT, checked in addition to rate_limit above, or null when '
                                 'the server has no limit configured.'}}}}}}}}, **_ERRORS}}},
             '/health': {'get': {'summary': 'Liveness check', 'tags': ['Service'],
-                                'responses': {'200': {'description': 'OK'}}}},
+                                'responses': {'200': {'description': 'OK', 'content': {'application/json': {
+                                    'schema': {'type': 'object', 'required': ['status', 'version'], 'properties': {
+                                        'status': {'type': 'string', 'enum': ['ok']},
+                                        'version': {'type': 'string', 'description': 'Server version.'}}}}}}}}},
             '/metrics': {'get': {
                 'summary': 'Prometheus text-format metrics: request/query counts and latencies, pool occupancy, '
                            'rate-limit rejections', 'tags': ['Service'],
@@ -645,3 +652,12 @@ DOCS_HTML = """<!doctype html>
   });
 </script></body></html>
 """
+
+
+def dump():
+    """The static API description (no saved queries, no environment-dependent parts, version pinned to "dev"),
+    as stable, sorted JSON. frontend/openapi.json is this output, committed: the Console's TypeScript types are
+    generated from it, so the frontend build needs no Python, and a test fails when the two drift apart.
+    Regenerate it with:  python frontend/scripts/dump_openapi.py"""
+    import json
+    return json.dumps(build_spec('dev', jwt=False), indent=2, sort_keys=True) + '\n'

@@ -9,7 +9,7 @@ one it supersedes.
 
 | ADR | Title | Status |
 |---|---|---|
-| [0001](0001-console-and-management-api.md) | QueryAPIGate Console: a React/TypeScript frontend over a versioned Management API | Proposed |
+| [0001](0001-console-and-management-api.md) | QueryAPIGate Console: a React/TypeScript frontend over a versioned Management API | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

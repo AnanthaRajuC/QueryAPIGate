@@ -21,6 +21,7 @@ from . import (
     cache,
     collection_admin,
     config,
+    console,
     cors,
     db,
     definitions,
@@ -52,8 +53,10 @@ bp = Blueprint('api', __name__)
 # Query-string arguments that control a request rather than supplying query parameters.
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
-                    'api.metrics_endpoint'}
-RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint'}  # monitoring keeps working while a client is throttled
+                    'api.console_page', 'api.metrics_endpoint'}
+# Monitoring keeps working while a client is throttled; the Console's static files are exempt so loading the page
+# (several hashed assets) never spends a client's quota - they carry no data and no key.
+RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
 
@@ -1458,3 +1461,10 @@ def docs():
 @bp.route('/ui', methods=['GET'])
 def admin_ui():
     return Response(ui.UI_HTML, mimetype='text/html')
+
+
+@bp.route('/console', methods=['GET'])
+@bp.route('/console/', methods=['GET'])
+@bp.route('/console/<path:path>', methods=['GET'])
+def console_page(path=''):
+    return console.serve(path)
