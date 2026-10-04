@@ -13,7 +13,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, deprecations, duckfiles, history
+from . import config, db, duckfiles, history
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -129,29 +129,6 @@ def read_connections():
     rows = db.connection().execute(
         'SELECT name, db, active, created_at, updated_at, details_json FROM connections').fetchall()
     return {row['name']: _connection_row_to_dict(row) for row in rows}
-
-
-def import_legacy_connections_if_empty():
-    """First-boot bootstrap: the connections table is now the only place a connection is read from - a
-    still-present db_connections.json (an upgrade from before this table existed, or a read-only seed file
-    like the docker-compose demo's) would otherwise just go silently unread. Only runs when the table is
-    completely empty, so it's safe to call on every startup: once anything exists in SQLite (imported here,
-    or created through the API) this never looks at the JSON file again. Never raises - a missing or
-    corrupt legacy file just means there is nothing to import, the same "nothing there yet" state as a
-    genuinely fresh install."""
-    if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
-        return
-    path = config.connections_file()
-    if not path.exists():
-        return
-    try:
-        with open(path, 'r') as f:
-            connections = json.load(f).get('connections', {})
-    except (OSError, json.JSONDecodeError):
-        return
-    if connections:
-        deprecations.warn('legacy_json_import')
-        update_connections(connections)
 
 
 def _expand_env(value):
@@ -722,102 +699,37 @@ def record_execution(path, version, entry, sample=True):
     history.record(path, version, entry, sample=sample)
 
 
-def import_legacy_saved_queries_if_empty():
-    """First-boot bootstrap for saved_sql/*.json, the same shape as import_legacy_connections_if_empty()
-    above and for the same reason: only runs while saved_queries is completely empty, only ever adds, and
-    the legacy folder itself is never written to or consulted again once anything exists in SQLite. Reads
-    the legacy file shape directly (not through load_versions(), which now expects SQL to already have the
-    data this function's whole job is to put there) - a version or history entry that doesn't parse as
-    expected is skipped rather than failing the whole import, the same tolerance _saved_files() used to
-    give a corrupt file."""
-    if db.connection().execute('SELECT 1 FROM saved_queries LIMIT 1').fetchone() is not None:
-        return
-    saved_dir = config.saved_sql_dir()
-    if not saved_dir.is_dir():
-        return
-    if any(name.endswith('.json') for name in os.listdir(str(saved_dir))):
-        deprecations.warn('legacy_json_import')
-    with db.transaction() as conn:
-        for filename in sorted(os.listdir(str(saved_dir))):
-            path = saved_dir / filename
-            if not (filename.endswith('.json') and path.is_file()):
-                continue
-            name = filename[:-len('.json')]
-            try:
-                with open(path, 'r') as f:
-                    content = json.load(f)
-            except (OSError, json.JSONDecodeError):
-                continue
-            if not isinstance(content, dict):
-                continue
-            collection = read_collection(content)
-            example = read_example(content)
-            conn.execute('INSERT OR IGNORE INTO saved_queries (name, collection, example) VALUES (?, ?, ?)',
-                        (name, collection, int(example)))
-            for key, data in content.items():
-                if not (key.isdigit() and isinstance(data, dict)):
-                    continue
-                version = int(key)
-                fields = {k: v for k, v in data.items() if k not in
-                         ('uuid', 'created_at', 'last_modified_at', 'status', 'version', 'execution_history')}
-                conn.execute("""
-                    INSERT OR IGNORE INTO saved_query_versions
-                        (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (name, version, data.get('uuid') or str(uuid.uuid4()), data.get('status') or 'active',
-                      data.get('created_at') or now(), data.get('last_modified_at') or now(),
-                      json.dumps(fields)))
-                history = data.get('execution_history')
-                for entry in history if isinstance(history, list) else []:
-                    if not isinstance(entry, dict):
-                        continue
-                    conn.execute(
-                        'INSERT INTO execution_history (query_name, version, executed_at, entry_json, status, '
-                        'key_name) VALUES (?, ?, ?, ?, ?, ?)',
-                        (name, version, entry.get('executed_at') or now(), json.dumps(entry, default=str),
-                         entry.get('status'), entry.get('key_name')))
-            # Legacy files predate publishing: their newest version was the one served, so it is the published one.
-            conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
-                         'WHERE query_name = ?) WHERE name = ? AND published_version IS NULL', (name, name))
-
-
-def import_legacy_audit_log_if_empty():
-    """First-boot bootstrap for audit_log.json, same shape as the two above: only runs while audit_log is
-    completely empty, reads the legacy file directly, and never touches it again afterward. A straight
-    one-time copy of whatever entries are already there (already capped as of the file's last write) - the
-    normal per-insert cap in record_audit() takes over from the next write onward."""
-    if db.connection().execute('SELECT 1 FROM audit_log LIMIT 1').fetchone() is not None:
-        return
-    try:
-        with open(config.audit_log_file(), 'r') as f:
-            entries = json.load(f).get('entries', [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        return
-    if entries:
-        deprecations.warn('legacy_json_import')
-    with db.transaction() as conn:
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            conn.execute('INSERT INTO audit_log (timestamp, entry_json) VALUES (?, ?)',
-                        (entry.get('timestamp') or now(), json.dumps(entry, default=str)))
-
-
-def import_legacy_data_if_empty():
-    """Called once at startup (app.create_app(), cli.main()): the single entry point for every first-boot
-    bootstrap this module owns, so every caller only needs to remember one name. apikeys.py's own
-    import_legacy_keys_if_empty()/import_legacy_roles_if_empty() are called separately by the same
-    callers - store.py cannot import apikeys here without creating an import cycle (apikeys.py already
-    imports store).
-
-    Skipped entirely on Postgres: those legacy files predate SQLite and are never deleted after import, so an
-    old home folder still holds a stale copy - data reaches Postgres from queryapigate.db, through
-    `queryapigate migrate-to-postgres`, never from them."""
+def refuse_legacy_home():
+    """Refuse to start on a home that still holds data only in the pre-SQLite JSON files - a home last run by
+    QueryAPIGate 0.10 or older (0.10 had moved connections into queryapigate.db, but not yet saved queries, keys,
+    roles or the audit log). 0.14 was the last release to import them; starting without them would look like data
+    loss. Each file counts only if it has entries its table lacks: files left behind after 0.11+ imported them, or
+    empty ones, are ignored, as is every PostgreSQL store."""
     if db.is_postgres():
         return
-    import_legacy_connections_if_empty()
-    import_legacy_saved_queries_if_empty()
-    import_legacy_audit_log_if_empty()
+    conn = db.connection()
+
+    def empty(table):
+        return conn.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone() is None
+
+    def entries(path, key):
+        try:
+            with open(path) as f:
+                return bool(json.load(f).get(key))
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    found = [path.name for path, key, table in (
+        (config.connections_file(), 'connections', 'connections'), (config.api_keys_file(), 'keys', 'api_keys'),
+        (config.roles_file(), 'roles', 'roles'), (config.audit_log_file(), 'entries', 'audit_log'))
+        if empty(table) and entries(path, key)]
+    saved_dir = config.saved_sql_dir()
+    if empty('saved_queries') and saved_dir.is_dir() and any(n.endswith('.json') for n in os.listdir(str(saved_dir))):
+        found.append('saved_sql/')
+    if found:
+        raise ValueError(f"{config.home()} holds data from QueryAPIGate 0.10 or older ({', '.join(found)}) that this "
+                         'version no longer reads. Start QueryAPIGate 0.14 on this folder once - it brings it into '
+                         'queryapigate.db - then this version.')
 
 
 def latest_versions():

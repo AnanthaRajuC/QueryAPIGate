@@ -50,7 +50,8 @@ tables (federation considered and deferred, see #83).
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
-3. **0.15:** #70 decided - several instances supported - and delivered by #55-#58; #75 files through DuckDB.
+3. **0.15:** #70 decided - several instances supported - and delivered by #55-#58; #75 files through DuckDB; what
+   0.14 deprecated, removed. (Released as 0.15.0 on 2026-10-04.)
 4. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 5. **1.0.0.**
 
@@ -2072,7 +2073,7 @@ breaks its own promise.
 
 ## 65. Upgrade guarantee: every 0.x store upgrades or refuses clearly, tested in CI
 
-**Status: shipped.** PostgreSQL stores too: `<version>.postgres.tar.gz` (0.12.0, 0.13.0, 0.14.0) are `pg_dump`
+**Status: shipped.** PostgreSQL stores too: `<version>.postgres.tar.gz` (0.12.0, 0.13.0, 0.14.0, 0.15.0) are `pg_dump`
 output of the same estate, restored and started in the PostgreSQL CI job (`generate.py --postgres URL`). `tests/fixtures/stores/`
 holds a home built by each of 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0 and 0.12.0 through its own API
 (`generate.py`); `tests/test_upgrades.py` starts the current code on each and checks connections, query versions

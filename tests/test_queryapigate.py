@@ -230,39 +230,31 @@ class SavedQueryTests(ApiTestCase):
             self.assertEqual(self.save(name).status_code, 400, name)
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, 'evil.json')))
 
-    def test_execute_latest_version_from_file(self):
+    def test_execute_latest_version(self):
         self.save('q', sql='SELECT actor_id FROM actor ORDER BY actor_id')
         self.save('q', sql='SELECT name FROM actor ORDER BY actor_id')
-        for filepath in ('q', 'q.json', 'saved_sql/q.json', os.path.join(self.saved_dir, 'q.json')):
-            res = self.client.post('/execute_sql_from_file?page_size=2',
-                                   json={'filepath': filepath, 'connection_name': 'lite', 'format': 'csv'})
-            self.assertEqual(res.get_data(as_text=True).splitlines(), ['name', 'Actor 1', 'Actor 2'], filepath)
+        res = self.client.post('/q/q?page_size=2', json={'connection_name': 'lite', 'format': 'csv'})
+        self.assertEqual(res.get_data(as_text=True).splitlines(), ['name', 'Actor 1', 'Actor 2'])
 
     def test_parameters(self):
         self.save('p', sql="SELECT name FROM actor WHERE actor_id = {id} AND born LIKE '{year}%'")
-        ok = self.client.post('/execute_sql_with_parameters_from_file', json={
-            'filepath': 'p', 'connection_name': 'lite', 'placeholders': {'id': 3, 'year': '1903'}})
+        ok = self.client.post('/q/p', json={'connection_name': 'lite', 'placeholders': {'id': 3, 'year': '1903'}})
         self.assertEqual(ok.get_json(), [{'name': 'Actor 3'}])
 
         for bad in ({'id': '1 OR 1=1; --', 'year': '1903'}, {'id': 3, 'year': "x' OR '1'='1"},
                     {'id': '3 -- ', 'year': 'x'}, {'id': [1], 'year': 'x'}):
-            res = self.client.post('/execute_sql_with_parameters_from_file', json={
-                'filepath': 'p', 'connection_name': 'lite', 'placeholders': bad})
+            res = self.client.post('/q/p', json={'connection_name': 'lite', 'placeholders': bad})
             self.assertEqual(res.status_code, 400, bad)
 
-        missing = self.client.post('/execute_sql_with_parameters_from_file', json={
-            'filepath': 'p', 'connection_name': 'lite', 'placeholders': {'id': 3}})
+        missing = self.client.post('/q/p', json={'connection_name': 'lite', 'placeholders': {'id': 3}})
         self.assertEqual(missing.status_code, 400)
         self.assertIn('year', missing.get_json()['error'])
 
-    def test_file_access_is_confined_to_saved_sql(self):
+    def test_a_name_is_never_a_path(self):
         self.save('q')
-        outside = (self.db_path, '../db_connections.json', '/etc/passwd', 'saved_sql/../db_connections.json')
-        for path in outside:
-            res = self.client.post('/execute_sql_from_file',
-                                   json={'filepath': path, 'connection_name': 'lite'})
-            self.assertIn(res.status_code, (403, 404), path)
-            self.assertNotIn('password', res.get_data(as_text=True))
+        for name in ('..%2Fdb_connections.json', '%2Fetc%2Fpasswd', 'saved_sql%2F..%2Fq'):
+            res = self.client.post(f'/q/{name}', json={'connection_name': 'lite'})
+            self.assertEqual(res.status_code, 404, name)
 
     def test_query_flow_extracts_tables_and_joins(self):
         self.save('q', sql='SELECT a.name FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id',
@@ -339,54 +331,62 @@ class ConnectionTests(ApiTestCase):
         self.assertNotEqual(res.get_json()['created_at'], '2000-01-01 00:00:00')
 
 
-@unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files are deliberately never imported into Postgres')
-class LegacyConnectionsImportTests(unittest.TestCase):
-    """A still-present db_connections.json (an upgrade from before the SQLite store existed, or a
-    read-only seed file like the docker-compose demo's) must still be picked up on first boot - the exact
-    regression a read-only-mounted demo home surfaced: the app no longer reads that file at all once
-    anything exists in SQLite, so a fresh SQLite store with zero rows needs to import it once, automatically."""
+@unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files only ever concerned SQLite stores')
+class LegacyHomeTests(unittest.TestCase):
+    """0.15 stopped importing the pre-SQLite JSON files (deprecated in 0.14). A home that has nothing but those -
+    from 0.9 or older - is refused with what to do, rather than started empty; a home from 0.10 on still holds them,
+    never deleted after their import, and is left alone."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = self.tmp.name
-        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home})
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home, 'QUERYAPIGATE_API_KEY': 'admin-key'})
         patcher.start()
         self.addCleanup(patcher.stop)
-        for name in ('QUERYAPIGATE_API_KEY',):
-            os.environ.pop(name, None)
 
-    def write_legacy_json(self, connections):
-        with open(os.path.join(self.home, 'db_connections.json'), 'w') as f:
-            json.dump({'connections': connections}, f)
+    def write(self, name, content):
+        path = os.path.join(self.home, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(content, f)
 
-    def test_a_legacy_file_is_imported_on_first_boot(self):
-        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
+    def test_a_home_of_only_legacy_files_is_refused_saying_what_to_do(self):
+        for name, content in (('db_connections.json', {'connections': {'a': {'db': 'sqlite'}}}),
+                              ('api_keys.json', {'keys': {'k': {'hash': 'h'}}}), ('roles.json', {'roles': {'r': {}}}),
+                              ('audit_log.json', {'entries': [{'action': 'x'}]}),
+                              ('saved_sql/q.json', {'1': {'sql_query': 'SELECT 1'}})):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as home, \
+                    mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):
+                self.home = home
+                self.write(name, content)
+                with self.assertRaisesRegex(ValueError, r'0\.10 or older .* Start QueryAPIGate 0\.14 on this folder'):
+                    create_app()
+                db.close()
+
+    def test_empty_leftover_files_are_ignored(self):
+        self.write('db_connections.json', {'connections': {}})
+        self.write('roles.json', {'roles': {}})
+        self.assertEqual(create_app().test_client().get('/health').status_code, 200)
+
+    def test_the_cli_says_so_and_exits_2(self):
+        self.write('db_connections.json', {'connections': {'a': {'db': 'sqlite'}}})
+        from queryapigate import cli
+        with mock.patch('sys.stderr') as stderr:
+            self.assertEqual(cli.main(['backup', os.path.join(self.home, 'b.db')]), 2)
+        self.assertIn('no longer reads', ''.join(str(c) for c in stderr.write.call_args_list))
+
+    def test_a_home_whose_store_has_data_ignores_leftover_files(self):
         client = create_app().test_client()
-        conns = {c['name']: c for c in client.get('/api/v1/connections').get_json()['items']}
-        self.assertIn('a', conns)
-        self.assertTrue(conns['a']['active'])
+        client.post('/api/v1/connections', headers={'X-API-Key': 'admin-key'},
+                    json={'name': 'made', 'db': 'sqlite', 'database': 'x.db'})
+        self.write('db_connections.json', {'connections': {'stale': {'db': 'sqlite', 'database': 'y.db'}}})
+        names = [c['name'] for c in create_app().test_client().get(
+            '/api/v1/connections', headers={'X-API-Key': 'admin-key'}).get_json()['items']]
+        self.assertEqual(names, ['made'])
 
-    def test_a_missing_legacy_file_is_a_no_op_not_an_error(self):
-        client = create_app().test_client()  # no db_connections.json at all
-        self.assertEqual(client.get('/api/v1/connections').get_json()['items'], [])
-
-    def test_import_only_happens_once_a_later_edit_to_the_json_file_is_never_picked_up(self):
-        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
-        create_app()
-        self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True},
-                                'b': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
-        client = create_app().test_client()  # second boot: connections table is no longer empty
-        conns = [c['name'] for c in client.get('/api/v1/connections').get_json()['items']]
-        self.assertNotIn('b', conns)
-
-    def test_a_connection_created_through_the_api_also_blocks_a_later_import(self):
-        client = create_app().test_client()  # boots with no legacy file - table starts empty
-        client.post('/api/v1/connections', json={'name': 'made', 'db': 'sqlite', 'database': 'x.db'})
-        self.write_legacy_json({'from_json': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
-        conns = [c['name'] for c in create_app().test_client().get('/api/v1/connections').get_json()['items']]
-        self.assertIn('made', conns)
-        self.assertNotIn('from_json', conns)
+    def test_a_fresh_home_starts(self):
+        self.assertEqual(create_app().test_client().get('/health').status_code, 200)
 
 
 @unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
@@ -405,66 +405,6 @@ class LegacyFilesIgnoredOnPostgresTests(unittest.TestCase):
             self.assertEqual(store.read_connections(), {})
             self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM api_keys').fetchone()[0], 0)
             db.close()
-
-
-@unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files are deliberately never imported into Postgres')
-class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
-    """Same first-boot bootstrap as LegacyConnectionsImportTests above, for the three files Phase 2 of the
-    SQLite migration (BACKLOG #53) moved: api_keys.json, roles.json, audit_log.json."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = self.tmp.name
-        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.home, 'QUERYAPIGATE_API_KEY': 'admin-key'})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def write_legacy_files(self):
-        with open(os.path.join(self.home, 'api_keys.json'), 'w') as f:
-            json.dump({'keys': {'legacy-key': {
-                'hash': 'a' * 64, 'connections': ['a'], 'allow_writes': False, 'queries': [], 'collections': [],
-                'expires_at': None, 'rate_limit': None, 'allowed_ips': None, 'allowed_write_ops': None,
-                'created_from_role': None, 'active': True, 'created_at': '2026-01-01 00:00:00'}}}, f)
-        with open(os.path.join(self.home, 'roles.json'), 'w') as f:
-            json.dump({'roles': {'legacy-role': {
-                'connections': ['a'], 'allow_writes': False, 'queries': [], 'collections': [], 'rate_limit': None,
-                'allowed_ips': None, 'allowed_write_ops': None, 'created_at': '2026-01-01 00:00:00'}}}, f)
-        with open(os.path.join(self.home, 'audit_log.json'), 'w') as f:
-            json.dump({'entries': [{'timestamp': '2026-01-01 00:00:00', 'actor': 'admin', 'action': 'create_key',
-                                    'target': 'legacy-key', 'changes': {'connections': ['a']}}]}, f)
-
-    def test_every_entry_round_trips_and_the_source_files_are_left_alone(self):
-        self.write_legacy_files()
-        client = create_app().test_client()
-        headers = {'X-API-Key': 'admin-key'}
-        self.assertIn('legacy-key', [k['name'] for k in client.get('/api/v1/api-keys', headers=headers)
-                                     .get_json()['items']])
-        self.assertIn('legacy-role', [r['name'] for r in client.get('/api/v1/roles', headers=headers)
-                                      .get_json()['items']])
-        entries = client.get('/api/v1/audit', headers=headers).get_json()['items']
-        self.assertEqual([e['target'] for e in entries], ['legacy-key'])
-        for filename in ('api_keys.json', 'roles.json', 'audit_log.json'):
-            self.assertTrue(os.path.exists(os.path.join(self.home, filename)))
-
-    def test_missing_legacy_files_are_a_no_op_not_an_error(self):
-        client = create_app().test_client()
-        headers = {'X-API-Key': 'admin-key'}
-        self.assertEqual(client.get('/api/v1/api-keys', headers=headers).get_json()['items'], [])
-        self.assertEqual(client.get('/api/v1/roles', headers=headers).get_json()['items'], [])
-        self.assertEqual(client.get('/api/v1/audit', headers=headers).get_json()['items'], [])
-
-    def test_import_only_happens_once(self):
-        self.write_legacy_files()
-        create_app()
-        with open(os.path.join(self.home, 'api_keys.json'), 'w') as f:
-            json.dump({'keys': {'legacy-key': {'hash': 'a' * 64, 'connections': ['a'], 'allow_writes': False,
-                                                'queries': [], 'active': True, 'created_at': 'now'},
-                                'second-key': {'hash': 'b' * 64, 'connections': [], 'allow_writes': False,
-                                              'queries': [], 'active': True, 'created_at': 'now'}}}, f)
-        client = create_app().test_client()  # second boot: api_keys table is no longer empty
-        listed = client.get('/api/v1/api-keys', headers={'X-API-Key': 'admin-key'}).get_json()['items']
-        self.assertNotIn('second-key', [k['name'] for k in listed])
 
 
 class TestConnectionTests(ApiTestCase):
@@ -1445,11 +1385,6 @@ class NamedQueryTests(ApiTestCase):
         self.assertEqual(self.client.post('/q/v?version=1', json=body).get_json(), [{'one': 1}])
         self.assertEqual(self.client.post('/q/v?version=9', json=body).status_code, 404)
         self.assertEqual(self.client.post('/q/v', json={}).status_code, 400)  # no connection anywhere
-
-    def test_legacy_endpoints_still_accept_saved_default_connection(self):
-        self.save('d', sql='SELECT 1 AS one', connection_name='lite')
-        res = self.client.post('/execute_sql_from_file', json={'filepath': 'd'})
-        self.assertEqual(res.get_json(), [{'one': 1}])
 
     def test_execution_history_is_recorded_and_capped(self):
         self.save('h', sql='SELECT actor_id FROM actor WHERE actor_id = :id', connection_name='lite')

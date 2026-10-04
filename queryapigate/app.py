@@ -56,7 +56,7 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 # (several hashed assets) never spends a client's quota - they carry no data and no key.
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
-SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
+SAVED_QUERY_ENDPOINTS = {'api.run_named_query'}  # where run_saved() is reached
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
 # entry is therefore plain identifier characters - no whitespace, quotes or control characters to forge a log line
@@ -113,9 +113,7 @@ def create_app():
     config.check_settings()
     logging_setup.configure(log)  # before anything below logs - the legacy import's deprecation warning, for one
     db.init_schema()
-    store.import_legacy_data_if_empty()
-    apikeys.import_legacy_keys_if_empty()
-    apikeys.import_legacy_roles_if_empty()
+    store.refuse_legacy_home()
     experimental.warn_in_use(log, os.environ, store.read_connections())
     instances.register('serve')
     instances.warn_if_unshared(log)
@@ -763,13 +761,6 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
                                                           'duration_ms': elapsed_ms,
                                                           'serialization_ms': g.serialization_ms})
     return response
-
-
-@bp.route('/execute_sql_from_file', methods=['POST'])
-@bp.route('/execute_sql_with_parameters_from_file', methods=['POST'])
-def execute_sql_from_file():
-    body = get_json_body()
-    return run_saved(body.get('filepath'), body, {})
 
 
 @bp.route('/q/<name>', methods=['GET', 'POST'])

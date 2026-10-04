@@ -100,8 +100,6 @@ def build_spec(version, saved_queries=None, jwt=None):
     copy never depends on the environment it was generated in."""
     if jwt is None:
         jwt = config.jwt_enabled()
-    saved = {'filepath': {'type': 'string', 'description': 'Saved query name or path inside saved_sql/.'},
-             **_EXEC_PROPS}
     spec = {
         'openapi': '3.0.3',
         'info': {'title': 'QueryAPIGate', 'version': version,
@@ -153,14 +151,6 @@ def build_spec(version, saved_queries=None, jwt=None):
                          'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
                          'requestBody': _body(_EXEC_PROPS, []),
                          'responses': {'200': _ROWS, **_ERRORS}}},
-            '/execute_sql_from_file': {'post': {
-                'summary': 'Run the latest version of a saved query', 'tags': ['Saved queries'],
-                'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
-                'requestBody': _body(saved, ['filepath']), 'responses': {'200': _ROWS, **_ERRORS}}},
-            '/execute_sql_with_parameters_from_file': {'post': {
-                'summary': 'Run a saved query with parameter values', 'tags': ['Saved queries'],
-                'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
-                'requestBody': _body(saved, ['filepath']), 'responses': {'200': _ROWS, **_ERRORS}}},
             '/events': {'get': {
                 'summary': 'Live saved-query execution events (Server-Sent Events)', 'tags': ['Saved queries'],
                 'description': 'One `data: {...}` line per saved-query execution as it happens - what keeps '

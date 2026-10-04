@@ -37,9 +37,10 @@ From the changelog's [versioning policy](../CHANGELOG.md#versioning-and-compatib
 docker compose pull && docker compose up -d       # or: pip install ... && systemctl restart queryapigate
 ```
 
-The store is upgraded automatically on first start - nothing to run by hand. Verified from a much older release:
-a `/data` volume written by **0.7.0** (connections and API keys still in JSON files) started under the current image.
-Its connection and key were all there, and the key authenticated with its original secret.
+The store is upgraded automatically on first start - nothing to run by hand. Verified across releases: a `/data`
+volume written by **0.7.0** (connections and API keys still in JSON files) started under 0.14 with its connection and
+key intact, and the key authenticated with its original secret. **Since 0.15, a home last run by 0.10 or older must go
+through 0.14 first** - 0.15 no longer reads those JSON files, and refuses to start on such a home, saying so.
 
 If the store can't be used safely, the server **refuses to start**, with a message saying what's wrong and what to
 do, before changing anything - for example, a store a *newer* release has already upgraded. It never starts and then
@@ -54,19 +55,19 @@ docker compose logs queryapigate | grep -i warn      # or journalctl -u queryapi
 
 Look for two kinds of warning.
 
-**Something you configured is deprecated.** That 0.7.0 upgrade logged:
+**Something you configured is deprecated.** For example, 0.14 logged this for a home still holding the pre-SQLite
+JSON files:
 
 ```
 WARNING queryapigate: Importing the pre-SQLite JSON files (db_connections.json, saved_sql/, api_keys.json, roles.json,
-audit_log.json) on first start is deprecated since 0.14.0 and may be removed in 0.15.0: upgrade a 0.9-or-older home
-through 0.14 first; from 0.10 on, everything is in queryapigate.db (stores of 0.10 and later never wrote them).
+audit_log.json) on first start is deprecated since 0.14.0 and may be removed in 0.15.0: ...
 ```
 
-That one says: **don't skip 0.14** if you're coming from 0.9 or older. Each deprecation warning names what to use
-instead and the earliest release that may remove it.
+- and 0.15 removed it. Each deprecation warning names what to use instead and the earliest release that may remove
+it; act on it before that release.
 
 **A caller uses something deprecated.** The first call to a deprecated route in each process is logged with the key
-that made it:
+that made it - 0.14, for the routes 0.15 then removed:
 
 ```
 WARNING queryapigate [5348a82deb98 key=app-alice]: /execute_sql_from_file is deprecated since 0.14.0 and may be

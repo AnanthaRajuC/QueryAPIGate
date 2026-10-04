@@ -707,7 +707,6 @@ through the Management API, the same calls the Console makes. Clean up with `doc
 |----------|--------|---------|
 | `/execute_sql` | POST | Run ad-hoc SQL (`sql`, `connection_name`, optional `params`). |
 | `/q/<name>` | GET, POST | Run a saved query; query-string or body values become parameters. |
-| `/execute_sql_from_file`, `/execute_sql_with_parameters_from_file` | POST | Deprecated: run a saved query by `filepath` - use `/q/<name>` instead. |
 | `/connections/<name>/schema` | GET | List a connection's tables/views and their columns. |
 | `/catalog` | GET | The saved queries this caller can reach, and the terms they're offered under. |
 | `/events` | GET | Live saved-query runs (Server-Sent Events). |

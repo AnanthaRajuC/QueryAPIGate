@@ -159,8 +159,8 @@ queryapigate serve
   [Backups and restores](DEPLOYMENT.md#5-persistent-data-backups-and-restores), which also lists the secrets a
   backup doesn't contain. On a SQLite store, `queryapigate backup FILE` takes a consistent copy while the server
   runs.
-- Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
-  PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
+- Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never read by a PostgreSQL
+  store - and since 0.15 not by any store: bring them into `queryapigate.db` with 0.14 first.
 
 Rate limits are shared between instances through Redis (`QUERYAPIGATE_REDIS_URL`, below). What is **not** shared:
 `/metrics`, which is per process, and the main server's own `GET /events`. For live events across instances, run
@@ -217,10 +217,10 @@ changes before it upgrades:
 | Docker image | `ghcr.io/anantharajuc/sql2api` | `ghcr.io/anantharajuc/queryapigate` |
 | JSON log `logger` field | `sql2api` | `queryapigate` |
 
-Your data folder needs no manual change: `db_connections.json`, `saved_sql/`, `api_keys.json`, `roles.json`
-and `audit_log.json` (if you're upgrading from before everything moved into `queryapigate.db`) are imported
-automatically, once, the first time the server or CLI runs against that home - nothing to run by hand, and
-the original files are left untouched, never deleted.
+Your data folder needs one step if it still holds `db_connections.json`, `saved_sql/`, `api_keys.json`,
+`roles.json` or `audit_log.json` (a home last run by 0.10 or older, before everything moved into `queryapigate.db`):
+start **QueryAPIGate 0.14** on it once, which imports them, then upgrade. 0.15 and later no longer read them, and
+refuse to start on such a home rather than start without its data.
 
 **Rename every environment variable, especially `SQL2API_API_KEY`.** The old names are not read at all, and
 an unset API key means an open server - so a server that still finds any `SQL2API_*` variable in its

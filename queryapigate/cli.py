@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime
 
-from . import __version__, apikeys, bundle, config, db, examples, experimental, instances, logging_setup, postman, store
+from . import __version__, bundle, config, db, examples, experimental, instances, logging_setup, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -93,10 +93,8 @@ def _events(args):
 def _init(args):
     """Scaffold a fresh home: just queryapigate.db (with the example connection templates seeded in, all
     inactive) now that connections are SQLite-backed - no more db_connections.json/saved_sql/ for a new
-    install. On an existing home, main()'s own db.init_schema()/import_legacy_data_if_empty() already ran
-    before this - if that found real data (a fresh table freshly imported from a legacy file, or one
-    already populated from a previous run), this is a no-op, the same "already exists - left untouched"
-    result `init` always gave."""
+    install. On a home whose store already has connections, this is a no-op - "already exists - left
+    untouched"."""
     home = config.home()
     home.mkdir(parents=True, exist_ok=True)
     if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
@@ -471,13 +469,11 @@ def main(argv=None):
     try:
         config.check_database_url()
         db.init_schema()
+        store.refuse_legacy_home()
     except ValueError as error:
         print(f'queryapigate: {error}', file=sys.stderr)
         return 2
     except db.Error as error:  # e.g. QUERYAPIGATE_DATABASE_URL names a server that isn't reachable
         print(f'queryapigate: cannot open the metadata database {db.describe()}: {error}'.rstrip(), file=sys.stderr)
         return 2
-    store.import_legacy_data_if_empty()
-    apikeys.import_legacy_keys_if_empty()
-    apikeys.import_legacy_roles_if_empty()
     return args.func(args)

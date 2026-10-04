@@ -15,24 +15,11 @@ log = logging.getLogger('queryapigate')
 
 # Routes, by URL rule: since (the release that deprecated it), its date (for the Deprecation header), the successor,
 # and the earliest release that may remove it.
-ROUTES = {
-    '/execute_sql_from_file': {
-        'since': '0.14.0', 'date': '2026-10-04', 'successor': '/q/{name}', 'removal': '0.15.0',
-        'why': 'it runs a saved query by its old file path; GET or POST /q/{name} does the same by name'},
-    '/execute_sql_with_parameters_from_file': {
-        'since': '0.14.0', 'date': '2026-10-04', 'successor': '/q/{name}', 'removal': '0.15.0',
-        'why': 'it runs a saved query by its old file path; GET or POST /q/{name} does the same by name'},
-}
+ROUTES: dict[str, dict[str, str]] = {}  # none today: the 0.14 ones were removed in 0.15
 
 # Everything else that can be deprecated - a CLI command or flag, an environment variable, a behaviour - by key.
-OTHER = {
-    'legacy_json_import': {
-        'since': '0.14.0', 'removal': '0.15.0',
-        'name': 'Importing the pre-SQLite JSON files (db_connections.json, saved_sql/, api_keys.json, roles.json, '
-                'audit_log.json) on first start',
-        'successor': 'upgrade a 0.9-or-older home through 0.14 first; from 0.10 on, everything is in queryapigate.db',
-        'why': 'stores of 0.10 and later never wrote them'},
-}
+OTHER: dict[str, dict[str, str]] = {}  # none today: the pre-SQLite JSON import was removed in 0.15
+
 
 _warned: set = set()
 _lock = threading.Lock()

@@ -43,7 +43,33 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-04
+
+Several instances become a supported deployment shape - shared rate limits, an instance list, a rolling-upgrade rule
+and test, and reference deployments for Compose and Kubernetes - files in buckets and on the web can be published
+through DuckDB, and what 0.14 deprecated is removed before the 1.0 freeze.
+
+### Upgrading from 0.14
+Read these first.
+- **Breaking: `POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file` are removed** - call
+  `/q/{name}` (GET or POST) instead. 0.14 marked them deprecated, with `Deprecation` headers and a log line naming each
+  caller's key.
+- **Breaking: the pre-SQLite JSON files are no longer imported.** A home last run by **0.10 or older** - 0.14's notice
+  said 0.9, but 0.10 still kept saved queries, keys, roles and the audit log in those files - must be started once by
+  0.14 first. 0.15 refuses to start on one, saying so, rather than start without its data.
+- **Breaking: a DuckDB connection reads only the files its new `allowed_paths` lists** - none by default. List the
+  folders and files your DuckDB queries read, as absolute paths.
+- **The store is upgraded to schema 6** on first start (a new `instances` table) - additive, so a 0.14 instance still
+  running against it keeps working during a rolling upgrade. Back up first anyway.
+- **Running several instances?** Give them all the same `QUERYAPIGATE_REDIS_URL`: rate limits are now shared through
+  it, and an alert says when some instances run without it. See DEPLOYMENT.md's *Scaling out*.
+- **The Docker image is about 90 MB larger** - it now includes every optional feature the docs describe.
+
 ### Breaking
+- **`POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file` are removed** (deprecated in
+  0.14, BACKLOG #67) - `/q/{name}` runs the same saved query by name.
+- **The pre-SQLite JSON files are no longer imported** (deprecated in 0.14). A home with data only in them (0.10 or
+  older) is refused at startup with what to do: start 0.14 on it once.
 - **A DuckDB connection reads only the files its `allowed_paths` lists** (BACKLOG #75). Before, any key that could
   run SQL on a DuckDB connection could read any file the server's user could - `read_csv('/etc/passwd')` included.
   Now a connection with no `allowed_paths` reads no files at all; list the folders and files a connection's queries
@@ -1609,7 +1635,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.15.0
 [0.14.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.14.0
 [0.13.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.13.0
 [0.12.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.12.0

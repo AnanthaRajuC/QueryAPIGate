@@ -83,6 +83,12 @@ class StoreChecks(FixtureTestCase):
 
     def check(self, version):
         home, expected = self.open_home(version, self.kind)
+        if tuple(int(p) for p in version.split('.')) < (0, 11):
+            # Its data is (partly) in the pre-SQLite JSON files, which 0.15 stopped importing: refused, saying what
+            # to do - never started without it.
+            with self.assertRaisesRegex(ValueError, r'0\.10 or older .* Start QueryAPIGate 0\.14 on this folder'):
+                create_app()
+            return
         self.assertEqual(expected['skipped'], [])
         if self.kind == '.postgres':
             with open(os.path.join(home, 'store.sql')) as f:
@@ -130,7 +136,7 @@ class PostgresUpgradeTests(StoreChecks):
     kind = '.postgres'
 
     def test_there_is_a_fixture_for_every_release_with_the_postgres_store(self):
-        self.assertLessEqual({'0.12.0', '0.13.0', '0.14.0'}, set(fixture_versions('.postgres')))
+        self.assertLessEqual({'0.12.0', '0.13.0', '0.14.0', '0.15.0'}, set(fixture_versions('.postgres')))
 
     def test_every_release_store_starts_with_its_data_intact(self):
         self.check_every_release()

@@ -83,11 +83,8 @@ def connections_file():
 
 def db_file():
     """queryapigate.db - the SQLite store for everything this app persists: connections, saved queries, API
-    keys, roles and the audit log (db.py, store.py, apikeys.py). Created by `queryapigate init` on a fresh
-    home; on an existing home with legacy db_connections.json/saved_sql/api_keys.json/roles.json/
-    audit_log.json, those are imported automatically, once, the first time the server or CLI runs against
-    it - see store.import_legacy_data_if_empty()/apikeys.import_legacy_keys_if_empty()/
-    import_legacy_roles_if_empty()."""
+    keys, roles and the audit log (db.py, store.py, apikeys.py). Created on first start. A home from 0.9 or older,
+    with only the pre-SQLite JSON files, is refused - see store.refuse_legacy_home()."""
     return home() / 'queryapigate.db'
 
 

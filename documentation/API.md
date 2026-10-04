@@ -12,8 +12,6 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 |----------|--------|---------|
 | [`/execute_sql`](#execute-sql) | POST | Run ad-hoc SQL |
 | [`/q/<name>`](#run-a-saved-query) | GET, POST | Run a saved query as an endpoint |
-| [`/execute_sql_from_file`](#run-a-saved-query) | POST | Deprecated - use `/q/{name}`. Run a saved query by file path |
-| [`/execute_sql_with_parameters_from_file`](#run-a-saved-query) | POST | Deprecated - use `/q/{name}`. Same as above |
 | [`/connections/<name>/schema`](#connections) | GET | List a connection's tables/views and their columns |
 | [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
 | [`/events`](#live-events-server-sent-events) | GET | Live saved-query runs (Server-Sent Events) |
@@ -162,24 +160,8 @@ at all: `/q/<name>` answers 404.
 Stores created before this (schema 3 and older) are upgraded on first start with every query published at its
 newest version, so nothing a caller sees changes.
 
-> **Deprecated since 0.14.0; 0.15.0 may remove them.** The older endpoints `POST /execute_sql_from_file` and
-> `POST /execute_sql_with_parameters_from_file` still work, but use `/q/{name}` instead. Their responses carry
-> `Deprecation` and `Link: </q/{name}>; rel="successor-version"` headers, and `/openapi.json` marks them deprecated.
-
-They do the same thing with the query named in the body:
-
-~~~json
-{
-    "filepath": "saved_sql/film_by_id.json",
-    "connection_name": "examples",
-    "placeholders": {"id": 7},
-    "format": "csv"
-}
-~~~
-
-`filepath` may be a bare name (`film_by_id`), a `saved_sql/`-qualified path, or an absolute path ending the
-same way - accepted forms kept for compatibility with how a saved query used to be referenced as a real
-file; every form resolves to the same saved query by name.
+`POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file`, which ran a saved query named in
+the body, were deprecated in 0.14 and removed in 0.15 - use `/q/{name}`.
 
 ## Response caching
 
@@ -1357,8 +1339,8 @@ events` and MCP tool calls - has the same shape:
 - Some errors add fields: `errors` (a map of parameter name to problem, for `param_invalid`, `param_required` and
   invalid query definitions), `retry_after` (seconds, for `rate_limited`, also sent as `Retry-After`), `timeout`
   (for `query_timeout`) and `detail`.
-- **`detail`** carries the database's own message when a query fails - except for a saved query (`/q/<name>`,
-  `/execute_sql_from_file`) called with a scoped key, which gets only the generic error, since the database's text
+- **`detail`** carries the database's own message when a query fails - except for a saved query (`/q/<name>`)
+  called with a scoped key, which gets only the generic error, since the database's text
   can reveal schema details to a caller who didn't write the SQL. The full message is always in the server log.
 - **MCP:** a tool error is `isError: true` with the message as text, as before, and `{"error", "code"}` (plus
   `retry_after` when rate limited) in `structuredContent`.
