@@ -17,7 +17,7 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 | [`/save_sql_to_file`](#save-a-query) | PATCH | Save a query / add a version |
 | [`/list_files`](#list-saved-queries) | GET | List saved queries |
 | [`/saved_sql/<name>`](#delete-a-saved-query) | DELETE | Delete a saved query or one version |
-| [`/view_file_content`](#view-a-saved-query-file) | GET | Raw saved-query file |
+| [`/view_file_content`](#view-a-saved-querys-raw-data) | GET | Raw saved-query file |
 | [`/saved_sql/<name>/collection`](#collections) | PUT | Move a saved query into a collection, or out of any |
 | [`/saved_sql/<name>/cache_ttl`](#save-a-query) | PUT | Set or clear one version's cache_ttl in place |
 | [`/collections`](#collections) | GET | Every collection, its queries, and the keys and roles that reach it |

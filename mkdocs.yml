@@ -26,6 +26,9 @@ nav:
   - Technology stack: documentation/TECHNOLOGY_STACK.MD
   - Security: SECURITY.md
   - Threat model: documentation/THREAT_MODEL.md
+  - Architecture decisions:
+      - Overview: documentation/adr/README.md
+      - 0001 Console and Management API: documentation/adr/0001-console-and-management-api.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/README.md"

@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0001-console-and-management-api.md"
