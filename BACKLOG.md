@@ -44,7 +44,7 @@ if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC
 JWKS support.
 
 **Suggested sequence:**
-1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Done.)
+1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
 2. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 3. **1.0.0.**
 

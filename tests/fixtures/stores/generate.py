@@ -6,7 +6,8 @@ Starts that version's server on a throwaway home, creates the same small, realis
 HTTP API - a connection, a saved query with two versions, a run of it, a scoped API key, a role - stops it, and packs
 the home as tests/fixtures/stores/<version>.tar.gz with an expected.json naming what was created. test_upgrades.py
 starts the current code on each fixture and checks it all reads back. Each release adds its own fixture; a version
-whose API lacks a step (roles before they existed) records the step as skipped instead of failing.
+whose API lacks a step (roles before they existed) records the step as skipped instead of failing. From 0.13 the
+steps go through the Management API (/api/v1), the only management interface since.
 
 Standard library only: it runs under the released version's own interpreter, or any Python 3.9+.
 """
@@ -43,7 +44,28 @@ def call(base, method, path, body=None):
         return error.code, error.read()
 
 
+def V1_STEPS(data):
+    """The same estate through the Management API, for 0.13 and later."""
+    rule = {'rating': {'type': 'str', 'required': True}}
+    return [
+        ('connection', 'POST', '/api/v1/connections', {'name': 'films', 'db': 'sqlite', 'database': data,
+                                                       'active': True}),
+        ('query v1', 'POST', '/api/v1/queries', {
+            'name': 'films_by_rating', 'sql': 'SELECT title FROM film WHERE rating = :rating', 'parameters': rule,
+            'connection_name': 'films', 'author': 'fixture', 'description': 'Films by rating', 'publish': True}),
+        ('query v2', 'POST', '/api/v1/queries/films_by_rating/versions', {
+            'sql': 'SELECT title FROM film WHERE rating = :rating ORDER BY title', 'parameters': rule,
+            'connection_name': 'films', 'author': 'fixture', 'description': 'Films by rating, sorted',
+            'publish': True}),
+        ('run', 'GET', '/q/films_by_rating?rating=PG', None),
+        ('key', 'POST', '/api/v1/api-keys', {'name': 'reporting', 'connections': ['films'], 'allow_writes': False}),
+        ('role', 'POST', '/api/v1/roles', {'name': 'analyst', 'connections': ['films']}),
+    ]
+
+
 def main(binary):
+    if os.sep in binary:  # a path: the server runs from the throwaway home, so make it absolute
+        binary = os.path.abspath(binary)
     version = subprocess.run([binary, '--version'], capture_output=True, text=True).stdout.split()[-1]
     home = tempfile.mkdtemp(prefix=f'qag-fixture-{version}-')
     data = os.path.join(home, 'data.db')
@@ -65,7 +87,8 @@ def main(binary):
                 break
             except OSError:
                 time.sleep(0.2)
-        steps = [
+        v1 = call(base, 'GET', '/api/v1/connections')[0] == 200  # 0.13 removed the unversioned routes below
+        steps = V1_STEPS(data) if v1 else [
             ('connection', 'PATCH', '/connections', {'connections': {'films': {
                 'db': 'sqlite', 'database': data, 'active': True}}}),
             ('query v1', 'PATCH', '/save_sql_to_file', {
@@ -83,7 +106,7 @@ def main(binary):
         ]
         for step, method, path, body in steps:
             status, payload = call(base, method, path, body)
-            if status == 200:
+            if 200 <= status < 300:
                 expected['created'][step] = True
             else:
                 expected['skipped'].append(f'{step}: HTTP {status} {payload[:120].decode(errors="replace")}')

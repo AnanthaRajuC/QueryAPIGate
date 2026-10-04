@@ -22,6 +22,28 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-04
+
+The Console replaces `/ui`, the Management API (`/api/v1`) replaces the unversioned management routes, and every
+front door - REST, MCP, live events - now shares one set of rules, one error format and one run history.
+
+### Upgrading from 0.12
+Read these first; everything else in this release is additive.
+- **Breaking: the unversioned management routes are removed - use `/api/v1`.** The table under *Removed* maps each
+  one to its successor. Runtime routes (`/q/<name>`, `/execute_sql`, `/catalog`, `/events`, ...) are unchanged.
+- **`/ui` redirects to `/console`**, the new admin UI. It needs a browser from 2024 or later (Chrome and Edge 128,
+  Firefox 126, Safari 17.5).
+- **New versions of a saved query are drafts** until published; only the published version is served. Existing
+  queries are published at their newest version on first start, so nothing callers see changes.
+- **MCP calls count against rate limits** (`QUERYAPIGATE_RATE_LIMIT` and the key's own `rate_limit`) like REST
+  requests: an agent calling faster than its key allows now gets a rate-limit error.
+- **A saved query's own `LIMIT` is respected**: paging no longer overrides it.
+- **An unreachable database answers 502 `connection_failed`**, not 500 `query_failed`.
+- **Error bodies gain `code` and `request_id`** beside `error` - additive; branch on `code` from now on.
+- **The store is upgraded to schema 5 on first start** - back up `QUERYAPIGATE_HOME` (or the PostgreSQL store) first.
+  Startup now refuses a store with a missing column, or one a newer release already upgraded, with a message saying
+  what to do.
+
 ### Added
 - **QueryAPIGate Console, at `/console` - the admin UI.** It replaces `/ui`
   ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript in `frontend/`,
@@ -172,7 +194,7 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   but undocumented, or documented but never raised. Additive for the runtime routes: `error`, `detail`, `errors`
   and the HTTP statuses are unchanged.
 - **The upgrade guarantee is tested** (BACKLOG #65): stores built by released 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0
-  and 0.12.0 through their own APIs (`tests/fixtures/stores/`) are started under the current code on every CI run,
+  and 0.12.0, and by this release, through their own APIs (`tests/fixtures/stores/`) are started under the current code on every CI run,
   which must read back their connections, queries and versions, run history, keys and roles, and run the query.
   Each release adds its fixture.
 - **[ADR 0002](documentation/adr/0002-event-ids.md): event ids** (BACKLOG #59, the storage decision). Event ids
@@ -191,8 +213,15 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `admin_only` (was `forbidden`), `invalid_body` for an invalid query definition and `invalid_filter` for a bad
   history/audit filter (both were `invalid_request`), `connection_not_found`, `version_not_found` and others.
   Creating an API key, role or collection whose name is taken is always `409`.
-- **The metadata store moves to schema 5:** `execution_history.query_name` and `version` may be NULL, for ad-hoc
-  runs. On SQLite the table is rebuilt on first start, keeping every run and its id (live events' resume ids).
+- **The metadata store moves to schema 5**, on first start, from a store any earlier release created:
+  - schema 4 adds `saved_queries.published_version`: every existing query is published at its newest version, so
+    nothing a caller sees changes. Deleting a query's published version publishes the newest *older* one, never a
+    draft;
+  - schema 5 lets `execution_history` hold ad-hoc runs (`query_name` and `version` may be NULL). On SQLite the table
+    is rebuilt, keeping every run and its id (live events' resume ids).
+
+  Back up first: going back to 0.12 on an upgraded store is not supported. `migrate-to-postgres` needs a store at
+  schema 5 - start this version on it once.
 - **Startup refuses a store it can't safely run on**, with a message naming the problem and what to do, instead of
   starting and failing on first use: a table missing a column this version needs, or a store a newer release has
   already upgraded (which used to have its schema version silently written back down).
@@ -225,11 +254,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   old save route did - filing a query there grants it to every key on that collection.
 - **Creating a connection through `/api/v1` now closes idle pooled connections**, as changing or deleting one does,
   so a name used before (deleted, then re-created) never reuses the old connection's sockets.
-- **`/ui`'s Home showed the five oldest audit entries as "Recent activity"**, oldest first, instead of the five
-  newest. It now shows the newest.
 - **The audit log no longer shows `[object Object]`** for a grant like `{"name": "films", "allow_writes": true}`
-  (a key or role with write access through a named query). It now shows the object as JSON, in `/ui` and the
-  Console.
+  (a key or role with write access through a named query). It now shows the object as JSON.
 - **A query's own `LIMIT` is respected** (BACKLOG #74). Paging used to replace a trailing `LIMIT`/`OFFSET` with the
   page window, so a saved "top 3" query (`... LIMIT 3`) returned a whole page: 10 rows by default, 50 with
   `?page_size=50`. Paging now happens within the statement's own window: `LIMIT 3` returns 3 rows, and `LIMIT 25`
@@ -251,15 +277,6 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `execution_history` table in an early shape it never wrote to (its runs still lived in `saved_sql/*.json`), and
   no later release replaced it, so recording or reading runs failed with `no such column: entry_json`. Startup now
   replaces that empty table; one that somehow has rows stops startup with instructions rather than being dropped.
-
-### Changed
-- **The metadata store moves to schema 4** (`saved_queries.published_version`). On first start, every existing
-  query is published at its newest version, so nothing a caller sees changes. The legacy save route,
-  `collection import` and `examples load` keep publishing what they save. The new Management API, starting with
-  #72, is what creates drafts. A store must be on schema 4 before `migrate-to-postgres` (starting the server once
-  upgrades it). Deleting a query's published version now publishes the newest *older* version, never a newer one;
-  before, deleting the newest version simply made the next-newest live, which is the same outcome whenever no
-  drafts exist.
 
 ## [0.12.0] - 2026-10-03
 
@@ -1426,7 +1443,12 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.13.0
+[0.12.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.12.0
+[0.11.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.11.0
+[0.10.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.10.0
+[0.9.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.9.0
 [0.8.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.8.0
 [0.7.1]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.7.1
 [0.7.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.7.0
