@@ -53,6 +53,20 @@ describe('Console shell - the classic frame', () => {
     expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
   });
 
+  it('sets the font size from the top right corner, as the Font size preference', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    const group = screen.getByRole('group', { name: 'Font size' });
+    expect(within(group).getByRole('button', { name: 'Medium text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await userEvent.click(within(group).getByRole('button', { name: 'Large text' }));
+    expect(document.documentElement.style.zoom).toBe('1.15');
+    expect(within(group).getByRole('button', { name: 'Large text' })).toHaveAttribute('aria-pressed', 'true');
+    expect(JSON.parse(localStorage.getItem('queryapigate-ui-prefs') ?? '{}').fontSize).toBe('Large');
+  });
+
   it('starts from the operating system when the theme follows it', () => {
     vi.stubGlobal(
       'matchMedia',

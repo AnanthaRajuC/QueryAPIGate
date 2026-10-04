@@ -124,7 +124,9 @@ describe('Settings', () => {
       within(screen.getByRole('group', { name: 'Theme' })).getByRole('button', { name: 'Dark' }),
     );
     expect(document.documentElement.style.colorScheme).toBe('dark');
-    const fontSize = screen.getByRole('group', { name: 'Font size' });
+    const fontSize = within(document.getElementById('settings-body')!).getByRole('group', {
+      name: 'Font size',
+    });
     expect(within(fontSize).getByRole('button', { name: 'Medium' })).toHaveClass('on');
     await userEvent.click(within(fontSize).getByRole('button', { name: 'Large' }));
     expect(document.documentElement.style.zoom).toBe('1.15');

@@ -4,11 +4,11 @@ import { useLocation, useNavigate } from 'react-router';
 import { onRateLimit, type RateLimit } from '@/api/client';
 
 import { useAllQueries, useApiKeys, useConnections, useRoles } from './data';
-import { setPref, useIsDark } from './prefs';
+import { setPref, useIsDark, usePrefValues } from './prefs';
 import { activeItem } from './Sidebar';
 
-// ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K), the rate-limit chip and the
-// light/dark switch.
+// ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K), the rate-limit chip, and the font
+// size and light/dark switches.
 
 const COLLAPSE_KEY = 'queryapigate-ui-side-collapsed';
 
@@ -94,10 +94,35 @@ export function Header() {
         >
           {rate ? `rate ${rate.remaining}/${rate.limit}` : ''}
         </span>
+        <FontSizeSwitch />
         <ThemeToggle />
       </header>
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </>
+  );
+}
+
+const FONT_SIZES = ['Small', 'Medium', 'Large'] as const;
+
+/** Small / Medium / Large as three A's of growing size - the same preference as Settings > Appearance > Font size. */
+function FontSizeSwitch() {
+  const { fontSize } = usePrefValues();
+  return (
+    <div className="seg" id="font-size" role="group" aria-label="Font size">
+      {FONT_SIZES.map((size) => (
+        <button
+          key={size}
+          type="button"
+          className={fontSize === size ? 'on' : ''}
+          aria-pressed={fontSize === size}
+          aria-label={`${size} text`}
+          title={`${size} text`}
+          onClick={() => setPref('fontSize', size)}
+        >
+          A
+        </button>
+      ))}
+    </div>
   );
 }
 

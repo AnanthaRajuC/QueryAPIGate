@@ -69,10 +69,37 @@
   color: var(--ink);
 }
 
+/* The header's font size switch: Settings' segmented control, sized for the bar, each A a step larger. With the theme
+   switch beside it, it stays in the right corner when the search box is hidden on narrow screens. */
+#font-size {
+  flex: none;
+  margin-left: auto;
+}
+#font-size button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  justify-content: center;
+  font-family: var(--sans);
+  line-height: 1;
+}
+#font-size button:nth-child(1) {
+  font-size: 11px;
+}
+#font-size button:nth-child(2) {
+  font-size: 13px;
+}
+#font-size button:nth-child(3) {
+  font-size: 15.5px;
+}
+#font-size button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* The header's light/dark switch, dressed as the sidebar toggle at the other end of the bar. */
 #theme-toggle {
   flex: none;
-  margin-left: auto; /* stays in the right corner when the search box is hidden on narrow screens */
   width: 30px;
   height: 30px;
   display: flex;

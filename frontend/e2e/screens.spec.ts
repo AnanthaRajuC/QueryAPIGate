@@ -43,9 +43,8 @@ test('the breadcrumb, Ctrl+K search and sidebar collapse work', async ({ page })
 });
 
 test('a larger font size scales the page and still fits the window', async ({ page }) => {
-  await open(page, '/settings', 'Settings');
-  await page.getByRole('button', { name: 'Appearance' }).click();
-  await page.getByRole('group', { name: 'Font size' }).getByRole('button', { name: 'Large' }).click();
+  await open(page, '/', 'Home');
+  await page.locator('header.top').getByRole('button', { name: 'Large text' }).click();
   await page.reload();
   await expect(page.locator('html')).toHaveCSS('zoom', '1.15');
   // zoom scales viewport units too; the sidebar must still end at the window's bottom edge, not below it

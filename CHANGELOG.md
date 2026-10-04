@@ -138,8 +138,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   and rate limits: it is a local operator with the store's files already in reach.
 - **A light/dark switch in the Console's top right corner.** It sets the same Theme preference as Settings ›
   Appearance (which is where to go back to following the operating system), and is remembered in this browser.
-- **A font size preference in the Console: Small, Medium (the default) or Large**, under Settings › Appearance (the
-  section was called Interface). It scales the whole page, text and spacing together, and is remembered in this
+- **A font size preference in the Console: Small, Medium (the default) or Large**, in the top right corner beside the
+  light/dark switch and under Settings › Appearance (the section was called Interface). It scales the whole page, text and spacing together, and is remembered in this
   browser.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
