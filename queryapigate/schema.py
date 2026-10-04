@@ -161,7 +161,7 @@ def fetch_schema(connection_name, database=None):
     tables = {}
     order = []
     for row in result.rows:
-        record = dict(zip(lower_columns, row))
+        record = dict(zip(lower_columns, row, strict=False))
         name = record['table_name']
         if name not in tables:
             tables[name] = {'name': name, 'schema': record['table_schema'],
@@ -189,7 +189,7 @@ def _merge_keys(tables, connection_name, dialect, database):
         result = engine.execute_sql(_KEY_QUERIES[dialect], connection_name, ROW_CAP, 0, database=database)
         lower_columns = [str(c).lower() for c in result.columns]
         for row in result.rows:
-            record = dict(zip(lower_columns, row))
+            record = dict(zip(lower_columns, row, strict=False))
             table = tables.get(record['table_name'])
             if not table:
                 continue

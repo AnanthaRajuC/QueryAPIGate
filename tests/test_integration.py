@@ -305,9 +305,8 @@ class DuckDBTests(IntegrationBase, unittest.TestCase):
     through the same real driver and the same shared test suite as every other dialect.
     """
     db = 'duckdb'
-    # A CPU-bound query, not a sleep: DuckDB only gained sleep_ms() in 1.5 (CI's Python 3.9 job resolves the
-    # newest 3.9-compatible release, 1.4.5, which does not have it - the same kind of cross-version gap
-    # documented for mypy in CHANGELOG.md). Verified interruptible on both 1.4.5 and 1.5.5.
+    # A CPU-bound query, not a sleep: DuckDB only gained sleep_ms() in 1.5, and the duckdb extra allows older
+    # releases. Verified interruptible on both 1.4.5 and 1.5.5.
     slow_sql = ('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 100000000) '
                 'SELECT count(*) FROM c')
     # No reliable, version-stable ~2-second primitive to calibrate against (see slow_sql above), so - like

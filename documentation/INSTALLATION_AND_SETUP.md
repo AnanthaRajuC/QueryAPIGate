@@ -4,7 +4,7 @@
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Python | 3.9+ | Runtime |
+| Python | 3.11+ | Runtime |
 | Java | 11+ (only for H2) | Runs the H2 JDBC driver via JPype |
 
 ## Install

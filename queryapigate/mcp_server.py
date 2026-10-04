@@ -278,7 +278,8 @@ def execute_sql_tool(permission, arguments):
         return _error(error.message, error.status, error.code)
     history.record_adhoc({**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms},
                          sql, query_params)
-    structured = {'rows': [dict(zip(result.columns, row)) for row in result.rows], 'truncated': result.has_more}
+    rows = [dict(zip(result.columns, row, strict=False)) for row in result.rows]
+    structured = {'rows': rows, 'truncated': result.has_more}
     return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
 

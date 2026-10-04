@@ -6,8 +6,6 @@ Database drivers are imported lazily so only the ones you actually use need to b
 Each network database is a small ``_Driver`` subclass. ``_make_runner`` turns it into the callable stored in
 ``RUNNERS``, which either opens a connection for the single call or borrows one from the pool.
 """
-from __future__ import annotations  # lets `str | None` below run on Python 3.9 too (annotations aren't evaluated)
-
 import atexit
 import logging
 import math

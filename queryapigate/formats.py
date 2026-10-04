@@ -86,7 +86,7 @@ class ResultSetDTO:
         return bool(self.rows)
 
     def as_dicts(self):
-        return [dict(zip(self.columns, row)) for row in self.rows]
+        return [dict(zip(self.columns, row, strict=False)) for row in self.rows]
 
     def _to_delimited(self, delimiter, mimetype):
         data_io = StringIO()
@@ -113,7 +113,7 @@ class ResultSetDTO:
         tags = [_xml_name(c) for c in self.columns]
         for row in self.rows:
             item = ET.SubElement(root, 'item')
-            for tag, value in zip(tags, row):
+            for tag, value in zip(tags, row, strict=False):
                 ET.SubElement(item, tag).text = '' if value is None else str(value)
         return Response(ET.tostring(root, encoding='unicode', method='xml'), mimetype='application/xml')
 
@@ -174,7 +174,7 @@ def _stream_delimited(columns, rows, delimiter):
 
 def _stream_ndjson(columns, rows):
     for row in rows:
-        yield json.dumps(dict(zip(columns, (_cell(v) for v in row))), default=json_default) + '\n'
+        yield json.dumps(dict(zip(columns, (_cell(v) for v in row), strict=False)), default=json_default) + '\n'
 
 
 def iter_stream_chunks(output_format, columns, rows):

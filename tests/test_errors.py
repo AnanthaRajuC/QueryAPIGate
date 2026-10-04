@@ -30,7 +30,7 @@ def raised_codes():
                 if node.func.id == '_error' and len(node.args) > 2:
                     values.append(node.args[2])
             elif isinstance(node, ast.Dict):
-                values = [v for k, v in zip(node.keys, node.values)
+                values = [v for k, v in zip(node.keys, node.values, strict=False)
                           if isinstance(k, ast.Constant) and k.value == 'code']
             for value in values:
                 for leaf in (value.body, value.orelse) if isinstance(value, ast.IfExp) else (value,):

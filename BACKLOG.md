@@ -36,7 +36,7 @@ by accident.
 | ~~#65 Upgrade guarantee and upgrade CI~~ (shipped; PostgreSQL dump fixtures still open) | Every 0.x store upgrades automatically or refuses with a clear message |
 | #66 Database support matrix | Tier 1 vs experimental database types |
 | #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
-| #68 Supported Python versions | Raise the floor from 3.9 (end of life since October 2025) |
+| ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
 | #71 PostgreSQL-store backup and restore | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 
 **Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #55-#58
@@ -2099,7 +2099,11 @@ so users have time to move and contributors know how to retire things.
 
 ## 68. Supported Python versions: raise the floor before 1.0
 
-**Status: open.** 1.0 milestone.
+**Status: shipped.** `requires-python = ">=3.11"`: 3.10 reaches end of life in October 2026, so raising only to it
+would have frozen 1.0 on a version weeks from its end. Classifiers, ruff (`py311`), mypy (`python_version = "3.11"`,
+so code needing a newer Python fails the type check) and the CI matrix (3.11-3.14) follow; the policy is in
+CHANGELOG.md's versioning section. Every `zip()` now says whether it is strict (ruff B905, on from 3.10): all
+`strict=False`, today's behaviour - the metrics histogram relies on it.
 
 **Impact:** `requires-python = ">=3.9"`, ruff targets `py39`, and CI tests 3.9-3.14. Python 3.9 reached end of
 life in October 2025. Freezing 1.0 on an end-of-life floor means either carrying it for the whole 1.x line or

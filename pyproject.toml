@@ -7,7 +7,7 @@ name = "queryapigate"
 dynamic = ["version"]
 description = "Turn SQL into a REST API: run queries against MySQL, PostgreSQL, ClickHouse, SQLite or H2 over HTTP and get JSON, CSV, XML, YAML or XLSX back."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "FSL-1.1-MIT"
 authors = [{ name = "Anantha Raju C", email = "arcswdev@gmail.com" }]
 keywords = ["sql", "api", "rest", "flask", "database", "mysql", "postgresql", "clickhouse", "sqlite", "h2", "jdbc"]
@@ -18,8 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -41,9 +39,7 @@ encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
 mcp = ["mcp>=1.10,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. 1.10 is the floor because
                         # that's where outputSchema/structuredContent support landed in the SDK (1.9 doesn't
-                        # have it). Needs Python >=3.10 (the mcp package's own floor), higher than this
-                        # project's own >=3.9 - the same shape h2's extra already needs a JVM beyond what
-                        # `pip install` alone provides.
+                        # have it).
 jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL is set - see jwtauth.py.
                                # 2.14 is the floor because that is where PyJWKClient stops refetching the JWKS for
                                # every unknown key id: before it, forged tokens could make the server hammer the provider.
@@ -74,7 +70,7 @@ queryapigate = ["lib/*.jar", "console_dist/**/*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
@@ -82,15 +78,14 @@ select = ["E", "F", "W", "I", "B"]
 [tool.mypy]
 # Gradual typing: the codebase has no type hints yet, so this catches real static errors (like a subclass
 # assigning the wrong type to a base class's annotated attribute) without demanding annotations everywhere -
-# a starting point to tighten later, not a finished type-checked codebase. No python_version pin: mypy 2.x
-# can no longer check against 3.9 (this project's actual floor - see requires-python) since upstream mypy
-# dropped it once 3.9 reached end of life; real 3.9 compatibility is still verified for real by CI actually
-# running the test suite on 3.9.
+# a starting point to tighten later, not a finished type-checked codebase. Checked against the oldest Python this
+# project supports (requires-python), so code that needs a newer one fails here, not on a user's machine.
+python_version = "3.11"
 ignore_missing_imports = true  # none of the DB drivers ship type stubs
 # Belt and braces: mypy 1.x and 2.x disagree on whether ignore_missing_imports alone covers a module that's
 # installed but has no stubs/py.typed marker (PyYAML, openpyxl, ...) - the "import-untyped" error code, as
 # opposed to one mypy can't find at all ("import-not-found") - so silence that code explicitly too. Found by
-# CI actually running Python 3.9, which resolves an older mypy than this project's own dev environment.
+# CI running the oldest supported Python, which can resolve an older mypy than this project's own dev environment.
 disable_error_code = ["import-untyped"]
 warn_unused_ignores = true
 warn_redundant_casts = true

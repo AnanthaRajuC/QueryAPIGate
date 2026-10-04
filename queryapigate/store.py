@@ -46,10 +46,8 @@ def server_time_zone(moment=None):
 
 
 def _zone_name(local):
-    try:
-        from zoneinfo import ZoneInfo
-    except ImportError:  # pragma: no cover - Python 3.9+ always has it
-        return None
+    from zoneinfo import ZoneInfo
+
     candidates = [os.environ.get('TZ', '').lstrip(':')]
     link = os.path.realpath('/etc/localtime')
     if '/zoneinfo/' in link:

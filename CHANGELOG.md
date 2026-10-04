@@ -14,6 +14,9 @@ including a patch: the admin UI's internal markup/JS structure, exact error-mess
 and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
 `__version__` are public Python API).
 
+**Python versions** are supported until their upstream end of life (see python.org's release status). Dropping one
+is a minor release, called out under **Breaking** - never a patch.
+
 **Experimental** features are outside that promise: they may change or be removed in any minor release (a patch
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
@@ -28,6 +31,11 @@ always called out under its own **Breaking** note in that release's entry below,
 discovered. Once a 1.0 ships, that same rule simply moves to major versions, as SemVer intends.
 
 ## [Unreleased]
+
+### Breaking
+- **Python 3.11 or newer is required** (was 3.9). Python 3.9 reached its end of life in October 2025 and 3.10
+  reaches its own this month, so neither is carried into 1.0. pip on 3.9 or 3.10 keeps installing 0.13.0, the last
+  release for them. The Docker image already runs Python 3.12 and is unaffected.
 
 ### Added
 - **An "experimental" label** (BACKLOG #64) for features outside the compatibility promise - they may change in

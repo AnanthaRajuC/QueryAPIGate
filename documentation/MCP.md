@@ -65,8 +65,7 @@ like a `POST /execute_sql` one, with `"transport": "mcp"` - see
 ## Running it
 
 ```bash
-pip install "queryapigate[mcp]"   # needs Python >= 3.10 - the mcp package's own floor, higher than
-                                   # queryapigate's own >= 3.9
+pip install "queryapigate[mcp]"
 queryapigate mcp
 ```
 

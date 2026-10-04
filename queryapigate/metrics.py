@@ -180,16 +180,17 @@ def _render_counter(lines, name, help_text, label_names, counts):
     lines.append(f'# HELP {name} {help_text}')
     lines.append(f'# TYPE {name} counter')
     for key in sorted(counts):
-        lines.append(f'{name}{_labels(zip(label_names, key))} {counts[key]}')
+        lines.append(f'{name}{_labels(zip(label_names, key, strict=False))} {counts[key]}')
 
 
 def _render_histogram(lines, name, help_text, label_names, hist, totals):
     lines.append(f'# HELP {name} {help_text}')
     lines.append(f'# TYPE {name} histogram')
     for key in sorted(hist):
-        labels = list(zip(label_names, key))
+        labels = list(zip(label_names, key, strict=False))
         cumulative = 0
-        for edge, count in zip(_BUCKETS, hist[key]):
+        # hist has one more count than there are edges - the +Inf bucket, written after this loop
+        for edge, count in zip(_BUCKETS, hist[key], strict=False):
             cumulative += count
             lines.append(f'{name}_bucket{_labels([*labels, ("le", edge)])} {cumulative}')
         cumulative += hist[key][-1]  # the +Inf bucket
