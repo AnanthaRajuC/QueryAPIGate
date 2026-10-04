@@ -6,8 +6,9 @@ server runs a saved query inside a synthetic request context, which runs no hook
 an agent's key, no JWT, and its calls missing from /metrics. REST's hooks (app.py) and the MCP server
 (mcp_server.handle_call) now both call these, so a new front door gets them by calling the same functions.
 
-The limiters are per process (held on the Flask app): `queryapigate serve` and `queryapigate mcp` count separately,
-as two instances would (BACKLOG #55).
+The limiters are held on the Flask app. With QUERYAPIGATE_REDIS_URL set they count in Redis, so every instance and
+process - `queryapigate serve`, `queryapigate mcp`, `queryapigate events` - shares one budget per client and per key
+(BACKLOG #55); without it each process counts on its own.
 """
 from dataclasses import dataclass
 

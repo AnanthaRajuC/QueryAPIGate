@@ -25,6 +25,7 @@ _serialization_hist: dict[tuple, list] = {}  # (format,) -> [count per bucket...
 _serialization_sum: dict[tuple, float] = {}  # (format,) -> total seconds
 _active_queries = 0                     # queries currently executing (paged or mid-stream)
 _rate_limit_rejections = 0
+_rate_limit_fallbacks = 0
 _cache_hits = 0                         # responses served from cache.ResponseCache/rediscache.RedisResponseCache
 _cache_misses = 0
 _history_runs: dict[tuple, int] = {}  # (outcome,) -> runs: recorded / sampled_out / dropped / failed
@@ -115,6 +116,12 @@ def inc_rate_limit_rejection():
     global _rate_limit_rejections
     with _lock:
         _rate_limit_rejections += 1
+
+
+def inc_rate_limit_fallback():
+    global _rate_limit_fallbacks
+    with _lock:
+        _rate_limit_fallbacks += 1
 
 
 def inc_cache_hit():
@@ -217,6 +224,7 @@ def render(cache=None):
         serialization_sum = dict(_serialization_sum)
         active_queries = _active_queries
         rejections = _rate_limit_rejections
+        fallbacks = _rate_limit_fallbacks
         cache_hits = _cache_hits
         cache_misses = _cache_misses
         history_runs = dict(_history_runs)
@@ -264,6 +272,11 @@ def render(cache=None):
     lines.append('# HELP queryapigate_rate_limit_rejections_total Requests rejected by the rate limiter.')
     lines.append('# TYPE queryapigate_rate_limit_rejections_total counter')
     lines.append(f'queryapigate_rate_limit_rejections_total {rejections}')
+
+    lines.append('# HELP queryapigate_rate_limit_fallbacks_total Rate-limit checks counted in this process instead '
+                 'of Redis, because Redis failed.')
+    lines.append('# TYPE queryapigate_rate_limit_fallbacks_total counter')
+    lines.append(f'queryapigate_rate_limit_fallbacks_total {fallbacks}')
 
     lines.append('# HELP queryapigate_cache_hits_total Responses served from the cache_ttl response cache.')
     lines.append('# TYPE queryapigate_cache_hits_total counter')

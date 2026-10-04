@@ -32,9 +32,8 @@ import time
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, history
+from . import config, cors, db, history, ratelimit
 from .errors import code_for
-from .ratelimit import RateLimiter
 
 try:
     import resource  # POSIX only: raising the open-file limit is skipped where it doesn't exist (Windows)
@@ -138,7 +137,7 @@ class EventServer:
         self.recent = set()         # ids delivered in the lookback window
         self.recent_order = deque()
         self.wake = None            # asyncio.Event, created in start() - on its own event loop
-        self.limiter = RateLimiter()
+        self.limiter = ratelimit.client_limiter(config.redis_url())  # shared with every instance's REST limit
         self.server = None
         self.tasks = []
         self.delivered = 0

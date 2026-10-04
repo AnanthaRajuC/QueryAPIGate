@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   configuration is locked as it opens. A refused path answers `403 path_not_allowed`.
 
 ### Added
+- **Rate limits shared across instances** (BACKLOG #55). With `QUERYAPIGATE_REDIS_URL` set, the server-wide limit
+  per client address and every key's (and signed-in user's) `rate_limit` are counted in Redis - an atomic token
+  bucket on Redis's own clock - so every instance, and `queryapigate mcp` and `events`, enforce one budget instead of
+  one each. If Redis fails, each process falls back to counting on its own (limits stay enforced, never lifted),
+  tries Redis again after a few seconds rather than on every request, logs it at most once a minute, counts it in
+  `queryapigate_rate_limit_fallbacks_total`, and raises the new `rate_limits_not_shared` alert. Settings shows where
+  limits are counted.
 - **Files on S3, GCS, R2 and the web as an API** (BACKLOG #75, experimental): a DuckDB connection's `allowed_paths`
   takes `s3://`, `gs://` and `r2://` prefixes and `http(s)://` files; `user`/`password` carry the access key (masked,
   encrypted and `${VAR}`-capable like any password), with `region`, `endpoint`, `url_style`, `use_ssl` and `storage`

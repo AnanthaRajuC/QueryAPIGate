@@ -951,6 +951,8 @@ format](https://prometheus.io/docs/instrumenting/exposition_formats/):
   there's no equivalent single span to measure there.
 - `queryapigate_pool_idle_connections` - idle pooled database connections currently held.
 - `queryapigate_rate_limit_rejections_total` - requests rejected by the rate limiter.
+- `queryapigate_rate_limit_fallbacks_total` - rate-limit checks counted in this process instead of Redis, because
+  Redis failed (see [Rate limiting and CORS](#rate-limiting-and-cors)).
 - `queryapigate_cache_hits_total` / `queryapigate_cache_misses_total` - responses served from, or missed in,
   the `cache_ttl` response cache (in-process by default, Redis-backed when `QUERYAPIGATE_REDIS_URL` is set -
   see `/api/v1/settings`). Counted from the same `X-Cache: HIT`/`MISS` header a cacheable response already carries.
@@ -1101,6 +1103,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `key_rate_limited` | warning | A key's own `rate_limit` refused it 10 times or more in the last hour |
 | `client_rate_limited` | warning | `QUERYAPIGATE_RATE_LIMIT` refused one client address 10 times or more in the last hour |
 | `history_failed`, `history_dropped` | warning | Runs could not be recorded, or were dropped because the store could not keep up |
+| `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 
 | Variable | Default | Effect |
@@ -1245,6 +1248,9 @@ Both are off unless the server enables them (`QUERYAPIGATE_RATE_LIMIT`, `QUERYAP
   for the server-wide one, `X-RateLimit-Key-Limit`/`X-RateLimit-Key-Remaining` for the key's own), and a rejection
   from the key's own limit reads `{"error": "Rate limit exceeded for this API key", ...}` - distinguishable from
   the server-wide rejection's plain `"Rate limit exceeded"`.
+- **Shared across instances.** With `QUERYAPIGATE_REDIS_URL` set, both limits are counted in Redis - one budget per
+  client address and per key across every instance and process. If Redis fails, each process counts on its own until
+  it's reachable again (`queryapigate_rate_limit_fallbacks_total`, and the `rate_limits_not_shared` alert).
 - **CORS.** For listed origins the server answers preflight (`OPTIONS`) requests and adds
   `Access-Control-Allow-Origin` to responses, exposing `X-Page`, `X-Page-Size`, `X-Has-More`, `X-RateLimit-*`
   (server-wide and per-key), `Retry-After`, `X-Request-Id`, `X-Cache`, `ETag`, `Deprecation` and `Link` to the page's

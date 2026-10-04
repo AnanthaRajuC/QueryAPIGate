@@ -98,9 +98,14 @@ QUERYAPIGATE_REDIS_URL=redis://localhost:6379/0 queryapigate serve
 ~~~
 
 If Redis is briefly unreachable, a cached response is simply treated as a miss - the query still runs
-against the real database, it's just not served from cache for that one request. Nothing here changes the
-`--workers 1` recommendation above: that limit comes from the per-process rate limiter and `/metrics`, not
-the cache, and is unaffected either way.
+against the real database, it's just not served from cache for that one request.
+
+The same `QUERYAPIGATE_REDIS_URL` also shares **rate limits**: the server-wide limit per client address and every
+key's own `rate_limit` are counted in Redis, so several instances (and `queryapigate mcp`/`events`) enforce one
+budget, not one each. If Redis fails a check, that process counts on its own for a few seconds before trying Redis
+again - limits stay enforced, per process, rather than lifted or turned into refusals - logs a warning (at most once
+a minute), counts it in `queryapigate_rate_limit_fallbacks_total`, and raises the `rate_limits_not_shared` alert for
+ten minutes.
 
 An optional sidecar service for `docker-compose.yml`:
 
@@ -157,8 +162,8 @@ queryapigate serve
 - Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
   PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
 
-What is **not** shared between instances yet: the rate limiter and `/metrics` are still per process, and so is the
-main server's own `GET /events`. For live events across instances, run
+Rate limits are shared between instances through Redis (`QUERYAPIGATE_REDIS_URL`, below). What is **not** shared:
+`/metrics`, which is per process, and the main server's own `GET /events`. For live events across instances, run
 [`queryapigate events`](API.md#queryapigate-events) - it reads every instance's runs from the shared store, and is
 woken by a PostgreSQL notification as soon as they are written. Point every instance at the same
 `QUERYAPIGATE_REDIS_URL` to share the response cache too.

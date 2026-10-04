@@ -35,6 +35,7 @@ from . import (
     metrics,
     mongotools,
     openapi,
+    ratelimit,
     schema,
     sqltools,
     store,
@@ -42,7 +43,6 @@ from . import (
 from . import params as param_rules
 from .errors import ApiError, code_for
 from .formats import FORMATTERS, STREAM_FORMATTERS, json_default, stream_response
-from .ratelimit import KeyRateLimiters, RateLimiter
 
 log = logging.getLogger('queryapigate')
 bp = Blueprint('api', __name__)
@@ -120,8 +120,8 @@ def create_app():
     hops = config.proxy_hops()
     if hops:  # behind reverse proxies: take the client address and scheme from their X-Forwarded-* headers
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
-    app.extensions['queryapigate_limiter'] = RateLimiter()
-    app.extensions['queryapigate_key_limiter'] = KeyRateLimiters()
+    app.extensions['queryapigate_limiter'] = ratelimit.client_limiter(config.redis_url())
+    app.extensions['queryapigate_key_limiter'] = ratelimit.key_limiters(config.redis_url())
     app.extensions['queryapigate_broadcaster'] = broadcast.Broadcaster()
     redis_url = config.redis_url()
     if redis_url:

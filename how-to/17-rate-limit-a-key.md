@@ -95,9 +95,15 @@ Only set it when there really is a proxy that overwrites `X-Forwarded-For`. With
 
 ## Limits of the limits
 
-The counters live in each server process's memory: they reset on restart, and several instances behind a load
-balancer each count separately, so the effective limit is multiplied by the number of instances. That's fine for
-protecting the server from a runaway client; it isn't billing-grade metering.
+Without Redis, the counters live in each server process's memory: they reset on restart, and several instances
+behind a load balancer each count separately, so the effective limit is multiplied by the number of instances.
+
+**With `QUERYAPIGATE_REDIS_URL` set, the limits are shared**: every instance, and `queryapigate mcp` and `events`,
+counts against one budget per client address and per key, kept in Redis. If Redis goes down, each process counts on
+its own until it's back - limits stay enforced, just per process - and **Alerts** shows *Rate limits are counted per
+instance*.
+
+Either way this protects the server from a runaway client; it isn't billing-grade metering.
 
 ## Next steps
 

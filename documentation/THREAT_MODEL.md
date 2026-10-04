@@ -152,10 +152,11 @@ of QueryAPIGate is not optional once a key exists.
 
 ### Rate limiting and abuse prevention
 
-The rate limiter is in-memory, per-process state - it throttles both by source IP (server-wide) and,
-additively, by API key (`rate_limit` grant). Because the state isn't shared across processes, running more
-than one worker silently multiplies the effective limit - the reason the shipped image pins
-`--workers 1` rather than something that looks more scalable on paper. `QUERYAPIGATE_TRUST_PROXY` tells
+The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without
+`QUERYAPIGATE_REDIS_URL` its state is in each process's memory, so running more than one process silently multiplies
+the effective limit. With it, every instance and process counts against one budget in Redis (an atomic token bucket,
+on Redis's own clock); if Redis becomes unreachable, each process falls back to its own counting - limits stay
+enforced, per process, never lifted - and the `rate_limits_not_shared` alert and a metric say so. `QUERYAPIGATE_TRUST_PROXY` tells
 the server how many reverse-proxy hops to trust when resolving the real client IP from `X-Forwarded-For` -
 left at its default of `0` with a direct-connecting client, or set to the actual hop count behind a proxy;
 getting this wrong in either direction lets a client forge its apparent IP and evade both the rate limiter

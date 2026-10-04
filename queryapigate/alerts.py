@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import apikeys, config, db, history, metrics
+from . import apikeys, config, db, history, metrics, ratelimit
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -229,6 +229,14 @@ def _rate_limited():
 def _history_health():
     counts = metrics.history_counts()
     found = []
+    since = ratelimit.degraded()
+    if since is not None:
+        found.append(_alert(
+            'warning', 'rate_limits_not_shared', 'server', 'Rate limits are counted per instance',
+            'Redis failed a rate-limit check in the last ten minutes, so each instance is counting on its own - '
+            'every limit is effectively multiplied by the number of instances. Check QUERYAPIGATE_REDIS_URL and Redis '
+            "itself; see the server log.", {'type': 'settings', 'name': 'traffic'},
+            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(since))))
     if counts.get('failed'):
         found.append(_alert(
             'warning', 'history_failed', 'server', 'Run history could not be written',

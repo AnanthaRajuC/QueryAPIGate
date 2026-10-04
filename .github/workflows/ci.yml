@@ -97,9 +97,15 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:  # shared rate limits across instances (BACKLOG #55) - tests/test_shared_rate_limit.py
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       QUERYAPIGATE_TEST_DATABASE_URL: postgresql://postgres:pw@localhost:5432/postgres
       QUERYAPIGATE_TEST_REQUIRE_PG_TOOLS: "1"  # the backup/restore tests must run here, not skip
+      QUERYAPIGATE_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -83,7 +83,8 @@ These are by design or not yet addressed - plan around them rather than discover
 - **Some connection types have gaps** - no query time limit on generic JDBC, no database-enforced read-only on DuckDB,
   H2 and JDBC; see the [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 - **A JWT can't be revoked** before it expires - keep token lifetimes short.
-- **Rate limits are per process**, in memory - fine for protection, not for metering.
+- **Rate limits are per process unless Redis is configured** (`QUERYAPIGATE_REDIS_URL`) - fine for protection, not
+  for metering.
 
 ## When it's the wrong tool
 

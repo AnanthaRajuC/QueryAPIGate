@@ -107,9 +107,9 @@ request counters and latency histograms with method `MCP` and endpoint `mcp.save
 `mcp.list_tables`, so agent traffic can be told apart from REST's. Saved-query and ad-hoc runs are recorded in
 run history (and live events) with `"transport": "mcp"`.
 
-**Limits are counted per process.** `queryapigate mcp` is a separate process from `queryapigate serve`, so a key
-with `rate_limit` 100/minute may make 100 calls a minute over REST *and* 100 over MCP - the same as two REST
-instances behind a load balancer (BACKLOG #55). Metrics are per process too: `queryapigate mcp` serves its own
+**Limits are shared through Redis.** With `QUERYAPIGATE_REDIS_URL` set (the same value for both processes), a key's
+`rate_limit` of 100/minute is 100 calls a minute over REST and MCP together. Without it, each process counts on its
+own: 100 over REST *and* 100 over MCP, as two instances would. Metrics are per process either way: `queryapigate mcp` serves its own
 `GET /metrics` (and `GET /health`) on its port, beside `/mcp`, with no key needed - the same as the REST server's.
 Scrape both.
 

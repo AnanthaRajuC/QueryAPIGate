@@ -43,9 +43,10 @@ by accident.
 if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC discovery beyond the current
 JWKS support.
 
-**More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (suggested
-first), #76 Trino, #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
-procedures.
+**More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (shipped),
+#76 Trino, #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
+procedures. **More from DuckDB:** #81 Parquet and Arrow output, #82 snapshots of slow queries, #83 Iceberg and Delta
+tables (federation considered and deferred, see #83).
 
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
@@ -1754,8 +1755,13 @@ mcp` and check its own stdout/logs, or use an MCP client to probe it directly.
 
 ## 55. Shared rate limiting across instances (Redis-backed)
 
-**Status: open.** The one correctness gap left before several instances can share a PostgreSQL metadata
-store behind a load balancer.
+**Status: shipped (for 0.15).** `ratelimit.SharedRateLimiter`: the same token bucket as the in-process limiter, as a
+Lua script on Redis's own clock, selected by `QUERYAPIGATE_REDIS_URL` for the client limit, key and JWT-user limits,
+MCP and the events server alike. Failure policy decided: fall back to per-process counting (never lifted, never
+refused), skip Redis for 5 s after a failure, warn once a minute, `queryapigate_rate_limit_fallbacks_total`, alert
+`rate_limits_not_shared`. Tested against a real Redis in CI's PostgreSQL job (`tests/test_shared_rate_limit.py`).
+
+Original notes:
 
 **Impact:** `ratelimit.py` is an in-memory token bucket per process. That covers the server-wide IP limit
 (`QUERYAPIGATE_RATE_LIMIT`), each key's `rate_limit` grant (#15), and each signed-in JWT user's limit. With N
@@ -2558,6 +2564,62 @@ today, since a procedure may write - and the check can't see inside it. Options:
 whose definition marks it, and only with `allow_writes` (treat every procedure as a write); or a per-connection
 allow-list of procedures known to be read-only. Also: procedures returning several result sets, and `OUT`
 parameters, which the response shape has no place for yet.
+
+## 81. Parquet and Arrow output for any saved query
+
+**Status: open.** The first of three DuckDB-backed additions (#81-#83), chosen by one test: does it help someone
+safely publish or consume data?
+
+**Impact:** data teams, notebooks and pipelines would rather fetch Parquet (or Arrow IPC) than JSON or CSV for large
+results - typed columns, compressed, read directly by pandas, Polars, Spark and DuckDB. Today a caller converts it
+themselves.
+
+**Notes:** `?format=parquet` (and possibly `arrow`) on `/q/<name>` and `/execute_sql`, for every database type, not
+only DuckDB: rows from the existing runners go into an in-memory DuckDB relation and out as Parquet. Decide:
+- column types - from the driver's description where it has them, otherwise inferred (and stated in the docs);
+- streaming - Parquet is written in row groups, so `?stream=true` can emit one group per batch without holding the
+  whole result; measure memory as #9's guide did;
+- `queryapigate export --format parquet` for the CLI path;
+- content type `application/vnd.apache.parquet`, and the formats list in `/openapi.json` and the Console.
+DuckDB's own connection to do the conversion is internal and reads no files - nothing a caller's SQL touches.
+
+## 82. Snapshots: serve a slow saved query from a scheduled copy of its result
+
+**Status: open.**
+
+**Impact:** a heavy query against a production database - a report over millions of rows - shouldn't run every time
+someone calls it. A snapshot runs it on a schedule, keeps the result as Parquet, and answers `/q/<name>` from the copy:
+fast for callers, one query per refresh for the database. It's the durable, scheduled big sibling of `cache_ttl`, and
+fits "safe access to your data" - production load stays predictable.
+
+**Notes:**
+- A saved-query setting such as `"snapshot": {"every": "1h"}` (or a cron expression). The result is written to
+  Parquet under `QUERYAPIGATE_HOME` (or object storage), and served through an internal DuckDB connection.
+- Parameters: a snapshot holds the whole result; a call's parameters filter it in DuckDB (`WHERE`), so the saved query
+  is written without them, or with only the ones applied at refresh time. This needs a clear rule.
+- Freshness is visible: `X-Snapshot-At` on responses, `snapshot_at` in `/catalog`, and an alert when a refresh fails or
+  is overdue.
+- Who refreshes: one process, so several instances don't all refresh (the same question as #58's retention sweep).
+- Grants and `allowed_tables` apply exactly as to the live query - a snapshot changes where rows come from, never who
+  may read them.
+
+## 83. Lakehouse tables: Iceberg and Delta Lake through DuckDB
+
+**Status: open.** Builds on #75.
+
+**Impact:** data lakes are organised as table formats, not loose files - Apache Iceberg and Delta Lake add schemas,
+partitions, snapshots and deletes on top of Parquet. Reading them as tables is the natural next step after files in a
+bucket.
+
+**Notes:** DuckDB's `iceberg` and `delta` extensions (`iceberg_scan('s3://...')`, `delta_scan(...)`). Like `httpfs`,
+each is installed in the Docker image and loaded before the connection is locked - only extensions named in the
+connection's settings, never on demand. `allowed_paths` covers the table's location. An Iceberg REST catalog (Polaris,
+Nessie, Glue) is a bigger step - credentials and a network service - and worth scoping separately. Starts experimental.
+
+**Considered and deferred: federation.** DuckDB's `postgres`, `mysql` and `sqlite` scanners can join tables across
+databases in one query. Powerful, but each attached database brings its own credentials and a new way to reach data
+through one connection, and it overlaps with Trino (#76), which is built for exactly this. Revisit after #76, if
+asked for.
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31,
 #32, #33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering

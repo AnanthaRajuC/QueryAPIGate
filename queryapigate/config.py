@@ -723,6 +723,9 @@ def describe_settings():
          'description': 'Per-client throttling and browser origins allowed to call the API.', 'rows': [
             row('Rate limit', 'Requests allowed per client. API keys and roles can set their own.',
                 'QUERYAPIGATE_RATE_LIMIT', format_rate_limit(limit) or 'off'),
+            row('Counted', 'Where rate limits are counted: in Redis, shared by every instance '
+                '(QUERYAPIGATE_REDIS_URL), or in this process alone.', '',
+                'in Redis - shared' if redis_url() else 'in this process'),  # no variable of its own
             row('CORS origins', 'Comma-separated origins, or * for any. Unset turns CORS off.',
                 'QUERYAPIGATE_CORS_ORIGINS',
                 'off' if cors is None else '*' if cors == '*' else ', '.join(sorted(cors)))]},

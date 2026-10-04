@@ -652,8 +652,8 @@ a warning if you start that way).
 `QUERYAPIGATE_RATE_LIMIT=60/minute` gives each client address a bucket of 60 requests that refills steadily, so short bursts
 work but the sustained rate is capped. Over the limit, requests get `429` with a `Retry-After` header, and every
 response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`. The limit is applied before the API key check, so
-guessing keys is throttled too; `/health` and CORS preflights are never counted. State is per process: with several
-workers, the effective limit is multiplied by the number of workers.
+guessing keys is throttled too; `/health` and CORS preflights are never counted. With `QUERYAPIGATE_REDIS_URL` set, limits are counted in Redis - one budget per client address and per key across every instance and process (`serve`, `mcp`, `events`); if Redis fails, each process falls back to counting on its own until it's back, and an alert says so. Without Redis,
+state is per process: with several workers or instances, the effective limit is multiplied by their number.
 
 An API key can also carry its own `rate_limit` (same grammar), checked in addition to the server-wide limit, never
 instead of it - a request has to pass both. See [Per-key rate limiting](documentation/API.md#per-key-rate-limiting).
