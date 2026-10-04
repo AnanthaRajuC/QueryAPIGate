@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime
 
-from . import __version__, apikeys, bundle, config, db, examples, logging_setup, postman, store
+from . import __version__, apikeys, bundle, config, db, examples, experimental, logging_setup, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -77,6 +77,8 @@ def _events(args):
         print(f'queryapigate: {error}', file=sys.stderr)
         return 2
     logging_setup.configure(logging.getLogger('queryapigate'))
+    experimental.warn_in_use(logging.getLogger('queryapigate'), os.environ, store.read_connections(),
+                             also=('live_events',))
     from .events import run
     run(host=args.host, port=args.port)
     return 0

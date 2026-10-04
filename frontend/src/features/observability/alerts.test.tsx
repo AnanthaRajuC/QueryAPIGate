@@ -112,7 +112,7 @@ describe('Alerts', () => {
     expect(bell.querySelector('.badge')).toHaveClass('critical');
     await waitFor(() => expect(screen.getByRole('tab', { name: /Alerts/ })).toHaveTextContent('Alerts3'));
     await userEvent.click(bell);
-    expect(await screen.findByRole('heading', { name: 'Alerts' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /^Alerts/ })).toBeInTheDocument();
   });
 
   it('dismisses one in this browser, and can bring it back', async () => {

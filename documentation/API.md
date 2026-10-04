@@ -973,6 +973,10 @@ of the metrics themselves.
 
 ## Live events (Server-Sent Events)
 
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): event ids and the payload change when the dedicated event log ships
+> ([ADR 0002](adr/0002-event-ids.md)).
+
 Every recorded run - of a saved query, or of ad-hoc SQL - can be streamed to clients as it happens - a mobile app showing a user their own requests
 completing, a dashboard, the admin UI's Home tab. There are two ways to serve that stream, with the same format:
 
@@ -1057,6 +1061,10 @@ are held at once; beyond that it answers `503` with `Retry-After`, rather than l
 disconnects frees its slot at the next keepalive, within 15 seconds.
 
 ## Alerts
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.13, its checks, thresholds and alert shape may change as it is
+> used.
 
 `GET /api/v1/alerts` (admin only) lists what needs attention now, most severe first. The Console shows the same
 list on its Alerts screen, as a count on the bell in its header, and in Home's System health. Every alert is a live

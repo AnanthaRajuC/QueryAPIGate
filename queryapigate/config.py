@@ -5,6 +5,8 @@ import os
 import re
 from pathlib import Path
 
+from . import experimental
+
 SUPPORTED_DB_TYPES = ('mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'jdbc', 'duckdb', 'mongo')
 PASSWORD_MASK = '********'
 CONNECT_TIMEOUT = 10  # seconds
@@ -645,10 +647,11 @@ def describe_settings():
     and "default" when the built-in default applies, and ``env_value`` is the raw value for a "copy as .env"
     export, or None for a secret so that export can never leak one. Read-only: settings are environment
     variables, changed by restarting the server, not through the API."""
-    def row(label, description, env, value, secret=False):
+    def row(label, description, env, value, secret=False, experimental_row=False):
         raw = os.environ.get(env, '').strip()
         return {'label': label, 'description': description, 'env': env, 'value': value,
-                'source': 'env' if raw else 'default', 'env_value': None if secret or not raw else raw}
+                'source': 'env' if raw else 'default', 'env_value': None if secret or not raw else raw,
+                'experimental': experimental_row or env in experimental.SETTINGS}
 
     def on_off(flag):
         return 'on' if flag else 'off'
@@ -756,7 +759,7 @@ def describe_settings():
                 'in-process' if redis_val is None else f'Redis ({redact_redis_url(redis_val)})',
                 secret=True),
             row('Live updates', 'GET /events on this server: live runs for the admin UI and light use, from '
-                'this process only.', '', 'in-process'),
+                'this process only.', '', 'in-process', experimental_row=True),  # live events, no variable
             row('Streams on this server', 'Concurrent GET /events streams this server holds open - each takes '
                 'a request thread. Beyond it, /events answers 503. 0 turns it off.',
                 'QUERYAPIGATE_EVENTS_MAX_STREAMS', str(events_max_streams())),

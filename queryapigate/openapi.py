@@ -2,7 +2,7 @@
 import re
 from urllib.parse import quote
 
-from . import config, schema, v1_spec
+from . import config, experimental, schema, v1_spec
 from .params import json_schema
 
 _FORMAT_PARAM = {'name': 'format', 'in': 'query', 'schema': {
@@ -255,6 +255,14 @@ def build_spec(version, saved_queries=None, jwt=None):
     # The legacy saved-query management routes /api/v1/queries replaces: still working, marked deprecated.
     for path, method in _DEPRECATED_OPERATIONS:
         spec['paths'][path][method]['deprecated'] = True
+    # Outside the compatibility promise (experimental.py, BACKLOG #64): flagged for tools, and said for people.
+    for method, path in experimental.OPERATIONS:
+        # Copies: the operations are module-level dicts (v1_spec.PATHS) shared by every build of this document
+        operation = dict(spec['paths'][path][method])
+        operation['x-experimental'] = True
+        operation['description'] = ('**Experimental** - may change in any minor release, noted in the changelog. '
+                                    + operation.get('description', '')).strip()
+        spec['paths'][path] = {**spec['paths'][path], method: operation}
     if saved_queries:
         spec['paths'].update(_saved_query_paths(saved_queries))
         spec['tags'] = [{'name': 'Saved queries (live)',

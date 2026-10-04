@@ -14,6 +14,13 @@ including a patch: the admin UI's internal markup/JS structure, exact error-mess
 and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
 `__version__` are public Python API).
 
+**Experimental** features are outside that promise: they may change or be removed in any minor release (a patch
+release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
+callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
+its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
+(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). The
+list is `queryapigate/experimental.py`.
+
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
 take that license casually. A patch release (`0.10.0` -> `0.10.1`) never breaks a covered surface. A minor
 release (`0.10.x` -> `0.11.0`) is this project's pre-1.0 equivalent of a major bump and may - rarely, and
@@ -21,6 +28,13 @@ always called out under its own **Breaking** note in that release's entry below,
 discovered. Once a 1.0 ships, that same rule simply moves to major versions, as SemVer intends.
 
 ## [Unreleased]
+
+### Added
+- **An "experimental" label** (BACKLOG #64) for features outside the compatibility promise - they may change in
+  any minor release, always noted here (see *Versioning and compatibility* above). Today: live events (`GET
+  /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). Each is
+  marked in its docs, with `x-experimental: true` in `/openapi.json`, with a tag in the Console (its Settings rows,
+  the database-type picker, the Alerts screen), and with a warning in the log at startup while one is in use.
 
 ## [0.13.0] - 2026-10-04
 

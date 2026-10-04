@@ -15,6 +15,8 @@ type Connection = Schemas['Connection'];
 type ConnectionInput = Schemas['ConnectionInput'];
 
 const DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo'];
+// Outside the compatibility promise (queryapigate/experimental.py) - labelled where an admin picks one.
+const EXPERIMENTAL_DB_TYPES = ['h2', 'jdbc', 'mongo'];
 const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
 
 type Filter = 'all' | 'active' | 'inactive' | 'deleted';
@@ -512,7 +514,7 @@ function ConnectionFormFields({
         <select id="c-db" value={db} onChange={(e) => setDb(e.target.value)}>
           {DB_TYPES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {EXPERIMENTAL_DB_TYPES.includes(t) ? `${t} (experimental)` : t}
             </option>
           ))}
         </select>

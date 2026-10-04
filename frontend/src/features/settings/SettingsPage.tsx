@@ -7,6 +7,7 @@ import { copyText, Loading, useFeedback } from '@/app/feedback';
 import { setPref, usePrefValues, type Prefs } from '@/app/prefs';
 
 import { lastSection, rememberSection } from './state';
+import { ExperimentalTag } from '@/components/Experimental';
 
 // The classic Settings screen (ui.py #tab-settings, renderSettings, renderMcpExtras, the copy-env button): the
 // server's configuration by section from /api/v1/settings, read-only, plus this browser's appearance preferences.
@@ -164,7 +165,9 @@ function SectionPanel({ section }: { section: Section }) {
       {section.rows.map((row) => (
         <div key={row.env + row.label} className="set-row">
           <div className="set-what">
-            <span className="set-label">{row.label}</span>
+            <span className="set-label">
+              {row.label} {row.experimental && <ExperimentalTag />}
+            </span>
             <span className="set-desc">{row.description}</span>
             <code className="set-env">{row.env}</code>
           </div>

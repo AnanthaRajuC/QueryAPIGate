@@ -240,7 +240,8 @@ SCHEMAS = {
         'properties': {
             'id': {'type': 'string'}, 'title': {'type': 'string'}, 'description': {'type': 'string'},
             'rows': {'type': 'array', 'items': {
-                'type': 'object', 'required': ['label', 'description', 'env', 'value', 'source', 'env_value'],
+                'type': 'object',
+                'required': ['label', 'description', 'env', 'value', 'source', 'env_value', 'experimental'],
                 'properties': {
                     'label': {'type': 'string'}, 'description': {'type': 'string'},
                     'env': {'type': 'string', 'description': 'The environment variable.'},
@@ -250,6 +251,9 @@ SCHEMAS = {
                     'env_value': {'type': 'string', 'nullable': True,
                                   'description': 'The raw value, for a .env export; null at the default and '
                                                  'always for a secret.'},
+                    'experimental': {'type': 'boolean',
+                                     'description': 'A setting of an experimental feature (outside the '
+                                                    'compatibility promise).'},
                 }}},
         },
     },

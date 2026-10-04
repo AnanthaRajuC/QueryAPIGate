@@ -32,7 +32,7 @@ by accident.
 
 | Item | What |
 |---|---|
-| #64 Experimental features label | A documented way to ship outside the freeze; live events are the first candidate |
+| ~~#64 Experimental features label~~ (shipped) | A documented way to ship outside the freeze; live events are the first candidate |
 | ~~#65 Upgrade guarantee and upgrade CI~~ (shipped; PostgreSQL dump fixtures still open) | Every 0.x store upgrades automatically or refuses with a clear message |
 | #66 Database support matrix | Tier 1 vs experimental database types |
 | #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
@@ -2014,7 +2014,11 @@ team.
 
 ## 64. An "experimental" label for features outside the 1.0 freeze
 
-**Status: open.** 1.0 milestone.
+**Status: shipped.** `queryapigate/experimental.py` is the one list - today live events, H2/JDBC/MongoDB
+connections and alerts. It drives `x-experimental` in the OpenAPI document, an "experimental" tag on Settings rows,
+the Console's labels, and a startup warning while one is in use; CHANGELOG.md's versioning section defines it, each
+feature's docs say so, and `tests/test_experimental.py` keeps them all in step. Graduating a feature is removing its
+entry and its callout.
 
 **Impact:** once 1.0 freezes the covered surfaces, every new feature is frozen the day it ships unless there
 is a documented way to say "not yet". Without it, the project either stops shipping new things after 1.0 or

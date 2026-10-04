@@ -1786,6 +1786,10 @@
                   "nullable": true,
                   "type": "string"
                 },
+                "experimental": {
+                  "description": "A setting of an experimental feature (outside the compatibility promise).",
+                  "type": "boolean"
+                },
                 "label": {
                   "type": "string"
                 },
@@ -1807,7 +1811,8 @@
                 "env",
                 "value",
                 "source",
-                "env_value"
+                "env_value",
+                "experimental"
               ],
               "type": "object"
             },
@@ -1933,6 +1938,7 @@
   "paths": {
     "/api/v1/alerts": {
       "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -1988,7 +1994,8 @@
         "summary": "What needs attention now - expiring keys, failing connections, slow or failing queries, rate limits being hit - most severe first",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/api-keys": {
@@ -6239,7 +6246,7 @@
     },
     "/events": {
       "get": {
-        "description": "One `data: {...}` line per saved-query execution as it happens - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every execution; a scoped key sees only executions it triggered itself (its own personal activity feed, filtered by API key name).",
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. One `data: {...}` line per saved-query execution as it happens - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every execution; a scoped key sees only executions it triggered itself (its own personal activity feed, filtered by API key name).",
         "responses": {
           "200": {
             "content": {
@@ -6276,7 +6283,8 @@
         "summary": "Live saved-query execution events (Server-Sent Events)",
         "tags": [
           "Saved queries"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/execute_mongo": {

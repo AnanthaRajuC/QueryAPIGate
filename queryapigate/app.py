@@ -2,6 +2,7 @@
 import json
 import logging
 import math
+import os
 import queue
 import re
 import threading
@@ -25,6 +26,7 @@ from . import (
     definitions,
     engine,
     examples,
+    experimental,
     governance,
     history,
     jwtauth,
@@ -116,6 +118,7 @@ def create_app():
     apikeys.import_legacy_keys_if_empty()
     apikeys.import_legacy_roles_if_empty()
     logging_setup.configure(log)
+    experimental.warn_in_use(log, os.environ, store.read_connections())
     app = Flask(__name__)
     hops = config.proxy_hops()
     if hops:  # behind reverse proxies: take the client address and scheme from their X-Forwarded-* headers

@@ -37,6 +37,9 @@ object; `GET /api/v1/connections/{name}` returns them under `options`.
 | `h2` | `JayDeBeApi` + bundled JDBC jar | Connects to a running H2 TCP server: `jdbc:h2:tcp://<host>[:port]/~/<database>` |
 | `jdbc` | `JayDeBeApi` + your own JDBC jar | Any other JDBC-compliant database (Oracle, SQL Server, DB2, Snowflake, ...) - see [Generic JDBC connections](#generic-jdbc-connections) |
 | `duckdb` | `duckdb` | An embedded analytical database that can also query CSV/JSON/Parquet files directly - see [DuckDB connections](#duckdb-connections) |
+| `mongo` | `pymongo` | `find()` queries only, never writes - see [Connect to MongoDB](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/04-connect-to-mongodb.md) |
+
+`h2`, `jdbc` and `mongo` are [experimental](#experimental-h2-jdbc-and-mongo).
 
 The SQL guard (single-statement / read-only check, see [API.md](API.md)) reads string literals using the quoting
 rules the connection's `db` type actually uses: `mysql` and `clickhouse` honour a backslash escape inside quoted
@@ -101,6 +104,16 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 | `port` | no | Overrides the driver's default port |
 | `user`, `password` | usually | Credentials |
 | `jar`, `driver_class`, `jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
+
+## Experimental: h2, jdbc and mongo
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+
+These three types work, but are tested less than the others, and not every feature reaches them: `allowed_tables`
+refuses queries on them rather than guess (fail closed), schema browsing and database listing are partial, and
+streaming exports don't cover `mongo`. A server with one configured logs a warning at startup saying so. They
+graduate once they are covered by the integration tests the other types run in CI on every push.
 
 ## Generic JDBC connections
 
