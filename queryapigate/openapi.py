@@ -631,7 +631,10 @@ _DEPRECATED_OPERATIONS = (('/list_files', 'get'), ('/view_file_content', 'get'),
                           ('/saved_sql/{name}', 'delete'), ('/saved_sql/{name}/collection', 'put'),
                           ('/saved_sql/{name}/cache_ttl', 'put'), ('/query_flow', 'get'),
                           ('/connections', 'get'), ('/connections', 'patch'), ('/connections/databases', 'post'),
-                          ('/connections/test', 'post'), ('/connections/{name}', 'delete'))
+                          ('/connections/test', 'post'), ('/connections/{name}', 'delete'),
+                          ('/api_keys', 'get'), ('/api_keys', 'post'), ('/api_keys/{name}', 'patch'),
+                          ('/api_keys/{name}', 'delete'), ('/roles', 'get'), ('/roles', 'post'),
+                          ('/roles/{name}', 'patch'), ('/roles/{name}', 'delete'))
 
 
 DOCS_HTML = """<!doctype html>

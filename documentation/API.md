@@ -330,6 +330,22 @@ curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-K
 Every change is audited exactly as the legacy routes audit theirs. A password appears in an audit entry only as
 `"changed"`, never its value.
 
+### API keys and roles
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`. Never secrets. |
+| `POST /api/v1/api-keys` | Create one, from explicit grants or from a `role` (whose grants are copied once; no grant fields then). The response's `secret` is the only time it is ever shown, and is sent with `Cache-Control: no-store`. 409 `key_exists`, 404 `role_not_found`. |
+| `GET /api/v1/api-keys/{name}` | One key. |
+| `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. Honours `If-Match`. |
+| `DELETE /api/v1/api-keys/{name}` | Revoke and remove it: anything still using it stops working immediately. |
+| `GET /api/v1/roles` | Every role's grants, with `keys_created`: the keys created from it. |
+| `POST /api/v1/roles` | Create one. 409 `role_exists`. |
+| `GET`, `PATCH`, `DELETE /api/v1/roles/{name}` | As for keys. A role is a template: changing or deleting it never touches a key already created from it. |
+
+A name is 1-100 letters, digits, spaces, `.`, `_` or `-` (`invalid_name`). Every change is audited, never with a
+secret.
+
 ### Deprecated routes
 
 The management routes replaced by an `/api/v1` resource keep working, unchanged. Their responses carry
@@ -339,7 +355,10 @@ deprecated:
   `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl` and
   `GET /query_flow`;
 - replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`, `POST /connections/test`,
-  `POST /connections/databases` and `DELETE /connections/{name}`.
+  `POST /connections/databases` and `DELETE /connections/{name}`;
+- replaced by `/api/v1/api-keys`: `GET /api_keys`, `POST /api_keys`, `PATCH /api_keys/{name}` and
+  `DELETE /api_keys/{name}`;
+- replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`.
 
 `GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
 schema of a connection it is granted. Runtime routes

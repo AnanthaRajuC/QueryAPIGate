@@ -91,10 +91,10 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       next_cursor: null,
     }),
     'GET /query_flow': () => ({ tables: ['film'], joins: [], formatted: null, error: null }),
-    'GET /api_keys': () => ({
-      keys: { partner: { active: true, collections: ['catalog'], rate_limit: '60/minute' } },
+    'GET /api/v1/api-keys': () => ({
+      items: [apiKey('partner', { connections: [], collections: ['catalog'], rate_limit: '60/minute' })],
     }),
-    'GET /roles': () => ({ roles: { analyst: { connections: ['lite'] } } }),
+    'GET /api/v1/roles': () => ({ items: [role('analyst', { connections: ['lite'] })] }),
     'GET /collections': () => ({
       collections: { catalog: { queries: ['films'], keys: ['partner'], roles: [] } },
       uncollected: ['rentals'],
@@ -114,4 +114,37 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       ],
     }),
   };
+}
+
+const GRANTS = {
+  connections: '*' as '*' | string[],
+  queries: [] as ('*' | string | { name: string; allow_writes?: boolean })[] | '*',
+  collections: [] as string[],
+  allow_writes: false,
+  allowed_write_ops: null as string[] | null,
+  allowed_tables: null as string[] | null,
+  rate_limit: null as string | null,
+  allowed_ips: null as string[] | null,
+};
+
+/** An API key as /api/v1/api-keys returns it. */
+export function apiKey(name: string, extra: Record<string, unknown> = {}) {
+  return {
+    name,
+    ...GRANTS,
+    active: true,
+    expires_at: null,
+    expired: false,
+    created_at: '2026-10-01 10:00:00',
+    created_from_role: null,
+    last_used_at: null,
+    example: false,
+    usage: { queries: 0, errors: 0, rows: 0 },
+    ...extra,
+  };
+}
+
+/** A role as /api/v1/roles returns it. */
+export function role(name: string, extra: Record<string, unknown> = {}) {
+  return { name, ...GRANTS, created_at: '2026-10-01 10:00:00', example: false, keys_created: 0, ...extra };
 }

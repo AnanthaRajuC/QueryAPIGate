@@ -379,6 +379,105 @@ class ConnectionTests(V1TestCase):
         self.assertEqual(res.get_json()['code'], 'connection_not_found')
 
 
+class AccessTests(V1TestCase):
+    K = '/api/v1/api-keys/{name}'
+    R = '/api/v1/roles/{name}'
+
+    def create_key(self, status=201, **fields):
+        body = {'name': 'reporting', 'connections': ['lite'], **fields}
+        return self.call('post', '/api/v1/api-keys', '/api/v1/api-keys', status, json=body)
+
+    def create_role(self, name='analyst', **fields):
+        body = {'name': name, 'connections': ['lite'], 'rate_limit': '100/minute', **fields}
+        return self.call('post', '/api/v1/roles', '/api/v1/roles', 201, json=body)
+
+    def test_create_shows_the_secret_once_and_never_again(self):
+        res = self.create_key(expires_at='2999-01-01')
+        body = res.get_json()
+        self.assertTrue(body['secret'].startswith('sk_'))
+        self.assertEqual(res.headers['Cache-Control'], 'no-store')
+        self.assertEqual((body['connections'], body['active'], body['expired'], body['expires_at']),
+                         (['lite'], True, False, '2999-01-01'))
+        self.assertEqual(set(body['usage']), {'queries', 'errors', 'rows'})  # live counters, process-wide
+        listed = self.call('get', '/api/v1/api-keys', '/api/v1/api-keys', 200)
+        self.assertNotIn(body['secret'], listed.get_data(as_text=True))
+        one = self.call('get', '/api/v1/api-keys/reporting', self.K, 200)
+        self.assertNotIn('secret', one.get_json())
+        self.assertNotIn(body['secret'], str(store.read_audit_log()))
+        self.assertEqual(store.read_audit_log()[-1]['action'], 'create_key')
+        # the secret works, for what it grants
+        run = self.client.post('/execute_sql', headers={'X-API-Key': body['secret']},
+                               json={'sql': 'SELECT 1 AS one', 'connection_name': 'lite'})
+        self.assertEqual(run.status_code, 200, run.get_data(as_text=True))
+
+    def test_bad_names_taken_names_and_unknown_fields_are_refused(self):
+        self.create_key()
+        self.assertEqual(self.create_key(409).get_json()['code'], 'key_exists')
+        self.assertEqual(self.create_key(400, name='../x').get_json()['code'], 'invalid_name')
+        self.assertEqual(self.create_key(400, name='k2', secret='mine').get_json()['code'], 'unknown_field')
+        self.assertEqual(self.create_key(404, name='k3', connections=None, role='nope').get_json()['code'],
+                         'role_not_found')
+        res = self.call('get', '/api/v1/api-keys/nope', self.K, 404)
+        self.assertEqual(res.get_json()['code'], 'key_not_found')
+
+    def test_patch_changes_what_it_names_and_null_clears(self):
+        etag = self.create_key(rate_limit='10/minute', allowed_ips=['10.0.0.0/8']).headers['ETag']
+        res = self.call('patch', '/api/v1/api-keys/reporting', self.K, 200, headers={**ADMIN, 'If-Match': etag},
+                        json={'allow_writes': True, 'rate_limit': None})
+        body = res.get_json()
+        self.assertEqual((body['allow_writes'], body['rate_limit'], body['allowed_ips'], body['connections']),
+                         (True, None, ['10.0.0.0/8'], ['lite']))
+        self.assertEqual(store.read_audit_log()[-1]['action'], 'update_key')
+        stale = self.call('patch', '/api/v1/api-keys/reporting', self.K, 412, headers={**ADMIN, 'If-Match': etag},
+                          json={'active': False})
+        self.assertEqual(stale.get_json()['code'], 'precondition_failed')
+        self.assertFalse(self.call('patch', '/api/v1/api-keys/reporting', self.K, 200,
+                                   json={'active': False}).get_json()['active'])
+
+    def test_delete_revokes(self):
+        secret = self.create_key().get_json()['secret']
+        self.call('delete', '/api/v1/api-keys/reporting', self.K, 204)
+        self.assertEqual(self.client.get('/catalog', headers={'X-API-Key': secret}).status_code, 401)
+        self.assertEqual(store.read_audit_log()[-1]['action'], 'delete_key')
+        self.call('delete', '/api/v1/api-keys/reporting', self.K, 404)
+
+    def test_a_key_from_a_role_copies_its_grants_once(self):
+        role = self.create_role().get_json()
+        self.assertEqual((role['connections'], role['rate_limit'], role['keys_created']),
+                         (['lite'], '100/minute', 0))
+        key = self.create_key(connections=None, role='analyst').get_json()
+        self.assertEqual((key['created_from_role'], key['rate_limit']), ('analyst', '100/minute'))
+        self.assertEqual(self.call('get', '/api/v1/roles/analyst', self.R, 200).get_json()['keys_created'], 1)
+        # combining a role with explicit grants is refused
+        self.create_key(400, name='k2', role='analyst')
+        # editing, then deleting, the role leaves the key alone
+        self.call('patch', '/api/v1/roles/analyst', self.R, 200, json={'rate_limit': '5/minute'})
+        self.call('delete', '/api/v1/roles/analyst', self.R, 204)
+        self.assertEqual(self.call('get', '/api/v1/api-keys/reporting', self.K, 200).get_json()['rate_limit'],
+                         '100/minute')
+        self.assertEqual([e['action'] for e in store.read_audit_log()][-4:],
+                         ['create_role', 'create_key', 'update_role', 'delete_role'])
+
+    def test_roles_list_conflicts_and_if_match(self):
+        etag = self.create_role().headers['ETag']
+        self.create_role('writer', allow_writes=True)
+        items = self.call('get', '/api/v1/roles', '/api/v1/roles', 200).get_json()['items']
+        self.assertEqual([r['name'] for r in items], ['analyst', 'writer'])
+        res = self.call('post', '/api/v1/roles', '/api/v1/roles', 409, json={'name': 'analyst'})
+        self.assertEqual(res.get_json()['code'], 'role_exists')
+        res = self.call('patch', '/api/v1/roles/analyst', self.R, 400, json={'expires_at': '2999-01-01'})
+        self.assertEqual(res.get_json()['code'], 'unknown_field')
+        self.call('patch', '/api/v1/roles/analyst', self.R, 200, json={'allowed_ips': ['10.0.0.1']})
+        self.call('delete', '/api/v1/roles/analyst', self.R, 412, headers={**ADMIN, 'If-Match': etag})
+        res = self.call('get', '/api/v1/roles/nope', self.R, 404)
+        self.assertEqual(res.get_json()['code'], 'role_not_found')
+
+    def test_scoped_keys_cannot_manage_access(self):
+        secret = self.create_key().get_json()['secret']
+        self.call('get', '/api/v1/api-keys', '/api/v1/api-keys', 403, headers={'X-API-Key': secret})
+        self.call('post', '/api/v1/roles', '/api/v1/roles', 403, headers={'X-API-Key': secret}, json={'name': 'x'})
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
@@ -387,6 +486,8 @@ class DeprecationTests(V1TestCase):
         self.assertNotIn('Deprecation', self.client.get('/catalog', headers=ADMIN).headers)
         self.assertIn('/api/v1/connections', self.client.get('/connections', headers=ADMIN).headers['Link'])
         self.assertNotIn('Deprecation', self.client.get('/connections/lite/schema', headers=ADMIN).headers)
+        self.assertIn('/api/v1/api-keys', self.client.get('/api_keys', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/roles', self.client.get('/roles', headers=ADMIN).headers['Link'])
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

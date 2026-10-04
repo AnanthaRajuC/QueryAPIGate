@@ -105,6 +105,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'apikeys',
+        path: '/api-keys',
         group: 'Access',
         label: 'API keys',
         count: 'apikeys',
@@ -119,6 +120,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'roles',
+        path: '/roles',
         group: 'Access',
         label: 'Roles',
         count: 'roles',

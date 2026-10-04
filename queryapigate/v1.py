@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request
 from . import collection_admin, history, schema, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
-from .services import connections, queries
+from .services import access, connections, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -259,3 +259,98 @@ def connection_schema(name):
     """`?database=` browses another database on the same server (the API Designer's Database picker)."""
     connections.load(name)
     return jsonify(schema.fetch_schema(name, database=request.args.get('database') or None)), 200
+
+
+# --------------------------------------------------------------------------------------
+# API keys and roles
+# --------------------------------------------------------------------------------------
+
+def _check_entry_if_match(entry, what):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != access.etag(entry):
+        raise ApiError(f'This {what} changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+def _key_response(name, status=200, secret=None):
+    entry = access.load_key(name)
+    body = access.to_key(name, entry)
+    if secret is not None:
+        body['secret'] = secret
+    response = jsonify(body)
+    response.headers['ETag'] = access.etag(entry)
+    if secret is not None:
+        response.headers['Cache-Control'] = 'no-store'  # the one response that carries a secret
+    return response, status
+
+
+@bp.route('/api-keys', methods=['GET'])
+def list_api_keys():
+    return jsonify({'items': access.list_keys()}), 200
+
+
+@bp.route('/api-keys', methods=['POST'])
+def create_api_key():
+    """A new key, from explicit grants or copied from a `role`. The response's `secret` is the only time it is
+    ever shown: store it now."""
+    name, secret = access.create_key(get_json_body(), caller_key_name())
+    return _key_response(name, 201, secret)
+
+
+@bp.route('/api-keys/<name>', methods=['GET'])
+def get_api_key(name):
+    return _key_response(name)
+
+
+@bp.route('/api-keys/<name>', methods=['PATCH'])
+def update_api_key(name):
+    """Change some grants, the expiry, or `active` (false revokes it at once); null clears an optional field."""
+    _check_entry_if_match(access.load_key(name), 'API key')
+    access.update_key(name, get_json_body(), caller_key_name())
+    return _key_response(name)
+
+
+@bp.route('/api-keys/<name>', methods=['DELETE'])
+def delete_api_key(name):
+    """Revoke and remove it: anything still using it stops working immediately."""
+    _check_entry_if_match(access.load_key(name), 'API key')
+    access.delete_key(name, caller_key_name())
+    return '', 204
+
+
+def _role_response(name, status=200):
+    entry = access.load_role(name)
+    response = jsonify(access.to_role(name, entry))
+    response.headers['ETag'] = access.etag(entry)
+    return response, status
+
+
+@bp.route('/roles', methods=['GET'])
+def list_roles():
+    return jsonify({'items': access.list_roles()}), 200
+
+
+@bp.route('/roles', methods=['POST'])
+def create_role():
+    return _role_response(access.create_role(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/roles/<name>', methods=['GET'])
+def get_role(name):
+    return _role_response(name)
+
+
+@bp.route('/roles/<name>', methods=['PATCH'])
+def update_role(name):
+    """Change some of the template's grants. Keys already created from it are not touched."""
+    _check_entry_if_match(access.load_role(name), 'role')
+    access.update_role(name, get_json_body(), caller_key_name())
+    return _role_response(name)
+
+
+@bp.route('/roles/<name>', methods=['DELETE'])
+def delete_role(name):
+    """Remove the template; keys already created from it keep their grants."""
+    _check_entry_if_match(access.load_role(name), 'role')
+    access.delete_role(name, caller_key_name())
+    return '', 204

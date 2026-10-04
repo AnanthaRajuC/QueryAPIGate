@@ -3,28 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { api, apiJson, unwrap, type Schemas } from '@/api/client';
 
 // Data the shell and several screens share. /api/v1 where it exists; the legacy routes (typed loosely here) for
-// what hasn't got a v1 resource yet - API keys, roles, collections.
+// what hasn't got a v1 resource yet - collections.
 
 export type Connection = Schemas['Connection'];
 export type QuerySummary = Schemas['QuerySummary'];
 
-/** A role's grants (legacy GET /roles) - the fields the Console reads. */
-export interface RoleEntry {
-  connections?: string[] | '*';
-  queries?: (string | { name: string; allow_writes?: boolean })[] | '*';
-  collections?: string[] | '*';
-  allow_writes?: boolean;
-  allowed_write_ops?: string[];
-  allowed_tables?: string[];
-  rate_limit?: string | null;
-}
-/** An API key (legacy GET /api_keys): a role's grants plus its own state. */
-export interface ApiKeyEntry extends RoleEntry {
-  active?: boolean;
-  expires_at?: string | null;
-  last_used_at?: string | null;
-  created_from_role?: string | null;
-}
+/** The grants a key or role carries - what reach and access cells read. */
+export type RoleEntry = Schemas['Grants'];
+export type Role = Schemas['Role'];
+export type ApiKeyEntry = Schemas['ApiKey'];
 export interface CollectionsInfo {
   collections: Record<string, { queries: string[]; keys: string[]; roles: string[] }>;
   uncollected: string[];
@@ -50,18 +37,23 @@ export function useAllQueries() {
   });
 }
 
+const byName = <T extends { name: string }>(items: T[]) =>
+  Object.fromEntries(items.map((item) => [item.name, item])) as Record<string, T>;
+
+/** Every API key, by name (never secrets). */
 export function useApiKeys() {
   return useQuery({
     queryKey: ['apikeys'],
-    queryFn: async () => (await apiJson<{ keys: Record<string, ApiKeyEntry> }>('/api_keys')).keys,
+    queryFn: async () => byName(unwrap(await api.GET('/api/v1/api-keys')).items),
     retry: false,
   });
 }
 
+/** Every role, by name. */
 export function useRoles() {
   return useQuery({
     queryKey: ['roles'],
-    queryFn: async () => (await apiJson<{ roles: Record<string, RoleEntry> }>('/roles')).roles,
+    queryFn: async () => byName(unwrap(await api.GET('/api/v1/roles')).items),
     retry: false,
   });
 }

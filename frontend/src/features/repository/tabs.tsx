@@ -17,6 +17,8 @@ import {
   type Query,
   type QueryVersion,
 } from './api';
+import { useAccessDrawers } from '@/features/access/forms';
+
 import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
 
 // The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
@@ -499,6 +501,7 @@ export function CliTab({ query, v }: { query: Query; v: QueryVersion }) {
 // ---- API Keys and Roles ----
 
 export function KeysTab({ reach, keys }: { reach: Reach; keys: Record<string, ApiKeyEntry> }) {
+  const drawers = useAccessDrawers();
   if (!reach.keys.length)
     return <Empty>No API key reaches this query yet - only the admin key can run it.</Empty>;
   const today = new Date().toISOString().slice(0, 10);
@@ -514,7 +517,7 @@ export function KeysTab({ reach, keys }: { reach: Reach; keys: Record<string, Ap
         </thead>
         <tbody>
           {reach.keys.map((k) => {
-            const full = keys[k.name] ?? {};
+            const full: Partial<ApiKeyEntry> = keys[k.name] ?? {};
             const expires = full.expires_at ?? undefined;
             const expired = Boolean(expires && expires < today);
             return (
@@ -548,7 +551,7 @@ export function KeysTab({ reach, keys }: { reach: Reach; keys: Record<string, Ap
                   {full.last_used_at || 'never'}
                 </td>
                 <td>
-                  <button type="button" className="btn ghost sm" onClick={() => openClassic('apikeys')}>
+                  <button type="button" className="btn ghost sm" onClick={() => drawers.editKey(k.name)}>
                     Edit
                   </button>
                 </td>
@@ -570,6 +573,7 @@ export function RolesTab({
   keys: Record<string, ApiKeyEntry>;
   roles: Record<string, RoleEntry>;
 }) {
+  const drawers = useAccessDrawers();
   if (!reach.roles.length) return <Empty>No role grants reach to this query.</Empty>;
   const keysFrom: Record<string, number> = {};
   Object.values(keys).forEach((k) => {
@@ -588,7 +592,7 @@ export function RolesTab({
         </thead>
         <tbody>
           {reach.roles.map((r) => {
-            const full = roles[r.name] ?? {};
+            const full: Partial<RoleEntry> = roles[r.name] ?? {};
             return (
               <tr key={r.name} data-name={r.name}>
                 <td>
@@ -605,7 +609,7 @@ export function RolesTab({
                   {keysFrom[r.name] ?? 0}
                 </td>
                 <td>
-                  <button type="button" className="btn ghost sm" onClick={() => openClassic('roles')}>
+                  <button type="button" className="btn ghost sm" onClick={() => drawers.editRole(r.name)}>
                     Edit
                   </button>
                 </td>

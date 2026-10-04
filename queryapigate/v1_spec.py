@@ -241,6 +241,96 @@ SCHEMAS = {
         'type': 'object', 'required': ['databases'],
         'properties': {'databases': {'type': 'array', 'items': {'type': 'string'}}},
     },
+    'Grants': {
+        'type': 'object',
+        'required': ['connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
+                     'rate_limit', 'allowed_ips'],
+        'properties': {
+            'connections': {'oneOf': [{'type': 'string', 'enum': ['*']},
+                                      {'type': 'array', 'items': {'type': 'string'}}],
+                            'description': '"*" for every connection, or a list of names (ad-hoc SQL and every '
+                                           'saved query on them).'},
+            'queries': {'oneOf': [{'type': 'string', 'enum': ['*']}, {'type': 'array', 'items': {'oneOf': [
+                {'type': 'string'},
+                {'type': 'object', 'required': ['name'],
+                 'properties': {'name': {'type': 'string'}, 'allow_writes': {'type': 'boolean'}}}]}}],
+                        'description': 'Saved queries runnable by name, independent of connections; an object entry '
+                                       'can allow writes through that one query.'},
+            'collections': {'type': 'array', 'items': {'type': 'string'},
+                            'description': 'Every query in these collections, including ones filed there later.'},
+            'allow_writes': {'type': 'boolean', 'description': 'Still capped by QUERYAPIGATE_ALLOW_WRITES.'},
+            'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'allowed_tables': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'rate_limit': {'type': 'string', 'nullable': True, 'description': 'e.g. 100/minute.'},
+            'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True,
+                            'description': 'Addresses or CIDR ranges.'},
+        },
+    },
+    'ApiKey': {
+        'allOf': [_ref('Grants'), {
+            'type': 'object',
+            'required': ['name', 'active', 'expires_at', 'expired', 'created_at', 'created_from_role',
+                         'last_used_at', 'example', 'usage'],
+            'properties': {
+                'name': {'type': 'string'}, 'active': {'type': 'boolean'},
+                'expires_at': {'type': 'string', 'nullable': True,
+                               'description': 'Valid through the end of this date.'},
+                'expired': {'type': 'boolean'},
+                'created_at': _NULLABLE_STRING, 'created_from_role': _NULLABLE_STRING,
+                'last_used_at': _NULLABLE_STRING, 'example': {'type': 'boolean'},
+                'usage': {'type': 'object', 'required': ['queries', 'errors', 'rows'],
+                          'properties': {'queries': {'type': 'integer'}, 'errors': {'type': 'integer'},
+                                         'rows': {'type': 'integer'}}},
+            }}],
+    },
+    'ApiKeyCreated': {
+        'allOf': [_ref('ApiKey'), {
+            'type': 'object', 'required': ['secret'],
+            'properties': {'secret': {'type': 'string', 'description': 'Shown this once - it cannot be read again.'}},
+        }],
+    },
+    'ApiKeyInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'},
+            'role': {'type': 'string', 'description': "Create only: copy this role's grants (no grant fields then)."},
+            'active': {'type': 'boolean', 'description': 'Update only; false revokes the key at once.'},
+            'expires_at': {'type': 'string', 'nullable': True},
+            'connections': {}, 'queries': {}, 'collections': {'type': 'array', 'items': {'type': 'string'}},
+            'allow_writes': {'type': 'boolean'},
+            'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'allowed_tables': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'rate_limit': {'type': 'string', 'nullable': True},
+            'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+        },
+    },
+    'ApiKeyList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('ApiKey')}},
+    },
+    'Role': {
+        'allOf': [_ref('Grants'), {
+            'type': 'object', 'required': ['name', 'created_at', 'example', 'keys_created'],
+            'properties': {'name': {'type': 'string'}, 'created_at': _NULLABLE_STRING, 'example': {'type': 'boolean'},
+                           'keys_created': {'type': 'integer', 'description': 'Keys created from this role.'}},
+        }],
+    },
+    'RoleInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'},
+            'connections': {}, 'queries': {}, 'collections': {'type': 'array', 'items': {'type': 'string'}},
+            'allow_writes': {'type': 'boolean'},
+            'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'allowed_tables': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'rate_limit': {'type': 'string', 'nullable': True},
+            'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+        },
+    },
+    'RoleList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Role')}},
+    },
     'Schema': {
         'type': 'object', 'required': ['tables', 'truncated'],
         'properties': {
@@ -334,6 +424,32 @@ PATHS = {
             {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}},
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/api-keys': {
+        'get': _op('List API keys (grants, status, expiry, last use, usage - never secrets)',
+                   {'200': _ok(_ref('ApiKeyList'))}),
+        'post': _op('Create an API key; the response carries its secret, shown this once',
+                    {'201': _ok(_ref('ApiKeyCreated'), etag=True), **_CONFLICT}, body=_ref('ApiKeyInput')),
+    },
+    '/api/v1/api-keys/{name}': {
+        'get': _op('Get an API key', {'200': _ok(_ref('ApiKey'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change some of its grants, its expiry, or active (false revokes it)',
+                     {'200': _ok(_ref('ApiKey'), etag=True), **_PRECONDITION}, parameters=[_NAME, _IF_MATCH],
+                     body=_ref('ApiKeyInput')),
+        'delete': _op('Revoke and remove it', {'204': {'description': 'Revoked'}, **_PRECONDITION},
+                      parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/roles': {
+        'get': _op('List roles (grant templates)', {'200': _ok(_ref('RoleList'))}),
+        'post': _op('Create a role', {'201': _ok(_ref('Role'), etag=True), **_CONFLICT}, body=_ref('RoleInput')),
+    },
+    '/api/v1/roles/{name}': {
+        'get': _op('Get a role', {'200': _ok(_ref('Role'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change some of its grants (keys created from it are not touched)',
+                     {'200': _ok(_ref('Role'), etag=True), **_PRECONDITION}, parameters=[_NAME, _IF_MATCH],
+                     body=_ref('RoleInput')),
+        'delete': _op('Delete the template (keys created from it keep their grants)',
+                      {'204': {'description': 'Deleted'}, **_PRECONDITION}, parameters=[_NAME, _IF_MATCH]),
     },
     '/api/v1/connections': {
         'get': _op('List connections (identity, status and live usage - never credentials)',

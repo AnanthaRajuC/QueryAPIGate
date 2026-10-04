@@ -89,6 +89,14 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   All / Active / Inactive / Deleted segments, the filter, the table with live usage, and the New / Edit drawer
   (password reveal, Load databases…, Test connection). Delete asks for a reason and the name typed back. Query opens
   the API Designer on that connection.
+- **Management API: `/api/v1/api-keys` and `/api/v1/roles`**: list, create, get, change and delete. A new key's
+  secret is in the create response only (sent with `Cache-Control: no-store`), never in a read or the audit log. A
+  key can be created from a role, and a role reports how many keys were created from it. Edits honour `If-Match`;
+  `null` clears an optional field, and `active: false` revokes a key.
+- **The Console's API keys and Roles screens** (`/console/api-keys`, `/console/roles`), at visual parity with the
+  classic ones: both tables, the key drawer (Create from a role, the grant fields, Expires, Active), the one-time
+  secret reveal, the role drawer and "New key from this". The API Repository's API Keys and Roles tabs now edit in
+  the Console.
 
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
@@ -97,6 +105,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   header with a `Link` to their successor; `/openapi.json` marks them deprecated. `/ui` still uses them.
 - The connection management routes replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`,
   `POST /connections/test`, `POST /connections/databases` and `DELETE /connections/{name}`, in the same way.
+- The API key and role routes replaced by `/api/v1/api-keys` and `/api/v1/roles`: `GET`/`POST /api_keys`,
+  `PATCH`/`DELETE /api_keys/{name}`, `GET`/`POST /roles` and `PATCH`/`DELETE /roles/{name}`, in the same way.
 
 ### Fixed
 - **A query's own `LIMIT` is respected** (BACKLOG #74). Paging used to replace a trailing `LIMIT`/`OFFSET` with the

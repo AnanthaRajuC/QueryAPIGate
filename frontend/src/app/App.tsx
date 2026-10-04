@@ -17,6 +17,12 @@ const ConnectionsPage = lazy(() =>
   import('@/features/connections/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
 );
 
+const ApiKeysPage = lazy(() =>
+  import('@/features/access/ApiKeysPage').then((m) => ({ default: m.ApiKeysPage })),
+);
+
+const RolesPage = lazy(() => import('@/features/access/RolesPage').then((m) => ({ default: m.RolesPage })));
+
 export function App() {
   return (
     <Routes>
@@ -45,6 +51,22 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <ConnectionsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="api-keys"
+          element={
+            <Suspense fallback={<Loading />}>
+              <ApiKeysPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="roles"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RolesPage />
             </Suspense>
           }
         />

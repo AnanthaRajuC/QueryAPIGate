@@ -75,7 +75,11 @@ export function AccessPill({ entry, role }: { entry: Reacher; role?: boolean }) 
   );
 }
 
-export function AccessCell({ entry }: { entry: RoleEntry }) {
+export function AccessCell({
+  entry,
+}: {
+  entry: Partial<Pick<RoleEntry, 'allow_writes' | 'allowed_write_ops' | 'allowed_tables'>>;
+}) {
   const allowWrites = Boolean(entry.allow_writes);
   const ops = entry.allowed_write_ops ?? [];
   const tables = entry.allowed_tables ?? [];

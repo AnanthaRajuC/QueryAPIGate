@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from 'react-router';
 import { onRateLimit, type RateLimit } from '@/api/client';
 
 import { useAllQueries, useApiKeys, useConnections, useRoles } from './data';
-import { openClassic } from './navigation';
 import { activeItem } from './Sidebar';
 
 // ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K) and the rate-limit chip.
@@ -122,7 +121,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const entries = useMemo<Entry[]>(() => {
     const out: Entry[] = [];
     (connections.data ?? []).forEach((c) =>
-      out.push({ group: 'Connections', name: c.name, desc: c.db, go: () => openClassic('connections') }),
+      out.push({ group: 'Connections', name: c.name, desc: c.db, go: () => navigate('/connections') }),
     );
     (queries.data ?? []).forEach((s) =>
       out.push({
@@ -140,12 +139,12 @@ function Palette({ onClose }: { onClose: () => void }) {
           group: 'API keys',
           name: n,
           desc: String(keys.data?.[n]?.rate_limit ?? ''),
-          go: () => openClassic('apikeys'),
+          go: () => navigate('/api-keys'),
         }),
       );
     Object.keys(roles.data ?? {})
       .sort()
-      .forEach((n) => out.push({ group: 'Roles', name: n, desc: '', go: () => openClassic('roles') }));
+      .forEach((n) => out.push({ group: 'Roles', name: n, desc: '', go: () => navigate('/roles') }));
     return out;
   }, [connections.data, queries.data, keys.data, roles.data, navigate]);
 

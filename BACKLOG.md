@@ -2140,8 +2140,7 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: in progress - the queries resource shipped, plus the connections read side; the other resources are
-open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: in progress - queries, connections, API keys and roles shipped; the other resources are open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2161,7 +2160,13 @@ Shipped:
 unlike the legacy wholesale replace), deleted list, test, databases; service in `queryapigate/services/connections.py`,
 which the legacy route's audit diff now shares.
 
-Remaining resources: API keys, roles, collections, audit, settings and MCP. Each arrives with its Console screen.
+**`/api/v1/api-keys` and `/api/v1/roles`, complete (2026-10-04):** list, create, get, change (`null` clears an optional
+field; `active: false` revokes) and delete, with `If-Match`; the key's secret is in the create response only
+(`Cache-Control: no-store`) and never in a read or the audit log; a key from a `role` copies its grants once, and a role
+reports `keys_created`. Service in `queryapigate/services/access.py`; the grant model and its validation stay in
+`apikeys.py`.
+
+Remaining resources: collections, audit, settings and MCP. Each arrives with its Console screen.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2251,7 +2256,15 @@ Query → API Designer. Checked by side-by-side screenshots of the list (light a
 and an end-to-end run (create, test, edit to inactive, the `example` flag surviving an edit, Query, delete → Deleted);
 Vitest.
 
-Next slice: API keys and Roles.
+**API keys and Roles slice shipped, at visual parity (2026-10-04):** both tables (scope, access, IPs, expiry with
+"expires soon", usage; keys created per role), the key drawer (Create from a role, the grant fields, Expires, Active),
+the one-time secret reveal, the role drawer, "New key from this", and the classic confirm-then-revoke/delete. The API
+Repository's API Keys and Roles tabs now edit in the Console too, and the shell's counts and search read
+`/api/v1`. Checked by side-by-side screenshots (both tables light and dark; Edit key, New key and Edit role drawers),
+an end-to-end run (create with grants → reveal → the secret runs SQL; edit; key from a role; role create/delete; revoke
+→ the secret gets 401); Vitest.
+
+Next slice: History, Metrics and Audit.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

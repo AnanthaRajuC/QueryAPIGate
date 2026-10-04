@@ -51,8 +51,8 @@ describe('Console shell - the classic frame', () => {
   it('opens screens it has not rebuilt in the classic UI, on the matching tab', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');
-    await userEvent.click(screen.getByRole('tab', { name: /API keys/ }));
-    expect(sessionStorage.getItem('queryapigate-ui-tab')).toBe('apikeys');
+    await userEvent.click(screen.getByRole('tab', { name: /Audit log/ }));
+    expect(sessionStorage.getItem('queryapigate-ui-tab')).toBe('auditlog');
   });
 
   it('applies an API key to this tab, in the same storage /ui and /docs use', async () => {

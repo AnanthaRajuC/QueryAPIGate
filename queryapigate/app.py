@@ -66,6 +66,10 @@ DEPRECATED_ENDPOINTS = {
                      'api.move_query', 'api.set_query_cache_ttl', 'api.query_flow'), '/api/v1/queries'),
     **dict.fromkeys(('api.get_connections', 'api.update_connections', 'api.list_databases_route',
                      'api.test_connection_route', 'api.delete_connection'), '/api/v1/connections'),
+    **dict.fromkeys(('api.get_api_keys', 'api.create_api_key', 'api.update_api_key', 'api.delete_api_key'),
+                    '/api/v1/api-keys'),
+    **dict.fromkeys(('api.get_roles', 'api.create_role_endpoint', 'api.update_role_endpoint',
+                     'api.delete_role_endpoint'), '/api/v1/roles'),
 }  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
