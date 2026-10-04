@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { onRateLimit, type RateLimit } from '@/api/client';
 
+import { useAlertFeed } from './alerts';
 import { useAllQueries, useApiKeys, useConnections, useRoles } from './data';
 import { setPref, useIsDark, usePrefValues } from './prefs';
 import { activeItem } from './Sidebar';
@@ -107,11 +108,40 @@ export function Header() {
         >
           {rate ? `rate ${rate.remaining}/${rate.limit}` : ''}
         </span>
-        <FontSizeSwitch />
-        <ThemeToggle />
+        <div className="top-tools">
+          <AlertsBell />
+          <FontSizeSwitch />
+          <ThemeToggle />
+        </div>
       </header>
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </>
+  );
+}
+
+/** The alerts bell: how many critical and warning alerts need attention, red while any is critical. Shown only to
+ *  callers who can read alerts (the admin key). */
+function AlertsBell() {
+  const navigate = useNavigate();
+  const { query, urgent, critical } = useAlertFeed();
+  if (!query.isSuccess) return null;
+  const label = urgent ? `Alerts: ${urgent} need${urgent === 1 ? 's' : ''} attention` : 'Alerts: all clear';
+  return (
+    <button
+      type="button"
+      id="alerts-bell"
+      title={label}
+      aria-label={label}
+      onClick={() => navigate('/alerts')}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+      </svg>
+      {urgent > 0 && (
+        <span className={'badge' + (critical ? ' critical' : '')}>{urgent > 99 ? '99+' : urgent}</span>
+      )}
+    </button>
   );
 }
 

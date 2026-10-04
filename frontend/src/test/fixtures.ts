@@ -70,6 +70,7 @@ export const FILMS: Query = {
 export function baseRoutes(): Record<string, (call: { search: URLSearchParams }) => unknown> {
   return {
     'GET /health': () => ({ status: 'ok', version: '9.9.9', time_zone: 'UTC', utc_offset: '+00:00' }),
+    'GET /api/v1/alerts': () => ({ items: [], checked_at: '2026-10-04 12:00:00' }),
     'GET /api/v1/connections': () => ({
       items: [
         { name: 'lite', db: 'sqlite', active: true, host: null, port: null, database: '/data/films.db' },

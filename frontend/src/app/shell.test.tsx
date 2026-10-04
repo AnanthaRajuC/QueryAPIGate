@@ -31,6 +31,7 @@ describe('Console shell - the classic frame', () => {
       'API keys',
       'Roles',
       'Access map',
+      'Alerts',
       'Metrics',
       'Audit log',
     ]);

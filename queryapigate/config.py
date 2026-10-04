@@ -22,6 +22,8 @@ DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
 DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
 DEFAULT_POOL_IDLE_TIMEOUT = 300.0  # seconds
 DEFAULT_SLOW_QUERY_THRESHOLD = 1.0  # seconds
+DEFAULT_ALERT_ERROR_RATE = 20  # percent of a saved query's recent runs failing before it is an alert (alerts.py)
+DEFAULT_ALERT_KEY_UNUSED_DAYS = 90  # days an API key may go unused before it is an alert
 DEFAULT_MCP_PORT = 5001  # distinct from QUERYAPIGATE_PORT so `queryapigate mcp` and `serve` can run together
 DEFAULT_MCP_MAX_ROWS = 200  # rows returned by an MCP tools/call - an LLM's context can't hold a huge result
 
@@ -310,6 +312,12 @@ def check_settings():
         raw = os.environ.get(name, '').strip()
         if raw and (not raw.isdigit() or int(raw) < 1):
             raise ValueError(f'{name} must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_ALERT_ERROR_RATE', '').strip()
+    if raw and (not raw.isdigit() or int(raw) > 100):
+        raise ValueError('QUERYAPIGATE_ALERT_ERROR_RATE must be a percentage from 0 to 100 (0 turns the check off)')
+    raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
+    if raw and not raw.isdigit():
+        raise ValueError('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS must be a whole number of days (0 turns the check off)')
     for name in ('QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS'):
         raw = os.environ.get(name, '').strip()
         if raw and (not raw.isdigit() or int(raw) < 1):
@@ -599,6 +607,20 @@ def mcp_max_rows():
     return int(raw) if raw else DEFAULT_MCP_MAX_ROWS
 
 
+def alert_error_rate():
+    """QUERYAPIGATE_ALERT_ERROR_RATE: the percentage of a saved query's recent runs that may fail before
+    GET /api/v1/alerts calls it out (alerts.py). Default 20; 0 turns the check off. Validated at startup."""
+    raw = os.environ.get('QUERYAPIGATE_ALERT_ERROR_RATE', '').strip()
+    return int(raw) if raw else DEFAULT_ALERT_ERROR_RATE
+
+
+def alert_key_unused_days():
+    """QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS: days an active API key may go unused before it is an alert - an unused
+    credential is risk without benefit. Default 90; 0 turns the check off. Validated at startup."""
+    raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
+    return int(raw) if raw else DEFAULT_ALERT_KEY_UNUSED_DAYS
+
+
 def slow_query_threshold():
     """Seconds a query may take before it is logged as a warning (QUERYAPIGATE_SLOW_QUERY_THRESHOLD, default 1);
     None when 0 disables it."""
@@ -745,6 +767,15 @@ def describe_settings():
                 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', str(events_max_connections())),
             row('Events poll interval', 'Seconds between checks for new runs (on PostgreSQL a notification '
                 'usually arrives first).', 'QUERYAPIGATE_EVENTS_POLL_INTERVAL', _seconds(events_poll_interval()))]},
+        {'id': 'alerts', 'title': 'Alerts',
+         'description': 'When GET /api/v1/alerts (the Console\'s Alerts screen) calls something out. A query is '
+             'slow when its typical run is over the slow-query threshold (Query execution).', 'rows': [
+            row('Query error rate', 'Share of a saved query\'s recent runs that may fail before it is an alert. '
+                '0 turns the check off.', 'QUERYAPIGATE_ALERT_ERROR_RATE',
+                f'{alert_error_rate()}%' if alert_error_rate() else 'off'),
+            row('Unused key', 'Days an active API key may go unused before it is an alert. 0 turns the check off.',
+                'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS',
+                f'{alert_key_unused_days()} days' if alert_key_unused_days() else 'off')]},
         {'id': 'mcp', 'title': 'MCP server',
          'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process, not started or '
              'checked for reachability by this one.', 'rows': [

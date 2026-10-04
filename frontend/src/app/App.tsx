@@ -45,6 +45,10 @@ const AccessMapPage = lazy(() =>
   import('@/features/accessmap/AccessMapPage').then((m) => ({ default: m.AccessMapPage })),
 );
 
+const AlertsPage = lazy(() =>
+  import('@/features/observability/AlertsPage').then((m) => ({ default: m.AlertsPage })),
+);
+
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
@@ -96,6 +100,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RolesPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="alerts"
+          element={
+            <Suspense fallback={<Loading />}>
+              <AlertsPage />
             </Suspense>
           }
         />

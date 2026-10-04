@@ -153,6 +153,14 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **Help in the Console:** How-to guides have a tab of their own, next to Docs; both show an "On this page" list of the
   open page's sections, marking the one being read, and a doc's own links to its sections now work. Opening Help
   collapses the sidebar for room (your saved sidebar choice is kept for every other screen).
+- **Alerts: what needs attention now.** `GET /api/v1/alerts` lists live conditions, most severe first: a server with
+  no API key, failing connections, keys expired, expiring within 7 days or long unused, saved queries failing often,
+  timing out or typically slow, keys and clients that keep hitting their rate limit, and run history that can't be
+  written. Each says what to do and where, and clears by itself once its cause does. The Console has an Alerts
+  screen (Observability), a bell with a count in its header, and Home's System health now shows the same list.
+  Dismissing an alert hides it in that browser until it clears. New settings `QUERYAPIGATE_ALERT_ERROR_RATE` and
+  `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS`; a query is slow by `QUERYAPIGATE_SLOW_QUERY_THRESHOLD`. See
+  [Alerts](documentation/API.md#alerts).
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and

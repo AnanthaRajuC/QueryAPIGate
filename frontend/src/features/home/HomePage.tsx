@@ -8,6 +8,7 @@ import { Loading, useFeedback } from '@/app/feedback';
 import { useMetricsSeries, usePoolPoll } from '@/app/metrics';
 import { StatTile } from '@/components/StatTile';
 import { metricGauge, metricSum } from '@/lib/metrics';
+import { useAlertFeed } from '@/app/alerts';
 import { Time } from '@/components/Time';
 
 // The classic Home screen (ui.py #tab-home, renderHome, renderHomeHealth, renderHomeRequestsPanel): the stat tiles,
@@ -36,9 +37,6 @@ function tone(action: string) {
   if (/^(delete|unload|revoke)/.test(action)) return 'bad';
   return '';
 }
-
-const today = () => new Date().toISOString().slice(0, 10);
-const inAWeek = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 /** What an ad-hoc run shows in place of a query name: the start of its SQL, or that it wasn't kept. */
 function adhocLabel(run: Run) {
@@ -229,57 +227,48 @@ export function HomePage() {
   );
 }
 
-/** System health: expired and soon-expiring keys, and connections with recorded errors - or an all-clear. */
+/** System health: the most pressing alerts (GET /api/v1/alerts, the Alerts screen's feed) - or an all-clear. */
 function Health() {
   const navigate = useNavigate();
-  const keys = Object.values(useApiKeys().data ?? {});
-  const conns = useConnections().data ?? [];
-  const now = today();
-  const soon = inAWeek();
-  const expired = keys.filter((k) => k.expires_at && k.expires_at < now).length;
-  const expiring = keys.filter((k) => k.expires_at && k.expires_at >= now && k.expires_at <= soon).length;
-  const errored = conns.filter((c) => (c.usage?.errors ?? 0) > 0).map((c) => c.name);
-  const issues: { tone: 'danger' | 'warn'; text: string; to: string }[] = [];
-  if (expired)
-    issues.push({
-      tone: 'danger',
-      text: `${expired} API key${expired === 1 ? '' : 's'} expired`,
-      to: '/api-keys',
+  const { query, active, urgent } = useAlertFeed();
+  const shown = active.slice(0, 5);
+  let body: React.ReactNode;
+  if (query.isError) {
+    body = <div className="hint">Alerts need the admin key.</div>;
+  } else if (!query.data) {
+    body = <div className="hint">Checking…</div>;
+  } else if (!shown.length) {
+    body = (
+      <div className="home-activity-row">
+        <span className="tag health-ok">OK</span>
+        <span>No issues detected.</span>
+      </div>
+    );
+  } else {
+    body = shown.map((a) => {
+      const tone = a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warn' : 'ok';
+      return (
+        <div key={a.id} className="home-activity-row">
+          <span className={'tag health-' + tone}>{a.severity === 'critical' ? '!' : '·'}</span>
+          <button type="button" className={'target health-text-' + tone} onClick={() => navigate('/alerts')}>
+            {a.title}
+          </button>
+        </div>
+      );
     });
-  if (expiring)
-    issues.push({
-      tone: 'warn',
-      text: `${expiring} API key${expiring === 1 ? '' : 's'} expiring within 7 days`,
-      to: '/api-keys',
-    });
-  if (errored.length)
-    issues.push({
-      tone: 'danger',
-      text: `${errored.length} connection${errored.length === 1 ? '' : 's'} with recorded errors: ${errored.join(', ')}`,
-      to: '/connections',
-    });
+  }
   return (
     <div className="panel" id="home-health" style={{ marginBottom: 16 }}>
-      <h2>System health</h2>
-      {!issues.length ? (
-        <div className="home-activity-row">
-          <span className="tag health-ok">OK</span>
-          <span>No issues detected.</span>
-        </div>
-      ) : (
-        issues.map((issue) => (
-          <div key={issue.text} className="home-activity-row">
-            <span className={'tag health-' + issue.tone}>{issue.tone === 'danger' ? '!' : '·'}</span>
-            <button
-              type="button"
-              className={'target health-text-' + issue.tone}
-              onClick={() => navigate(issue.to)}
-            >
-              {issue.text}
-            </button>
-          </div>
-        ))
-      )}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <h2>System health</h2>
+        <span className="spacer" style={{ flex: 1 }} />
+        {query.data && (
+          <button type="button" className="btn ghost sm" onClick={() => navigate('/alerts')}>
+            {active.length > shown.length ? `All ${active.length} alerts` : urgent ? 'Open alerts' : 'Alerts'}
+          </button>
+        )}
+      </div>
+      {body}
     </div>
   );
 }

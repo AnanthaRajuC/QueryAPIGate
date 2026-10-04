@@ -30,6 +30,20 @@ const routes = () => ({
   'GET /api/v1/api-keys': () => ({
     items: [apiKey('old', { expires_at: '2000-01-01', expired: true })],
   }),
+  'GET /api/v1/alerts': () => ({
+    items: [
+      {
+        id: 'key_expired:old',
+        severity: 'warning',
+        kind: 'key_expired',
+        title: "API key 'old' has expired",
+        detail: 'It expired on 2000-01-01.',
+        since: '2000-01-01',
+        target: { type: 'key', name: 'old' },
+      },
+    ],
+    checked_at: '2026-10-04 12:00:00',
+  }),
   'GET /api/v1/audit': () => ({
     items: [
       {
@@ -70,7 +84,7 @@ describe('Home', () => {
     expect(document.getElementById('home-stats')).toHaveTextContent('Error rate10.0%');
     expect(document.getElementById('home-pool-active')).toHaveTextContent('2');
     expect(
-      await within(document.getElementById('home-health')!).findByText('1 API key expired'),
+      await within(document.getElementById('home-health')!).findByText("API key 'old' has expired"),
     ).toBeInTheDocument();
     expect(within(document.getElementById('home-activity')!).getByText('create_key')).toHaveClass(
       'tag act ok',

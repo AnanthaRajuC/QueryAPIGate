@@ -6,6 +6,7 @@ import { getApiKey, setApiKey } from '@/auth/apiKey';
 
 import { useAllQueries, useApiKeys, useConnections, useHealth, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
+import { useAlertFeed } from './alerts';
 
 // ui.py <aside class="side">, element for element.
 
@@ -20,12 +21,14 @@ function useCounts() {
   const queries = useAllQueries();
   const keys = useApiKeys();
   const roles = useRoles();
+  const alerts = useAlertFeed();
   const n = (value: number | undefined) => (value ? String(value) : '');
   return {
     connections: n(connections.data?.length),
     queries: n(queries.data?.length),
     apikeys: n(keys.data ? Object.keys(keys.data).length : undefined),
     roles: n(roles.data ? Object.keys(roles.data).length : undefined),
+    alerts: n(alerts.urgent),
   };
 }
 

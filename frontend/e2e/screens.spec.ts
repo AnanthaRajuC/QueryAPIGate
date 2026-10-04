@@ -12,6 +12,7 @@ const SCREENS: [string, string, string][] = [
   ['API keys', 'API keys', 'example-partner'],
   ['Roles', 'Roles', 'example-partner'],
   ['Access map', 'Access map', 'API KEYS'],
+  ['Alerts', 'Alerts', 'What needs attention now'],
   ['Metrics', 'Metrics', 'Requests by status'],
   ['Audit log', 'Audit log', 'load_examples'],
   ['Settings', 'Settings', 'QUERYAPIGATE_HOME'],

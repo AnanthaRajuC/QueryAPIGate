@@ -188,6 +188,28 @@ SCHEMAS = {
             'code': {'type': 'string', 'description': "A failed run's error code (API.md, Errors), from 0.13 on."},
         },
     },
+    'Alert': {
+        'type': 'object', 'required': ['id', 'severity', 'kind', 'title', 'detail', 'since', 'target'],
+        'properties': {
+            'id': {'type': 'string', 'description': 'Stable while the condition holds: kind and subject.'},
+            'severity': {'type': 'string', 'enum': ['critical', 'warning', 'info']},
+            'kind': {'type': 'string', 'enum': [
+                'open_server', 'key_expired', 'key_expiring', 'key_unused', 'connection_failing', 'query_errors',
+                'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed',
+                'history_dropped']},
+            'title': {'type': 'string'}, 'detail': {'type': 'string'},
+            'since': {'type': 'string', 'nullable': True,
+                      'description': 'When the condition began or will begin, where known (server time).'},
+            'target': {'type': 'object', 'nullable': True, 'required': ['type', 'name'], 'properties': {
+                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings']},
+                'name': {'type': 'string'}}},
+        },
+    },
+    'AlertList': {
+        'type': 'object', 'required': ['items', 'checked_at'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Alert')},
+                       'checked_at': {'type': 'string', 'description': 'Server time the checks ran.'}},
+    },
     'HistoryPage': {
         'type': 'object', 'required': ['items', 'next_cursor'],
         'properties': {'items': {'type': 'array', 'items': _ref('HistoryEntry')},
@@ -609,6 +631,10 @@ PATHS = {
             {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 100}},
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/alerts': {
+        'get': _op('What needs attention now - expiring keys, failing connections, slow or failing queries, '
+                   'rate limits being hit - most severe first', {'200': _ok(_ref('AlertList'))}),
     },
     '/api/v1/audit': {
         'get': _op('Administrative changes, newest first', {'200': _ok(_ref('AuditLog'))}, parameters=[

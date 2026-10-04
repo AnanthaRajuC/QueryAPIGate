@@ -69,11 +69,18 @@
   color: var(--ink);
 }
 
-/* The header's font size switch: Settings' segmented control, sized for the bar, each A a step larger. With the theme
-   switch beside it, it stays in the right corner when the search box is hidden on narrow screens. */
+/* The header's tools at its right end - alerts bell, font size, theme - kept in the corner on narrow screens. */
+.top-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* The header's font size switch: Settings' segmented control, sized for the bar, each A a step larger. */
 #font-size {
   flex: none;
-  margin-left: auto;
 }
 #font-size button {
   width: 24px;
@@ -98,7 +105,8 @@
 }
 
 /* The header's light/dark switch, dressed as the sidebar toggle at the other end of the bar. */
-#theme-toggle {
+#theme-toggle,
+#alerts-bell {
   flex: none;
   width: 30px;
   height: 30px;
@@ -112,16 +120,19 @@
   color: var(--ink-2);
   cursor: pointer;
 }
-#theme-toggle:hover {
+#theme-toggle,
+#alerts-bell:hover {
   background: var(--surface);
   border-color: var(--line);
   color: var(--ink);
 }
-#theme-toggle:focus-visible {
+#theme-toggle,
+#alerts-bell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-#theme-toggle svg {
+#theme-toggle,
+#alerts-bell svg {
   width: 16px;
   height: 16px;
   fill: none;
@@ -235,4 +246,94 @@ body.reduce-motion {
 }
 .docs-browser {
   height: calc(100vh / var(--zoom, 1) - 210px); /* the font size zoom (see aside.side above) */
+}
+
+/* Alerts: one row per alert, grouped by severity; the same tones as Home's System health. */
+.alerts-group {
+  margin-bottom: 16px;
+  padding: 0;
+  overflow: hidden;
+}
+.alerts-group h2 {
+  margin: 0;
+  padding: 14px 18px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.alerts-group h2 .count {
+  font: 11px var(--mono);
+  color: var(--ink-3);
+}
+.alert-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+.alert-what {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.alert-detail {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.alert-since {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.sev {
+  justify-self: start;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font: 600 10.5px/1.4 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.sev.critical {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.sev.warning {
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+.sev.info {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.alerts-dismissed {
+  margin-top: 4px;
+}
+@media (max-width: 700px) {
+  .alert-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The header's alerts bell: a count of critical and warning alerts, red while any is critical. */
+#alerts-bell {
+  position: relative;
+}
+#alerts-bell .badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warn);
+  color: var(--accent-ink);
+  font: 600 10px/16px var(--sans);
+  text-align: center;
+}
+#alerts-bell .badge.critical {
+  background: var(--danger);
+  color: #fff;
 }

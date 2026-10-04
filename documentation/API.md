@@ -1056,6 +1056,48 @@ are held at once; beyond that it answers `503` with `Retry-After`, rather than l
 (`0` turns it off). It only sees runs handled by its own process, and has no event ids or resume. A client that
 disconnects frees its slot at the next keepalive, within 15 seconds.
 
+## Alerts
+
+`GET /api/v1/alerts` (admin only) lists what needs attention now, most severe first. The Console shows the same
+list on its Alerts screen, as a count on the bell in its header, and in Home's System health. Every alert is a live
+condition, worked out afresh on each request - nothing is stored, and an alert disappears by itself once its cause
+does (a key extended, a connection fixed, a query sped up).
+
+~~~json
+{"items": [{"id": "key_expiring:partner", "severity": "warning", "kind": "key_expiring",
+            "title": "API key 'partner' expires in 3 days",
+            "detail": "On 2026-10-07. Calls with it will be refused from then on - extend it, or give its callers a new key first.",
+            "since": "2026-10-07", "target": {"type": "key", "name": "partner"}}],
+ "checked_at": "2026-10-04 12:47:00"}
+~~~
+
+`id` (kind and subject) stays the same while the condition holds, so a client can remember which alerts it has
+already reported or dismissed. `target` names what to fix: a `key`, `query`, `connection`, or a `settings` section.
+
+| Kind | Severity | When |
+|------|----------|------|
+| `open_server` | critical | No API key is configured: anyone can use and change the server |
+| `connection_failing` | critical | A connection's last 3 runs in 24 hours all failed for a connection reason (`connection_failed`, `driver_missing`, ...), not bad SQL |
+| `key_expired` | warning | An active key's `expires_at` has passed |
+| `key_expiring` | warning | An active key expires within 7 days |
+| `query_errors` | warning | At least `QUERYAPIGATE_ALERT_ERROR_RATE`% (default 20) of a saved query's last 50 runs in 7 days failed, with 10 runs or more |
+| `query_timeouts` | warning | A saved query timed out (`query_timeout`) in the last 24 hours |
+| `query_slow` | warning | A saved query's median successful run (of its last 50 in 7 days, 5 or more) is over `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` - typically slow, not slow once |
+| `key_rate_limited` | warning | A key's own `rate_limit` refused it 10 times or more in the last hour |
+| `client_rate_limited` | warning | `QUERYAPIGATE_RATE_LIMIT` refused one client address 10 times or more in the last hour |
+| `history_failed`, `history_dropped` | warning | Runs could not be recorded, or were dropped because the store could not keep up |
+| `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `QUERYAPIGATE_ALERT_ERROR_RATE` | `20` | Percentage of a saved query's recent runs that may fail before `query_errors`. `0` turns it off. |
+| `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` | `90` | Days an active key may go unused before `key_unused`. `0` turns it off. |
+
+The history checks read the newest 5,000 runs, so their cost doesn't grow with how much history is kept. Rate-limit
+and history-write counts are this process's own, since it started (like `/metrics`): with several instances, each
+reports its share. For production paging, alert on `/metrics` from Prometheus too - this list is for the people
+running QueryAPIGate day to day, not a replacement for an on-call alerting system.
+
 ## Run history
 
 Every saved-query run is recorded: when, against which connection, by which key, through which front door

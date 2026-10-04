@@ -13,6 +13,101 @@
       }
     },
     "schemas": {
+      "Alert": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable while the condition holds: kind and subject.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "open_server",
+              "key_expired",
+              "key_expiring",
+              "key_unused",
+              "connection_failing",
+              "query_errors",
+              "query_timeouts",
+              "query_slow",
+              "key_rate_limited",
+              "client_rate_limited",
+              "history_failed",
+              "history_dropped"
+            ],
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "warning",
+              "info"
+            ],
+            "type": "string"
+          },
+          "since": {
+            "description": "When the condition began or will begin, where known (server time).",
+            "nullable": true,
+            "type": "string"
+          },
+          "target": {
+            "nullable": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "key",
+                  "query",
+                  "connection",
+                  "settings"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name"
+            ],
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "kind",
+          "title",
+          "detail",
+          "since",
+          "target"
+        ],
+        "type": "object"
+      },
+      "AlertList": {
+        "properties": {
+          "checked_at": {
+            "description": "Server time the checks ran.",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Alert"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "checked_at"
+        ],
+        "type": "object"
+      },
       "ApiKey": {
         "allOf": [
           {
@@ -1836,6 +1931,66 @@
   },
   "openapi": "3.0.3",
   "paths": {
+    "/api/v1/alerts": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What needs attention now - expiring keys, failing connections, slow or failing queries, rate limits being hit - most severe first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
     "/api/v1/api-keys": {
       "get": {
         "responses": {

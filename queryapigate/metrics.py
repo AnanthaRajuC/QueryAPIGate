@@ -128,6 +128,12 @@ def inc_history(outcome, count=1):
         _history_runs[(outcome,)] = _history_runs.get((outcome,), 0) + count
 
 
+def history_counts():
+    """Runs by history outcome since this process started: recorded, sampled_out, dropped, failed."""
+    with _lock:
+        return {outcome: count for (outcome,), count in _history_runs.items()}
+
+
 def inc_cache_miss():
     global _cache_misses
     with _lock:

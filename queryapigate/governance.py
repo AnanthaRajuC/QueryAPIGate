@@ -11,7 +11,7 @@ as two instances would (BACKLOG #55).
 """
 from dataclasses import dataclass
 
-from . import apikeys, config, jwtauth, metrics
+from . import alerts, apikeys, config, jwtauth, metrics
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,7 @@ def check_client_limit(flask_app, client_ip):
         client_ip or 'unknown', count, period)
     if not allowed:
         metrics.inc_rate_limit_rejection()
+        alerts.note_rate_limited('client', client_ip)
     return Verdict(allowed, count, remaining, retry_after)
 
 
@@ -63,6 +64,7 @@ def check_key_limit(flask_app, permission):
         permission.name, count, period)
     if not allowed:
         metrics.inc_rate_limit_rejection()
+        alerts.note_rate_limited('key', permission.name)
     return Verdict(allowed, count, remaining, retry_after)
 
 
