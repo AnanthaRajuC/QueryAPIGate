@@ -171,6 +171,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **Startup refuses a store it can't safely run on**, with a message naming the problem and what to do, instead of
   starting and failing on first use: a table missing a column this version needs, or a store a newer release has
   already upgraded (which used to have its schema version silently written back down).
+- **The Console's Connections table shows Edit and Delete as icons** (a pencil, and a red trash can), each with a
+  tooltip naming the connection, leaving room for more columns.
 - **`/ui` redirects to `/console`.** The hand-written admin page it served (`queryapigate/ui.py`) is removed; the
   Console has every screen it had, and looks the same.
 

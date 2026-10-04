@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
 import { Empty, Field, FormActions, Loading, useFeedback } from '@/app/feedback';
+import { PencilIcon, TrashIcon } from '@/components/icons';
 
 // The classic Connections screen (ui.py #tab-connections, renderConnections, openConnectionForm,
 // openDeleteConnectionForm): All / Active / Inactive / Deleted, a filter, the table with each connection's live
@@ -230,7 +231,9 @@ export function ConnectionsPage() {
                       </button>
                       <button
                         type="button"
-                        className="btn ghost sm"
+                        className="btn ghost sm icon"
+                        title={`Edit ${c.name}`}
+                        aria-label="Edit"
                         onClick={() =>
                           openDrawer({
                             title: 'Edit connection',
@@ -239,11 +242,13 @@ export function ConnectionsPage() {
                           })
                         }
                       >
-                        Edit
+                        <PencilIcon />
                       </button>
                       <button
                         type="button"
-                        className="btn ghost sm danger"
+                        className="btn ghost sm icon danger"
+                        title={`Delete ${c.name}`}
+                        aria-label="Delete"
                         onClick={() =>
                           openDrawer({
                             title: 'Delete connection',
@@ -252,7 +257,7 @@ export function ConnectionsPage() {
                           })
                         }
                       >
-                        Delete
+                        <TrashIcon />
                       </button>
                     </div>
                   </td>
