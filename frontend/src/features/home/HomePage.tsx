@@ -8,7 +8,7 @@ import { Loading, useFeedback } from '@/app/feedback';
 import { useMetricsSeries, usePoolPoll } from '@/app/metrics';
 import { StatTile } from '@/components/StatTile';
 import { metricGauge, metricSum } from '@/lib/metrics';
-import { useAlertFeed } from '@/app/alerts';
+import { alertTab, useAlertFeed } from '@/app/alerts';
 import { Time } from '@/components/Time';
 
 // The classic Home screen (ui.py #tab-home, renderHome, renderHomeHealth, renderHomeRequestsPanel): the stat tiles,
@@ -250,7 +250,11 @@ function Health() {
       return (
         <div key={a.id} className="home-activity-row">
           <span className={'tag health-' + tone}>{a.severity === 'critical' ? '!' : '·'}</span>
-          <button type="button" className={'target health-text-' + tone} onClick={() => navigate('/alerts')}>
+          <button
+            type="button"
+            className={'target health-text-' + tone}
+            onClick={() => navigate('/alerts/' + alertTab(a.kind))}
+          >
             {a.title}
           </button>
         </div>

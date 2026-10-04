@@ -98,3 +98,70 @@ export function useAlertFeed() {
     critical: active.some((a) => a.severity === 'critical'),
   };
 }
+
+/** The Alerts screen's tabs after All: one per check, each listing the alert kinds it covers and what it watches. */
+export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; about: string }[] = [
+  {
+    id: 'key-expiry',
+    label: 'Key expiry',
+    kinds: ['key_expired', 'key_expiring'],
+    about:
+      'Active API keys that have expired, or expire within 7 days - their callers are refused from then on.',
+  },
+  {
+    id: 'unused-keys',
+    label: 'Unused keys',
+    kinds: ['key_unused'],
+    about:
+      'Active API keys not used for QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS (default 90) - risk without benefit.',
+  },
+  {
+    id: 'connections',
+    label: 'Failing connections',
+    kinds: ['connection_failing'],
+    about:
+      'Connections whose last 3 runs in 24 hours all failed for a connection reason - the database unreachable, a ' +
+      'driver missing, settings incomplete. Bad SQL on a working connection is not counted here.',
+  },
+  {
+    id: 'query-errors',
+    label: 'Query errors',
+    kinds: ['query_errors'],
+    about:
+      'Saved queries where at least QUERYAPIGATE_ALERT_ERROR_RATE% (default 20) of their last 50 runs in 7 days ' +
+      'failed, once they have 10 runs or more.',
+  },
+  {
+    id: 'slow-queries',
+    label: 'Slow queries',
+    kinds: ['query_slow', 'query_timeouts'],
+    about:
+      'Saved queries whose typical (median) run is over QUERYAPIGATE_SLOW_QUERY_THRESHOLD, or that timed out in ' +
+      'the last 24 hours.',
+  },
+  {
+    id: 'rate-limits',
+    label: 'Rate limits',
+    kinds: ['key_rate_limited', 'client_rate_limited'],
+    about:
+      'API keys refused by their own rate_limit, and client addresses refused by QUERYAPIGATE_RATE_LIMIT, 10 times ' +
+      'or more in the last hour (counted by this server since it started).',
+  },
+  {
+    id: 'open-access',
+    label: 'Open access',
+    kinds: ['open_server'],
+    about: 'Whether the server runs with no API key at all, letting anyone query and change it.',
+  },
+  {
+    id: 'run-history',
+    label: 'Run history',
+    kinds: ['history_failed', 'history_dropped'],
+    about: 'Runs that could not be recorded, or were dropped because the store could not keep up.',
+  },
+];
+
+/** The tab an alert kind belongs to. */
+export function alertTab(kind: string): string {
+  return ALERT_TABS.find((t) => (t.kinds as string[]).includes(kind))?.id ?? 'all';
+}

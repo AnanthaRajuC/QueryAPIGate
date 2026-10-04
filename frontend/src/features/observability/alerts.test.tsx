@@ -59,6 +59,51 @@ describe('Alerts', () => {
     expect(await screen.findByRole('heading', { name: 'API Repository' })).toBeInTheDocument();
   });
 
+  it('has a tab per check, each with its count, its alerts and what it watches', async () => {
+    fakeBackend(routes());
+    renderAt('/alerts');
+    const tabs = await screen.findByRole('tablist', { name: 'Checks' });
+    await waitFor(() =>
+      expect([...tabs.querySelectorAll('[role=tab]')].map((t) => t.textContent)).toEqual([
+        'All4',
+        'Key expiry1',
+        'Unused keys1',
+        'Failing connections1',
+        'Query errors0',
+        'Slow queries1',
+        'Rate limits0',
+        'Open access0',
+        'Run history0',
+      ]),
+    );
+    expect(
+      within(tabs)
+        .getByRole('tab', { name: /Failing connections/ })
+        .querySelector('.n'),
+    ).toHaveClass('critical');
+    await userEvent.click(within(tabs).getByRole('tab', { name: /Slow queries/ }));
+    expect(within(tabs).getByRole('tab', { name: /Slow queries/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText("Query 'films' is slow")).toBeInTheDocument();
+    expect(screen.queryByText("Connection 'pg' is failing")).toBeNull();
+    expect(screen.getByText(/typical \(median\) run/)).toBeInTheDocument();
+    await userEvent.click(within(tabs).getByRole('tab', { name: /Rate limits/ }));
+    expect(screen.getByText('Nothing to report from this check right now.')).toBeInTheDocument();
+    expect(screen.getByText(/refused by their own rate_limit/)).toBeInTheDocument();
+  });
+
+  it("opens a check's tab from its address, as Home links to it", async () => {
+    fakeBackend(routes());
+    renderAt('/');
+    await waitFor(() => expect(document.getElementById('home-health')).not.toBeNull());
+    await userEvent.click(
+      await within(document.getElementById('home-health')!).findByText("API key 'partner' expires in 3 days"),
+    );
+    const checks = await screen.findByRole('tablist', { name: 'Checks' });
+    const selected = within(checks).getByRole('tab', { selected: true });
+    expect(selected).toHaveTextContent('Key expiry');
+    expect(screen.queryByText("Query 'films' is slow")).toBeNull();
+  });
+
   it('counts critical and warning alerts on the bell and in the sidebar, red while any is critical', async () => {
     fakeBackend(routes());
     renderAt('/');

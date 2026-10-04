@@ -104,7 +104,7 @@ export function App() {
           }
         />
         <Route
-          path="alerts"
+          path="alerts/:tab?"
           element={
             <Suspense fallback={<Loading />}>
               <AlertsPage />

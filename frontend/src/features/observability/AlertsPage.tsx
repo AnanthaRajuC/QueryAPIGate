@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
-import { dismissAlert, restoreAlert, useAlertFeed, type Alert } from '@/app/alerts';
+import { ALERT_TABS, dismissAlert, restoreAlert, useAlertFeed, type Alert } from '@/app/alerts';
 import { Loading } from '@/app/feedback';
 import { Time } from '@/components/Time';
 import { rememberSection } from '@/features/settings/state';
 
 // What needs attention now (GET /api/v1/alerts): expiring keys, failing connections, failing or slow queries, rate
 // limits being hit, an open server. Live conditions, checked every minute - each clears by itself once its cause
-// does. Dismissing hides one in this browser until it clears (see app/alerts.ts).
+// does. Dismissing hides one in this browser until it clears (see app/alerts.ts). All, then a tab per check, each at
+// its own address (/alerts/slow-queries) so Home and the bell can open the right one.
 
 const SEVERITIES: { id: Alert['severity']; label: string }[] = [
   { id: 'critical', label: 'Critical' },
@@ -76,9 +77,37 @@ function AlertRow({ alert, dismissed }: { alert: Alert; dismissed?: boolean }) {
   );
 }
 
+function Groups({ alerts }: { alerts: Alert[] }) {
+  return (
+    <>
+      {SEVERITIES.map(({ id, label }) => {
+        const items = alerts.filter((a) => a.severity === id);
+        if (!items.length) return null;
+        return (
+          <div key={id} className="panel alerts-group" id={'alerts-' + id}>
+            <h2>
+              {label} <span className="count">{items.length}</span>
+            </h2>
+            {items.map((a) => (
+              <AlertRow key={a.id} alert={a} />
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function AlertsPage() {
-  const { query, active, dismissed } = useAlertFeed();
+  const navigate = useNavigate();
+  const params = useParams();
+  const tab = ALERT_TABS.find((t) => t.id === params.tab);
+  const { query, active: everything, dismissed: allDismissed } = useAlertFeed();
   const [showDismissed, setShowDismissed] = useState(false);
+  const inTab = (a: Alert) => !tab || (tab.kinds as string[]).includes(a.kind);
+  const active = everything.filter(inTab);
+  const dismissed = allDismissed.filter(inTab);
+  const of = (kinds?: string[]) => everything.filter((a) => !kinds || kinds.includes(a.kind));
 
   let body: React.ReactNode;
   if (query.isPending) {
@@ -98,28 +127,20 @@ export function AlertsPage() {
   } else {
     body = (
       <>
+        {tab && <p className="alerts-about">{tab.about}</p>}
         {!active.length ? (
           <div className="panel" id="alerts-clear">
             <div className="empty">
               <strong>All clear</strong>
-              <span>Nothing needs your attention right now.</span>
+              <span>
+                {tab
+                  ? `Nothing to report from this check right now.`
+                  : 'Nothing needs your attention right now.'}
+              </span>
             </div>
           </div>
         ) : (
-          SEVERITIES.map(({ id, label }) => {
-            const items = active.filter((a) => a.severity === id);
-            if (!items.length) return null;
-            return (
-              <div key={id} className="panel alerts-group" id={'alerts-' + id}>
-                <h2>
-                  {label} <span className="count">{items.length}</span>
-                </h2>
-                {items.map((a) => (
-                  <AlertRow key={a.id} alert={a} />
-                ))}
-              </div>
-            );
-          })
+          <Groups alerts={active} />
         )}
         {dismissed.length > 0 && (
           <div className="alerts-dismissed">
@@ -138,6 +159,30 @@ export function AlertsPage() {
       </>
     );
   }
+
+  const tabButton = (id: string, label: string, alerts: Alert[]) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={(tab?.id ?? 'all') === id}
+      className={'minitab' + ((tab?.id ?? 'all') === id ? ' active' : '')}
+      onClick={() => navigate(id === 'all' ? '/alerts' : '/alerts/' + id)}
+    >
+      {label}
+      {query.data ? (
+        <span
+          className={
+            'n' +
+            (alerts.length ? ' on' : '') +
+            (alerts.some((a) => a.severity === 'critical') ? ' critical' : '')
+          }
+        >
+          {alerts.length}
+        </span>
+      ) : null}
+    </button>
+  );
 
   return (
     <>
@@ -158,6 +203,10 @@ export function AlertsPage() {
         <button id="refresh-alerts" type="button" className="btn" onClick={() => void query.refetch()}>
           Check now
         </button>
+      </div>
+      <div className="minitabs alerts-tabs" role="tablist" aria-label="Checks">
+        {tabButton('all', 'All', of())}
+        {ALERT_TABS.map((t) => tabButton(t.id, t.label, of(t.kinds)))}
       </div>
       {body}
     </>

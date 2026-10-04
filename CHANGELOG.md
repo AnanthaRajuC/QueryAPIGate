@@ -157,7 +157,7 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   no API key, failing connections, keys expired, expiring within 7 days or long unused, saved queries failing often,
   timing out or typically slow, keys and clients that keep hitting their rate limit, and run history that can't be
   written. Each says what to do and where, and clears by itself once its cause does. The Console has an Alerts
-  screen (Observability), a bell with a count in its header, and Home's System health now shows the same list.
+  screen (Observability) with All and a tab per check (`/alerts/slow-queries`, ...), each saying what it watches, a bell with a count in its header, and Home's System health now shows the same list.
   Dismissing an alert hides it in that browser until it clears. New settings `QUERYAPIGATE_ALERT_ERROR_RATE` and
   `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS`; a query is slow by `QUERYAPIGATE_SLOW_QUERY_THRESHOLD`. See
   [Alerts](documentation/API.md#alerts).

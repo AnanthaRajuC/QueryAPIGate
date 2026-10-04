@@ -337,3 +337,33 @@ body.reduce-motion {
   background: var(--danger);
   color: #fff;
 }
+
+/* Alerts' tabs: All, then one per check, each with its count - highlighted while it has something to report. */
+.alerts-tabs {
+  flex-wrap: wrap;
+  padding: 0 0 12px;
+}
+.alerts-tabs .minitab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.alerts-tabs .n {
+  font: 10.5px var(--mono);
+  color: var(--ink-3);
+}
+.alerts-tabs .n.on {
+  padding: 0 5px;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+.alerts-tabs .n.critical {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.alerts-about {
+  margin: 0 0 12px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
