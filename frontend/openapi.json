@@ -6731,6 +6731,15 @@
                       ],
                       "type": "string"
                     },
+                    "time_zone": {
+                      "description": "IANA name of the zone the server's timestamps are in, where it can tell (e.g. Asia/Kolkata).",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "utc_offset": {
+                      "description": "That zone's current UTC offset, e.g. +05:30.",
+                      "type": "string"
+                    },
                     "version": {
                       "description": "Server version.",
                       "type": "string"

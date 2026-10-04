@@ -19,8 +19,13 @@ import {
 import { tags } from '@lezer/highlight';
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
+import { readPrefs, usePrefValues } from '@/app/prefs';
+
 // CodeMirror 6 dressed as the classic editor (.editor.boxed, console.css): the classic syntax colours, gutter and
 // focus ring, plus completion that knows the connection's dialect, tables and columns.
+
+const gutter = (pref: string) => (pref === 'Off' ? [] : lineNumbers());
+const wrap = (pref: string) => (pref === 'On' ? EditorView.lineWrapping : []);
 
 const DIALECTS: Record<string, SQLDialect> = {
   postgres: PostgreSQL,
@@ -84,6 +89,10 @@ export function SqlEditor({
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [languageSlot] = useState(() => new Compartment());
+  // Settings > Editor & results: line numbers and wrapping, changed live
+  const [gutterSlot] = useState(() => new Compartment());
+  const [wrapSlot] = useState(() => new Compartment());
+  const { lineNumbers: showNumbers, lineWrap } = usePrefValues();
   const onChangeRef = useRef(onChange);
   const onRunRef = useRef(onRun);
   const onDoubleClickRef = useRef(onDoubleClick);
@@ -128,7 +137,8 @@ export function SqlEditor({
         doc: value,
         extensions: [
           // basicSetup minus the fold gutter, active-line highlight and search panel the classic editor never had
-          lineNumbers(),
+          gutterSlot.of(gutter(readPrefs().lineNumbers)),
+          wrapSlot.of(wrap(readPrefs().lineWrap)),
           highlightSpecialChars(),
           history(),
           drawSelection(),
@@ -184,6 +194,12 @@ export function SqlEditor({
   useEffect(() => {
     view.current?.dispatch({ effects: languageSlot.reconfigure(language(dialect, schema)) });
   }, [dialect, schema, languageSlot]);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: [gutterSlot.reconfigure(gutter(showNumbers)), wrapSlot.reconfigure(wrap(lineWrap))],
+    });
+  }, [showNumbers, lineWrap, gutterSlot, wrapSlot]);
 
   useEffect(() => {
     const editor = view.current;

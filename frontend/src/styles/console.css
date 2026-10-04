@@ -168,3 +168,24 @@ aside.side {
 #queries-panel {
   max-height: calc(100vh / var(--zoom, 1) - 110px);
 }
+
+/* Settings > Appearance > Reduce motion: On, or System when the operating system asks for less motion. Loading
+   spinners keep turning - they say something is happening, and stopping them would say the opposite. */
+body.reduce-motion *:not(.spin),
+body.reduce-motion *:not(.spin)::before,
+body.reduce-motion *:not(.spin)::after {
+  animation: none !important;
+  transition: none !important;
+}
+body.reduce-motion {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  body,
+  body *:not(.spin),
+  body *:not(.spin)::before,
+  body *:not(.spin)::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

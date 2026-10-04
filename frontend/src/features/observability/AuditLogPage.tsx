@@ -3,6 +3,7 @@ import { useState } from 'react';
 
 import { api, unwrap, type Schemas } from '@/api/client';
 import { Loading, useFeedback } from '@/app/feedback';
+import { Time } from '@/components/Time';
 
 // The classic Audit log screen (ui.py #tab-auditlog, loadAuditLog, renderAuditLog, renderAuditChanges), on
 // /api/v1/audit: newest first, filtered by action and by actor / target / time, exported as JSON.
@@ -121,7 +122,7 @@ export function AuditLogPage() {
             {filtered.map((e, i) => (
               <tr key={i}>
                 <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                  {e.timestamp || ''}
+                  <Time value={e.timestamp} fallback="" />
                 </td>
                 <td className="mono">{e.actor || '-'}</td>
                 <td>

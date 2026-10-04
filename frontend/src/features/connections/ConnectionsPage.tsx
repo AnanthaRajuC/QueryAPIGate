@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router';
 import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
 import { Empty, Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
+import { Time } from '@/components/Time';
 
 // The classic Connections screen (ui.py #tab-connections, renderConnections, openConnectionForm,
 // openDeleteConnectionForm): All / Active / Inactive / Deleted, a filter, the table with each connection's live
@@ -105,7 +106,7 @@ export function ConnectionsPage() {
                   </td>
                   <td className="mono">{e.database || ''}</td>
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                    {e.deleted_at || '—'}
+                    <Time value={e.deleted_at} />
                   </td>
                   <td className="mono">{e.deleted_by || '—'}</td>
                   <td>{e.reason || '—'}</td>
@@ -213,10 +214,10 @@ export function ConnectionsPage() {
                     </td>
                   )}
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                    {c.created_at || '—'}
+                    <Time value={c.created_at} />
                   </td>
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                    {c.updated_at || '—'}
+                    <Time value={c.updated_at} />
                   </td>
                   <td>
                     <div className="actions">

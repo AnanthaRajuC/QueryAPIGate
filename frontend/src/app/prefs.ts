@@ -1,17 +1,38 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-// The appearance preferences (Settings > Appearance: theme, font size, density and the default result format), stored per browser
+// The preferences of Settings > Appearance and Settings > Editor & results, stored per browser
 // - under the classic UI's key, so preferences set before the Console replaced it carry over.
 const PREFS_KEY = 'queryapigate-ui-prefs';
 
 export interface Prefs {
   theme: string;
   fontSize: string;
+  timeZone: string;
+  timeFormat: string;
+  motion: string;
+  pageSize: string;
+  nullDisplay: string;
+  numberFormat: string;
+  lineWrap: string;
+  lineNumbers: string;
   density: string;
   format: string;
 }
 
-const DEFAULTS: Prefs = { theme: 'System', fontSize: 'Medium', density: 'Comfortable', format: 'json' };
+const DEFAULTS: Prefs = {
+  theme: 'System',
+  fontSize: 'Medium',
+  timeZone: 'Local',
+  timeFormat: 'Absolute',
+  motion: 'System',
+  density: 'Comfortable',
+  format: 'json',
+  pageSize: '10',
+  nullDisplay: 'NULL',
+  numberFormat: 'Plain',
+  lineWrap: 'Off',
+  lineNumbers: 'On',
+};
 
 // Font size scales the whole page, like the browser's own zoom: the stylesheet sizes text in px (as the classic UI's
 // did), so scaling everything keeps text, spacing and icons in proportion instead of crowding larger text.
@@ -73,7 +94,12 @@ export function pageZoom(): number {
   return parseFloat(document.documentElement.style.zoom) || 1;
 }
 
-/** Applies theme, font size and density to the page, now and whenever they change. */
+/** Rows per page to start a query with (Settings > Editor & results). */
+export function preferredPageSize(): number {
+  return Number(readPrefs().pageSize) || 10;
+}
+
+/** Applies theme, font size, density and motion to the page, now and whenever they change. */
 export function usePrefs() {
   const prefs = usePrefValues();
   useEffect(() => {
@@ -83,7 +109,8 @@ export function usePrefs() {
     document.documentElement.style.zoom = zoom;
     document.documentElement.style.setProperty('--zoom', zoom); // for the stylesheet's viewport sizes (console.css)
     document.body.classList.toggle('compact', prefs.density === 'Compact');
-  }, [prefs.theme, prefs.fontSize, prefs.density]);
+    document.body.classList.toggle('reduce-motion', prefs.motion === 'On'); // System: console.css's media query
+  }, [prefs.theme, prefs.fontSize, prefs.density, prefs.motion]);
 }
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';

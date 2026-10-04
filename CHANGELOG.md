@@ -141,6 +141,15 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **A font size preference in the Console: Small, Medium (the default) or Large**, in the top right corner beside the
   light/dark switch and under Settings › Appearance (the section was called Interface). It scales the whole page, text and spacing together, and is remembered in this
   browser.
+- **Times in the Console follow the viewer.** Settings › Appearance › Time zone shows every timestamp in this
+  computer's time zone (the default), UTC, or the server's; Time format shows them as a date and time or as "5 min
+  ago". Hovering any time shows it exactly, with its zone. Before, timestamps were the server's local time with no
+  zone, wrong by the difference for anyone elsewhere. `GET /health` now reports the server's zone (`time_zone`,
+  `utc_offset`) so clients can convert too.
+- **Settings › Editor & results** (with Default result format, moved from Appearance): rows per page to start with,
+  NULL shown as `NULL` or blank, thousands separators in result grids, and line wrapping and line numbers in the SQL
+  editor. **Settings › Appearance › Reduce motion** turns off sliding drawers and pulsing indicators, and is on
+  whenever the operating system asks for less motion.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and

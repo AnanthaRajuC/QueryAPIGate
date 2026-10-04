@@ -1,4 +1,4 @@
-import { readPrefs } from '@/app/prefs';
+import { preferredPageSize, readPrefs } from '@/app/prefs';
 
 // The API Designer's working state, kept for the life of the page so leaving the screen and coming back finds the
 // query where it was - as the classic UI, which only hides its tab, always did. Not persisted beyond the page.
@@ -30,7 +30,7 @@ export function loadDesignerState(): DesignerState {
     sql: '',
     params: '',
     page: 1,
-    pageSize: 10,
+    pageSize: preferredPageSize(),
     timeout: '',
   };
   return saved;

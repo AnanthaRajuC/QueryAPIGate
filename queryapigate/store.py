@@ -32,6 +32,42 @@ def now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def server_time_zone(moment=None):
+    """The zone now()'s wall-clock times are in - every timestamp this server stores and returns - so a client can
+    show them in its own: (IANA name or None, current UTC offset like '+05:30'). The name comes from TZ,
+    /etc/localtime or /etc/timezone, and only if it agrees with the offset in effect; without one, a client can only
+    apply the current offset, which is off by an hour for times on the other side of a daylight-saving change."""
+    local = (moment or datetime.now()).astimezone()
+    offset = local.utcoffset()
+    minutes = int(offset.total_seconds() // 60) if offset is not None else 0
+    sign = '-' if minutes < 0 else '+'
+    text = f'{sign}{abs(minutes) // 60:02d}:{abs(minutes) % 60:02d}'
+    return _zone_name(local), text
+
+
+def _zone_name(local):
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:  # pragma: no cover - Python 3.9+ always has it
+        return None
+    candidates = [os.environ.get('TZ', '').lstrip(':')]
+    link = os.path.realpath('/etc/localtime')
+    if '/zoneinfo/' in link:
+        candidates.append(link.split('/zoneinfo/', 1)[1])
+    try:
+        with open('/etc/timezone') as f:
+            candidates.append(f.read().strip())
+    except OSError:
+        pass
+    for name in filter(None, candidates):
+        try:
+            if local.astimezone(ZoneInfo(name)).utcoffset() == local.utcoffset():
+                return name
+        except (ValueError, OSError, KeyError):  # not a zone name this system knows
+            continue
+    return None
+
+
 # --------------------------------------------------------------------------------------
 # Audit log: a durable record of administrative changes (API keys, connections, saved
 # queries) - distinct from execution_history below (query *runs*) and from the ephemeral,

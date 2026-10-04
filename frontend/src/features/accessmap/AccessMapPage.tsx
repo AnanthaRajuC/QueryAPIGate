@@ -16,6 +16,7 @@ import { reachVia } from '@/features/repository/reach';
 
 import { QueryInfo } from './QueryInfo';
 import { amapState, setAmapState, type AmapState } from './state';
+import { Time } from '@/components/Time';
 
 // The classic Access map (ui.py #tab-accessmap, renderAccessMap and its helpers): every saved query against every
 // API key and role - how each reaches it (Q a named query, C a collection, W a whole connection) - with the
@@ -459,9 +460,15 @@ function Matrix({
                 <td>
                   {row.dbType ? <span className="tag">{row.dbType}</span> : <span className="dim">—</span>}
                 </td>
-                <td className="mono dim">{q.created_at || '—'}</td>
-                <td className="mono dim">{q.updated_at || '—'}</td>
-                <td className={q.last_used_at ? 'mono' : 'mono dim'}>{q.last_used_at || 'never'}</td>
+                <td className="mono dim">
+                  <Time value={q.created_at} />
+                </td>
+                <td className="mono dim">
+                  <Time value={q.updated_at} />
+                </td>
+                <td className={q.last_used_at ? 'mono' : 'mono dim'}>
+                  <Time value={q.last_used_at} fallback="never" />
+                </td>
                 <td className="mono">{'v' + q.latest_version}</td>
                 <td className="mono dim">{q.connection_name || '—'}</td>
                 <td className="num" title="Reachable by an actual API key (roles alone reach nothing)">

@@ -13,7 +13,7 @@ from unittest import mock
 
 import duckdb
 
-from queryapigate import config, create_app, db, engine, metrics, pool, runners, schema, sqltools, store
+from queryapigate import config, create_app, db, engine, history, metrics, pool, runners, schema, sqltools, store
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
 from tests import TEST_DATABASE_URL
@@ -39,6 +39,7 @@ class ApiTestCase(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(history.flush)  # runs first: batched runs land before the home is removed, not during
         for name in ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_ALLOW_WRITES', 'QUERYAPIGATE_MAX_PAGE_SIZE'):
             os.environ.pop(name, None)
 
@@ -1711,6 +1712,21 @@ class ConnectionSecretsTests(ApiTestCase):
 
 
 class ServiceEndpointTests(ApiTestCase):
+    @unittest.skipUnless(hasattr(time, 'tzset'), 'needs time.tzset() to change the process time zone')
+    def test_health_says_which_zone_timestamps_are_in(self):
+        def zone(tz):
+            with mock.patch.dict(os.environ, {'TZ': tz}):
+                time.tzset()
+                body = self.client.get('/health').get_json()
+            time.tzset()
+            return body['time_zone'], body['utc_offset']
+
+        self.addCleanup(time.tzset)
+        self.assertEqual(zone('Asia/Kolkata'), ('Asia/Kolkata', '+05:30'))
+        self.assertEqual(zone('Asia/Kathmandu'), ('Asia/Kathmandu', '+05:45'))  # zones without daylight saving,
+        self.assertEqual(zone('America/Lima'), ('America/Lima', '-05:00'))      # so the offsets never change
+        self.assertEqual(zone('UTC'), ('UTC', '+00:00'))
+
     def test_health_docs_and_openapi_are_public(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         self.assertEqual(self.client.get('/health').get_json()['status'], 'ok')

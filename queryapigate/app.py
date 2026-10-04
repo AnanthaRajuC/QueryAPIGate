@@ -884,7 +884,9 @@ def favicon():
 @bp.route('/health', methods=['GET'])
 def health():
     from flask import current_app
-    return jsonify({'status': 'ok', 'version': current_app.config['QUERYAPIGATE_VERSION']})
+    zone, offset = store.server_time_zone()
+    return jsonify({'status': 'ok', 'version': current_app.config['QUERYAPIGATE_VERSION'], 'time_zone': zone,
+                    'utc_offset': offset})
 
 
 @bp.route('/metrics', methods=['GET'])

@@ -4,6 +4,7 @@ import { AccessCell } from '@/features/repository/reach';
 
 import { useAccessDrawers, useRevokeKey } from './forms';
 import { ScopeNode } from './grants';
+import { Time } from '@/components/Time';
 
 // The classic API keys screen (ui.py #tab-apikeys, renderApiKeys), on /api/v1/api-keys.
 
@@ -123,7 +124,7 @@ export function ApiKeysPage() {
                     )}
                   </td>
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                    {k.last_used_at || 'never'}
+                    <Time value={k.last_used_at} fallback="never" />
                   </td>
                   {usage ? (
                     <td

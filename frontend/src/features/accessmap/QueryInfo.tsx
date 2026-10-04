@@ -5,6 +5,7 @@ import { api, unwrap } from '@/api/client';
 import { copyText, Loading, useFeedback } from '@/app/feedback';
 import { CodeBox } from '@/components/CodeBox';
 import { fetchFlow } from '@/features/repository/api';
+import { Time } from '@/components/Time';
 
 // The Access map's query details drawer (ui.py openQueryInfo): everything about one saved query that the matrix
 // leaves out - its meta, the latest version's SQL and every version with its runs.
@@ -55,9 +56,15 @@ export function QueryInfo({ name, dbType }: { name: string; dbType: string | nul
         <MetaItem term="collection">{query.collection || '—'}</MetaItem>
         <MetaItem term="status">{latest.status || '—'}</MetaItem>
         <MetaItem term="author">{latest.author || '—'}</MetaItem>
-        <MetaItem term="created">{created || '—'}</MetaItem>
-        <MetaItem term="last modified">{latest.last_modified_at || latest.created_at || '—'}</MetaItem>
-        <MetaItem term="last used">{lastUsed || 'never'}</MetaItem>
+        <MetaItem term="created">
+          <Time value={created} />
+        </MetaItem>
+        <MetaItem term="last modified">
+          <Time value={latest.last_modified_at || latest.created_at} />
+        </MetaItem>
+        <MetaItem term="last used">
+          <Time value={lastUsed} fallback="never" />
+        </MetaItem>
         {latest.tags.length ? <MetaItem term="tags">{latest.tags.join(', ')}</MetaItem> : null}
       </dl>
       <p className="sub-h" style={{ marginTop: 6 }}>
@@ -93,8 +100,12 @@ export function QueryInfo({ name, dbType }: { name: string; dbType: string | nul
             {[...query.versions].reverse().map((v) => (
               <tr key={v.version}>
                 <td className="mono">{'v' + v.version}</td>
-                <td className="mono dim">{v.created_at || '—'}</td>
-                <td className="mono dim">{v.last_modified_at || '—'}</td>
+                <td className="mono dim">
+                  <Time value={v.created_at} />
+                </td>
+                <td className="mono dim">
+                  <Time value={v.last_modified_at} />
+                </td>
                 <td className="mono" style={{ textAlign: 'right' }}>
                   {String(v.run_count ?? 0)}
                 </td>

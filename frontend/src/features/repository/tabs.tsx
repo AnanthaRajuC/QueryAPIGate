@@ -1,11 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 
 import { timedFetch } from '@/api/client';
 import type { ApiKeyEntry, RoleEntry } from '@/app/data';
 import { useConnections } from '@/app/data';
 import { copyText, Empty, Field, Loading, useFeedback } from '@/app/feedback';
-import { readPrefs } from '@/app/prefs';
+import { preferredPageSize, readPrefs } from '@/app/prefs';
 import { CodeBox } from '@/components/CodeBox';
 import { readResult, Results, type ResultData } from '@/components/Results';
 import { formatSql, PARSEABLE_DIALECTS, shQuote } from '@/lib/sql';
@@ -22,6 +22,7 @@ import { useAccessDrawers } from '@/features/access/forms';
 import { presetQuery } from '@/features/accessmap/state';
 
 import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
+import { Time } from '@/components/Time';
 
 // The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
 // renderHistoryTab, renderCurlTab, renderQueryKeysTab, renderQueryRolesTab, the Access box + flow diagram,
@@ -57,7 +58,7 @@ export function RunTab({ query, v }: { query: Query; v: QueryVersion }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [connection, setConnection] = useState('');
   const [format, setFormat] = useState(preferredFormat);
-  const [size, setSize] = useState(10);
+  const [size, setSize] = useState(preferredPageSize);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ResultData | null>(null);
   const version = versionSuffix(query, v);
@@ -359,7 +360,7 @@ export function HistoryTab({ v, runs }: { v: QueryVersion; runs: HistoryEntry[] 
                     style={{ whiteSpace: 'nowrap' }}
                     title={x.connection_name ? 'connection: ' + x.connection_name : undefined}
                   >
-                    {x.executed_at}
+                    <Time value={x.executed_at} fallback="" />
                   </td>
                   <td className="mono">{x.key_name ?? ''}</td>
                   <td className="mono num">
@@ -543,7 +544,7 @@ export function KeysTab({ reach, keys }: { reach: Reach; keys: Record<string, Ap
                   )}
                 </td>
                 <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                  {full.last_used_at || 'never'}
+                  <Time value={full.last_used_at} fallback="never" />
                 </td>
                 <td>
                   <button type="button" className="btn ghost sm" onClick={() => drawers.editKey(k.name)}>
@@ -887,11 +888,19 @@ export function CacheTab({ query, v, etag }: { query: Query; v: QueryVersion; et
 
 // ---- Metrics and the stat tiles ----
 
-function StatTile({ label, value, warn }: { label: string; value: string | number; warn?: boolean }) {
+function StatTile({
+  label,
+  value,
+  warn,
+}: {
+  label: string;
+  value: string | number | ReactElement;
+  warn?: boolean;
+}) {
   return (
     <div className="stat-tile">
       <div className="label">{label}</div>
-      <div className={warn ? 'value warn' : 'value'}>{String(value)}</div>
+      <div className={warn ? 'value warn' : 'value'}>{typeof value === 'object' ? value : String(value)}</div>
     </div>
   );
 }
@@ -918,7 +927,7 @@ export function StatTiles({ runs }: { runs: HistoryEntry[] }) {
       <StatTile label="Avg duration" value={avgDuration === null ? '—' : `${avgDuration} ms`} />
       <StatTile label="Slowest run" value={maxDuration === null ? '—' : `${maxDuration} ms`} />
       <StatTile label="Avg rows" value={avgRows === null ? '—' : avgRows} />
-      <StatTile label="Last run" value={last ? last.executed_at : '—'} />
+      <StatTile label="Last run" value={<Time value={last?.executed_at} />} />
     </div>
   );
 }

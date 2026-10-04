@@ -69,7 +69,7 @@ export const FILMS: Query = {
 /** Every route the shell and the API Repository read, with sensible data; override per test. */
 export function baseRoutes(): Record<string, (call: { search: URLSearchParams }) => unknown> {
   return {
-    'GET /health': () => ({ status: 'ok', version: '9.9.9' }),
+    'GET /health': () => ({ status: 'ok', version: '9.9.9', time_zone: 'UTC', utc_offset: '+00:00' }),
     'GET /api/v1/connections': () => ({
       items: [
         { name: 'lite', db: 'sqlite', active: true, host: null, port: null, database: '/data/films.db' },

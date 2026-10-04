@@ -236,7 +236,12 @@ def build_spec(version, saved_queries=None, jwt=None):
                                 'responses': {'200': {'description': 'OK', 'content': {'application/json': {
                                     'schema': {'type': 'object', 'required': ['status', 'version'], 'properties': {
                                         'status': {'type': 'string', 'enum': ['ok']},
-                                        'version': {'type': 'string', 'description': 'Server version.'}}}}}}}}},
+                                        'version': {'type': 'string', 'description': 'Server version.'},
+                                        'time_zone': {'type': 'string', 'nullable': True, 'description':
+                                                      "IANA name of the zone the server's timestamps are in, where "
+                                                      'it can tell (e.g. Asia/Kolkata).'},
+                                        'utc_offset': {'type': 'string', 'description':
+                                                       "That zone's current UTC offset, e.g. +05:30."}}}}}}}}},
             '/metrics': {'get': {
                 'summary': 'Prometheus text-format metrics: request/query counts and latencies, pool occupancy, '
                            'rate-limit rejections', 'tags': ['Service'],

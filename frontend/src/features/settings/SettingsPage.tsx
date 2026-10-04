@@ -14,7 +14,9 @@ import { lastSection, rememberSection } from './state';
 
 type Section = Schemas['SettingsSection'];
 
-const PREF_ROWS: [keyof Prefs, string, string, string[]][] = [
+type PrefRow = [keyof Prefs, string, string, string[]];
+
+const APPEARANCE_ROWS: PrefRow[] = [
   ['theme', 'Theme', 'Follows your operating system unless set.', ['System', 'Light', 'Dark']],
   [
     'fontSize',
@@ -22,13 +24,44 @@ const PREF_ROWS: [keyof Prefs, string, string, string[]][] = [
     'Text, and the spacing around it, across the Console.',
     ['Small', 'Medium', 'Large'],
   ],
+  [
+    'timeZone',
+    'Time zone',
+    "Timestamps in this computer's time zone, UTC, or the server's (the one it records them in).",
+    ['Local', 'UTC', 'Server'],
+  ],
+  [
+    'timeFormat',
+    'Time format',
+    'Relative shows "5 min ago"; hover any time for the exact one.',
+    ['Absolute', 'Relative'],
+  ],
   ['density', 'Table density', 'Row height in lists and result grids.', ['Compact', 'Comfortable']],
+  ['motion', 'Reduce motion', 'Turns off sliding drawers and pulsing indicators.', ['System', 'On']],
+];
+
+const EDITOR_ROWS: PrefRow[] = [
   [
     'format',
     'Default result format',
-    'Pre-selected format in API Designer.',
+    'Pre-selected format in API Designer and when trying a query.',
     ['json', 'csv', 'ndjson', 'tsv', 'xml', 'yaml', 'xlsx'],
   ],
+  [
+    'pageSize',
+    'Rows per page',
+    'How many rows a query returns per page, to start with.',
+    ['10', '25', '50', '100', '500'],
+  ],
+  ['nullDisplay', 'NULL values', 'How a NULL looks in result grids.', ['NULL', 'Blank']],
+  [
+    'numberFormat',
+    'Numbers',
+    'Thousands separators in result grids (1,234,567). Copies and exports keep the raw value.',
+    ['Plain', 'Grouped'],
+  ],
+  ['lineWrap', 'Wrap long lines', 'In the SQL editor.', ['Off', 'On']],
+  ['lineNumbers', 'Line numbers', 'In the SQL editor.', ['Off', 'On']],
 ];
 
 export function SettingsPage() {
@@ -62,7 +95,9 @@ export function SettingsPage() {
   let body: React.ReactNode;
   const current = sections.find((s) => s.id === section) ?? sections[0];
   if (section === 'ui') {
-    body = <AppearancePrefs />;
+    body = <PrefsPanel title="Appearance" rows={APPEARANCE_ROWS} />;
+  } else if (section === 'editor') {
+    body = <PrefsPanel title="Editor & results" rows={EDITOR_ROWS} />;
   } else if (settings.isPending) {
     body = <Loading text="Loading settings…" />;
   } else if (!settings.data) {
@@ -111,6 +146,7 @@ export function SettingsPage() {
         <nav id="settings-nav" aria-label="Settings sections">
           {sections.map((sec) => navButton(sec.id, sec.title, sec.rows.length))}
           {navButton('ui', 'Appearance', null)}
+          {navButton('editor', 'Editor & results', null)}
         </nav>
         <div id="settings-body">{body}</div>
       </div>
@@ -144,15 +180,16 @@ function SectionPanel({ section }: { section: Section }) {
   );
 }
 
-function AppearancePrefs() {
+/** Preferences kept in this browser: Appearance, and Editor & results. */
+function PrefsPanel({ title, rows }: { title: string; rows: PrefRow[] }) {
   const prefs = usePrefValues();
   return (
     <div className="panel">
       <div className="set-head">
-        <h2>Appearance</h2>
+        <h2>{title}</h2>
         <span>Stored in this browser only. Nothing is sent to the server.</span>
       </div>
-      {PREF_ROWS.map(([key, label, description, options]) => (
+      {rows.map(([key, label, description, options]) => (
         <div key={key} className="set-row pref">
           <div className="set-what">
             <span className="set-label">{label}</span>

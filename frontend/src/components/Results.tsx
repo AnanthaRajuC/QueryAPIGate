@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 
 import { useFeedback, copyText } from '@/app/feedback';
+import { usePrefValues } from '@/app/prefs';
+import { grouped } from '@/lib/numbers';
 
 import { ChartPanel, numericColumns } from './ChartPanel';
 
@@ -374,6 +376,7 @@ export function widestColumn(rows: Record<string, unknown>[]) {
 }
 
 export function RowsTable({ rows, offset = 0 }: { rows: Record<string, unknown>[]; offset?: number }) {
+  const { nullDisplay, numberFormat } = usePrefValues();
   if (!rows.length) return <div className="res-note">No rows returned.</div>;
   const cols = columnsOf(rows);
   const numeric = Object.fromEntries(
@@ -404,9 +407,7 @@ export function RowsTable({ rows, offset = 0 }: { rows: Record<string, unknown>[
                 const v = row[c];
                 if (v === null || v === undefined) {
                   return (
-                    <td key={c}>
-                      <span className="null">NULL</span>
-                    </td>
+                    <td key={c}>{nullDisplay === 'Blank' ? null : <span className="null">NULL</span>}</td>
                   );
                 }
                 const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
@@ -416,7 +417,7 @@ export function RowsTable({ rows, offset = 0 }: { rows: Record<string, unknown>[
                     className={numeric[c] ? 'num' : undefined}
                     title={s.length > 40 ? s : undefined}
                   >
-                    {s}
+                    {typeof v === 'number' && numberFormat === 'Grouped' ? grouped(v) : s}
                   </td>
                 );
               })}

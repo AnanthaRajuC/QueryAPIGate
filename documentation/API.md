@@ -18,7 +18,7 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 | [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
 | [`/events`](#live-events-server-sent-events) | GET | Live saved-query runs (Server-Sent Events) |
 | [`/api/v1/...`](#management-api-v1) | GET, POST, PATCH, DELETE | The Management API: saved queries, connections, API keys, roles, collections, history, audit, settings and more (admin only) |
-| `/health` | GET | `{"status": "ok", "version": "..."}` |
+| `/health` | GET | `{"status": "ok", "version": "...", "time_zone": "Asia/Kolkata", "utc_offset": "+05:30"}` - the zone every timestamp the server returns is in (`time_zone` is `null` when the server can't name it) |
 | [`/metrics`](#observability) | GET | Prometheus text-format metrics |
 
 ## Common query parameters
@@ -1181,7 +1181,7 @@ Both are off unless the server enables them (`QUERYAPIGATE_RATE_LIMIT`, `QUERYAP
 
 - **Rate limit.** When enabled, every response carries `X-RateLimit-Limit` (the quota) and `X-RateLimit-Remaining`. A
   client over its limit receives **429** with a `Retry-After` header (seconds) and
-  `{"error": "Rate limit exceeded", "retry_after": 12}`. `/health` is never limited.
+  `{"error": "Rate limit exceeded", "code": "rate_limited", "retry_after": 12, "request_id": "..."}`. `/health` is never limited.
 - **Per-key rate limit.** An API key can also carry its own `rate_limit` (same grammar, e.g. `"100/minute"` - see
   [Per-key rate limiting](#per-key-rate-limiting)), checked *in addition to* the server-wide limit above, never
   instead of it - a response carries both header pairs when both apply (`X-RateLimit-Limit`/`X-RateLimit-Remaining`

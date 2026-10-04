@@ -75,6 +75,36 @@ describe('Connections', () => {
     expect(table()).toHaveTextContent('retired');
   });
 
+  it("shows timestamps in the viewer's chosen zone and format, the exact time on hover", async () => {
+    fakeBackend({
+      ...routes(),
+      'GET /health': () => ({
+        status: 'ok',
+        version: '9.9.9',
+        time_zone: 'Asia/Kolkata',
+        utc_offset: '+05:30',
+      }),
+    });
+    renderAt('/connections');
+    await waitFor(() => expect(table().querySelector('tr[data-name="shop"]')).not.toBeNull());
+    const created = () => table().querySelector('tr[data-name="shop"] time')!;
+    // Local by default - this computer is UTC under test, the server is 5:30 ahead
+    await waitFor(() => expect(created()).toHaveTextContent('2026-10-01 04:30:00'));
+    expect(created()).toHaveAttribute('dateTime', '2026-10-01T04:30:00.000Z');
+    expect(created().getAttribute('title')).toContain("this computer's time zone");
+    localStorage.setItem('queryapigate-ui-prefs', JSON.stringify({ timeZone: 'Server' }));
+    window.dispatchEvent(new StorageEvent('storage'));
+    await waitFor(() => expect(created()).toHaveTextContent('2026-10-01 10:00:00'));
+    expect(created().getAttribute('title')).toContain('Asia/Kolkata');
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-01T06:30:00Z') });
+    localStorage.setItem('queryapigate-ui-prefs', JSON.stringify({ timeFormat: 'Relative' }));
+    window.dispatchEvent(new StorageEvent('storage'));
+    await waitFor(() => expect(created()).toHaveTextContent('2 h ago'));
+    expect(created().getAttribute('title')).toContain('2026-10-01 04:30:00');
+    vi.useRealTimers();
+    localStorage.clear();
+  });
+
   it('creates a connection from the drawer', async () => {
     const { calls } = fakeBackend({
       ...routes(),

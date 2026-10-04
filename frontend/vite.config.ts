@@ -7,6 +7,9 @@ import { defineConfig } from 'vitest/config';
 // console_dist/ directory - so that's where the build goes. See ADR 0001.
 const backend = process.env.QUERYAPIGATE_URL ?? 'http://127.0.0.1:5000';
 
+// Unit tests read times in UTC whatever the machine's zone, so a timestamp's expected text is the same everywhere.
+if (process.env.VITEST) process.env.TZ = 'UTC';
+
 export default defineConfig({
   base: '/console/',
   plugins: [react()],

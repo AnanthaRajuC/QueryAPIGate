@@ -8,6 +8,7 @@ import { Loading, useFeedback } from '@/app/feedback';
 import { useMetricsSeries, usePoolPoll } from '@/app/metrics';
 import { StatTile } from '@/components/StatTile';
 import { metricGauge, metricSum } from '@/lib/metrics';
+import { Time } from '@/components/Time';
 
 // The classic Home screen (ui.py #tab-home, renderHome, renderHomeHealth, renderHomeRequestsPanel): the stat tiles,
 // System health, Recent activity, Quick actions, and Recent API requests / Slowest queries - kept live from
@@ -151,7 +152,7 @@ export function HomePage() {
           {(audit.data?.items ?? []).length ? (
             audit.data!.items.slice(0, 5).map((e, i) => (
               <div key={i} className="home-activity-row">
-                <time>{e.timestamp || ''}</time>
+                <Time value={e.timestamp} fallback={<time />} />
                 <span className={'tag act ' + tone(e.action)}>{e.action || ''}</span>
                 <button type="button" className="target" onClick={() => navigate(activityTarget(e.action))}>
                   {e.target || '(unknown)'}
@@ -354,7 +355,7 @@ function Requests() {
                   />
                 </td>
                 <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                  {String(e.executed_at ?? '')}
+                  <Time value={e.executed_at} fallback="" />
                 </td>
                 <td>
                   {e.query === null ? (

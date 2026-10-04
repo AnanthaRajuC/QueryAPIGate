@@ -133,15 +133,34 @@ describe('Settings', () => {
     await userEvent.click(within(fontSize).getByRole('button', { name: 'Small' }));
     expect(document.documentElement.style.zoom).toBe('0.9');
     await userEvent.click(
-      within(screen.getByRole('group', { name: 'Default result format' })).getByRole('button', {
-        name: 'csv',
-      }),
+      within(screen.getByRole('group', { name: 'Reduce motion' })).getByRole('button', { name: 'On' }),
     );
+    expect(document.body).toHaveClass('reduce-motion');
+    await userEvent.click(screen.getByRole('button', { name: 'Editor & results' }));
+    expect(screen.getByRole('heading', { name: 'Editor & results' })).toBeInTheDocument();
+    const pick = async (group: string, option: string) =>
+      userEvent.click(
+        within(screen.getByRole('group', { name: group })).getByRole('button', { name: option }),
+      );
+    await pick('Default result format', 'csv');
+    await pick('Rows per page', '50');
+    await pick('NULL values', 'Blank');
+    await pick('Numbers', 'Grouped');
+    await pick('Wrap long lines', 'On');
+    await pick('Line numbers', 'Off');
     expect(JSON.parse(localStorage.getItem('queryapigate-ui-prefs')!)).toEqual({
       theme: 'Dark',
       fontSize: 'Small',
+      timeZone: 'Local',
+      timeFormat: 'Absolute',
+      motion: 'On',
       density: 'Compact',
       format: 'csv',
+      pageSize: '50',
+      nullDisplay: 'Blank',
+      numberFormat: 'Grouped',
+      lineWrap: 'On',
+      lineNumbers: 'Off',
     });
   });
 

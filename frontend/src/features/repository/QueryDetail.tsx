@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
@@ -28,6 +28,7 @@ import {
   SqlTab,
   StatTiles,
 } from './tabs';
+import { Time } from '@/components/Time';
 
 // The classic saved-query detail panel (ui.py renderDetail): title row with the version switcher and actions,
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
@@ -157,7 +158,7 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           <MetaItem k="connection" v={v.connection_name || '—'} />
           <MetaItem k="collection" v={query.collection || '—'} />
           <MetaItem k="author" v={v.author || '—'} />
-          <MetaItem k="modified" v={v.last_modified_at || v.created_at || '—'} />
+          <MetaItem k="modified" v={<Time value={v.last_modified_at || v.created_at} />} />
           {v.tags.length ? <MetaItem k="tags" v={v.tags.join(', ')} /> : null}
         </dl>
         <StatTiles runs={runs} />
@@ -197,11 +198,11 @@ function statusTitle(v: QueryVersion, query: Query) {
   return `Served before; still runnable with ?version=${v.version}`;
 }
 
-function MetaItem({ k, v }: { k: string; v: string }) {
+function MetaItem({ k, v }: { k: string; v: string | ReactElement }) {
   return (
     <div>
       <dt>{k}</dt>
-      <dd title={v}>{v}</dd>
+      <dd title={typeof v === 'string' ? v : undefined}>{v}</dd>
     </div>
   );
 }
