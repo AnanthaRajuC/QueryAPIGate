@@ -150,6 +150,10 @@ queryapigate serve
   fact - set `QUERYAPIGATE_HISTORY_RETENTION_DAYS` (e.g. `30`) and browse it with
   [`GET /api/v1/history`](API.md#get-apiv1history). On a very busy server, `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps a fraction
   of successful runs while still recording every failure.
+- Back it up with `pg_dump` and restore with `pg_restore` - see
+  [Backups and restores](DEPLOYMENT.md#5-persistent-data-backups-and-restores), which also lists the secrets a
+  backup doesn't contain. On a SQLite store, `queryapigate backup FILE` takes a consistent copy while the server
+  runs.
 - Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
   PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.
 

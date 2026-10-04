@@ -38,6 +38,15 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   release for them. The Docker image already runs Python 3.12 and is unaffected.
 
 ### Added
+- **Backups you can restore, documented and tested** (BACKLOG #71). `queryapigate backup FILE` copies the SQLite
+  store consistently while the server runs (SQLite's backup API, so nothing still in the write-ahead log is
+  missed); on a PostgreSQL store it prints the `pg_dump` command for its schema. DEPLOYMENT.md's *Backups and
+  restores* covers both stores - backing up while serving, restoring, and what a backup doesn't contain:
+  `QUERYAPIGATE_SECRET_KEY` (without it, encrypted connection passwords can't be read), the admin key, and
+  variables connections refer to. `tests/test_backup_restore.py` fills a store, backs it up, loses it, restores
+  it and checks the admin API sees exactly what it saw, on SQLite and PostgreSQL alike.
+- **PostgreSQL upgrade fixtures** (the rest of BACKLOG #65): stores built by 0.12.0 and 0.13.0 on PostgreSQL, as
+  `pg_dump` output, are restored and started under the current code in the PostgreSQL CI job.
 - **An "experimental" label** (BACKLOG #64) for features outside the compatibility promise - they may change in
   any minor release, always noted here (see *Versioning and compatibility* above). Today: live events (`GET
   /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). Each is

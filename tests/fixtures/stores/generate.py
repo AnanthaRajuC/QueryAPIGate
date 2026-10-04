@@ -1,6 +1,7 @@
 """Write an upgrade fixture: a store created by a *released* QueryAPIGate, through that release's own API (BACKLOG #65).
 
     python tests/fixtures/stores/generate.py /path/to/<venv of queryapigate==X.Y.Z>/bin/queryapigate
+    python tests/fixtures/stores/generate.py --postgres postgresql://... /path/to/.../bin/queryapigate
 
 Starts that version's server on a throwaway home, creates the same small, realistic set of things through its own
 HTTP API - a connection, a saved query with two versions, a run of it, a scoped API key, a role - stops it, and packs
@@ -10,6 +11,11 @@ whose API lacks a step (roles before they existed) records the step as skipped i
 steps go through the Management API (/api/v1), the only management interface since.
 
 Standard library only: it runs under the released version's own interpreter, or any Python 3.9+.
+
+--postgres URL (0.12.0 and later, which have the PostgreSQL store): the release runs on schema qag_fixture of that
+database instead - dropped and recreated first, so use a scratch database - and the fixture is
+<version>.postgres.tar.gz: that schema as plain SQL (store.sql, from pg_dump on PATH) beside data.db. This mode
+needs psycopg2 in the interpreter running it, and the release installed with its postgres extra.
 """
 import json
 import os
@@ -63,7 +69,20 @@ def V1_STEPS(data):
     ]
 
 
-def main(binary):
+PG_SCHEMA = 'qag_fixture'
+
+
+def _pg(url, statement):
+    import psycopg2  # --postgres only
+    conn = psycopg2.connect(url)
+    conn.autocommit = True
+    try:
+        conn.cursor().execute(statement)
+    finally:
+        conn.close()
+
+
+def main(binary, postgres=None):
     if os.sep in binary:  # a path: the server runs from the throwaway home, so make it absolute
         binary = os.path.abspath(binary)
     version = subprocess.run([binary, '--version'], capture_output=True, text=True).stdout.split()[-1]
@@ -77,6 +96,10 @@ def main(binary):
     port = free_port()
     env = {**os.environ, 'QUERYAPIGATE_HOME': home, 'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_PORT': str(port)}
     env.pop('QUERYAPIGATE_DATABASE_URL', None)
+    if postgres:
+        _pg(postgres, f'DROP SCHEMA IF EXISTS {PG_SCHEMA} CASCADE; CREATE SCHEMA {PG_SCHEMA}')
+        env['QUERYAPIGATE_DATABASE_URL'] = (postgres + ('&' if '?' in postgres else '?')
+                                            + f'options=-csearch_path%3D{PG_SCHEMA}')
     server = subprocess.Popen([binary, 'serve'], env=env, cwd=home, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     base = f'http://127.0.0.1:{port}'
     expected = {'version': version, 'created': {}, 'skipped': []}
@@ -114,24 +137,35 @@ def main(binary):
     finally:
         server.terminate()
         server.wait(timeout=30)
+    if postgres:  # the store as plain SQL: readable, and restorable into any PostgreSQL version
+        dump = subprocess.run(['pg_dump', '--format=plain', f'--schema={PG_SCHEMA}', '--no-owner', '--no-privileges',
+                               '--inserts', postgres], check=True, capture_output=True).stdout
+        with open(os.path.join(home, 'store.sql'), 'wb') as f:
+            f.write(dump)
+        _pg(postgres, f'DROP SCHEMA {PG_SCHEMA} CASCADE')
     store = os.path.join(home, 'queryapigate.db')
     if os.path.exists(store):  # fold the write-ahead log into the file itself, so the fixture is one file
         conn = sqlite3.connect(store)
         conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         conn.close()
     os.makedirs(HERE, exist_ok=True)
-    out = os.path.join(HERE, f'{version}.tar.gz')
+    fixture = f'{version}.postgres' if postgres else version
+    out = os.path.join(HERE, f'{fixture}.tar.gz')
     with tarfile.open(out, 'w:gz') as tar:
         for name in sorted(os.listdir(home)):
             if name.endswith(('-wal', '-shm')):
                 continue
             tar.add(os.path.join(home, name), arcname=name)
     expected['data_db_path'] = data  # the connection's absolute path in the fixture's own home
-    with open(os.path.join(HERE, f'{version}.expected.json'), 'w') as f:
+    with open(os.path.join(HERE, f'{fixture}.expected.json'), 'w') as f:
         json.dump(expected, f, indent=2, sort_keys=True)
         f.write('\n')
     print(version, out, json.dumps(expected))
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    args = sys.argv[1:]
+    url = None
+    if args[:1] == ['--postgres']:
+        url, args = args[1], args[2:]
+    main(args[0], postgres=url)

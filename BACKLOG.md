@@ -33,11 +33,11 @@ by accident.
 | Item | What |
 |---|---|
 | ~~#64 Experimental features label~~ (shipped) | A documented way to ship outside the freeze; live events are the first candidate |
-| ~~#65 Upgrade guarantee and upgrade CI~~ (shipped; PostgreSQL dump fixtures still open) | Every 0.x store upgrades automatically or refuses with a clear message |
+| ~~#65 Upgrade guarantee and upgrade CI~~ (shipped) | Every 0.x store upgrades automatically or refuses with a clear message |
 | #66 Database support matrix | Tier 1 vs experimental database types |
 | #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
 | ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
-| #71 PostgreSQL-store backup and restore | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
+| ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 
 **Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #55-#58
 if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC discovery beyond the current
@@ -2039,7 +2039,8 @@ breaks its own promise.
 
 ## 65. Upgrade guarantee: every 0.x store upgrades or refuses clearly, tested in CI
 
-**Status: shipped (SQLite and JSON stores); PostgreSQL dump fixtures still open.** `tests/fixtures/stores/`
+**Status: shipped.** PostgreSQL stores too: `<version>.postgres.tar.gz` (0.12.0, 0.13.0) are `pg_dump`
+output of the same estate, restored and started in the PostgreSQL CI job (`generate.py --postgres URL`). `tests/fixtures/stores/`
 holds a home built by each of 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0 and 0.12.0 through its own API
 (`generate.py`); `tests/test_upgrades.py` starts the current code on each and checks connections, query versions
 and the published one, history, keys, roles and audit through `/api/v1`, then runs the query. It found the bug
@@ -2159,7 +2160,12 @@ limits or in-app metrics (#55-#58). If 1.0 says nothing, the promise is implicit
 
 ## 71. A tested backup and restore procedure for the PostgreSQL store
 
-**Status: open.** 1.0 milestone.
+**Status: shipped.** DEPLOYMENT.md §5, *Backups and restores*: SQLite (`queryapigate backup FILE`, SQLite's online
+backup API) and PostgreSQL (`pg_dump --schema=...`, `pg_restore`; `queryapigate backup` prints the command), what
+each gives while serving, how to restore, and the secrets a backup doesn't hold. `tests/test_backup_restore.py`
+populates, backs up, loses, restores and compares `/api/v1` on both stores, and checks a restore without the same
+`QUERYAPIGATE_SECRET_KEY` loses exactly the encrypted passwords. The PostgreSQL CI job installs the client tools and
+fails if they are missing rather than skipping.
 
 **Impact:** DEPLOYMENT.md §5 covers backing up the SQLite store's volume. Since PR #30 added the PostgreSQL
 store, there's no documented procedure for it. A backup nobody has restored is not a backup.

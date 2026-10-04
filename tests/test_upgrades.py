@@ -5,6 +5,10 @@ wrong. Never a server that starts and then fails, or quietly loses data.
 Each tests/fixtures/stores/<version>.tar.gz is a home that release's own server built through its own API
 (fixtures/stores/generate.py): a connection, a saved query with two versions, a run of it, a scoped key and a role.
 A new release adds its fixture; this test then covers it with no change here.
+
+Releases with the PostgreSQL store (0.12.0 on) also have <version>.postgres.tar.gz: the same estate in a PostgreSQL
+schema, dumped as plain SQL. When the suite runs against PostgreSQL, each is restored into the test's own schema and
+checked the same way - which is also a test of restoring a pg_dump (BACKLOG #71).
 """
 import glob
 import json
@@ -23,34 +27,52 @@ FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 
 ADMIN = {'X-API-Key': 'fixture-admin-key'}
 
 
-def fixture_versions():
-    return sorted((os.path.basename(path)[:-len('.tar.gz')] for path in glob.glob(os.path.join(FIXTURES, '*.tar.gz'))),
-                  key=lambda v: tuple(int(part) for part in v.split('.')))
+def fixture_versions(kind=''):
+    """The releases with a fixture: SQLite/JSON homes (kind ''), or PostgreSQL dumps (kind '.postgres')."""
+    suffix = kind + '.tar.gz'
+    names = [os.path.basename(p)[:-len(suffix)] for p in glob.glob(os.path.join(FIXTURES, '*' + suffix))]
+    return sorted((n for n in names if n.replace('.', '').isdigit()), key=lambda v: tuple(int(p) for p in v.split('.')))
+
+
+def restore_postgres(sql):
+    """Load a fixture's plain-SQL dump into this test's own schema (tests/__init__.py maps each home to one), in
+    place of the empty one QueryAPIGate would create: the dump creates the schema itself."""
+    import psycopg2
+    schema = db.postgres_schema()
+    db.close()
+    statements = '\n'.join(line for line in sql.splitlines() if not line.startswith('\\'))  # psql-only: \restrict
+    conn = psycopg2.connect(TEST_DATABASE_URL)
+    conn.autocommit = True
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f'DROP SCHEMA {schema} CASCADE')
+        cursor.execute(statements.replace('qag_fixture', schema))
+    finally:
+        conn.close()
 
 
 class FixtureTestCase(unittest.TestCase):
-    def open_home(self, version):
+    def open_home(self, version, kind=''):
         """A fresh home holding that version's store, with the test's QUERYAPIGATE_HOME pointed at it."""
         home = tempfile.mkdtemp(prefix=f'qag-upgrade-{version}-')
         self.addCleanup(shutil.rmtree, home, True)
-        with tarfile.open(os.path.join(FIXTURES, f'{version}.tar.gz')) as tar:
+        with tarfile.open(os.path.join(FIXTURES, f'{version}{kind}.tar.gz')) as tar:
             tar.extractall(home, filter='data') if hasattr(tarfile, 'data_filter') else tar.extractall(home)
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home, 'QUERYAPIGATE_API_KEY': ADMIN['X-API-Key']})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(db.close)
         self.addCleanup(history.flush)
-        with open(os.path.join(FIXTURES, f'{version}.expected.json')) as f:
+        with open(os.path.join(FIXTURES, f'{version}{kind}.expected.json')) as f:
             return home, json.load(f)
 
 
-@unittest.skipIf(TEST_DATABASE_URL, 'the fixtures are SQLite stores and JSON files (PostgreSQL dumps: future work)')
-class UpgradeTests(FixtureTestCase):
-    def test_there_is_a_fixture_for_every_supported_release(self):
-        self.assertGreaterEqual(len(fixture_versions()), 6)
+class StoreChecks(FixtureTestCase):
+    """What every fixture must read back, whichever store it is in - run by the two classes below."""
+    kind = ''
 
-    def test_every_release_store_starts_with_its_data_intact(self):
-        for version in fixture_versions():
+    def check_every_release(self):
+        for version in fixture_versions(self.kind):
             with self.subTest(version=version):
                 self.check(version)
 
@@ -60,8 +82,11 @@ class UpgradeTests(FixtureTestCase):
         return res.get_json()
 
     def check(self, version):
-        home, expected = self.open_home(version)
+        home, expected = self.open_home(version, self.kind)
         self.assertEqual(expected['skipped'], [])
+        if self.kind == '.postgres':
+            with open(os.path.join(home, 'store.sql')) as f:
+                restore_postgres(f.read())
         client = create_app().test_client()
 
         connection = self.get(client, '/api/v1/connections/films')
@@ -89,6 +114,26 @@ class UpgradeTests(FixtureTestCase):
         self.assertEqual([row['title'] for row in res.get_json()], ['Alpha', 'Gamma'])
 
         self.assertTrue(self.get(client, '/api/v1/audit')['items'])
+
+
+@unittest.skipIf(TEST_DATABASE_URL, 'the SQLite stores and JSON homes')
+class UpgradeTests(StoreChecks):
+    def test_there_is_a_fixture_for_every_supported_release(self):
+        self.assertGreaterEqual(len(fixture_versions()), 7)
+
+    def test_every_release_store_starts_with_its_data_intact(self):
+        self.check_every_release()
+
+
+@unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
+class PostgresUpgradeTests(StoreChecks):
+    kind = '.postgres'
+
+    def test_there_is_a_fixture_for_every_release_with_the_postgres_store(self):
+        self.assertLessEqual({'0.12.0', '0.13.0'}, set(fixture_versions('.postgres')))
+
+    def test_every_release_store_starts_with_its_data_intact(self):
+        self.check_every_release()
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the fixtures are SQLite stores')

@@ -116,6 +116,10 @@ class EventServerTestCase(unittest.TestCase):
 
         def stop():
             asyncio.run_coroutine_threadsafe(server.stop(), loop).result(10)
+            # Wait for the loop's worker threads too (asyncio.to_thread - checking a key opens a store connection):
+            # one still connecting when the test's patched environment is restored reads os.environ while it is
+            # being changed, which libpq does in C - and that crashes the interpreter, not just the test.
+            asyncio.run_coroutine_threadsafe(loop.shutdown_default_executor(), loop).result(10)
             loop.call_soon_threadsafe(loop.stop)
             thread.join(5)
             loop.close()

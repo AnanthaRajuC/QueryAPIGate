@@ -102,6 +102,28 @@ def _init(args):
     return 0
 
 
+def _backup(args):
+    """`queryapigate backup FILE`: a consistent copy of the SQLite store, safe while the server runs. A PostgreSQL
+    store is backed up with pg_dump, like the rest of that database - this prints the command for it."""
+    if db.is_postgres():
+        schema = db.postgres_schema()
+        print('queryapigate: the store is PostgreSQL - back it up with pg_dump, as the rest of that database '
+              '(see DEPLOYMENT.md, Backups and restores):\n'
+              f'  pg_dump --format=custom --schema={schema} --no-owner --no-privileges '
+              f'--file={args.file} "$QUERYAPIGATE_DATABASE_URL"', file=sys.stderr)
+        return 2
+    destination = os.path.abspath(args.file)
+    if os.path.exists(destination) and not args.force:
+        print(f'queryapigate: {destination} already exists - pass --force to replace it', file=sys.stderr)
+        return 2
+    if os.path.abspath(str(config.db_file())) == destination:
+        print('queryapigate: that is the store itself - back it up to another file', file=sys.stderr)
+        return 2
+    size = db.backup_sqlite(destination)
+    print(f'Backed up {db.describe()} to {destination} ({size} bytes)')
+    return 0
+
+
 def _resolve_export_path(template, name):
     """Fill in a --out template's {date}/{name} placeholders. Deliberately just these two, not a general
     strftime/templating facility - the exact shape #31 was scoped to."""
@@ -351,6 +373,12 @@ def build_parser():
     events_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
     events_parser.add_argument('--port', type=int, default=config.events_port())
     events_parser.set_defaults(func=_events)
+
+    backup = commands.add_parser('backup', help='copy queryapigate.db to FILE, consistently, while the server '
+                                                'runs (a PostgreSQL store: prints the pg_dump command)')
+    backup.add_argument('file', metavar='FILE')
+    backup.add_argument('--force', action='store_true', help='replace FILE if it exists')
+    backup.set_defaults(func=_backup)
 
     init = commands.add_parser('init', help='create db_connections.json and saved_sql/ in the home folder')
     init.set_defaults(func=_init)

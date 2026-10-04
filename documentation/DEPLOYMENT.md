@@ -162,29 +162,77 @@ need from the admin UI (`https://api.example.com/console`) or `PATCH /api/v1/con
 throwaway SQLite database and five example API keys, and is documented as such in
 [EXAMPLES.md](EXAMPLES.md).
 
-## 5. Persistent data and backups
+## 5. Persistent data, backups and restores
 
-Everything QueryAPIGate owns - connections, saved queries, API keys, roles, the audit log - lives in one
-file, `queryapigate.db`, inside the `/data` volume. It's SQLite in WAL mode, so a plain `cp` of that one
-file can miss data still sitting in the `-wal` companion file; back it up with SQLite's own backup API
-instead, which is WAL-aware and safe to run against a live database with no downtime. The image doesn't
-include the standalone `sqlite3` CLI (it's a slim Python base), but Python's own `sqlite3` module - already
-there, since QueryAPIGate itself depends on it - does the same job in one line:
+Everything QueryAPIGate owns - connections, saved queries and their versions, run history, API keys, roles and
+the audit log - lives in its store: `queryapigate.db` on the `/data` volume, or a PostgreSQL database if you set
+one up ([section 8](#8-shared-metadata-store-optional)). Back up the store, and separately the few secrets it
+depends on ([below](#what-a-backup-of-the-store-does-not-contain)). Then restore one now and then: a backup
+nobody has restored is not a backup.
+
+### The SQLite store
+
+`queryapigate backup` copies it while the server keeps running. It uses SQLite's own backup API, so the copy is one
+consistent moment and includes changes still in the write-ahead log (`queryapigate.db-wal`) - which a plain `cp` of
+the file can miss:
 
 ~~~bash
-docker compose exec queryapigate python3 -c "
-import sqlite3
-src = sqlite3.connect('/data/queryapigate.db')
-dst = sqlite3.connect('/data/backup.db')
-src.backup(dst)
-dst.close(); src.close()"
+docker compose exec queryapigate queryapigate backup /data/backup.db --force
 docker compose cp queryapigate:/data/backup.db "./backups/queryapigate-$(date +%F).db"
 docker compose exec queryapigate rm /data/backup.db
 ~~~
 
-Run that on a schedule (host cron calling the two lines above, or a small sidecar container with its own
-cron) and ship the result somewhere off the host. There's nothing else to back up - no separate config
-files, no secrets in the volume (those live in `.env`, outside it).
+Run that on a schedule (host cron, or a small sidecar with its own) and ship the result off the host.
+
+To restore, stop the server, put the backup in place as `queryapigate.db` - removing the `-wal` and `-shm` files,
+which belong to the store being replaced - and start it again:
+
+~~~bash
+docker compose stop queryapigate
+docker compose run --rm -v ./backups:/backups queryapigate sh -c \
+  'cp /backups/queryapigate-2026-10-04.db /data/queryapigate.db && rm -f /data/queryapigate.db-wal /data/queryapigate.db-shm'
+docker compose start queryapigate
+~~~
+
+### The PostgreSQL store
+
+Back it up with `pg_dump`, like any other PostgreSQL data. On a managed database whose snapshots or point-in-time
+recovery already cover the whole database, that covers QueryAPIGate's store too. To back up just the store, dump
+its schema - `public`, or the one `?options=-csearch_path%3D...` names in `QUERYAPIGATE_DATABASE_URL`;
+`queryapigate backup` prints this command with the right schema filled in:
+
+~~~bash
+pg_dump --format=custom --schema=public --no-owner --no-privileges \
+  --file="queryapigate-$(date +%F).dump" "$QUERYAPIGATE_DATABASE_URL"
+~~~
+
+`pg_dump` reads one snapshot, in a single transaction, so it is consistent and safe to run while QueryAPIGate is
+serving; runs recorded after it starts are simply not in it. Use a `pg_dump` of the same major version as the
+server, or newer.
+
+To restore, stop every QueryAPIGate process using the store, restore into an empty database (or one where that
+schema has been dropped), and start them again:
+
+~~~bash
+pg_restore --no-owner --no-privileges --dbname="$QUERYAPIGATE_DATABASE_URL" "queryapigate-2026-10-04.dump"
+~~~
+
+The schema is recreated under its original name, so the URL's `search_path` (if any) must name the same schema.
+
+### What a backup of the store does not contain
+
+- **`QUERYAPIGATE_SECRET_KEY`**, if you set it: connection passwords are stored encrypted with it. A store restored
+  without the same key has every encrypted password unreadable - each connection must be given its password again.
+  Keep the key in your secrets manager, with the `.env` it lives in.
+- **`QUERYAPIGATE_API_KEY`**, the admin key, and any environment variable a connection refers to (`"password":
+  "${WAREHOUSE_PASSWORD}"`). Scoped API keys *are* in the store - as hashes, so they keep working after a restore,
+  but a lost secret can't be recovered from a backup: issue a new key instead.
+- **The databases QueryAPIGate connects to** - back those up in their own right. The Redis response cache, if
+  used, is disposable: it refills.
+
+A restore from an older release's store is upgraded on first start, as any upgrade is; one from a newer release
+is refused rather than run on. `tests/test_backup_restore.py` does all of this on every CI run: it fills a store,
+backs it up, loses it, restores it, and checks the admin API sees exactly what it saw before.
 
 ## 6. Observability
 
@@ -309,7 +357,7 @@ responses at least, since that's the one piece of state this setup can actually 
 
 1. Read the [Changelog](../CHANGELOG.md) entry for the target version, especially anything under a
    "Breaking" or "Upgrading" heading.
-2. [Back up](#5-persistent-data-and-backups) first - always, even for a patch version.
+2. [Back up](#5-persistent-data-backups-and-restores) first - always, even for a patch version.
 3. Bump the pinned tag in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
 4. Check `docker compose logs queryapigate` and `curl .../health`.
 

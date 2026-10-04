@@ -347,6 +347,25 @@ def init_schema():
         _record_schema_version(conn)
 
 
+def backup_sqlite(destination):
+    """Copy the SQLite store to `destination` while the server keeps running: SQLite's online backup API, so the
+    copy is one consistent point in time and includes what is still in the write-ahead log, which copying the
+    file alone can miss. Returns the copy's size in bytes."""
+    source = sqlite3.connect(str(config.db_file()))
+    target = sqlite3.connect(str(destination))
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    return os.path.getsize(destination)
+
+
+def postgres_schema():
+    """The schema the PostgreSQL store's tables are in - public, or the one ?options=-csearch_path names."""
+    return connection().execute('SELECT current_schema()').fetchone()[0]
+
+
 def _columns(conn, table, postgres):
     if postgres:
         return {row[0] for row in conn.execute(

@@ -179,3 +179,20 @@ it locally after changing any `.md` file:
 pip install -e ".[docs]"
 mkdocs serve
 ~~~
+
+### Releasing
+
+1. Bump `__version__` in `queryapigate/__init__.py` and turn `## [Unreleased]` in CHANGELOG.md into a dated
+   `## [X.Y.Z] - YYYY-MM-DD` section, with what upgraders must know first. Commit on `main`, push, and wait for CI.
+2. Tag that commit `vX.Y.Z` and push the tag: the Release workflow checks the tag against the version and the
+   changelog, builds the Console into the wheel and publishes to PyPI; the Docker workflow publishes the image.
+3. Add the release's upgrade fixtures (`tests/fixtures/stores/`, BACKLOG #65) from the published package, so every
+   later version is tested against a store it really wrote:
+
+   ~~~bash
+   python -m venv /tmp/qag-X.Y.Z && /tmp/qag-X.Y.Z/bin/pip install "queryapigate[server,postgres]==X.Y.Z"
+   python tests/fixtures/stores/generate.py /tmp/qag-X.Y.Z/bin/queryapigate
+   python tests/fixtures/stores/generate.py --postgres postgresql://postgres:pw@localhost:5432/postgres \
+     /tmp/qag-X.Y.Z/bin/queryapigate   # a scratch database; needs pg_dump on PATH
+   ~~~
+4. Retake the screenshots (`npm run screenshots`, above) - the Console's Help now reads that release's docs.
