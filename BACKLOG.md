@@ -48,6 +48,9 @@ by accident.
 procedures. **More from DuckDB:** #81 Parquet and Arrow output, #82 snapshots of slow queries, #83 Iceberg and Delta
 tables (federation considered and deferred, see #83).
 
+**AI agents:** #85 OAuth 2.1 for the MCP server (first - it opens hosted AI clients), #63 column masking, #86
+descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
+
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
@@ -2695,6 +2698,65 @@ than everything, nobody signs in as themselves, and the audit log records every 
 already does better - tokens and SSO cover it, the break-glass key covers teams without one) and SAML (OIDC covers
 the identity providers in use today). **Later, if asked for:** SCIM provisioning, SAML, custom admin roles, approval
 steps for risky changes (enabling writes, deleting a connection).
+
+## 85. OAuth 2.1 authorization for the MCP server
+
+**Status: open.** The first of four items (#85-#88, with #63 column masking) that make QueryAPIGate a strong
+governed data gateway for AI agents.
+
+**Impact:** the MCP specification's authorization for remote servers is OAuth 2.1, and hosted AI clients - Claude's
+and ChatGPT's connectors among them - expect it. `queryapigate mcp` accepts an API key or a JWT in a request header:
+fine for SDKs, agent frameworks and many clients, but not every hosted connector can send one. For an organisation
+"opening its data to AI", this is the biggest gap.
+
+**Notes:**
+- Implement the spec's authorization: protected-resource metadata, the authorization code flow with PKCE against the
+  organisation's identity provider, dynamic client registration where the client needs it, and access tokens
+  checked on every call - jwtauth.py's verification, reused.
+- What a token may do comes from a role, as for JWT-signed app users today; `from_claim` keeps working, so an agent
+  acting for a person sees only that person's rows.
+- Share the identity-provider configuration with #84's Console SSO, so one setup covers both.
+- Keep header API keys for SDKs and automation.
+
+## 86. Descriptions for agents: a semantic layer over tables, columns and queries
+
+**Status: open.**
+
+**Impact:** an agent writing SQL sees table and column names and types - `orders.amt`, `cust_tier` - but not what
+they mean. Accuracy on ad-hoc questions depends on knowing that `amt` is net revenue in EUR excluding refunds, which
+joins are the right ones, and how a metric is defined. Tools are only as good as their descriptions, too.
+
+**Notes:**
+- Descriptions per table and column (stored per connection, editable in the Console's schema browser), served by
+  `list_tables` and the schema API.
+- Richer saved-query descriptions: what it answers, what its columns mean - in the tool description agents read.
+- MCP *resources* for a data dictionary: descriptions, approved joins, metric definitions, example questions.
+- Possibly imported from where teams keep this already (dbt docs, database `COMMENT ON`).
+
+## 87. A per-agent usage view
+
+**Status: open.**
+
+**Impact:** a data owner who lets agents in needs to see what they did - which questions, how many rows read from
+which tables, what was refused - per agent and over time. Run history has every call (`"transport": "mcp"`, the
+key, the SQL), but nothing summarises it.
+
+**Notes:** a Console screen and an API summarising run history by key for MCP calls: calls, tools used, top ad-hoc
+SQL (by `sql_hash`), rows read, refusals by code, over a period. Alerts for an agent suddenly reading far more than
+usual. Builds on history.py and the instances/alerts work, no new recording.
+
+## 88. Write tools over MCP, with a confirmation step
+
+**Status: open.** The remainder of #42 (and of the private aspirational backlog's A1).
+
+**Impact:** agents can only read today - deliberately. Some must act: file a ticket, update a status, record an
+order. Exposing a write-capable saved query as a tool needs a decision about confirming a model-initiated write
+before it runs.
+
+**Notes:** only saved queries whose author marked them as agent-writable; the MCP `destructiveHint` annotation set;
+a confirmation round (a dry run that shows what would change, then an explicit confirm with a short-lived token) or
+reliance on the client's own human-in-the-loop prompt - decide which, per the MCP spec's guidance at the time. Never
+for `execute_sql`. Every write audited with the agent's identity.
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31,
 #32, #33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
