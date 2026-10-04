@@ -54,5 +54,25 @@ def _use_postgres(url):
     db._open = open_target
 
 
+def _flush_history_before_removing_homes():
+    """Run history is written in batches by a background thread (history.py). A test's last runs can still be
+    queued when its temporary QUERYAPIGATE_HOME is removed; written mid-removal, they recreate queryapigate.db there,
+    and the removal fails with "Directory not empty" - intermittently, depending on timing. So every temporary
+    directory waits for this process's queued runs to be written before it is removed, whatever test made it."""
+    import tempfile
+
+    from queryapigate import history
+
+    remove = tempfile.TemporaryDirectory.cleanup
+
+    def cleanup(self):
+        history.flush()
+        remove(self)
+
+    tempfile.TemporaryDirectory.cleanup = cleanup  # type: ignore[method-assign]
+
+
+_flush_history_before_removing_homes()
+
 if TEST_DATABASE_URL:
     _use_postgres(TEST_DATABASE_URL)
