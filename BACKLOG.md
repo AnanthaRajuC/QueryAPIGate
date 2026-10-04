@@ -43,6 +43,10 @@ by accident.
 if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC discovery beyond the current
 JWKS support.
 
+**More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (suggested
+first), #76 Trino, #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
+procedures.
+
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
@@ -1106,7 +1110,8 @@ that already do it well.
 
 ## 36. Broader database backend support
 
-**Status: MongoDB shipped as a find-only slice; MSSQL/Oracle/Redis/Snowflake/BigQuery not started.** Raised
+**Status: MongoDB shipped as a find-only slice; MSSQL/Oracle/Redis not started.** Snowflake and BigQuery moved to
+#77 (with Redshift and Databricks), Mongo aggregation pipelines to #78, and more sources to #75, #76 and #79. Raised
 as "support MySQL Workbench, DBeaver, etc." - worth being precise about what that actually means: those are
 GUI *clients*, not protocols, and they already work today, because they talk to a real MySQL/PostgreSQL/etc.
 server over that database's own wire protocol - the same server a QueryAPIGate connection of that type points
@@ -2450,6 +2455,101 @@ MCP and the Console's test run alike.
   **Changed** in the release.
 
 ---
+
+## 75. Files and data lakes as a source: Parquet, CSV and JSON on S3, GCS or HTTP, through DuckDB
+
+**Status: open.** Suggested as the next new source after 1.0's #70 - the smallest change that adds a whole kind of
+data.
+
+**Impact:** a Parquet file in a bucket becomes a governed REST endpoint and MCP tool - keys, grants, rate limits, run
+history - with no database to run. Teams with a data lake but no serving layer are a large, poorly served audience.
+
+**Notes:**
+- DuckDB is already tier 1 and reads `read_parquet('s3://...')`, `read_csv(...)` and `read_json(...)` from SQL; its
+  `httpfs` extension adds S3, GCS, R2 and HTTP(S). An in-memory DuckDB connection (`database: ":memory:"`, which
+  `_resolve_db_file` refuses today) is all a file-only source needs.
+- What's missing: a connection setting for object-store credentials (DuckDB `CREATE SECRET`, filled from `${VAR}`
+  references, never stored in plain text), loading `httpfs` on connect, and deciding whether extensions may be
+  downloaded at runtime or must be bundled (offline and air-gapped installs).
+- Governance: a key with `connections` on such a source could read any URL the credentials reach. Consider an
+  allow-list of path prefixes per connection, and check what `allowed_tables` means for table functions (today it
+  can't restrict them - see guide 16).
+- Schema browser: there are no tables to list. Either list nothing, or let a connection name a few files as views.
+- A how-to guide: "Publish a Parquet file in S3 as an API".
+
+## 76. Trino / Presto as a native connection type
+
+**Status: open.**
+
+**Impact:** one Trino connection reaches every catalog Trino can - Hive, Iceberg, Delta, Kafka, other databases -
+so each becomes a source QueryAPIGate can publish, through a single, well-understood engine. Reachable today only
+through generic JDBC, with no query time limit and no schema browser.
+
+**Notes:** the `trino` Python client (DB-API); `information_schema` per catalog for the schema browser; cancelling a
+running query through the client for `QUERYAPIGATE_QUERY_TIMEOUT`; `allowed_tables` via sqlglot's `trino` dialect,
+with names that are three-part (`catalog.schema.table`) - today's bare-name matching needs a decision there. Read-only
+by the SQL check plus a Trino user with read-only access control. Starts experimental (#64) until it meets #66's
+graduation criteria.
+
+## 77. Cloud data warehouses: Snowflake, BigQuery, Redshift, Databricks SQL
+
+**Status: open.** Split out of #36, which lists Snowflake and BigQuery among its remaining dialects.
+
+**Impact:** a governed API in front of the warehouse is a common ask - for internal apps, partners and agents - and
+it's where much of an organisation's analytical data lives.
+
+**Notes:** each is its own unit of work, roughly in this order:
+- **Redshift** speaks the PostgreSQL protocol, so a `postgres` connection may already work. Verify, document the
+  gaps (server-side cursors, `information_schema` differences), and add it to the support matrix before writing any
+  driver.
+- **Databricks SQL** (`databricks-sql-connector`), **Snowflake** (`snowflake-connector-python`) and **BigQuery**
+  (`google-cloud-bigquery`, not DB-API in spirit) - each with its own auth (tokens, key pairs, service accounts)
+  that needs connection-form fields and secret handling like passwords get (#22's encryption, `${VAR}`).
+- Cost: these bill per query or per scanned byte. Caching (`cache_ttl`), rate limits and a per-query timeout matter
+  more here than anywhere; consider surfacing the bytes scanned (BigQuery dry runs) in run history.
+- Each starts experimental (#64).
+
+## 78. MongoDB aggregation pipelines
+
+**Status: open.** Split out of #36's MongoDB remainder.
+
+**Impact:** `find()` covers lookups; real reporting on MongoDB needs `$group`, `$lookup` and friends. Pipelines are
+MongoDB's actual query language, so without them the Mongo support stops at simple reads.
+
+**Notes:** a saved Mongo query with `mongo_pipeline` (a JSON array) instead of `mongo_filter`. `mongotools`
+placeholder substitution already works on any JSON document, so `:name` values bind safely. Refuse the stages that
+write or reach outside: `$out`, `$merge`, and - as today - `$where`, `$function` and `$accumulator`. Treat
+`$lookup` into another collection like `allowed_tables` would (a decision: refuse it for restricted keys, or check
+the collection). `maxTimeMS` for the time limit, as `find()` uses. Pagination by appending `$skip`/`$limit`.
+
+## 79. Other query languages: Elasticsearch/OpenSearch, Cypher
+
+**Status: open; lower priority than #75-#78.**
+
+**Impact:** each reaches a team whose data isn't in a SQL database or MongoDB - search indexes and graph databases.
+
+**Notes:**
+- **Elasticsearch/OpenSearch:** a saved JSON query (the Query DSL) against an index, much like a Mongo filter - the
+  same placeholder substitution. Refuse scripts (`script`, `script_score`) the way `$where` is refused.
+- **Cypher** (Neo4j, Memgraph): has real query parameters, so `:name` maps to `$name` cleanly. Read-only via a
+  read transaction (`session.execute_read`) - enforced by the database, not only a check.
+- Considered and not planned: SPARQL, PromQL and InfluxQL (narrow audiences for this product); **wrapping other HTTP
+  APIs** (an integration platform, a different product); **server-side text-to-SQL** (agents already do that over
+  MCP, with `execute_sql` as the governed path).
+
+## 80. Stored procedures and functions as saved queries
+
+**Status: open.**
+
+**Impact:** many databases keep business logic in procedures and functions (`CALL monthly_report(:month)`,
+`SELECT * FROM report_fn(:month)`). Publishing them as endpoints is a natural fit, and asked for by teams whose
+DBAs already expose data that way.
+
+**Notes:** a function in a `SELECT` already works on most dialects. `CALL`/`EXEC` is refused by the read-only check
+today, since a procedure may write - and the check can't see inside it. Options: allow `CALL` only for a saved query
+whose definition marks it, and only with `allow_writes` (treat every procedure as a write); or a per-connection
+allow-list of procedures known to be read-only. Also: procedures returning several result sets, and `OUT`
+parameters, which the response shape has no place for yet.
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31,
 #32, #33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
