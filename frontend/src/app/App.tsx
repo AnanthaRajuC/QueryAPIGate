@@ -31,6 +31,10 @@ const AuditLogPage = lazy(() =>
   import('@/features/observability/AuditLogPage').then((m) => ({ default: m.AuditLogPage })),
 );
 
+const SettingsPage = lazy(() =>
+  import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
+
 export function App() {
   return (
     <Routes>
@@ -91,6 +95,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <AuditLogPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <Suspense fallback={<Loading />}>
+              <SettingsPage />
             </Suspense>
           }
         />

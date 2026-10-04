@@ -521,6 +521,36 @@ class HistoryAndAuditTests(V1TestCase):
             self.call('get', path, path, 403, headers={'X-API-Key': secret})
 
 
+class SettingsAndMcpTests(V1TestCase):
+    def test_settings_by_section_never_with_a_secret(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_KEY': 'k' * 44, 'QUERYAPIGATE_QUERY_TIMEOUT': '45'}):
+            res = self.call('get', '/api/v1/settings', '/api/v1/settings', 200)
+        sections = res.get_json()['items']
+        self.assertIn('mcp', [s['id'] for s in sections])
+        rows = {r['env']: r for s in sections for r in s['rows']}
+        timeout = rows['QUERYAPIGATE_QUERY_TIMEOUT']
+        self.assertEqual((timeout['source'], timeout['env_value']), ('env', '45'))
+        self.assertIsNone(rows['QUERYAPIGATE_API_KEY']['env_value'])  # a secret: never exported
+        self.assertNotIn('admin-key', res.get_data(as_text=True))
+        self.assertNotIn('k' * 44, res.get_data(as_text=True))
+
+    def test_mcp_status_and_tools(self):
+        self.create('films', publish=True)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '1'}):  # nothing listens on port 1
+            status = self.call('get', '/api/v1/mcp/status', '/api/v1/mcp/status', 200).get_json()
+        self.assertEqual(status, {'reachable': False, 'port': 1})
+        tools = {t['name']: t for t in self.call('get', '/api/v1/mcp/tools', '/api/v1/mcp/tools',
+                                                 200).get_json()['items']}
+        self.assertEqual(tools['execute_sql']['kind'], 'ad-hoc')
+        self.assertEqual((tools['films']['kind'], tools['films']['read_only']), ('saved query', True))
+
+    def test_all_three_are_admin_only(self):
+        secret = self.call('post', '/api/v1/api-keys', '/api/v1/api-keys', 201,
+                           json={'name': 'k', 'connections': ['lite']}).get_json()['secret']
+        for path in ('/api/v1/settings', '/api/v1/mcp/status', '/api/v1/mcp/tools'):
+            self.call('get', path, path, 403, headers={'X-API-Key': secret})
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
@@ -533,6 +563,7 @@ class DeprecationTests(V1TestCase):
         self.assertIn('/api/v1/roles', self.client.get('/roles', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/audit', self.client.get('/audit_log', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/history', self.client.get('/history', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/settings', self.client.get('/settings', headers=ADMIN).headers['Link'])
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

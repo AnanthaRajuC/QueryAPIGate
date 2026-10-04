@@ -353,6 +353,14 @@ secret.
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target` and `changes`. Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 
+### Settings and MCP
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/settings` | The server's effective configuration, as sections (`id`, `title`, `description`, `rows`). Each row has the `env` variable, its displayed `value`, its `source` (`env` or `default`) and `env_value`, the raw value for a `.env` export. A secret's `value` only says whether it is configured, and its `env_value` is always null. Read-only: change settings in the environment and restart. |
+| `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
+| `GET /api/v1/mcp/tools` | What `tools/list` returns for an unrestricted caller: each tool's `name`, `description`, `kind` (`ad-hoc` or `saved query`), `params` and `read_only`. Computed in this process, so it works whether or not `queryapigate mcp` is running. |
+
 ### Deprecated routes
 
 The management routes replaced by an `/api/v1` resource keep working, unchanged. Their responses carry
@@ -366,7 +374,9 @@ deprecated:
 - replaced by `/api/v1/api-keys`: `GET /api_keys`, `POST /api_keys`, `PATCH /api_keys/{name}` and
   `DELETE /api_keys/{name}`;
 - replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`;
-- replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`.
+- replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`;
+- replaced by `/api/v1/settings` and `/api/v1/mcp/...`: `GET /settings`, `GET /settings/mcp_status` and
+  `GET /settings/mcp_tools`.
 
 `GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
 schema of a connection it is granted. Runtime routes

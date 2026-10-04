@@ -4,7 +4,6 @@ import logging
 import math
 import queue
 import re
-import socket
 import threading
 import time
 import uuid
@@ -30,7 +29,6 @@ from . import (
     history,
     jwtauth,
     logging_setup,
-    mcp_server,
     metrics,
     mongotools,
     openapi,
@@ -72,6 +70,9 @@ DEPRECATED_ENDPOINTS = {
                      'api.delete_role_endpoint'), '/api/v1/roles'),
     'api.audit_log_endpoint': '/api/v1/audit',
     'api.history_endpoint': '/api/v1/history',
+    'api.settings_endpoint': '/api/v1/settings',
+    'api.mcp_status_endpoint': '/api/v1/mcp/status',
+    'api.mcp_tools_endpoint': '/api/v1/mcp/tools',
 }  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
@@ -1301,13 +1302,8 @@ def mcp_status_endpoint():
     own latency and failure mode added to every settings load) - the admin UI only calls this on an explicit
     "Check now" click."""
     require_admin()
-    port = config.mcp_port()
-    try:
-        with socket.create_connection(('127.0.0.1', port), timeout=1.5):
-            reachable = True
-    except OSError:
-        reachable = False
-    return jsonify({'reachable': reachable, 'port': port}), 200
+    from .services import mcp as mcp_service
+    return jsonify(mcp_service.status()), 200
 
 
 @bp.route('/settings/mcp_tools', methods=['GET'])
@@ -1317,14 +1313,8 @@ def mcp_tools_endpoint():
     probe of that separate process, so this works whether or not `queryapigate mcp` actually happens to be
     running right now. BACKLOG #54's own still-open "tool-listing panel" note."""
     require_admin()
-    tools = mcp_server.list_tools_for(apikeys.OPEN)
-    return jsonify({'tools': [{
-        'name': t['name'],
-        'description': t['description'],
-        'kind': 'ad-hoc' if t['name'] in mcp_server.RESERVED_TOOL_NAMES else 'saved query',
-        'params': sorted(t['inputSchema'].get('properties', {}).keys()),
-        'read_only': t['readOnlyHint'],
-    } for t in tools]}), 200
+    from .services import mcp as mcp_service
+    return jsonify({'tools': mcp_service.tools()}), 200
 
 
 # --------------------------------------------------------------------------------------

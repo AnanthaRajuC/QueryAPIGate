@@ -677,6 +677,7 @@ Clean up with `docker compose down -v`.
 | `/api_keys/<name>` | PATCH, DELETE | Update / revoke a scoped API key (admin only). |
 | `/audit_log` | GET | Durable record of administrative changes - keys, connections, saved queries (admin only). |
 | `/settings` | GET | The server's own configuration - each setting's effective value and whether it comes from the environment or the default; read-only, secrets never returned (admin only). |
+| `/api/v1/...` | GET, POST, PATCH, DELETE | The versioned Management API: queries, connections, API keys, roles, history, audit, settings and MCP (admin only). It replaces the management routes above, which keep working but are deprecated - see [Management API (v1)](documentation/API.md#management-api-v1). |
 | `/health`, `/docs`, `/openapi.json` | GET | Liveness, Swagger UI, OpenAPI spec. |
 | `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |
 | `/ui` | GET | A small admin UI: manage connections and saved queries, run ad-hoc SQL. |

@@ -2140,8 +2140,8 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: in progress - queries, connections, API keys, roles, history and audit shipped; the other resources are
-open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: in progress - queries, connections, API keys, roles, history, audit, settings and MCP shipped;
+collections and the remaining screens' needs are open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2171,7 +2171,12 @@ reports `keys_created`. Service in `queryapigate/services/access.py`; the grant 
 cursor) and the audit log with filters, `total`, `actions` and `retention`; service in `queryapigate/services/audit.py`.
 `/metrics` stays as it is: it is Prometheus's contract, not a management route.
 
-Remaining resources: collections, settings and MCP. Each arrives with its Console screen.
+**`/api/v1/settings`, `/api/v1/mcp/status` and `/api/v1/mcp/tools` (2026-10-04):** the configuration by section, the
+MCP port check and tool listing; the probe and listing moved to `queryapigate/services/mcp.py`, shared with the legacy
+routes.
+
+Remaining resources: collections (still read through the legacy `/collections` by the Console's API Repository),
+and whatever Home, Caching and the Access map need. Each arrives with its Console screen.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2278,7 +2283,15 @@ History screen of its own - run history lives in a query's History tab (already 
 for its live numbers) and an end-to-end run (the pool poll every 2 s, Refresh, filter, Export, a new change on
 Refresh); Vitest.
 
-Next slice: MCP and Settings (with Home, Caching and the Access map, the remaining classic screens).
+**MCP and Settings slice shipped, at visual parity (2026-10-04):** the Settings screen (every section, Copy as .env,
+the MCP section's Check now and Tools, the Interface preferences) on `/api/v1/settings` and `/api/v1/mcp/*`. The classic
+UI has no MCP screen of its own - MCP lives in Settings - so this slice is both. The Console's preferences now live in
+one store (`src/app/prefs.ts`) that applies a change at once and is shared with `/ui`. Checked by side-by-side
+screenshots (General light and dark, the MCP section after Check now, Interface: all pixel-identical) and an end-to-end
+run (a preference set in the Console reaches the Designer and `/ui`); Vitest.
+
+Next: the last classic screens - Home, Caching, the Access map and Help - then phase 3 (`/ui` redirects to the
+Console).
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

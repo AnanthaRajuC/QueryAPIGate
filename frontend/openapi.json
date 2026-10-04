@@ -688,6 +688,66 @@
         ],
         "type": "object"
       },
+      "McpStatus": {
+        "properties": {
+          "port": {
+            "type": "integer"
+          },
+          "reachable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reachable",
+          "port"
+        ],
+        "type": "object"
+      },
+      "McpToolList": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "ad-hoc",
+                    "saved query"
+                  ],
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "params": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "read_only": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "kind",
+                "params",
+                "read_only"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ParameterRule": {
         "properties": {
           "default": {
@@ -1184,6 +1244,82 @@
         "required": [
           "tables",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "SettingsList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SettingsSection"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "SettingsSection": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "env": {
+                  "description": "The environment variable.",
+                  "type": "string"
+                },
+                "env_value": {
+                  "description": "The raw value, for a .env export; null at the default and always for a secret.",
+                  "nullable": true,
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "env",
+                    "default"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "description": "The effective value; a secret only as \"configured\" or \"enabled\".",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "description",
+                "env",
+                "value",
+                "source",
+                "env_value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "rows"
         ],
         "type": "object"
       },
@@ -2629,6 +2765,126 @@
           }
         },
         "summary": "Every saved query's runs, newest first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/mcp/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Whether the MCP server's port answers (a TCP connect, run only when asked)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/mcp/tools": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpToolList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What tools/list returns for an unrestricted caller",
         "tags": [
           "Management API v1"
         ]
@@ -4305,6 +4561,66 @@
           }
         },
         "summary": "Change some of its grants (keys created from it are not touched)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "The server's effective configuration, by section (read-only)",
         "tags": [
           "Management API v1"
         ]
@@ -7585,6 +7901,7 @@
     },
     "/settings": {
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Settings grouped into sections"
@@ -7619,6 +7936,7 @@
     },
     "/settings/mcp_status": {
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Reachable or not, and the port checked"
@@ -7653,6 +7971,7 @@
     },
     "/settings/mcp_tools": {
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Every MCP tool an admin key would see"

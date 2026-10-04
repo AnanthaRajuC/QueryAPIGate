@@ -14,10 +14,10 @@ Routes here translate HTTP to services/ calls and back; the meaning of each oper
 """
 from flask import Blueprint, jsonify, request
 
-from . import collection_admin, history, schema, store
+from . import collection_admin, config, history, schema, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
-from .services import access, audit, connections, queries
+from .services import access, audit, connections, mcp, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -379,3 +379,26 @@ def list_audit():
     args = request.args
     return jsonify(audit.listing(action=args.get('action'), actor=args.get('actor'), target=args.get('target'),
                                  text=args.get('q'))), 200
+
+
+# --------------------------------------------------------------------------------------
+# Settings and MCP
+# --------------------------------------------------------------------------------------
+
+@bp.route('/settings', methods=['GET'])
+def get_settings():
+    """The server's effective configuration, by section. Read-only: settings are environment variables, changed
+    by restarting the server. A secret is shown only as configured or not, and never in `env_value`."""
+    return jsonify({'items': config.describe_settings()}), 200
+
+
+@bp.route('/mcp/status', methods=['GET'])
+def mcp_status():
+    """Whether something answers on the MCP server's port - a plain TCP connect, run only when asked."""
+    return jsonify(mcp.status()), 200
+
+
+@bp.route('/mcp/tools', methods=['GET'])
+def mcp_tools():
+    """What `tools/list` returns for an unrestricted caller, whether or not the MCP server is running."""
+    return jsonify({'items': mcp.tools()}), 200

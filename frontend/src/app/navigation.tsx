@@ -177,6 +177,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 export const FOOT_ITEMS: NavItem[] = [
   {
     tab: 'settings',
+    path: '/settings',
     group: 'System',
     label: 'Settings',
     icon: svg(

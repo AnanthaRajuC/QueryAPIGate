@@ -190,6 +190,43 @@ SCHEMAS = {
                                                             '(QUERYAPIGATE_AUDIT_LOG_LIMIT).'},
         },
     },
+    'SettingsSection': {
+        'type': 'object', 'required': ['id', 'title', 'description', 'rows'],
+        'properties': {
+            'id': {'type': 'string'}, 'title': {'type': 'string'}, 'description': {'type': 'string'},
+            'rows': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['label', 'description', 'env', 'value', 'source', 'env_value'],
+                'properties': {
+                    'label': {'type': 'string'}, 'description': {'type': 'string'},
+                    'env': {'type': 'string', 'description': 'The environment variable.'},
+                    'value': {'type': 'string', 'description': 'The effective value; a secret only as '
+                                                               '"configured" or "enabled".'},
+                    'source': {'type': 'string', 'enum': ['env', 'default']},
+                    'env_value': {'type': 'string', 'nullable': True,
+                                  'description': 'The raw value, for a .env export; null at the default and '
+                                                 'always for a secret.'},
+                }}},
+        },
+    },
+    'SettingsList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('SettingsSection')}},
+    },
+    'McpStatus': {
+        'type': 'object', 'required': ['reachable', 'port'],
+        'properties': {'reachable': {'type': 'boolean'}, 'port': {'type': 'integer'}},
+    },
+    'McpToolList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': {
+            'type': 'object', 'required': ['name', 'description', 'kind', 'params', 'read_only'],
+            'properties': {
+                'name': {'type': 'string'}, 'description': {'type': 'string'},
+                'kind': {'type': 'string', 'enum': ['ad-hoc', 'saved query']},
+                'params': {'type': 'array', 'items': {'type': 'string'}},
+                'read_only': {'type': 'boolean'},
+            }}}},
+    },
     'Connection': {
         'type': 'object',
         'required': ['name', 'db', 'active', 'host', 'port', 'database', 'user', 'example', 'created_at', 'updated_at',
@@ -462,6 +499,17 @@ PATHS = {
             {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
              'description': 'Matches the time, actor or target.'}]),
+    },
+    '/api/v1/settings': {
+        'get': _op("The server's effective configuration, by section (read-only)",
+                   {'200': _ok(_ref('SettingsList'))}),
+    },
+    '/api/v1/mcp/status': {
+        'get': _op("Whether the MCP server's port answers (a TCP connect, run only when asked)",
+                   {'200': _ok(_ref('McpStatus'))}),
+    },
+    '/api/v1/mcp/tools': {
+        'get': _op('What tools/list returns for an unrestricted caller', {'200': _ok(_ref('McpToolList'))}),
     },
     '/api/v1/api-keys': {
         'get': _op('List API keys (grants, status, expiry, last use, usage - never secrets)',

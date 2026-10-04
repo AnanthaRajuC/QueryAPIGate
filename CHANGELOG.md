@@ -103,6 +103,11 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **The Console's Metrics and Audit log screens** (`/console/metrics`, `/console/audit-log`), at visual parity with
   the classic ones. Metrics has the stat tiles (the two pool tiles live every 2 s), requests by status, queries by
   connection and the per-connection table. Audit log has the action filter, the text filter, Refresh and Export.
+- **Management API: `/api/v1/settings`, `/api/v1/mcp/status` and `/api/v1/mcp/tools`**: the server's configuration
+  by section (secrets never exported), the MCP port check, and the tools an MCP client sees.
+- **The Console's Settings screen** (`/console/settings`), at visual parity with the classic one: every section,
+  Copy as .env, the MCP section's Check now and Tools, and the Interface preferences (theme, table density, default
+  result format). A preference changed in either UI applies to both, and now takes effect in the Console at once.
 
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
@@ -114,6 +119,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - The API key and role routes replaced by `/api/v1/api-keys` and `/api/v1/roles`: `GET`/`POST /api_keys`,
   `PATCH`/`DELETE /api_keys/{name}`, `GET`/`POST /roles` and `PATCH`/`DELETE /roles/{name}`, in the same way.
 - `GET /history` and `GET /audit_log`, replaced by `/api/v1/history` and `/api/v1/audit`, in the same way.
+- `GET /settings`, `GET /settings/mcp_status` and `GET /settings/mcp_tools`, replaced by `/api/v1/settings`,
+  `/api/v1/mcp/status` and `/api/v1/mcp/tools`, in the same way.
 
 ### Fixed
 - **The audit log no longer shows `[object Object]`** for a grant like `{"name": "films", "allow_writes": true}`

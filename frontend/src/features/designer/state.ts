@@ -1,3 +1,5 @@
+import { readPrefs } from '@/app/prefs';
+
 // The API Designer's working state, kept for the life of the page so leaving the screen and coming back finds the
 // query where it was - as the classic UI, which only hides its tab, always did. Not persisted beyond the page.
 
@@ -14,15 +16,7 @@ export interface DesignerState {
   timeout: string;
 }
 
-const PREFS_KEY = 'queryapigate-ui-prefs';
-
-function preferredFormat() {
-  try {
-    return (JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') as { format?: string }).format ?? 'json';
-  } catch {
-    return 'json';
-  }
-}
+const preferredFormat = () => readPrefs().format;
 
 let saved: DesignerState | null = null;
 

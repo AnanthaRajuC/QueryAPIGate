@@ -20,19 +20,13 @@ import {
 import { useAccessDrawers } from '@/features/access/forms';
 
 import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
+import { readPrefs } from '@/app/prefs';
 
 // The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
 // renderHistoryTab, renderCurlTab, renderQueryKeysTab, renderQueryRolesTab, the Access box + flow diagram,
 // renderCacheTab, renderQueryMetricsTab, renderCliTab), reading the Management API instead of the legacy routes.
 
-const PREFS_KEY = 'queryapigate-ui-prefs';
-function preferredFormat() {
-  try {
-    return (JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') as { format?: string }).format ?? 'json';
-  } catch {
-    return 'json';
-  }
-}
+const preferredFormat = () => readPrefs().format;
 
 /** A parameter's declared shape as the classic tables show it: type, constraints (key=value) and description. */
 function declared(rule: ParameterRule | undefined) {
