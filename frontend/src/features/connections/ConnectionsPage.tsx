@@ -340,7 +340,7 @@ function reportError(showError: ReturnType<typeof useFeedback>['showError'], err
 }
 
 /** New / Edit connection (ui.py openConnectionForm): same fields, Load databases…, Test connection. */
-function ConnectionForm({ name }: { name?: string }) {
+export function ConnectionForm({ name }: { name?: string }) {
   const isEdit = Boolean(name);
   const client = useQueryClient();
   const { closeDrawer, showError, toast } = useFeedback();

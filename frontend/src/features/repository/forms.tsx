@@ -41,7 +41,15 @@ function reportError(showError: ReturnType<typeof useFeedback>['showError'], err
 
 // ---- New API / New version ----
 
-export function QueryForm({ base }: { base?: { query: Query; version: QueryVersion; etag: string | null } }) {
+/** New API, or (with `base`) a new version of one. `starter` pre-fills a new one's connection and SQL - the Access
+ * map's "New API on <table>". */
+export function QueryForm({
+  base,
+  starter,
+}: {
+  base?: { query: Query; version: QueryVersion; etag: string | null };
+  starter?: { connection: string; sql?: string };
+}) {
   const navigate = useNavigate();
   const { closeDrawer, showError, toast } = useFeedback();
   const connections = useConnections();
@@ -54,7 +62,7 @@ export function QueryForm({ base }: { base?: { query: Query; version: QueryVersi
 
   const [filename, setFilename] = useState(base?.query.name ?? '');
   const [author, setAuthor] = useState(prefill?.author ?? '');
-  const [connection, setConnection] = useState(prefill?.connection_name ?? '');
+  const [connection, setConnection] = useState(prefill?.connection_name ?? starter?.connection ?? '');
   const [sql, setSql] = useState(
     isMongo0 && prefill?.mongo
       ? JSON.stringify(
@@ -67,7 +75,7 @@ export function QueryForm({ base }: { base?: { query: Query; version: QueryVersi
           null,
           2,
         )
-      : (prefill?.sql ?? ''),
+      : (prefill?.sql ?? starter?.sql ?? ''),
   );
   const [description, setDescription] = useState(prefill?.description ?? '');
   const [collection, setCollection] = useState('');

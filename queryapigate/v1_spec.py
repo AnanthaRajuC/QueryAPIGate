@@ -86,13 +86,15 @@ SCHEMAS = {
             'cache_ttl': {'type': 'integer', 'nullable': True},
             'created_at': _NULLABLE_STRING,
             'last_modified_at': _NULLABLE_STRING,
+            'run_count': {'type': 'integer', 'description': "Runs of this version stored in history - in a "
+                                                            "query's detail only."},
         },
     },
     'QuerySummary': {
         'type': 'object',
         'required': ['name', 'description', 'query_type', 'connection_name', 'collection', 'tags',
                      'published_version', 'latest_version', 'has_draft', 'version_count', 'example', 'endpoint',
-                     'updated_at'],
+                     'updated_at', 'created_at', 'last_used_at', 'cache_ttl'],
         'properties': {
             'name': {'type': 'string'},
             'description': {'type': 'string', 'description': "The published version's, or the newest draft's."},
@@ -107,6 +109,12 @@ SCHEMAS = {
             'example': {'type': 'boolean'},
             'endpoint': {'type': 'string', 'description': 'Where the published version is served, e.g. /q/name.'},
             'updated_at': _NULLABLE_STRING,
+            'created_at': {'type': 'string', 'nullable': True, 'description': 'When its first version was saved.'},
+            'last_used_at': {'type': 'string', 'nullable': True,
+                             'description': 'Its newest stored run, of any version; null if it never ran.'},
+            'cache_ttl': {'type': 'integer', 'nullable': True,
+                          'description': "The published version's (or newest draft's) response cache TTL, "
+                                         'in seconds.'},
         },
     },
     'Query': {
@@ -225,6 +233,32 @@ SCHEMAS = {
                 'kind': {'type': 'string', 'enum': ['ad-hoc', 'saved query']},
                 'params': {'type': 'array', 'items': {'type': 'string'}},
                 'read_only': {'type': 'boolean'},
+            }}}},
+    },
+    'QueryFlow': {
+        'type': 'object', 'required': ['tables', 'joins', 'formatted', 'error'],
+        'properties': {
+            'tables': {'type': 'array', 'items': {'type': 'string'}},
+            'joins': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['left', 'right', 'type', 'on'],
+                'properties': {'left': {'type': 'string'}, 'right': {'type': 'string'},
+                               'type': {'type': 'string', 'description': 'e.g. LEFT JOIN.'},
+                               'on': {'type': 'string', 'description': 'The join condition; empty if none.'}}}},
+            'formatted': _NULLABLE_STRING,
+            'error': {'type': 'string', 'nullable': True, 'description': 'Why it could not be analyzed.'},
+        },
+    },
+    'CacheEntryList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': {
+            'type': 'object', 'required': ['key', 'content_type', 'size_bytes', 'ttl_remaining_s', 'meta'],
+            'properties': {
+                'key': {'type': 'string'}, 'content_type': {'type': 'string'},
+                'size_bytes': {'type': 'integer'}, 'ttl_remaining_s': {'type': 'number'},
+                'meta': {'type': 'object', 'additionalProperties': True,
+                         'description': 'name, version, connection, format and page, when known.',
+                         'properties': {'name': {'type': 'string'}, 'version': {'type': 'integer'},
+                                        'connection': {'type': 'string'}, 'format': {'type': 'string'}}},
             }}}},
     },
     'Connection': {
@@ -452,6 +486,10 @@ PATHS = {
         'post': _op('Add a version (a draft unless publish is true)', {'201': _QUERY, **_PRECONDITION},
                     parameters=[_NAME, _IF_MATCH], body=_ref('QueryVersionInput')),
     },
+    '/api/v1/queries/{name}/versions/{version}/flow': {
+        'get': _op('The tables and joins its SQL touches, and the SQL formatted (best effort)',
+                   {'200': _ok(_ref('QueryFlow'))}, parameters=[_NAME, _VERSION]),
+    },
     '/api/v1/queries/{name}/versions/{version}': {
         'get': _op('Get one version', {'200': _ok(_ref('QueryVersion'))}, parameters=[_NAME, _VERSION]),
         'patch': _op("Change a version's cache_ttl", {'200': _QUERY, **_PRECONDITION},
@@ -499,6 +537,18 @@ PATHS = {
             {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
              'description': 'Matches the time, actor or target.'}]),
+    },
+    '/api/v1/cache/entries': {
+        'get': _op('What is in the response cache now, soonest to expire first', {'200': _ok(_ref('CacheEntryList'))}),
+        'delete': _op('Evict every entry', {'204': {'description': 'Cleared'}}),
+    },
+    '/api/v1/cache/entries/{key}': {
+        'get': _op('The cached body, with its real content type', {'200': {
+            'description': 'The body, exactly as a caller receives it on a hit',
+            'content': {'*/*': {'schema': {'type': 'string', 'format': 'binary'}}}}},
+            parameters=[{'name': 'key', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}]),
+        'delete': _op('Evict one entry', {'204': {'description': 'Evicted'}},
+                      parameters=[{'name': 'key', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}]),
     },
     '/api/v1/settings': {
         'get': _op("The server's effective configuration, by section (read-only)",

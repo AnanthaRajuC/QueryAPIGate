@@ -5,13 +5,13 @@ import { useLocation, useNavigate } from 'react-router';
 import { getApiKey, setApiKey } from '@/auth/apiKey';
 
 import { useAllQueries, useApiKeys, useConnections, useHealth, useRoles } from './data';
-import { FOOT_ITEMS, NAV_GROUPS, openClassic, type NavItem } from './navigation';
+import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 
 // ui.py <aside class="side">, element for element.
 
 export function activeItem(pathname: string): NavItem | undefined {
-  return [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS].find(
-    (i) => i.path && pathname.startsWith(i.path),
+  return [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS].find((i) =>
+    i.path === '/' ? pathname === '/' : pathname.startsWith(i.path),
   );
 }
 
@@ -36,7 +36,7 @@ export function Sidebar() {
   const counts = useCounts();
   const health = useHealth();
 
-  const go = (item: NavItem) => (item.path ? navigate(item.path) : openClassic(item.tab));
+  const go = (item: NavItem) => navigate(item.path);
   const button = (item: NavItem, extraClass?: string) => (
     <button
       key={item.tab}

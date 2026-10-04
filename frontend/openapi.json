@@ -244,6 +244,60 @@
         ],
         "type": "object"
       },
+      "CacheEntryList": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "content_type": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "meta": {
+                  "additionalProperties": true,
+                  "description": "name, version, connection, format and page, when known.",
+                  "properties": {
+                    "connection": {
+                      "type": "string"
+                    },
+                    "format": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "ttl_remaining_s": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "key",
+                "content_type",
+                "size_bytes",
+                "ttl_remaining_s",
+                "meta"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "Connection": {
         "properties": {
           "active": {
@@ -843,6 +897,60 @@
           }
         ]
       },
+      "QueryFlow": {
+        "properties": {
+          "error": {
+            "description": "Why it could not be analyzed.",
+            "nullable": true,
+            "type": "string"
+          },
+          "formatted": {
+            "nullable": true,
+            "type": "string"
+          },
+          "joins": {
+            "items": {
+              "properties": {
+                "left": {
+                  "type": "string"
+                },
+                "on": {
+                  "description": "The join condition; empty if none.",
+                  "type": "string"
+                },
+                "right": {
+                  "type": "string"
+                },
+                "type": {
+                  "description": "e.g. LEFT JOIN.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "left",
+                "right",
+                "type",
+                "on"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables",
+          "joins",
+          "formatted",
+          "error"
+        ],
+        "type": "object"
+      },
       "QueryList": {
         "properties": {
           "items": {
@@ -859,11 +967,21 @@
       },
       "QuerySummary": {
         "properties": {
+          "cache_ttl": {
+            "description": "The published version's (or newest draft's) response cache TTL, in seconds.",
+            "nullable": true,
+            "type": "integer"
+          },
           "collection": {
             "nullable": true,
             "type": "string"
           },
           "connection_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When its first version was saved.",
             "nullable": true,
             "type": "string"
           },
@@ -880,6 +998,11 @@
           },
           "has_draft": {
             "type": "boolean"
+          },
+          "last_used_at": {
+            "description": "Its newest stored run, of any version; null if it never ran.",
+            "nullable": true,
+            "type": "string"
           },
           "latest_version": {
             "type": "integer"
@@ -925,7 +1048,10 @@
           "version_count",
           "example",
           "endpoint",
-          "updated_at"
+          "updated_at",
+          "created_at",
+          "last_used_at",
+          "cache_ttl"
         ],
         "type": "object"
       },
@@ -978,6 +1104,10 @@
               "mongo"
             ],
             "type": "string"
+          },
+          "run_count": {
+            "description": "Runs of this version stored in history - in a query's detail only.",
+            "type": "integer"
           },
           "sql": {
             "nullable": true,
@@ -1916,6 +2046,249 @@
           }
         },
         "summary": "Administrative changes, newest first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/cache/entries": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Cleared"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Evict every entry",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheEntryList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What is in the response cache now, soonest to expire first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/cache/entries/{key}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Evicted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Evict one entry",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The body, exactly as a caller receives it on a hit"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "The cached body, with its real content type",
         "tags": [
           "Management API v1"
         ]
@@ -4157,6 +4530,84 @@
         ]
       }
     },
+    "/api/v1/queries/{name}/versions/{version}/flow": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryFlow"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "The tables and joins its SQL touches, and the SQL formatted (best effort)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
     "/api/v1/roles": {
       "get": {
         "responses": {
@@ -5021,6 +5472,7 @@
     },
     "/cache/entries": {
       "delete": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Cleared"
@@ -5053,6 +5505,7 @@
         ]
       },
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Live entries, soonest-expiring first"
@@ -5087,6 +5540,7 @@
     },
     "/cache/entries/{key}": {
       "delete": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Deleted (also 200 if it was already gone)"
@@ -5119,6 +5573,7 @@
         ]
       },
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "The cached body"

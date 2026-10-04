@@ -53,6 +53,9 @@ export function summary(
     example: false,
     endpoint: `/q/${name}`,
     updated_at: '2026-10-03 10:00:00',
+    created_at: '2026-10-01 10:00:00',
+    last_used_at: null,
+    cache_ttl: null,
     ...extra,
   };
 }
@@ -90,7 +93,12 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       ],
       next_cursor: null,
     }),
-    'GET /query_flow': () => ({ tables: ['film'], joins: [], formatted: null, error: null }),
+    'GET /api/v1/queries/*/versions/*/flow': () => ({
+      tables: ['film'],
+      joins: [],
+      formatted: null,
+      error: null,
+    }),
     'GET /api/v1/api-keys': () => ({
       items: [apiKey('partner', { connections: [], collections: ['catalog'], rate_limit: '60/minute' })],
     }),

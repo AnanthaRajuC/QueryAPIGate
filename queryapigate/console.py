@@ -17,9 +17,11 @@ DIST = Path(__file__).parent / 'console_dist'
 # injects its own, and a few classic components size themselves with style attributes); the one third-party origin
 # is img.shields.io, for the sidebar's GitHub-stars badge - an image, as on /ui.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-       "img-src 'self' data: https://img.shields.io; "
-       "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
-       "form-action 'self'")
+       # any https image: Help > Docs renders the project's markdown, badges and screenshots included
+       "img-src 'self' data: https:; "
+       # Help > Docs reads this project's own markdown from GitHub, at the running version's tag
+       "font-src 'self'; connect-src 'self' https://raw.githubusercontent.com; object-src 'none'; base-uri 'self'; "
+       "frame-ancestors 'none'; form-action 'self'")
 
 NOT_BUILT_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

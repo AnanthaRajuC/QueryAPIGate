@@ -2140,8 +2140,7 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: in progress - queries, connections, API keys, roles, history, audit, settings and MCP shipped;
-collections and the remaining screens' needs are open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: in progress - every resource the Console needs except collections has shipped.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2175,8 +2174,12 @@ cursor) and the audit log with filters, `total`, `actions` and `retention`; serv
 MCP port check and tool listing; the probe and listing moved to `queryapigate/services/mcp.py`, shared with the legacy
 routes.
 
-Remaining resources: collections (still read through the legacy `/collections` by the Console's API Repository),
-and whatever Home, Caching and the Access map need. Each arrives with its Console screen.
+**For the last screens (2026-10-04):** `/api/v1/cache/entries`; `GET /api/v1/queries/{name}/versions/{version}/flow`
+(the Console no longer calls the deprecated `/query_flow`); and `created_at`, `last_used_at`, `cache_ttl` on query
+summaries and `run_count` on a query's versions (one grouped read each).
+
+Remaining: collections and the example APIs - the Console still calls the legacy `/collections` (list, rename,
+Postman export) and `/examples` (the examples strip). Those are what is left of #72 before phase 3.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2219,7 +2222,7 @@ legacy names.
 
 ## 73. QueryAPIGate Console: a React/TypeScript frontend replacing `/ui`
 
-**Status: phase 1 (foundations) shipped; phases 2-4 open.** Decided in
+**Status: phases 1 and 2 shipped - the Console has every classic screen, at visual parity; phases 3-4 open.** Decided in
 [ADR 0001](documentation/adr/0001-console-and-management-api.md). Additive; ships as experimental (#64) until it
 reaches parity with `/ui`.
 
@@ -2290,8 +2293,19 @@ one store (`src/app/prefs.ts`) that applies a change at once and is shared with 
 screenshots (General light and dark, the MCP section after Check now, Interface: all pixel-identical) and an end-to-end
 run (a preference set in the Console reaches the Designer and `/ui`); Vitest.
 
-Next: the last classic screens - Home, Caching, the Access map and Help - then phase 3 (`/ui` redirects to the
-Console).
+**Home, Caching, Access map and Help shipped, at visual parity (2026-10-04) - phase 2 is complete.** Home is the
+Console's start screen and stays live from `GET /events` (with a 5 s poll if the stream can't be reached); the Access
+map has the table drill-down, filters, search, sorting and the query details drawer; Help renders the docs with
+marked and DOMPurify bundled into its own chunk (no CDN script; the CSP allows fetching from raw.githubusercontent.com
+and https images). Every sidebar item is now a Console route; nothing links to `/ui` any more. Found on the way: `/ui`'s
+Home showed the five *oldest* audit entries as Recent activity (fixed in both), and the Access map's details drawer
+shows the publishing state where `/ui` showed a stored `status` that is always "active" (kept deliberately). Checked
+by side-by-side screenshots of all four screens in light and dark (Help identical; the others differ only in live
+numbers and TTLs), both drawers, and an end-to-end run (a run elsewhere appears on Home live; table drill-down; View
+in Access map; evicting an entry; reading a doc); Vitest.
+
+Next: phase 3 - `/ui` redirects to `/console`, and the Console leaves experimental. Before that, the collections and
+examples resources (#72), so the Console calls no legacy management route.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

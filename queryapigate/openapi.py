@@ -636,7 +636,8 @@ _DEPRECATED_OPERATIONS = (('/list_files', 'get'), ('/view_file_content', 'get'),
                           ('/api_keys/{name}', 'delete'), ('/roles', 'get'), ('/roles', 'post'),
                           ('/roles/{name}', 'patch'), ('/roles/{name}', 'delete'), ('/audit_log', 'get'),
                           ('/history', 'get'), ('/settings', 'get'), ('/settings/mcp_status', 'get'),
-                          ('/settings/mcp_tools', 'get'))
+                          ('/settings/mcp_tools', 'get'), ('/cache/entries', 'get'), ('/cache/entries', 'delete'),
+                          ('/cache/entries/{key}', 'get'), ('/cache/entries/{key}', 'delete'))
 
 
 DOCS_HTML = """<!doctype html>

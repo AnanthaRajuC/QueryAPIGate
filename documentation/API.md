@@ -285,9 +285,9 @@ full in `/openapi.json`, under the "Management API v1" tag.
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/v1/queries` | Every saved query's summary. Filters: `search` (name, description or tag), `collection`, `connection`, `status` (`published`, `unpublished`, `draft`). |
+| `GET /api/v1/queries` | Every saved query's summary, including `created_at` (its first version), `last_used_at` (its newest stored run) and `cache_ttl`. Filters: `search` (name, description or tag), `collection`, `connection`, `status` (`published`, `unpublished`, `draft`). |
 | `POST /api/v1/queries` | Create a query with its first version: `name`, `description`, `sql`, `connection_name`, `parameters`, `tags`, `cache_ttl`, `collection`. A draft unless `"publish": true`. 409 `query_exists` if the name is taken. |
-| `GET /api/v1/queries/{name}` | The query with every version, each with its `status`: `published`, `draft` or `previous`. |
+| `GET /api/v1/queries/{name}` | The query with every version, each with its `status` (`published`, `draft` or `previous`) and `run_count` (its runs stored in history). |
 | `PATCH /api/v1/queries/{name}` | Change its `collection` (`null` removes it). |
 | `DELETE /api/v1/queries/{name}` | Delete it and every version. |
 | `POST /api/v1/queries/{name}/versions` | Add a version: a draft unless `"publish": true`. The published version keeps serving. |
@@ -296,6 +296,7 @@ full in `/openapi.json`, under the "Management API v1" tag.
 | `DELETE /api/v1/queries/{name}/versions/{n}` | Delete one version; see [Drafts and publishing](#drafts-and-publishing) for what happens to the published one. |
 | `POST /api/v1/queries/{name}/publish` | `{"version": n}`: publish a draft, or an older version to roll back. |
 | `POST /api/v1/queries/{name}/unpublish` | Stop serving it; every version is kept. |
+| `GET /api/v1/queries/{name}/versions/{version}/flow` | The tables and joins the version's SQL touches, and the SQL formatted. Best effort: a query that can't be analyzed (Mongo, an unsupported dialect, a parse failure) has an `error` and no tables. |
 | `GET /api/v1/queries/{name}/history` | Its runs, newest first. Paged with `limit` and `cursor` (`next_cursor` in the response); filters `version`, `status`, `key`, `since`, `until`. |
 | `POST /api/v1/queries/validate` | Check a definition without saving it. Returns every problem found, the parameters the SQL uses and the tables it reads. |
 
@@ -353,6 +354,17 @@ secret.
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target` and `changes`. Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 
+### The response cache
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/cache/entries` | What is cached right now (in-process or Redis), soonest to expire first: each entry's `key`, `content_type`, `size_bytes`, `ttl_remaining_s` and `meta` (query `name`, `version`, `connection`, `format`). Never the body. |
+| `DELETE /api/v1/cache/entries` | Evict everything: the next call to each query runs it for real. |
+| `GET /api/v1/cache/entries/{key}` | The cached body, with its real content type - what a caller receives on a hit. 404 `cache_entry_not_found` once it has expired or been evicted. |
+| `DELETE /api/v1/cache/entries/{key}` | Evict one entry early. |
+
+Clearing the cache is housekeeping, not a change, so it is not audited.
+
 ### Settings and MCP
 
 | Method and path | What it does |
@@ -376,7 +388,10 @@ deprecated:
 - replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`;
 - replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`;
 - replaced by `/api/v1/settings` and `/api/v1/mcp/...`: `GET /settings`, `GET /settings/mcp_status` and
-  `GET /settings/mcp_tools`.
+  `GET /settings/mcp_tools`;
+- replaced by `/api/v1/cache/entries`: `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`.
+
+(`GET /query_flow`'s successor is `GET /api/v1/queries/{name}/versions/{version}/flow`.)
 
 `GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
 schema of a connection it is granted. Runtime routes

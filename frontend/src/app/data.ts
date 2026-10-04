@@ -65,3 +65,12 @@ export function useCollections() {
     retry: false,
   });
 }
+
+/** The server's configuration by section (admin only) - Settings, and Caching's backend tile. */
+export function useSettings() {
+  return useQuery({
+    queryKey: ['settings'],
+    queryFn: async () => unwrap(await api.GET('/api/v1/settings')).items,
+    retry: false,
+  });
+}

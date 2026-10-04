@@ -73,6 +73,8 @@ DEPRECATED_ENDPOINTS = {
     'api.settings_endpoint': '/api/v1/settings',
     'api.mcp_status_endpoint': '/api/v1/mcp/status',
     'api.mcp_tools_endpoint': '/api/v1/mcp/tools',
+    **dict.fromkeys(('api.cache_entries', 'api.clear_cache_entries', 'api.cache_entry_body',
+                     'api.delete_cache_entry'), '/api/v1/cache/entries'),
 }  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',

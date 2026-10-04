@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { api, unwrap, type Schemas } from '@/api/client';
+import { useSettings } from '@/app/data';
 import { copyText, Loading, useFeedback } from '@/app/feedback';
 import { setPref, usePrefValues, type Prefs } from '@/app/prefs';
 
@@ -26,11 +27,7 @@ const PREF_ROWS: [keyof Prefs, string, string, string[]][] = [
 
 export function SettingsPage() {
   const { toast } = useFeedback();
-  const settings = useQuery({
-    queryKey: ['settings'],
-    queryFn: async () => unwrap(await api.GET('/api/v1/settings')).items,
-    retry: false,
-  });
+  const settings = useSettings();
   const [section, setSectionState] = useState(lastSection());
   const setSection = (id: string) => {
     rememberSection(id);

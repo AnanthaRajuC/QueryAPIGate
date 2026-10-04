@@ -200,6 +200,18 @@ Until step 3, the Console ships marked experimental, alongside the existing UI.
   - Header buttons wrapped differently with the extra Unpublish button, so they now wrap as one group.
   - CodeMirror's fold gutter made the editor wider than the classic one, so it now uses a leaner setup without it.
 
+## Findings from the last slices (2026-10-04)
+
+- **Parity needs the same data, not only the same markup.** Several classic screens computed things from data the
+  v1 API didn't expose (a query's first save, last run, cache TTL and per-version run counts; the tables a query
+  touches). Each was added to the Management API as a field or resource rather than reconstructed client-side.
+- **Side-by-side screenshots also found classic bugs**: an audit change showing `[object Object]`, and Home's Recent
+  activity showing the oldest entries. They were fixed in both UIs, so parity still holds.
+- **One deliberate difference:** a query's "status" in the Access map's details is its publishing state; `/ui` shows
+  a stored field that is always "active".
+- **Third-party content keeps the CSP strict.** Help's markdown renderer and sanitizer are bundled (lazily, into
+  Help's own chunk) instead of loaded from a CDN, so `script-src` stays `'self'`.
+
 ## Open questions
 
 - Console authentication: keep the admin API key in session storage (as `/ui` does today), or add a proper

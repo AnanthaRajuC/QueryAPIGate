@@ -1,10 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router';
 
 import { timedFetch } from '@/api/client';
 import type { ApiKeyEntry, RoleEntry } from '@/app/data';
 import { useConnections } from '@/app/data';
 import { copyText, Empty, Field, Loading, useFeedback } from '@/app/feedback';
-import { openClassic } from '@/app/navigation';
+import { readPrefs } from '@/app/prefs';
 import { CodeBox } from '@/components/CodeBox';
 import { readResult, Results, type ResultData } from '@/components/Results';
 import { formatSql, PARSEABLE_DIALECTS, shQuote } from '@/lib/sql';
@@ -18,9 +19,9 @@ import {
   type QueryVersion,
 } from './api';
 import { useAccessDrawers } from '@/features/access/forms';
+import { presetQuery } from '@/features/accessmap/state';
 
 import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
-import { readPrefs } from '@/app/prefs';
 
 // The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
 // renderHistoryTab, renderCurlTab, renderQueryKeysTab, renderQueryRolesTab, the Access box + flow diagram,
@@ -619,6 +620,7 @@ export function RolesTab({
 // ---- Access ----
 
 export function AccessTab({ query, v, reach }: { query: Query; v: QueryVersion; reach: Reach }) {
+  const navigate = useNavigate();
   return (
     <>
       <div className="access-box">
@@ -636,7 +638,10 @@ export function AccessTab({ query, v, reach }: { query: Query; v: QueryVersion; 
             type="button"
             className="btn sm ghost"
             style={{ marginLeft: 'auto' }}
-            onClick={() => openClassic('accessmap')}
+            onClick={() => {
+              presetQuery(query.name);
+              navigate('/access-map');
+            }}
           >
             View in Access map
           </button>

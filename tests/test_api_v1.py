@@ -551,6 +551,47 @@ class SettingsAndMcpTests(V1TestCase):
             self.call('get', path, path, 403, headers={'X-API-Key': secret})
 
 
+class SummaryFlowAndCacheTests(V1TestCase):
+    def test_a_summary_says_when_it_was_created_and_last_used_and_its_cache_ttl(self):
+        self.create('films', publish=True, cache_ttl=30)
+        item = self.call('get', '/api/v1/queries', '/api/v1/queries', 200).get_json()['items'][0]
+        self.assertIsNotNone(item['created_at'])
+        self.assertIsNone(item['last_used_at'])
+        self.assertEqual(item['cache_ttl'], 30)
+        self.client.get('/q/films', headers=ADMIN)
+        item = self.call('get', '/api/v1/queries', '/api/v1/queries', 200).get_json()['items'][0]
+        self.assertIsNotNone(item['last_used_at'])
+        one = self.call('get', '/api/v1/queries/films', '/api/v1/queries/{name}', 200).get_json()
+        self.assertEqual(one['last_used_at'], item['last_used_at'])
+        self.assertEqual([v['run_count'] for v in one['versions']], [1])
+
+    def test_flow_names_the_tables_a_version_touches(self):
+        self.create('films')
+        flow = self.call('get', '/api/v1/queries/films/versions/1/flow',
+                         '/api/v1/queries/{name}/versions/{version}/flow', 200).get_json()
+        self.assertEqual(flow['tables'], ['film'])
+        self.assertIsNone(flow['error'])
+        res = self.call('get', '/api/v1/queries/films/versions/9/flow',
+                        '/api/v1/queries/{name}/versions/{version}/flow', 404)
+        self.assertEqual(res.get_json()['code'], 'version_not_found')
+
+    def test_cache_entries_list_read_evict_and_clear(self):
+        self.create('films', publish=True, cache_ttl=60)
+        live = self.client.get('/q/films', headers=ADMIN)
+        items = self.call('get', '/api/v1/cache/entries', '/api/v1/cache/entries', 200).get_json()['items']
+        self.assertEqual([(e['meta']['name'], e['meta']['version']) for e in items], [('films', 1)])
+        key = items[0]['key']
+        body = self.call('get', f'/api/v1/cache/entries/{key}', '/api/v1/cache/entries/{key}', 200)
+        self.assertEqual((body.content_type, body.get_data()), (live.content_type, live.get_data()))
+        self.call('delete', f'/api/v1/cache/entries/{key}', '/api/v1/cache/entries/{key}', 204)
+        res = self.call('get', f'/api/v1/cache/entries/{key}', '/api/v1/cache/entries/{key}', 404)
+        self.assertEqual(res.get_json()['code'], 'cache_entry_not_found')
+        self.client.get('/q/films', headers=ADMIN)
+        self.call('delete', '/api/v1/cache/entries', '/api/v1/cache/entries', 204)
+        after = self.call('get', '/api/v1/cache/entries', '/api/v1/cache/entries', 200).get_json()
+        self.assertEqual(after['items'], [])
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
@@ -564,6 +605,7 @@ class DeprecationTests(V1TestCase):
         self.assertIn('/api/v1/audit', self.client.get('/audit_log', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/history', self.client.get('/history', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/settings', self.client.get('/settings', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/cache/entries', self.client.get('/cache/entries', headers=ADMIN).headers['Link'])
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

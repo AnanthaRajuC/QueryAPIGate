@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
 import { useApiKeys, useRoles } from '@/app/data';
@@ -74,8 +74,10 @@ export function QueryDetail({ name }: { name: string | undefined }) {
 
 function Detail({ query, etag }: { query: Query; etag: string | null }) {
   const latest = query.versions[query.versions.length - 1]!;
-  const [versionNumber, setVersionNumber] = useState(latest.version);
-  const [tab, setTab] = useState<TabId>('run');
+  // Home's request rows open a query on its History tab, at the version that ran
+  const opened = useLocation().state as { tab?: TabId; version?: number } | null;
+  const [versionNumber, setVersionNumber] = useState(opened?.version ?? latest.version);
+  const [tab, setTab] = useState<TabId>(opened?.tab ?? 'run');
   // A new version saved from the drawer becomes the latest: follow it, as the classic view does.
   const [seenLatest, setSeenLatest] = useState(latest.version);
   if (seenLatest !== latest.version) {

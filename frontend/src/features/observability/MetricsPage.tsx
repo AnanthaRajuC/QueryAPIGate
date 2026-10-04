@@ -1,45 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
-import { apiFetch } from '@/api/client';
 import { useConnections } from '@/app/data';
 import { Loading } from '@/app/feedback';
-import { metricGauge, metricGroupSum, metricSum, parseMetricsText, type Series } from '@/lib/metrics';
+import { useMetricsSeries, usePoolPoll } from '@/app/metrics';
+import { StatTile } from '@/components/StatTile';
+import { metricGauge, metricGroupSum, metricSum } from '@/lib/metrics';
 
 // The classic Metrics screen (ui.py #tab-metrics, loadMetrics, renderMetrics, pollPoolStats): live totals since
 // this process started, from /metrics. The two pool tiles refresh every 2s; the rest on Refresh.
-
-async function fetchSeries(): Promise<Series[]> {
-  const response = await apiFetch('/metrics');
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return parseMetricsText(await response.text());
-}
-
-function StatTile({
-  label,
-  value,
-  warn,
-  id,
-  live,
-}: {
-  label: string;
-  value: string | number;
-  warn?: boolean;
-  id?: string;
-  live?: boolean;
-}) {
-  return (
-    <div className="stat-tile">
-      <div className="label">
-        {label}
-        {live ? <span className="live-dot" title="Updates every 2s" /> : null}
-      </div>
-      <div className={'value' + (warn ? ' warn' : '')} id={id}>
-        {String(value)}
-      </div>
-    </div>
-  );
-}
 
 /** One card of horizontal bars: label, a track filled in proportion to the largest value, and the number. */
 function BarCard({
@@ -95,20 +63,8 @@ function useAge(at: number) {
 }
 
 export function MetricsPage() {
-  const metrics = useQuery({
-    queryKey: ['metrics'],
-    queryFn: fetchSeries,
-    retry: false,
-    staleTime: Infinity,
-  });
-  // just the two pool gauges, polled - the rest stays as loaded until Refresh
-  const pool = useQuery({
-    queryKey: ['metrics', 'pool'],
-    queryFn: fetchSeries,
-    retry: false,
-    refetchInterval: 2000,
-    enabled: metrics.isSuccess,
-  });
+  const metrics = useMetricsSeries();
+  const pool = usePoolPoll(metrics.isSuccess); // just the two pool gauges - the rest stays as loaded until Refresh
   const connections = useConnections();
   const age = useAge(metrics.dataUpdatedAt);
 

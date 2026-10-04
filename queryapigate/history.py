@@ -333,3 +333,23 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
                for row in rows[:limit]]
     last = rows[limit - 1] if len(rows) > limit else None
     return entries, (_encode_cursor(last['executed_at'], last['rowid']) if last is not None else None)
+
+
+def last_run_times(name=None):
+    """{query name: when it last ran} over every stored run - for one query, or (name None) for all of them in
+    one grouped read rather than one per query."""
+    flush()
+    where, params = ('WHERE query_name = ?', (name,)) if name is not None else ('', ())
+    rows = db.connection().execute(
+        f'SELECT query_name, MAX(executed_at) AS last FROM execution_history {where} GROUP BY query_name',
+        params).fetchall()
+    return {row['query_name']: row['last'] for row in rows}
+
+
+def run_counts(name):
+    """{version: how many runs are stored} for one query."""
+    flush()
+    rows = db.connection().execute(
+        'SELECT version, COUNT(*) AS n FROM execution_history WHERE query_name = ? GROUP BY version',
+        (name,)).fetchall()
+    return {row['version']: row['n'] for row in rows}

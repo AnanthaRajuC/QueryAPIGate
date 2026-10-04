@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api, apiJson, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
+import { api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
 
 export type Query = Schemas['Query'];
 export type QueryVersion = Schemas['QueryVersion'];
@@ -42,18 +42,19 @@ export function useVersionHistory(name: string, version: number) {
   });
 }
 
-export interface QueryFlow {
-  tables: string[];
-  joins: { left: string; right: string; type: string; on?: string }[];
-  formatted: string | null;
-  error?: string | null;
+export type QueryFlow = Schemas['QueryFlow'];
+
+/** Tables and joins a version's SQL touches, and sqlglot's formatting of it. */
+export async function fetchFlow(name: string, version: number): Promise<QueryFlow> {
+  return unwrap(
+    await api.GET('/api/v1/queries/{name}/versions/{version}/flow', { params: { path: { name, version } } }),
+  );
 }
 
-/** Tables and joins the SQL touches, and sqlglot's formatting of it (legacy GET /query_flow, until #72 adds it). */
 export function useQueryFlow(name: string, version: number, enabled = true) {
   return useQuery({
     queryKey: ['queries', 'flow', name, version],
-    queryFn: () => apiJson<QueryFlow>(`/query_flow?filename=${encodeURIComponent(name)}&version=${version}`),
+    queryFn: () => fetchFlow(name, version),
     enabled,
     staleTime: Infinity,
   });

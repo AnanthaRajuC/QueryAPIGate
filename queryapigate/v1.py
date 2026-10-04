@@ -12,9 +12,9 @@ each one replaces keep working, marked deprecated. Conventions, the same on ever
 
 Routes here translate HTTP to services/ calls and back; the meaning of each operation lives in the service.
 """
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
-from . import collection_admin, config, history, schema, store
+from . import collection_admin, config, history, schema, sqlflow, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
 from .services import access, audit, connections, mcp, queries
@@ -116,6 +116,22 @@ def get_version(name, version):
     if not isinstance(data, dict):
         raise ApiError(f'Version {version} not found', 404, code='version_not_found')
     return jsonify(queries.to_version(content, version, data)), 200
+
+
+@bp.route('/queries/<name>/versions/<int:version>/flow', methods=['GET'])
+def version_flow(name, version):
+    """The tables and joins the version's SQL touches, and its SQL formatted - best effort (see sqlflow.py): a
+    query that can't be analyzed (a Mongo query, an unsupported dialect, a parse failure) has an `error` and no
+    tables, rather than failing."""
+    name, content = queries.load(name)
+    data = content.get(str(version))
+    if not isinstance(data, dict):
+        raise ApiError(f'Version {version} not found', 404, code='version_not_found')
+    if data.get('query_type') == 'mongo' or not isinstance(data.get('sql_query'), str):
+        return jsonify({'tables': [], 'joins': [], 'formatted': None,
+                        'error': "SQL analysis isn't available for this query"}), 200
+    connection = store.read_connections().get(data.get('connection_name') or '')
+    return jsonify(sqlflow.extract_flow(data['sql_query'], connection['db'] if connection else None)), 200
 
 
 @bp.route('/queries/<name>/versions/<int:version>', methods=['PATCH'])
@@ -402,3 +418,45 @@ def mcp_status():
 def mcp_tools():
     """What `tools/list` returns for an unrestricted caller, whether or not the MCP server is running."""
     return jsonify({'items': mcp.tools()}), 200
+
+
+# --------------------------------------------------------------------------------------
+# The response cache
+# --------------------------------------------------------------------------------------
+
+def _cache():
+    return current_app.extensions['queryapigate_cache']
+
+
+@bp.route('/cache/entries', methods=['GET'])
+def list_cache_entries():
+    """What is cached right now (in-process or Redis), soonest to expire first - each entry's query, version,
+    connection, format, content type, size and time left; never the body."""
+    entries = _cache().list_entries()
+    entries.sort(key=lambda e: e['ttl_remaining_s'])
+    return jsonify({'items': entries}), 200
+
+
+@bp.route('/cache/entries', methods=['DELETE'])
+def clear_cache():
+    """Evict everything: the next call to each query runs it for real. Not audited - housekeeping, not a change."""
+    _cache().clear()
+    return '', 204
+
+
+@bp.route('/cache/entries/<key>', methods=['GET'])
+def get_cache_entry(key):
+    """The cached body itself, with its real content type - what a caller receives on a hit."""
+    hit = _cache().get_body(key)
+    if hit is None:
+        raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404,
+                       code='cache_entry_not_found')
+    body, content_type = hit
+    return Response(body, content_type=content_type)
+
+
+@bp.route('/cache/entries/<key>', methods=['DELETE'])
+def delete_cache_entry(key):
+    """Evict one entry early."""
+    _cache().delete(key)
+    return '', 204

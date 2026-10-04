@@ -2820,7 +2820,7 @@ function renderHome() {
 
   var activityBox = clear($('home-activity'));
   activityBox.appendChild(h('h2', { text: 'Recent activity' }));
-  var recent = auditLogCache.slice(-5).reverse();
+  var recent = auditLogCache.slice(0, 5); // newest first already (loadAuditLog() reads /audit_log, newest first)
   if (!recent.length) {
     activityBox.appendChild(h('div', { className: 'empty' }, h('span', { text: 'No administrative changes recorded yet.' })));
   } else {

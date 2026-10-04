@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { useFeedback, copyText } from '@/app/feedback';
 
@@ -117,12 +117,16 @@ export function Results({
   onPageSize,
   curl,
   panelProps,
+  layout = 'panel',
 }: {
   result: ResultData | null;
   running: boolean;
   filename: string;
   onPage: (page: number) => void;
   onPageSize: (size: number) => void;
+  /** 'drawer': a stored response shown as-is (the Caching screen's cache entry) - the status bar above the results
+   * panel, with no pager and no timing, as ui.py renderResponse() lays it out when given neither. */
+  layout?: 'panel' | 'drawer';
   /** An ad-hoc run's equivalent curl command - adds "Copy as curl" (ui.py asCurl). */
   curl?: string;
   /** id/className for the panel, where a screen's own CSS targets it (the API Designer's #run-results-panel). */
@@ -131,6 +135,30 @@ export function Results({
   const { toast } = useFeedback();
   const [showHeaders, setShowHeaders] = useState(false);
   const [showChart, setShowChart] = useState(false);
+  const drawer = layout === 'drawer';
+  const frame = (bar: ReactNode, body: ReactNode) =>
+    drawer ? (
+      <>
+        <div className="resbar">{bar}</div>
+        <div className="panel results">
+          <div className="res-body">{body}</div>
+        </div>
+      </>
+    ) : (
+      <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
+        <div className="resbar">{bar}</div>
+        <div className="res-body">{body}</div>
+      </div>
+    );
+  if (drawer && (running || !result)) return frame(null, null);
+  if (drawer && result?.error)
+    return frame(
+      null,
+      <div className="res-note err">
+        <span className="eb-code">{result.status}</span>
+        {result.error}
+      </div>,
+    );
   if (running) {
     return (
       <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
@@ -170,25 +198,25 @@ export function Results({
   const payload = rows ? JSON.stringify(rows, null, 2) : (result.text ?? null);
   const offset = (result.page - 1) * result.size;
   const base = `${filename}${result.page > 1 ? '-p' + result.page : ''}`;
-  return (
-    <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
-      <div className="resbar">
-        <span className="stat">
-          <span>
-            <b className="stat-ok">{result.status}</b>
-            {result.statusText ? ' ' + result.statusText : ''}
-          </span>
-          {rows ? (
-            <span>
-              <b>{rows.length}</b>
-              {rows.length === 1 ? ' row' : ' rows'}
-            </span>
-          ) : null}
-          {rows && rows.length ? <span>{`rows ${offset + 1}–${offset + rows.length}`}</span> : null}
-          <span>{result.format}</span>
-          <span>{result.elapsed} ms</span>
+  return frame(
+    <>
+      <span className="stat">
+        <span>
+          <b className="stat-ok">{result.status}</b>
+          {result.statusText ? ' ' + result.statusText : ''}
         </span>
-        <span className="spacer" />
+        {rows ? (
+          <span>
+            <b>{rows.length}</b>
+            {rows.length === 1 ? ' row' : ' rows'}
+          </span>
+        ) : null}
+        {rows && rows.length ? <span>{`rows ${offset + 1}–${offset + rows.length}`}</span> : null}
+        <span>{result.format}</span>
+        {drawer ? null : <span>{result.elapsed} ms</span>}
+      </span>
+      <span className="spacer" />
+      {drawer ? null : (
         <Pager
           page={result.page}
           size={result.size}
@@ -196,78 +224,77 @@ export function Results({
           onPage={onPage}
           onPageSize={onPageSize}
         />
-        <button type="button" className="btn sm ghost" onClick={() => setShowHeaders((s) => !s)}>
-          Headers
+      )}
+      <button type="button" className="btn sm ghost" onClick={() => setShowHeaders((s) => !s)}>
+        Headers
+      </button>
+      {payload !== null && (
+        <>
+          <button type="button" className="btn sm ghost" onClick={() => copyText(payload, toast)}>
+            Copy
+          </button>
+          <button
+            type="button"
+            className="btn sm ghost"
+            onClick={() =>
+              download(
+                new Blob([payload], { type: result.contentType || 'text/plain' }),
+                `${base}.${EXT[result.format] || 'txt'}`,
+              )
+            }
+          >
+            Download
+          </button>
+        </>
+      )}
+      {rows && (
+        <button type="button" className="btn sm ghost" onClick={() => copyText(toTsv(rows), toast)}>
+          Copy as TSV
         </button>
-        {payload !== null && (
-          <>
-            <button type="button" className="btn sm ghost" onClick={() => copyText(payload, toast)}>
-              Copy
-            </button>
-            <button
-              type="button"
-              className="btn sm ghost"
-              onClick={() =>
-                download(
-                  new Blob([payload], { type: result.contentType || 'text/plain' }),
-                  `${base}.${EXT[result.format] || 'txt'}`,
-                )
-              }
-            >
-              Download
-            </button>
-          </>
-        )}
-        {rows && (
-          <button type="button" className="btn sm ghost" onClick={() => copyText(toTsv(rows), toast)}>
-            Copy as TSV
+      )}
+      {curl && (
+        <button type="button" className="btn sm ghost" onClick={() => copyText(curl, toast)}>
+          Copy as curl
+        </button>
+      )}
+      {rows && rows.length > 0 && numericColumns(rows, columnsOf(rows)).length > 0 && (
+        <button type="button" className="btn sm ghost" onClick={() => setShowChart((s) => !s)}>
+          Chart
+        </button>
+      )}
+    </>,
+    <>
+      {rows ? (
+        <RowsTable rows={rows} offset={offset} />
+      ) : result.text !== undefined ? (
+        <pre className="res-pre">{result.text}</pre>
+      ) : result.blob ? (
+        <div className="res-note">
+          Downloaded <code>{`${base}.${EXT[result.format] || 'bin'}`}</code> (
+          {result.blob.size < 1024 ? `${result.blob.size} B` : `${(result.blob.size / 1024).toFixed(1)} KB`})
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => download(result.blob!, `${base}.${EXT[result.format] || 'bin'}`)}
+          >
+            Download again
           </button>
-        )}
-        {curl && (
-          <button type="button" className="btn sm ghost" onClick={() => copyText(curl, toast)}>
-            Copy as curl
-          </button>
-        )}
-        {rows && rows.length > 0 && numericColumns(rows, columnsOf(rows)).length > 0 && (
-          <button type="button" className="btn sm ghost" onClick={() => setShowChart((s) => !s)}>
-            Chart
-          </button>
-        )}
-      </div>
-      <div className="res-body">
-        {rows ? (
-          <RowsTable rows={rows} offset={offset} />
-        ) : result.text !== undefined ? (
-          <pre className="res-pre">{result.text}</pre>
-        ) : result.blob ? (
-          <div className="res-note">
-            Downloaded <code>{`${base}.${EXT[result.format] || 'bin'}`}</code> (
-            {result.blob.size < 1024 ? `${result.blob.size} B` : `${(result.blob.size / 1024).toFixed(1)} KB`}
-            )
-            <button
-              type="button"
-              className="btn sm"
-              onClick={() => download(result.blob!, `${base}.${EXT[result.format] || 'bin'}`)}
-            >
-              Download again
-            </button>
-          </div>
-        ) : null}
-        {showChart && rows && rows.length > 0 && <ChartPanel rows={rows} cols={columnsOf(rows)} />}
-        <div className="panel headers-panel" hidden={!showHeaders}>
-          <table className="grid">
-            <tbody>
-              {result.headers.map(([k, v]) => (
-                <tr key={k}>
-                  <td className="mono dim">{k}</td>
-                  <td className="mono">{v}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
+      ) : null}
+      {showChart && rows && rows.length > 0 && <ChartPanel rows={rows} cols={columnsOf(rows)} />}
+      <div className="panel headers-panel" hidden={!showHeaders}>
+        <table className="grid">
+          <tbody>
+            {result.headers.map(([k, v]) => (
+              <tr key={k}>
+                <td className="mono dim">{k}</td>
+                <td className="mono">{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </div>
+    </>,
   );
 }
 

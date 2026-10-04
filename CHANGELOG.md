@@ -22,12 +22,11 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
-- **QueryAPIGate Console (experimental), at `/console`.** The start of the new web UI that will replace `/ui` one
-  screen at a time ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript
-  in `frontend/`, it is a client of the public JSON API only, and looks exactly like `/ui`: the same stylesheet,
-  sidebar, header, search and API key panel (the key is shared with `/ui` and `/docs` in the same browser tab).
-  Its first rebuilt screen is the API Repository (below).
-  Every other screen links straight to the matching tab of `/ui`, which is unchanged. The wheel and the Docker image
+- **QueryAPIGate Console (experimental), at `/console`.** The new web UI that will replace `/ui`
+  ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript in `frontend/`,
+  it is a client of the public JSON API only, and looks exactly like `/ui`: the same stylesheet, sidebar, header,
+  search and API key panel (the key is shared with `/ui` and `/docs` in the same browser tab). It has every screen
+  `/ui` has (below); `/ui` itself is unchanged. The wheel and the Docker image
   include the built Console, so running it needs no Node.js; a source checkout without a build shows how to build it.
   The Console is served with a strict Content-Security-Policy, and loading its static files doesn't count toward
   `QUERYAPIGATE_RATE_LIMIT`.
@@ -60,8 +59,7 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   Drafts and publishing appear in the classic style: a Published / Draft / Previous pill; Publish, Roll back to and
   Unpublish buttons; and Save as draft next to Save in the drawer (Save still publishes at once, as before). The SQL
   editor is CodeMirror with completion that knows the connection's tables and columns, styled as the classic editor.
-  Every other sidebar item opens the classic UI on that tab. The API Repository loads on first visit, so the shell
-  stays light.
+  The API Repository loads on first visit, so the shell stays light.
 
 - **The Console's API Designer** (`/console/designer`), rebuilt at visual parity with the classic one. It has:
   - the Type → Host → Connection → Database picker, with the connection's live usage;
@@ -109,6 +107,22 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   Copy as .env, the MCP section's Check now and Tools, and the Interface preferences (theme, table density, default
   result format). A preference changed in either UI applies to both, and now takes effect in the Console at once.
 
+- **The Console now has every screen of the classic UI.** Home (now the screen it opens on), Caching, the Access
+  map and Help join the others, at visual parity:
+  - Home: the stat tiles, System health, Recent activity, Quick actions, and Recent API requests / Slowest queries,
+    kept live from `GET /events`;
+  - Caching: the cache's numbers, the queries with a `cache_ttl`, and the live cache entries, each viewable as a caller
+    receives it;
+  - Access map: every query against every key and role, with the connection → table drill-down, filters, search
+    and sortable columns, and each query's details;
+  - Help: the quick reference and the docs browser (this project's markdown, read from GitHub at the running version).
+
+  The Console no longer sends you to `/ui` for anything.
+- **Management API:** `/api/v1/cache/entries` (list, read, evict, clear); `GET
+  /api/v1/queries/{name}/versions/{version}/flow` (the tables and joins a version touches - the successor of
+  `GET /query_flow`); and on saved queries, `created_at`, `last_used_at` and `cache_ttl` in summaries and
+  `run_count` per version.
+
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
   `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,
@@ -121,8 +135,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - `GET /history` and `GET /audit_log`, replaced by `/api/v1/history` and `/api/v1/audit`, in the same way.
 - `GET /settings`, `GET /settings/mcp_status` and `GET /settings/mcp_tools`, replaced by `/api/v1/settings`,
   `/api/v1/mcp/status` and `/api/v1/mcp/tools`, in the same way.
+- `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`, replaced by `/api/v1/cache/entries`, in the
+  same way.
 
 ### Fixed
+- **`/ui`'s Home showed the five oldest audit entries as "Recent activity"**, oldest first, instead of the five
+  newest. It now shows the newest.
 - **The audit log no longer shows `[object Object]`** for a grant like `{"name": "films", "allow_writes": true}`
   (a key or role with write access through a named query). It now shows the object as JSON, in `/ui` and the
   Console.

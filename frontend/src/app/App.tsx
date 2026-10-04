@@ -35,13 +35,30 @@ const SettingsPage = lazy(() =>
   import('@/features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })),
 );
 
+const HomePage = lazy(() => import('@/features/home/HomePage').then((m) => ({ default: m.HomePage })));
+
+const CachingPage = lazy(() =>
+  import('@/features/caching/CachingPage').then((m) => ({ default: m.CachingPage })),
+);
+
+const AccessMapPage = lazy(() =>
+  import('@/features/accessmap/AccessMapPage').then((m) => ({ default: m.AccessMapPage })),
+);
+
+const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
+
 export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        {/* Every other screen still lives in the classic UI (the sidebar links there), so the Console opens on the
-            one it has rebuilt. */}
-        <Route index element={<Navigate to="/queries" replace />} />
+        <Route
+          index
+          element={
+            <Suspense fallback={<Loading />}>
+              <HomePage />
+            </Suspense>
+          }
+        />
         <Route
           path="queries/:name?"
           element={
@@ -106,7 +123,31 @@ export function App() {
             </Suspense>
           }
         />
-        <Route path="*" element={<Navigate to="/queries" replace />} />
+        <Route
+          path="caching"
+          element={
+            <Suspense fallback={<Loading />}>
+              <CachingPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="access-map"
+          element={
+            <Suspense fallback={<Loading />}>
+              <AccessMapPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="help"
+          element={
+            <Suspense fallback={<Loading />}>
+              <HelpPage />
+            </Suspense>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

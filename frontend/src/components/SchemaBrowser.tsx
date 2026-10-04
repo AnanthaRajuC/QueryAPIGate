@@ -5,8 +5,9 @@ import { useNavigate } from 'react-router';
 import { api, apiJson, unwrap } from '@/api/client';
 import { useAllQueries, useApiKeys, useRoles } from '@/app/data';
 import { copyText, Field, Loading, useFeedback } from '@/app/feedback';
-import { openClassic } from '@/app/navigation';
+import { presetTable } from '@/features/accessmap/state';
 import { CodeBox } from '@/components/CodeBox';
+import { fetchFlow } from '@/features/repository/api';
 import { AccessPill, ReachDot, queryReach, type Reach } from '@/features/repository/reach';
 import { formatSql, PARSEABLE_DIALECTS } from '@/lib/sql';
 
@@ -289,12 +290,6 @@ export function buildSqlSelect(table: Pick<SchemaTable, 'name' | 'schema' | 'col
 
 // ---- Which saved queries touch each table (ui.py buildTableUsageIndex) ----
 
-interface Flow {
-  tables: string[];
-  error?: string | null;
-  formatted?: string | null;
-}
-
 type Detail = {
   name: string;
   collection: string | null;
@@ -316,7 +311,7 @@ async function queryDetail(name: string): Promise<Detail | null> {
 
 /** {table: [query names]} for the queries on `connection`: real parsing (query_flow) where the dialect allows,
  * a whole-word search of the SQL otherwise. */
-function useTableUsage(
+export function useTableUsage(
   connection: string | undefined,
   dialect: string | null | undefined,
   tableNames: string[],
@@ -336,9 +331,7 @@ function useTableUsage(
           if (!d) return;
           if (parseable) {
             try {
-              const flow = await apiJson<Flow>(
-                `/query_flow?filename=${encodeURIComponent(name)}&version=${d.version}`,
-              );
+              const flow = await fetchFlow(name, d.version);
               if (!flow.error) {
                 flow.tables.forEach((ft) => {
                   const match = tableNames.find((t) => t.toLowerCase() === ft.toLowerCase());
@@ -420,6 +413,7 @@ function TableDdl({
 }
 
 function TableUsage({
+  connection,
   table,
   users,
   reach,
@@ -430,6 +424,7 @@ function TableUsage({
   reach: Reach;
 }) {
   const { closeDrawer } = useFeedback();
+  const navigate = useNavigate();
   const sorted = [...users].sort();
   return (
     <>
@@ -469,10 +464,10 @@ function TableUsage({
         <button
           type="button"
           className="btn"
-          title={`Opens the Access map in the classic UI, for ${table}`}
           onClick={() => {
             closeDrawer();
-            openClassic('accessmap');
+            presetTable(connection, table, users);
+            navigate('/access-map');
           }}
         >
           View in Access map
@@ -491,8 +486,7 @@ function UsageQuery({ name }: { name: string }) {
   const detail = useQuery({ queryKey: ['usage-query', name], queryFn: () => queryDetail(name) });
   const flow = useQuery({
     queryKey: ['queries', 'flow', name, detail.data?.version],
-    queryFn: () =>
-      apiJson<Flow>(`/query_flow?filename=${encodeURIComponent(name)}&version=${detail.data!.version}`),
+    queryFn: () => fetchFlow(name, detail.data!.version),
     enabled: Boolean(detail.data && !detail.data.sql.includes('\n')),
   });
   let body: ReactNode = <div className="hint">{`Loading ${name}…`}</div>;

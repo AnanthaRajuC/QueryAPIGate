@@ -1,16 +1,16 @@
 import type { ReactNode } from 'react';
 
-// The classic UI's sidebar, item for item (ui.py <nav id="tabs">): same groups, names, order and icons. A screen
-// the Console has rebuilt has a `path`; every other one opens the classic UI on that tab (`tab`), which looks the
-// same, so moving between the two is seamless while screens move over one at a time (ADR 0001).
+// The classic UI's sidebar, item for item (ui.py <nav id="tabs">): same groups, names, order and icons - each one now
+// a Console route. `tab` is the classic tab's id, which the shell uses as the screen's section id (#tab-<tab>), so the
+// classic stylesheet's per-screen rules apply unchanged (ADR 0001).
 
 export interface NavItem {
   tab: string;
   group: string;
   label: string;
   icon: ReactNode;
-  /** Console route, once the screen has moved here. */
-  path?: string;
+  /** Console route. */
+  path: string;
   count?: 'connections' | 'queries' | 'apikeys' | 'roles';
 }
 
@@ -33,6 +33,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'home',
+        path: '/',
         group: 'Overview',
         label: 'Home',
         icon: svg(
@@ -63,6 +64,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'caching',
+        path: '/caching',
         group: 'Data',
         label: 'Caching',
         icon: svg(<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />),
@@ -128,6 +130,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'accessmap',
+        path: '/access-map',
         group: 'Access',
         label: 'Access map',
         icon: svg(
@@ -189,6 +192,7 @@ export const FOOT_ITEMS: NavItem[] = [
   },
   {
     tab: 'help',
+    path: '/help',
     group: 'System',
     label: 'Help',
     icon: svg(
@@ -202,13 +206,3 @@ export const FOOT_ITEMS: NavItem[] = [
 ];
 
 export const ALL_NAV = [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS];
-
-/** Open the classic UI on a tab: it restores the last tab it showed from sessionStorage. */
-export function openClassic(tab: string) {
-  try {
-    sessionStorage.setItem('queryapigate-ui-tab', tab);
-  } catch {
-    // storage unavailable - the classic UI opens on Home instead
-  }
-  window.location.assign('/ui');
-}

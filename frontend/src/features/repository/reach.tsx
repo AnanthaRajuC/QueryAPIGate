@@ -10,7 +10,7 @@ export type Reach = { keys: Reacher[]; roles: Reacher[] };
 
 const CODE: Record<Via['kind'], string> = { query: 'Q', collection: 'C', connection: 'W' };
 
-function reachVia(
+export function reachVia(
   entry: RoleEntry,
   query: string,
   collection: string | null,

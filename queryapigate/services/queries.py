@@ -11,7 +11,7 @@ v1 names fields for what they are, not for the file-based store they came from: 
 import hashlib
 import json
 
-from .. import definitions, mongotools, sqlflow, sqltools, store
+from .. import definitions, history, mongotools, sqlflow, sqltools, store
 from .. import params as param_rules
 from ..errors import ApiError
 
@@ -85,7 +85,8 @@ def _versions(content):
     return sorted((int(k), v) for k, v in content.items() if k.isdigit() and isinstance(v, dict))
 
 
-def to_summary(name, content):
+def to_summary(name, content, last_runs=None):
+    """`last_runs` is history.last_run_times() for a whole list; left out, this query's own is read."""
     versions = _versions(content)
     latest_number, latest = versions[-1]
     published = store.read_published(content)
@@ -104,12 +105,17 @@ def to_summary(name, content):
         'example': store.read_example(content),
         'endpoint': ENDPOINT_PREFIX + name,
         'updated_at': max((v.get('last_modified_at') or '' for _, v in versions), default=None) or None,
+        'created_at': min((v.get('created_at') for _, v in versions if v.get('created_at')), default=None),
+        'last_used_at': (history.last_run_times(name) if last_runs is None else last_runs).get(name),
+        'cache_ttl': shown.get('cache_ttl') or None,
     }
 
 
 def to_detail(name, content):
+    counts = history.run_counts(name)
     return {**to_summary(name, content),
-            'versions': [to_version(content, number, data) for number, data in _versions(content)]}
+            'versions': [{**to_version(content, number, data), 'run_count': counts.get(number, 0)}
+                         for number, data in _versions(content)]}
 
 
 def etag(content):
@@ -139,9 +145,10 @@ def list_queries(collection=None, connection=None, search=None, status=None):
         raise ApiError("status must be 'published', 'unpublished' or 'draft'", code='invalid_filter')
     needle = (search or '').strip().lower()
     found = []
+    last_runs = history.last_run_times()
     for name, content in store.iter_saved():
         try:
-            summary = to_summary(name, content)
+            summary = to_summary(name, content, last_runs)
         except (ValueError, IndexError):  # a query with no readable version
             continue
         if collection and summary['collection'] != collection:
