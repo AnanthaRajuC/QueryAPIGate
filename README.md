@@ -234,18 +234,12 @@ If you already know SQL, you can produce a governed API without building an API 
 
 ### Multi-database support
 
-Native drivers for MySQL, PostgreSQL, ClickHouse, SQLite, H2 and DuckDB, plus generic JDBC for anything else with a
-driver jar - Oracle, SQL Server, DB2, Snowflake and more. The same guard, pooling, parameter binding and output
-formats apply regardless of which database is behind a given connection.
-
-| Database   | JSON | NDJSON | XML | YAML | CSV | TSV | XLSX |
-|------------|:----:|:------:|:---:|:----:|:---:|:---:|:----:|
-| MySQL      | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
-| PostgreSQL | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
-| ClickHouse | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
-| SQLite     | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
-| H2         | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
-| DuckDB     | ✅   | ✅     | ✅  | ✅   | ✅  | ✅  | ✅   |
+**Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse: every feature, tested against a real server in CI, and
+covered by the compatibility promise. **Experimental** - H2, generic JDBC (Oracle, SQL Server, DB2, Snowflake and
+anything else with a driver jar) and MongoDB (`find()` queries): they work, with documented gaps. The same guard,
+pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TSV and Excel - apply to every one.
+What each supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming - is in the
+[support matrix](documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 
 ### Security and access control
 

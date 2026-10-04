@@ -22,6 +22,16 @@ def _sql_hash(sql):
     return hashlib.sha256(sql.encode('utf-8')).hexdigest()
 
 
+def _sql_connection(connection_name):
+    """A connection to run SQL on - refusing, clearly, one that has no SQL (a MongoDB connection runs find()
+    queries through /execute_mongo instead), rather than failing inside the driver lookup."""
+    details = store.get_connection(connection_name)
+    if details['db'] not in RUNNERS:
+        raise ApiError(f"'{connection_name}' is a {details['db']} connection, which doesn't run SQL - use "
+                       '/execute_mongo for its find() queries', code='wrong_connection_type')
+    return details
+
+
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
                 allowed_write_ops=None, database=None, allowed_tables=None):
     """Run ``sql`` on a named connection and return the requested page as a ResultSetDTO.
@@ -37,7 +47,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     schema.fetch_schema()); a stored, scoped API key can never send this itself (there is no request field
     for it), only the admin UI's own ad-hoc calls do.
     """
-    details = store.get_connection(connection_name)
+    details = _sql_connection(connection_name)
     if database:
         details = {**details, 'database': database}
     effective_allow_writes = config.allow_writes() and allow_writes
@@ -277,7 +287,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     generator - the connection checked out (or freshly opened) for it is released only once that generator
     is exhausted, errors, or a client disconnect closes it early (see runners._make_stream_runner).
     """
-    details = store.get_connection(connection_name)
+    details = _sql_connection(connection_name)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables)
     log.info('Streaming from %s (%s): %s', connection_name, details['db'], sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})

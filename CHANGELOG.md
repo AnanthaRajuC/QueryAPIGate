@@ -38,6 +38,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   release for them. The Docker image already runs Python 3.12 and is unaffected.
 
 ### Added
+- **A database support matrix** (BACKLOG #66) in DATABASE_CONNECTION_CONFIGURATION.md: what each of the eight types
+  supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming, MCP and more - and
+  which are **tier 1** (PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse: every feature, tested against a real server
+  in CI, covered by the compatibility promise) or experimental (H2, JDBC, MongoDB), with what an experimental type
+  needs to become tier 1. The table is generated from the code that implements each feature
+  (`queryapigate/databases.py`) and checked by a test, so it can't claim more than the code does.
 - **Backups you can restore, documented and tested** (BACKLOG #71). `queryapigate backup FILE` copies the SQLite
   store consistently while the server runs (SQLite's backup API, so nothing still in the write-ahead log is
   missed); on a PostgreSQL store it prints the `pg_dump` command for its schema. DEPLOYMENT.md's *Backups and
@@ -52,6 +58,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). Each is
   marked in its docs, with `x-experimental: true` in `/openapi.json`, with a tag in the Console (its Settings rows,
   the database-type picker, the Alerts screen), and with a warning in the log at startup while one is in use.
+### Fixed
+- **SQL sent to a MongoDB connection is refused clearly** - `400 wrong_connection_type`, pointing to
+  `/execute_mongo` - on `/execute_sql`, streamed exports and MCP's `execute_sql`. It used to fail inside the driver
+  lookup, as a `500` whose detail was just `'mongo'`.
 
 ## [0.13.0] - 2026-10-04
 

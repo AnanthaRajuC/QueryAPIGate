@@ -41,6 +41,43 @@ object; `GET /api/v1/connections/{name}` returns them under `options`.
 
 `h2`, `jdbc` and `mongo` are [experimental](#experimental-h2-jdbc-and-mongo).
 
+## Support matrix
+
+**Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse - is covered by the compatibility promise and runs
+against a real server in CI on every push. Types marked `*` are [experimental](#experimental-h2-jdbc-and-mongo): they
+work, with the gaps below, and may change in a minor release.
+
+<!-- support-matrix:start - generated from queryapigate/databases.py; tests/test_databases.py checks it -->
+| | PostgreSQL | MySQL | SQLite | DuckDB | ClickHouse | H2 * | JDBC * | MongoDB * |
+|---|---|---|---|---|---|---|---|---|
+| Saved queries and ad-hoc runs | yes | yes | yes | yes | yes | yes | yes | find() only |
+| Read-only by default (SQL check) | yes | yes | yes | yes | yes | yes | yes | n/a |
+| Read-only enforced by the database too | yes | yes | yes | no | yes | no | no | n/a |
+| Writes, when allowed | yes | yes | yes | yes | yes | yes | yes | no |
+| Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes |
+| `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | no |
+| Schema browser, MCP `list_tables` | yes | yes | yes | yes | yes | yes | no | yes |
+| Primary and foreign keys in the schema | yes | yes | no | yes | no | no | no | n/a |
+| Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
+| Table DDL | no | yes | yes | no | yes | no | no | n/a |
+| Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
+| Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | yes |
+| MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
+| Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
+| Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | no |
+<!-- support-matrix:end -->
+
+`n/a` is a feature the database has no use for (a SQLite file has no other database to switch to; MongoDB has no SQL).
+Where `allowed_tables` says `no`, a key restricted to tables is refused on that connection rather than trusted, and
+`Read-only enforced by the database too: no` means the read-only default rests on QueryAPIGate's own SQL check.
+
+An experimental type becomes tier 1 when:
+
+1. It runs against a real server in the CI integration job (tests/test_integration.py), reads and writes;
+2. The read-only default, the query time limit and `allowed_tables` all work on it - each a test, not a claim;
+3. Its gaps in this table are closed, or stated as limits of the database itself;
+4. Its entry leaves `queryapigate/experimental.py`, and this table and the changelog say so.
+
 The SQL guard (single-statement / read-only check, see [API.md](API.md)) reads string literals using the quoting
 rules the connection's `db` type actually uses: `mysql` and `clickhouse` honour a backslash escape inside quoted
 strings by default, the others do not, and using the wrong rule for a value can misjudge where a statement ends.
@@ -110,10 +147,11 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 > **Experimental** - may change in any minor release, always noted in the changelog
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
-These three types work, but are tested less than the others, and not every feature reaches them: `allowed_tables`
-refuses queries on them rather than guess (fail closed), schema browsing and database listing are partial, and
-streaming exports don't cover `mongo`. A server with one configured logs a warning at startup saying so. They
-graduate once they are covered by the integration tests the other types run in CI on every push.
+These three types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
+all three rather than guess (fail closed); H2 and JDBC rest their read-only default on the SQL check alone, and JDBC
+has no query time limit and no schema browser; MongoDB runs `find()` queries only, with no streaming exports, and is
+the one type not yet tested against a real server in CI. A server with one configured logs a warning at startup
+saying so. The matrix also lists what each needs to become tier 1.
 
 ## Generic JDBC connections
 
