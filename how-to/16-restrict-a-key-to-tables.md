@@ -66,8 +66,10 @@ tables.
 - **The schema shows only the listed tables.** The schema browser (`GET /connections/shop/schema`) and MCP's
   `list_tables` leave the others out, and a foreign key pointing at one shows as none. `table_ddl` for a forbidden
   table answers `404` - *'salaries' is not a table on 'shop'* - exactly as for a table that doesn't exist.
-- **Table-valued functions** (ClickHouse's `numbers(10)`, DuckDB's `read_csv(...)`) touch no named table, so the
-  list can't restrict them.
+- **Table functions that read data** - DuckDB's `read_parquet(...)` and `read_csv(...)`, ClickHouse's `url(...)` -
+  are refused for a table-restricted key (`table_not_allowed`): they name no table the list could check. Pure
+  generators (`range`, `numbers`, `generate_series`, `unnest`) are fine. On DuckDB, give files a name with a view and
+  list the view ([guide 41](41-publish-files-in-s3-as-an-api.md)).
 
 `allowed_tables` is defence in depth on top of a database user with only the rights it needs - not a replacement for
 one.

@@ -15,7 +15,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import config, store
+from . import config, duckfiles, store
 from .errors import ApiError
 from .pool import Session, close_pooled_connections
 from .sqltools import bind_parameters, is_paginated, paginate
@@ -409,8 +409,17 @@ class _DuckDB(_Driver):
     PARAM_STYLE = 'qmark'
 
     def connect(self, details, read_only):
+        """`database: ":memory:"` is a database of nothing but views and files (BACKLOG #75). Either way the connection
+        is locked to its allowed_paths before anyone's SQL runs on it - see duckfiles.py."""
         import duckdb
-        return duckdb.connect(_resolve_db_file(details, 'DuckDB'))
+        database = ':memory:' if details.get('database') == ':memory:' else _resolve_db_file(details, 'DuckDB')
+        conn = duckdb.connect(database)
+        try:
+            duckfiles.lock_down(conn, details)
+        except BaseException:
+            conn.close()
+            raise
+        return conn
 
     def is_alive(self, session):
         try:
@@ -437,6 +446,8 @@ class _DuckDB(_Driver):
             result = _fetch_page(conn, sql, params, 'qmark', limit, offset, self.DIALECT)
         except duckdb.InterruptException:
             raise _timed_out(timeout) from None
+        except duckdb.PermissionException as error:
+            raise duckfiles.not_allowed(error) from None
         finally:
             if timer:
                 timer.cancel()
@@ -460,6 +471,8 @@ class _DuckDB(_Driver):
             conn.execute(sql) if args is None else conn.execute(sql, args)
         except duckdb.InterruptException:
             raise _timed_out(timeout) from None
+        except duckdb.PermissionException as error:
+            raise duckfiles.not_allowed(error) from None
         finally:
             if timer:
                 timer.cancel()

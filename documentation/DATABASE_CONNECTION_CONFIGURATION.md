@@ -61,6 +61,7 @@ work, with the gaps below, and may change in a minor release.
 | Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
 | Table DDL | no | yes | yes | no | yes | no | no | n/a |
 | Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
+| Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes (remote: experimental) | no | no | no | no |
 | Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
 | MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
 | Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
@@ -197,37 +198,55 @@ advisory in the JDBC specification, not something every driver is required to en
 
 ## DuckDB connections
 
-`db: "duckdb"` is an embedded analytical database - its own storage, its own persistent `.db` file, no server
-process to run - that also happens to read flat files directly. One connection type, two uses:
+`db: "duckdb"` is an embedded analytical database - its own storage, its own `.duckdb` file, no server process to
+run - that also reads files directly: Parquet, CSV and JSON, on local disk, object storage or the web. One connection
+type, two uses:
 
 ~~~json
-{
-    "analytics": {"db": "duckdb", "database": "analytics.duckdb", "active": true}
-}
+{"name": "analytics", "db": "duckdb", "database": "/data/analytics.duckdb", "active": true}
 ~~~
 
 **As a general embedded database**, it behaves like `sqlite`: point `database` at an existing file (QueryAPIGate never
 creates one, so a mistyped path fails instead of opening an empty database - create it first, e.g.
-`python -c "import duckdb; duckdb.connect('analytics.duckdb')"`), then `CREATE TABLE`/`INSERT`/`SELECT` against it as usual. Its SQL
-dialect is close to PostgreSQL, so it uses the same quote-doubling string-literal rules as `postgres`/`sqlite`/`h2`
-(no backslash escaping).
+`python -c "import duckdb; duckdb.connect('analytics.duckdb')"`), then `CREATE TABLE`/`INSERT`/`SELECT` against it as
+usual. Its SQL dialect is close to PostgreSQL, so it uses the same quote-doubling string-literal rules as
+`postgres`/`sqlite`/`h2` (no backslash escaping). Or set `database` to `":memory:"` for a connection that holds no
+tables of its own - only views over files (below).
 
-**For flat files**, no new connection fields are needed - reference the file straight from a saved query's own SQL
-using DuckDB's own table functions:
+**For files**, list what the connection may read in `allowed_paths`, then read them straight from SQL with DuckDB's
+own table functions - no import step, column types inferred:
 
-~~~sql
-SELECT * FROM read_csv(:path) WHERE status = :status
-SELECT customer_id, sum(amount) FROM read_parquet('/data/sales/*.parquet') GROUP BY customer_id
+~~~json
+{"name": "files", "db": "duckdb", "database": ":memory:", "active": true,
+ "allowed_paths": ["/data/sales/", "/data/reference/countries.csv"]}
 ~~~
 
-Column types are inferred automatically; no `CREATE TABLE` or import step first. This works against any active
-`duckdb` connection, including a bare `example.duckdb` file that has no tables of its own yet.
+~~~sql
+SELECT customer_id, sum(amount) FROM read_parquet('/data/sales/*.parquet') GROUP BY customer_id
+SELECT * FROM read_csv('/data/reference/countries.csv') WHERE region = :region
+~~~
 
-A relative path (like `'orders.csv'` above) resolves against the **server process's own working directory** - not
-`QUERYAPIGATE_HOME`, unlike the connection's own `database` field. This is easy to get bitten by once (a query that
-works when you run `queryapigate serve` from one directory 404s from another), so an **absolute path** is the safer
-choice - or, as in `read_csv(:path)` above, bind it as a parameter instead of writing it into the SQL at all, which
-also sidesteps having to think about how a path with a quote in it would need escaping.
+**Nothing outside `allowed_paths` can be read** - not another file, folder, URL or database, by any route (`read_csv`,
+`FROM 'file.parquet'`, `glob`, `ATTACH`, `COPY`), and no extension can be installed or loaded. DuckDB itself enforces
+this: each connection is locked as it opens (`enable_external_access = false`, the allowed paths, `lock_configuration`),
+so a query can't change it back. A refused path answers `403 path_not_allowed`. **A connection with no `allowed_paths`
+reads no files at all** - only its own database.
+
+- An entry ending in `/` allows that folder and everything under it; anything else allows exactly that file.
+- Local entries must be **absolute**, and SQL must use the same absolute path: DuckDB checks a path as written, so a
+  relative one never matches.
+- `..` and wildcards aren't accepted in entries; a `..` in a query's path is resolved before the check, so it can't
+  climb out.
+
+**Views** give files a name - for the schema browser, for saved queries, and for `allowed_tables`:
+
+~~~json
+{"views": {"sales": "SELECT * FROM read_parquet('/data/sales/*.parquet')"}}
+~~~
+
+Each is created as a temporary view on every new connection. A key restricted with `allowed_tables: ["sales"]` can
+query the view but not call `read_parquet` itself: for a table-restricted key, table functions that read data are
+refused (`table_not_allowed`).
 
 Two things carried over from `h2`/`jdbc`, both for the same underlying reason (DuckDB refuses to open a second
 connection to a file with a different read-only setting than a connection already open on it, which pooling
@@ -237,6 +256,38 @@ read-only and read-write connections separately would trip constantly):
   guarantee rests on the SQL guard alone**, same as `h2`/`jdbc`.
 - Unlike `h2`/`jdbc`, the query time limit **is** enforced (`Connection.interrupt()`, see the table above) - this
   is a DuckDB Python client capability the JDBC-based drivers don't have access to.
+
+## Files on S3, GCS, R2 and the web
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+
+`allowed_paths` also takes object-storage prefixes and web addresses, read through DuckDB's `httpfs` extension (in the
+Docker image; elsewhere it's downloaded on first use, or install it ahead with
+`python -c "import duckdb; duckdb.connect().execute('INSTALL httpfs')"`):
+
+~~~json
+{"name": "lake", "db": "duckdb", "database": ":memory:", "active": true,
+ "allowed_paths": ["s3://sales/2026/", "https://data.example.com/prices.parquet"],
+ "user": "AKIA...", "password": "${LAKE_SECRET_KEY}", "region": "eu-west-1",
+ "views": {"orders": "SELECT * FROM read_parquet('s3://sales/2026/*.parquet')"}}
+~~~
+
+| Field | Meaning |
+|---|---|
+| `allowed_paths` | `s3://`, `gs://` (or `gcs://`) and `r2://` prefixes ending in `/`; `http(s)://` **files** - a web address must name one file, because a web server resolves `..` in a URL and a prefix couldn't stop that |
+| `user`, `password` | the access key id and secret - stored like any connection password: masked, encrypted with `QUERYAPIGATE_SECRET_KEY`, or a `${VAR}` reference. Leave both out for public files |
+| `storage` | `s3` (default, also any S3-compatible service), `gcs` (HMAC keys) or `r2` |
+| `region`, `endpoint`, `url_style`, `use_ssl` | as DuckDB's S3 settings: `endpoint` and `url_style: "path"` for an S3-compatible service such as MinIO; `account_id` for R2 |
+
+**A bucket prefix is a second lock, not the first.** DuckDB refuses anything outside the listed prefixes, but an
+S3-compatible server might itself resolve `..` in an object key, so give the connection credentials that can read only
+what it should - a bucket policy or IAM role scoped to those prefixes. Tested against an S3-compatible server
+(SeaweedFS) and a plain web server; Google Cloud Storage and R2 use the same mechanism but weren't tested here.
+
+Any caller with the connection in its `connections` grant can read every listed path with its own SQL; the key ID and
+endpoint are visible to it through DuckDB's `duckdb_secrets()` (the secret itself is always redacted). For partners,
+publish saved queries or views and grant those instead.
 
 ## Keeping secrets out of the file
 

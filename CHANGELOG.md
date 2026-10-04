@@ -21,7 +21,8 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
-(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). The
+(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
+`gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), and alerts (`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -41,6 +42,27 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Breaking
+- **A DuckDB connection reads only the files its `allowed_paths` lists** (BACKLOG #75). Before, any key that could
+  run SQL on a DuckDB connection could read any file the server's user could - `read_csv('/etc/passwd')` included.
+  Now a connection with no `allowed_paths` reads no files at all; list the folders and files a connection's queries
+  use (absolute paths), e.g. `"allowed_paths": ["/data/sales/"]`. DuckDB itself enforces it: each connection's
+  configuration is locked as it opens. A refused path answers `403 path_not_allowed`.
+
+### Added
+- **Files on S3, GCS, R2 and the web as an API** (BACKLOG #75, experimental): a DuckDB connection's `allowed_paths`
+  takes `s3://`, `gs://` and `r2://` prefixes and `http(s)://` files; `user`/`password` carry the access key (masked,
+  encrypted and `${VAR}`-capable like any password), with `region`, `endpoint`, `url_style`, `use_ssl` and `storage`
+  beside them. `database: ":memory:"` makes a connection of nothing but files, and `views` names them - for the schema
+  browser, saved queries and `allowed_tables`. The Console's connection form has a section for all of it, the Docker
+  image includes DuckDB's `httpfs` extension, and how-to guide 41 walks through publishing a bucket.
+
+### Fixed
+- **A table-restricted key can't read data through a table function.** `allowed_tables` checked the tables a statement
+  names, but `read_parquet(...)`, `read_csv(...)`, `glob(...)` or ClickHouse's `url(...)` name none, so they passed.
+  They're now refused for such a key (`table_not_allowed`); pure generators (`range`, `numbers`, `generate_series`,
+  `unnest`) still work.
 
 ## [0.14.0] - 2026-10-04
 

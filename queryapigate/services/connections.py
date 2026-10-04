@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 
-from .. import config, engine, metrics, pool, schema, store
+from .. import config, duckfiles, engine, metrics, pool, schema, store
 from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
@@ -164,6 +164,8 @@ def test(data):
     details, name = _probe_details(data)
     if details is None:
         details = store.resolve_ad_hoc(load(name))
+    elif details.get('db') == 'duckdb':
+        duckfiles.validate(details)
     try:
         return engine.test_connection(details)
     except ApiError as error:

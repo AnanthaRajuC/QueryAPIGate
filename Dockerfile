@@ -39,6 +39,9 @@ RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,re
 
 RUN useradd --create-home app && mkdir /data && chown app /data
 USER app
+# DuckDB's httpfs extension, for s3://, gs://, r2:// and http(s):// files in a connection's allowed_paths - installed now,
+# so the container never downloads code at runtime (and works where it can't).
+RUN python -c "import duckdb; duckdb.connect().execute('INSTALL httpfs')"
 
 # queryapigate.db lives here (connections, saved queries, API keys, roles, audit log) - mount a volume to keep it.
 ENV QUERYAPIGATE_HOME=/data

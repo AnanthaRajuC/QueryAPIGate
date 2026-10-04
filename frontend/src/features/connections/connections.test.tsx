@@ -130,6 +130,43 @@ describe('Connections', () => {
     expect(await screen.findByText('Created films')).toBeInTheDocument();
   });
 
+  it('creates a DuckDB connection over files: allowed paths, storage settings and views', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/connections': () => jsonResponse({ ...conn('lake'), password: null, options: {} }, 201),
+    });
+    renderAt('/connections');
+    await userEvent.click(await screen.findByRole('button', { name: 'New connection' }));
+    const drawer = document.getElementById('drawer')!;
+    expect(within(drawer).queryByLabelText('Allowed paths')).toBeNull(); // only for duckdb
+    await userEvent.type(within(drawer).getByLabelText('Name'), 'lake');
+    await userEvent.selectOptions(within(drawer).getByLabelText('Database type'), 'duckdb');
+    await userEvent.type(within(drawer).getByLabelText('Default database'), ':memory:');
+    await userEvent.type(within(drawer).getByLabelText('Access key ID'), 'AKIA1');
+    await userEvent.type(
+      within(drawer).getByLabelText('Allowed paths'),
+      's3://sales/2026/{enter}https://x.io/p.csv',
+    );
+    await userEvent.type(within(drawer).getByLabelText('Region'), 'eu-west-1');
+    await userEvent.click(within(drawer).getByLabelText('Use HTTPS for object storage'));
+    await userEvent.click(within(drawer).getByLabelText('Views'));
+    await userEvent.paste('{"orders": "SELECT 1"}');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({
+      name: 'lake',
+      db: 'duckdb',
+      user: 'AKIA1',
+      password: '',
+      database: ':memory:',
+      active: true,
+      allowed_paths: ['s3://sales/2026/', 'https://x.io/p.csv'],
+      region: 'eu-west-1',
+      use_ssl: false,
+      views: { orders: 'SELECT 1' },
+    });
+  });
+
   it('edits a connection: the mask keeps the password, an emptied field is removed, If-Match is sent', async () => {
     const { calls } = fakeBackend({
       ...routes(),

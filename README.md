@@ -241,6 +241,10 @@ pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TS
 What each supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming - is in the
 [support matrix](documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 
+**Files as a source** - through DuckDB, Parquet, CSV and JSON files on local disk, S3, GCS, R2 or the web are queried
+where they are and published like any table, limited to the paths each connection lists (remote files are
+experimental - see [publishing a bucket as an API](how-to/41-publish-files-in-s3-as-an-api.md)).
+
 ### Security and access control
 
 QueryAPIGate is built to expose specific query results, not database credentials:

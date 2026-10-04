@@ -12,8 +12,9 @@ CTE'd DELETE/UPDATE/INSERT - one code path for every statement type this guard n
 
 Known, accepted limitations: a table name is extracted bare (``information_schema.tables`` -> ``'tables'``),
 not schema-qualified - matches allowed_write_ops's own bare-keyword-list style, but can't disambiguate two
-identically-named tables in different schemas. A table-valued function (e.g. ClickHouse's ``numbers(10)``)
-extracts no table at all, so allowed_tables can't meaningfully restrict one.
+identically-named tables in different schemas. A table-valued function names no table, so one that reads data -
+DuckDB's ``read_parquet(...)``, ``read_csv(...)``, ``glob(...)``, a ClickHouse ``url(...)`` - is refused outright
+for a table-restricted key; only pure generators (``range``, ``numbers``, ``generate_series``, ``unnest``) pass.
 """
 from . import sqltools
 from .errors import ApiError
@@ -41,5 +42,22 @@ def extract_tables(sql, dialect):
     except Exception:
         raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
                        code='table_check_failed') from None
+    for source in [*parsed.find_all(exp.Table), *parsed.find_all(exp.Lateral)]:
+        function = source.this
+        if isinstance(function, exp.Func) and not _is_generator(function):
+            name = function.sql_name().lower() if not isinstance(function, exp.Anonymous) else function.name.lower()
+            raise ApiError(f'This API key may only query its allowed tables - a table function such as {name}() '
+                           "reads data the allow-list can't see, so it isn't allowed", 403, code='table_not_allowed')
     cte_names = {cte.alias_or_name for cte in parsed.find_all(exp.CTE)}
     return {t.name.lower() for t in parsed.find_all(exp.Table) if t.name and t.name not in cte_names}
+
+
+# Table functions that only generate values - no data to restrict - and so stay usable with allowed_tables.
+_GENERATORS = {'numbers', 'range', 'generate_series', 'system_range', 'unnest', 'generate_subscripts'}
+
+
+def _is_generator(function):
+    from sqlglot import exp
+    if isinstance(function, (exp.GenerateSeries, exp.ExplodingGenerateSeries, exp.Unnest)):
+        return True
+    return isinstance(function, exp.Anonymous) and function.name.lower() in _GENERATORS

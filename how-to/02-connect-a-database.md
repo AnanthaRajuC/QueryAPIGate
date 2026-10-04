@@ -104,8 +104,9 @@ already accounts for this per-dialect, nothing you need to configure.
 
 An embedded analytical database: `database` is its own `.duckdb` file, which must already exist - like SQLite,
 QueryAPIGate never creates one, so a mistyped path fails rather than opening an empty database. Create it with
-`python -c "import duckdb; duckdb.connect('analytics.duckdb')"` (or the DuckDB CLI). It can also read CSV and Parquet
-files straight from a query's SQL - see
+`python -c "import duckdb; duckdb.connect('analytics.duckdb')"` (or the DuckDB CLI). It can also read CSV, Parquet and
+JSON files - local, in a bucket or on the web - straight from SQL, but only the ones its `allowed_paths` lists
+([guide 41](41-publish-files-in-s3-as-an-api.md)); see
 [DuckDB connections](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#duckdb-connections).
 
 ```bash

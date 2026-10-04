@@ -114,6 +114,11 @@ This is the part worth being the most precise about, because it's also the part 
 - **`allowed_tables` uses a real parser** (`sqlglot`) specifically because table extraction has to be
   correct, not just approximately right - a key restricted to certain tables is refused entirely rather
   than let through on a best-effort guess when the dialect can't be parsed reliably (H2/JDBC).
+- **DuckDB file access is enforced by DuckDB itself.** A DuckDB connection reads only its `allowed_paths` - none by
+  default - because each connection's configuration is locked as it opens (`enable_external_access = false`, the
+  allowed paths, `lock_configuration`): no SQL can reach another file, URL or extension, or change the setting back.
+  Object-storage prefixes are a second lock behind the credentials' own permissions, since an S3-compatible server
+  could resolve `..` in a key; web addresses must name files for the same reason.
 - **Older `{name}` text placeholders are string substitution**, not parameterization - restricted to a
   narrow safe-character pattern (digits and plain text only) specifically because they're substituted
   directly into the SQL text. Prefer `:name` bound parameters; `{name}` exists for cases (identifiers,

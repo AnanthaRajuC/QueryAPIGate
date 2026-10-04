@@ -2458,8 +2458,16 @@ MCP and the Console's test run alike.
 
 ## 75. Files and data lakes as a source: Parquet, CSV and JSON on S3, GCS or HTTP, through DuckDB
 
-**Status: open.** Suggested as the next new source after 1.0's #70 - the smallest change that adds a whole kind of
-data.
+**Status: shipped (experimental, for 0.15).** `queryapigate/duckfiles.py`: every DuckDB connection is locked as it
+opens - DuckDB's own `allowed_directories`/`allowed_paths`, `enable_external_access = false` and `lock_configuration`
+- so it reads only its `allowed_paths` (none by default, which closed reading any local file). Object-storage
+credentials reuse `user`/`password`; `views` name files for the schema browser and `allowed_tables`; table functions
+are refused for table-restricted keys. HTTP(S) entries must be files, since a web server resolves `..`. Tested against
+local files, a web server and SeaweedFS (S3 API) in `tests/test_duckdb_files.py` (the S3 part when
+`QUERYAPIGATE_TEST_S3` is set); GCS and R2 use the same mechanism, untested. Not done: the AWS credential chain
+(instance roles), and a CI job with an S3-compatible service. Guide 41.
+
+Original notes:
 
 **Impact:** a Parquet file in a bucket becomes a governed REST endpoint and MCP tool - keys, grants, rate limits, run
 history - with no database to run. Teams with a data lake but no serving layer are a large, poorly served audience.

@@ -273,6 +273,12 @@ const DOCS = [
     path: 'how-to/40-read-the-threat-model.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-41',
+    title: 'Publish files in S3 as an API',
+    path: 'how-to/41-publish-files-in-s3-as-an-api.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

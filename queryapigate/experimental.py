@@ -24,6 +24,15 @@ FEATURES: dict[str, dict[str, Any]] = {
         'db_types': ('h2', 'jdbc', 'mongo'),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and mongo'),
     },
+    'remote_files': {
+        'name': 'Remote files through DuckDB',
+        'why': 'new in 0.15 - reading s3://, gs://, r2:// and http(s):// files, and its connection fields, may change '
+               'as it is used',
+        'detect': lambda details: details.get('db') == 'duckdb' and any(
+            isinstance(p, str) and p.startswith(('s3://', 'gs://', 'gcs://', 'r2://', 'http://', 'https://'))
+            for p in details.get('allowed_paths') or []),
+        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Files on S3, GCS, R2 and the web'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',
@@ -46,8 +55,9 @@ def in_use(environ, connections):
     for key, feature in FEATURES.items():
         set_here = sorted(s for s in feature.get('settings', ()) if environ.get(s, '').strip())
         typed = sorted(name for name, details in connections.items()
-                       if isinstance(details, dict) and details.get('db') in feature.get('db_types', ())
-                       and details.get('active', True))
+                       if isinstance(details, dict) and details.get('active', True)
+                       and (details.get('db') in feature.get('db_types', ())
+                            or ('detect' in feature and feature['detect'](details))))
         if set_here:
             used[key] = ', '.join(set_here)
         elif typed:

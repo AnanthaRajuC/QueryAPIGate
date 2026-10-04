@@ -402,6 +402,42 @@ function ConnectionFormFields({
   const [dbResult, setDbResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [autoLoaded, setAutoLoaded] = useState(false);
+  // DuckDB's file access (BACKLOG #75): which files and URLs it may read, object-storage settings, views over files.
+  const opts = (existing?.options ?? {}) as Record<string, unknown>;
+  const [paths, setPaths] = useState(((opts.allowed_paths as string[] | undefined) ?? []).join('\n'));
+  const [storage, setStorage] = useState((opts.storage as string | undefined) ?? 's3');
+  const [region, setRegion] = useState((opts.region as string | undefined) ?? '');
+  const [endpoint, setEndpoint] = useState((opts.endpoint as string | undefined) ?? '');
+  const [urlStyle, setUrlStyle] = useState((opts.url_style as string | undefined) ?? '');
+  const [useSsl, setUseSsl] = useState(opts.use_ssl !== false);
+  const [views, setViews] = useState(opts.views ? JSON.stringify(opts.views, null, 2) : '');
+  const isDuck = db === 'duckdb';
+
+  /** DuckDB's file-access fields; an emptied one as `empty` (undefined to leave out, null to remove on edit). */
+  const duckFields = (empty: null | undefined) => {
+    if (!isDuck) return {};
+    const list = paths
+      .split('\n')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    let parsedViews: unknown = empty;
+    if (views.trim()) {
+      try {
+        parsedViews = JSON.parse(views);
+      } catch {
+        throw new Error('Views must be a JSON object of {"name": "SELECT ..."}.');
+      }
+    }
+    return {
+      allowed_paths: list.length ? list : empty,
+      storage: storage === 's3' ? empty : storage,
+      region: region.trim() || empty,
+      endpoint: endpoint.trim() || empty,
+      url_style: urlStyle || empty,
+      use_ssl: useSsl ? empty : false,
+      views: parsedViews,
+    };
+  };
 
   const details = (): ConnectionInput => ({
     db,
@@ -411,6 +447,7 @@ function ConnectionFormFields({
     password,
     database: database || undefined,
     ...(isEdit ? { name } : {}),
+    ...duckFields(undefined),
   });
 
   const probe = useMutation({
@@ -463,6 +500,7 @@ function ConnectionFormFields({
           user: user || null,
           password,
           database: database || null,
+          ...duckFields(null),
         };
         unwrap(
           await api.PATCH('/api/v1/connections/{name}', {
@@ -476,7 +514,7 @@ function ConnectionFormFields({
       return unwrap(await api.POST('/api/v1/connections', { body })).name;
     },
     onSuccess: onSaved,
-    onError: (e) => reportError(showError, e),
+    onError: (e) => (e instanceof ApiError ? reportError(showError, e) : showError((e as Error).message)),
   });
 
   const submit = (e: FormEvent) => {
@@ -519,7 +557,7 @@ function ConnectionFormFields({
           ))}
         </select>
       </Field>
-      <div className="grid-host">
+      <div className="grid-host" hidden={isDuck}>
         <Field id="c-host" label="Host">
           <input
             id="c-host"
@@ -542,7 +580,11 @@ function ConnectionFormFields({
         </Field>
       </div>
       <div className="grid2">
-        <Field id="c-user" label="User">
+        <Field
+          id="c-user"
+          label={isDuck ? 'Access key ID' : 'User'}
+          hint={isDuck ? 'For object storage; leave empty for public files.' : undefined}
+        >
           <input
             id="c-user"
             autoComplete="off"
@@ -553,7 +595,7 @@ function ConnectionFormFields({
         </Field>
         <Field
           id="c-password"
-          label="Password"
+          label={isDuck ? 'Secret access key' : 'Password'}
           hint={
             isEdit
               ? 'Leave the mask to keep the stored password.'
@@ -583,7 +625,11 @@ function ConnectionFormFields({
       <Field
         id="c-database"
         label="Default database"
-        hint="SQLite, DuckDB and H2 take a file path here instead."
+        hint={
+          isDuck
+            ? 'A .duckdb file that already exists, or :memory: for a source made only of files.'
+            : 'SQLite, DuckDB and H2 take a file path here instead.'
+        }
       >
         <div>
           {databases ? (
@@ -624,6 +670,86 @@ function ConnectionFormFields({
           {dbResult && <span className={dbResult.ok ? 'test-ok' : 'test-fail'}>{dbResult.text}</span>}
         </span>
       </div>
+      {isDuck && (
+        <fieldset className="duck-files">
+          <legend>Files it may read</legend>
+          <Field
+            id="c-paths"
+            label="Allowed paths"
+            hint="One per line. Folders and buckets end in / (s3://sales/2026/, /data/files/); a web address must name one file. Nothing else is readable - an empty list means no files at all."
+          >
+            <textarea
+              id="c-paths"
+              rows={3}
+              spellCheck={false}
+              placeholder={'s3://sales/2026/\nhttps://data.example.com/prices.parquet'}
+              value={paths}
+              onChange={(e) => setPaths(e.target.value)}
+            />
+          </Field>
+          <div className="grid2">
+            <Field id="c-storage" label="Object storage">
+              <select id="c-storage" value={storage} onChange={(e) => setStorage(e.target.value)}>
+                <option value="s3">S3 or S3-compatible</option>
+                <option value="gcs">Google Cloud Storage</option>
+                <option value="r2">Cloudflare R2</option>
+              </select>
+            </Field>
+            <Field id="c-region" label="Region">
+              <input
+                id="c-region"
+                placeholder="us-east-1"
+                spellCheck={false}
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="grid2">
+            <Field
+              id="c-endpoint"
+              label="Endpoint"
+              hint="Only for an S3-compatible service, e.g. minio.internal:9000."
+            >
+              <input
+                id="c-endpoint"
+                spellCheck={false}
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+              />
+            </Field>
+            <Field id="c-url-style" label="URL style">
+              <select id="c-url-style" value={urlStyle} onChange={(e) => setUrlStyle(e.target.value)}>
+                <option value="">Default</option>
+                <option value="vhost">Virtual-hosted (bucket.host)</option>
+                <option value="path">Path (host/bucket)</option>
+              </select>
+            </Field>
+          </div>
+          <label className="switch">
+            <input
+              id="c-ssl"
+              type="checkbox"
+              checked={useSsl}
+              onChange={(e) => setUseSsl(e.target.checked)}
+            />
+            Use HTTPS for object storage
+          </label>
+          <Field
+            id="c-views"
+            label="Views"
+            hint={`Optional JSON: {"orders": "SELECT * FROM read_parquet('s3://sales/2026/*.parquet')"}. They appear in the schema browser and can be granted with allowed_tables.`}
+          >
+            <textarea
+              id="c-views"
+              rows={3}
+              spellCheck={false}
+              value={views}
+              onChange={(e) => setViews(e.target.value)}
+            />
+          </Field>
+        </fieldset>
+      )}
       <label className="switch">
         <input id="c-active" type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
         Active

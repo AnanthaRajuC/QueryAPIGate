@@ -27,8 +27,8 @@ def anchors(path):
 
 
 class HowToTests(unittest.TestCase):
-    def test_there_are_forty_guides_numbered_without_gaps(self):
-        self.assertEqual([g[:2] for g in GUIDES], [f'{n:02d}' for n in range(1, 41)])
+    def test_the_guides_are_numbered_without_gaps(self):
+        self.assertEqual([g[:2] for g in GUIDES], [f'{n:02d}' for n in range(1, len(GUIDES) + 1)])
 
     def test_the_index_links_every_guide(self):
         index = read(os.path.join(HOWTO, 'how-to.md'))

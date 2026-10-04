@@ -100,3 +100,8 @@ guide covers one scenario end to end, and every command and response in it was r
     collection and role is set up the way it is.
 40. [**Use the threat model to decide how to expose QueryAPIGate**](40-read-the-threat-model.md) - from your laptop
     to the internet, and the limits to plan around.
+
+## Files and data lakes
+
+41. [**Publish Parquet, CSV or JSON files in S3 as an API**](41-publish-files-in-s3-as-an-api.md) (experimental) -
+    DuckDB reads them where they are; `allowed_paths`, credentials, views.

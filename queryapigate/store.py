@@ -13,7 +13,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, deprecations, history
+from . import config, db, deprecations, duckfiles, history
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -310,6 +310,8 @@ def update_connections(connections):
         if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
             raise ApiError(f"Connection '{name}' must be an object whose 'db' is one of: "
                            f"{', '.join(config.SUPPORTED_DB_TYPES)}")
+        if details.get('db') == 'duckdb':
+            duckfiles.validate(details)
     with db.transaction() as conn:
         timestamp = now()
         for name, details in connections.items():
