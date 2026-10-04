@@ -170,7 +170,8 @@ class UpgradeTests(unittest.TestCase):
                 db.init_schema()
                 self.assertEqual(store.read_published(store.load_versions('a')), 2)
                 self.assertEqual(store.read_published(store.load_versions('b')), 1)
-            self.assertEqual(db.connection().execute('SELECT version FROM schema_version').fetchone()[0], 4)
+            self.assertEqual(db.connection().execute('SELECT version FROM schema_version').fetchone()[0],
+                         db.SCHEMA_VERSION)
 
 
 if __name__ == '__main__':

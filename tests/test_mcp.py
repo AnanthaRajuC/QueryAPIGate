@@ -127,10 +127,10 @@ class ListToolsForTests(McpTestCase):
         self.assertEqual(tool_names, {'reader', 'list_tables', 'execute_sql'})
 
     def test_an_unauthenticated_caller_via_the_server_sees_nothing(self):
-        # _permission_for()'s own contract, exercised at the mcp_server level rather than apikeys directly:
-        # a missing/invalid key with a server key configured resolves to no Permission at all.
-        permission = apikeys.authenticate('wrong-key')
-        self.assertIsNone(permission)
+        # tools/list's own resolution: a missing or wrong key, with a server key configured, is no caller at all
+        self.assertIsNone(mcp_server.permission_for_listing(self.app, 'wrong-key', '', '10.0.0.1'))
+        self.assertIsNone(mcp_server.permission_for_listing(self.app, '', '', '10.0.0.1'))
+        self.assertTrue(mcp_server.permission_for_listing(self.app, 'admin-key', '', '10.0.0.1').admin)
 
     def test_tool_shape_carries_schema_and_hints(self):
         self.save('q1', sql='SELECT * FROM t WHERE id = :id')
@@ -207,6 +207,85 @@ class CallToolForTests(McpTestCase):
         # A cache hit returns early in run_saved(), before execution_history is ever touched - so exactly
         # one entry (not two) is the direct evidence the second call was actually served from cache.
         self.assertEqual(len(content['1']['execution_history']), 1)
+
+
+class GovernanceParityTests(McpTestCase):
+    """BACKLOG #61: a call over MCP is governed exactly like the same call over REST - the same outcome (allowed,
+    denied, rate-limited), counted in /metrics, and recorded in history. Keeps a future front door from skipping
+    what REST's request hooks apply."""
+
+    def setUp(self):
+        super().setUp()
+        self.save('q1')
+
+    def key(self, name, **grants):
+        res = self.client.post('/api/v1/api-keys', json={'name': name, **grants}, headers=self.admin_headers)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return res.get_json()['secret']
+
+    def over_rest(self, secret, query):
+        return self.client.get(f'/q/{query}', headers={'X-API-Key': secret}).status_code
+
+    def over_mcp(self, secret, query):
+        result = mcp_server.handle_call(self.app, secret, '', '10.0.0.9', query, {})
+        if not result.get('isError'):
+            return 200
+        text = result['content'][0]['text']
+        return 429 if 'Rate limit' in text else 401 if 'Unauthorized' in text else 403
+
+    def test_the_same_outcome_over_both_front_doors(self):
+        for transport in ('rest', 'mcp'):
+            call = self.over_rest if transport == 'rest' else self.over_mcp
+            allowed = self.key(f'{transport}-allowed', connections=['a'], rate_limit='2/minute')
+            denied = self.key(f'{transport}-denied', connections=[])
+            self.assertEqual(call(allowed, 'q1'), 200, transport)
+            self.assertEqual(call(denied, 'q1'), 403, transport)
+            self.assertEqual(call('wrong-key', 'q1'), 401, transport)
+            self.assertEqual(call(allowed, 'q1'), 200, transport)
+            self.assertEqual(call(allowed, 'q1'), 429, transport)  # its own 2/minute
+
+    def test_both_are_recorded_in_history_with_the_caller(self):
+        secret = self.key('agent', connections=['a'])
+        self.over_rest(secret, 'q1')
+        self.over_mcp(secret, 'q1')
+        runs = self.client.get('/api/v1/queries/q1/history', headers=self.admin_headers).get_json()['items']
+        self.assertEqual([r['key_name'] for r in runs], ['agent', 'agent'])
+
+    def test_mcp_calls_are_counted_in_metrics_apart_from_rest(self):
+        secret = self.key('metrics-mcp-agent', connections=['a'])
+        self.over_mcp(secret, 'q1')
+        self.over_mcp(secret, 'nope')
+        self.over_mcp(secret, 'execute_sql')  # no connection_name: an error result, still counted
+        body = self.client.get('/metrics').get_data(as_text=True)
+        self.assertIn('queryapigate_requests_total{method="MCP",endpoint="mcp.saved_query",status="200",'
+                      'key="metrics-mcp-agent"} 1', body)
+        self.assertIn('queryapigate_requests_total{method="MCP",endpoint="mcp.saved_query",status="404",'
+                      'key="metrics-mcp-agent"} 1', body)
+        self.assertIn('queryapigate_requests_total{method="MCP",endpoint="mcp.execute_sql",status="400",'
+                      'key="metrics-mcp-agent"} 1', body)
+
+    def test_the_server_wide_client_limit_applies_before_authentication(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_RATE_LIMIT': '2/minute'}):
+            results = [mcp_server.handle_call(self.app, 'wrong-key', '', '10.0.0.77', 'q1', {})['content'][0]['text']
+                       for _ in range(3)]
+        self.assertIn('Unauthorized', results[0])
+        self.assertIn('Rate limit exceeded', results[2])  # guessing keys is throttled too
+
+    def test_a_signed_in_user_can_call_tools_with_a_bearer_token(self):
+        import time
+
+        import jwt
+        secret = 'a-shared-secret-that-is-long-enough-for-hs256'
+        self.client.post('/api/v1/roles', json={'name': 'agents', 'connections': ['a']}, headers=self.admin_headers)
+        token = jwt.encode({'sub': 'alice', 'exp': int(time.time()) + 300}, secret, algorithm='HS256')
+        env = {'QUERYAPIGATE_JWT_SECRET': secret, 'QUERYAPIGATE_JWT_ROLE': 'agents'}
+        with mock.patch.dict(os.environ, env):
+            result = mcp_server.handle_call(self.app, '', f'Bearer {token}', '10.0.0.9', 'q1', {})
+            listed = mcp_server.permission_for_listing(self.app, '', f'Bearer {token}', '10.0.0.9')
+        self.assertFalse(result.get('isError'), result)
+        self.assertEqual(listed.name, 'jwt:alice')
+        runs = self.client.get('/api/v1/queries/q1/history', headers=self.admin_headers).get_json()['items']
+        self.assertEqual(runs[0]['key_name'], 'jwt:alice')
 
 
 class FixedToolsTests(McpTestCase):
@@ -342,6 +421,12 @@ class EndToEndMcpTests(McpTestCase):
         self.assertEqual(len(result.structuredContent['rows']), 5)
         self.assertFalse(result.structuredContent['truncated'])
         self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+        # This process's own /metrics shows the call - REST's can't, it runs in another process (BACKLOG #61).
+        import urllib.request
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/metrics', timeout=5) as res:
+            self.assertIn('method="MCP",endpoint="mcp.saved_query",status="200"', res.read().decode())
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=5) as res:
+            self.assertEqual(json.loads(res.read())['status'], 'ok')
 
 
 if __name__ == '__main__':

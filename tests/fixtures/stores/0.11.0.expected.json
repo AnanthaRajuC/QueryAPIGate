@@ -1,0 +1,13 @@
+{
+  "created": {
+    "connection": true,
+    "key": true,
+    "query v1": true,
+    "query v2": true,
+    "role": true,
+    "run": true
+  },
+  "data_db_path": "/tmp/qag-fixture-0.11.0-ted69sg2/data.db",
+  "skipped": [],
+  "version": "0.11.0"
+}

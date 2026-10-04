@@ -9,6 +9,9 @@ SUPPORTED_DB_TYPES = ('mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'jdbc',
 PASSWORD_MASK = '********'
 CONNECT_TIMEOUT = 10  # seconds
 HISTORY_LIMIT = 50  # executions remembered per saved-query version (QUERYAPIGATE_HISTORY_LIMIT)
+HISTORY_ADHOC_LIMIT = 1000  # ad-hoc SQL runs remembered in all (QUERYAPIGATE_HISTORY_ADHOC_LIMIT)
+HISTORY_ADHOC_SQL_MODES = ('text', 'hash', 'none')  # what an ad-hoc run's history keeps of its SQL
+HISTORY_ADHOC_SQL_MAX = 4000  # characters of ad-hoc SQL text kept, at most
 DEFAULT_HISTORY_FLUSH_INTERVAL = 1.0  # seconds between batched history writes
 DEFAULT_EVENTS_PORT = 5002  # `queryapigate events`
 DEFAULT_EVENTS_MAX_CONNECTIONS = 10_000
@@ -114,6 +117,21 @@ def history_limit():
     check_settings()."""
     raw = os.environ.get('QUERYAPIGATE_HISTORY_LIMIT', '').strip()
     return int(raw) if raw else HISTORY_LIMIT
+
+
+def history_adhoc_limit():
+    """QUERYAPIGATE_HISTORY_ADHOC_LIMIT: ad-hoc SQL runs (/execute_sql, MCP's execute_sql) kept in all, newest first,
+    unless a retention period is set - they have no saved-query version to be capped per. Default 1000."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_ADHOC_LIMIT', '').strip()
+    return int(raw) if raw else HISTORY_ADHOC_LIMIT
+
+
+def history_adhoc_sql():
+    """QUERYAPIGATE_HISTORY_ADHOC_SQL: what an ad-hoc run's history entry keeps of its SQL - `text` (default; the
+    first HISTORY_ADHOC_SQL_MAX characters), `hash` (its SHA-256 only: which statements repeat, never their text,
+    e.g. when SQL carries literal values that mustn't be stored) or `none`. Validated at startup."""
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_ADHOC_SQL', '').strip().lower()
+    return raw or 'text'
 
 
 def history_retention_days():
@@ -284,7 +302,11 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_AUDIT_LOG_LIMIT', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_AUDIT_LOG_LIMIT must be a positive integer')
-    for name in ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS'):
+    raw = os.environ.get('QUERYAPIGATE_HISTORY_ADHOC_SQL', '').strip().lower()
+    if raw and raw not in HISTORY_ADHOC_SQL_MODES:
+        raise ValueError(f"QUERYAPIGATE_HISTORY_ADHOC_SQL must be one of: {', '.join(HISTORY_ADHOC_SQL_MODES)}")
+    for name in ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_ADHOC_LIMIT',
+                 'QUERYAPIGATE_HISTORY_RETENTION_DAYS'):
         raw = os.environ.get(name, '').strip()
         if raw and (not raw.isdigit() or int(raw) < 1):
             raise ValueError(f'{name} must be a positive integer')
@@ -688,10 +710,15 @@ def describe_settings():
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
         {'id': 'history', 'title': 'Run history',
-         'description': 'What each saved-query run leaves behind in its history, and for how long. GET '
-             '/api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [
+         'description': 'What each run - of a saved query, or ad-hoc SQL - leaves behind in its history, and for how '
+             'long. GET /api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [
             row('History limit', 'Runs kept per saved-query version, unless a retention period is set.',
                 'QUERYAPIGATE_HISTORY_LIMIT', f'{history_limit()} runs'),
+            row('Ad-hoc history limit', 'Ad-hoc SQL runs kept in all, unless a retention period is set.',
+                'QUERYAPIGATE_HISTORY_ADHOC_LIMIT', f'{history_adhoc_limit()} runs'),
+            row('Ad-hoc SQL kept', 'What an ad-hoc run\'s history keeps of its SQL: the text (first '
+                f'{HISTORY_ADHOC_SQL_MAX} characters), a hash, or none. Parameter values are never kept.',
+                'QUERYAPIGATE_HISTORY_ADHOC_SQL', history_adhoc_sql()),
             row('History retention', 'Keep every run for this many days instead of a per-version count. Best '
                 'with a PostgreSQL metadata store.', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS',
                 'per-version limit' if history_retention_days() is None else f'{history_retention_days()} days'),

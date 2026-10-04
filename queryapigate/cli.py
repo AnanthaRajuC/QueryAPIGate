@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 
 from . import __version__, apikeys, bundle, config, db, examples, logging_setup, postman, store
@@ -138,7 +139,7 @@ def _export(args):
 
         path = store.resolve_saved_file(args.query)
         name = store.query_name(path)
-        _, saved = store.select_version(store.load_versions(path), None)
+        version, saved = store.select_version(store.load_versions(path), None)
         connection_name = args.connection or saved.get('connection_name')
         if not connection_name:
             raise ApiError('Connection name is missing - pass --connection or set one on the saved query')
@@ -154,7 +155,14 @@ def _export(args):
         os.makedirs(out_dir, exist_ok=True)
         tmp_path = os.path.join(out_dir, f'.{os.path.basename(out_path)}.part')
 
-        columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
+        started = time.monotonic()
+        entry = {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': None,
+                 'key_name': 'cli'}
+        try:
+            columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
+        except ApiError as error:
+            store.record_execution(path, version, {**entry, 'status': 'error', 'error': error.message})
+            raise
         row_count = 0
 
         def counted(row_iter):
@@ -167,6 +175,10 @@ def _export(args):
             for chunk in iter_stream_chunks(args.format, columns, counted(rows)):
                 f.write(chunk)
         os.replace(tmp_path, out_path)
+        # The CLI runs outside the API's grants (a local operator is already trusted), but what it exports is
+        # still on the record: run history, with `cli` as the caller.
+        store.record_execution(path, version, {**entry, 'status': 'success', 'rows': row_count,
+                                               'duration_ms': round((time.monotonic() - started) * 1000, 1)})
     except ApiError as error:
         print(f'queryapigate export: {error.message}', file=sys.stderr)
         return 1

@@ -26,6 +26,7 @@ A flush interval of 0 writes each run inside its own request instead, exactly as
 """
 import atexit
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -174,6 +175,23 @@ def record(name, version, entry, sample=True):
         _writer().add(target, row)
 
 
+def record_adhoc(entry, sql, params=None, sample=True):
+    """Queue one ad-hoc run (/execute_sql, /execute_mongo, MCP's execute_sql) for history, like record(): sampled the
+    same way (failures always kept), written in the same batches. Keeps its SQL as QUERYAPIGATE_HISTORY_ADHOC_SQL
+    says, and the names of its parameters - never their values. Returns the entry as recorded."""
+    mode = config.history_adhoc_sql()
+    entry = dict(entry)
+    if isinstance(sql, str) and mode == 'text':
+        entry['sql'] = sql[:config.HISTORY_ADHOC_SQL_MAX]
+        if len(sql) > config.HISTORY_ADHOC_SQL_MAX:
+            entry['sql_truncated'] = True
+    elif isinstance(sql, str) and mode == 'hash':
+        entry['sql_sha256'] = hashlib.sha256(sql.encode()).hexdigest()
+    entry['params'] = sorted(params or ())
+    record(None, None, entry, sample=sample)
+    return entry
+
+
 def flush():
     """Have everything this process has queued written, now - called before every history read, so a process
     always sees its own runs (read-your-writes). The writer thread does the writing; this only waits for it.
@@ -209,6 +227,11 @@ def write(rows, target=None):
     try:
         with db.transaction(append_only=True, target=target) as conn:
             for name, version, executed_at, entry_json, status, key_name in rows:
+                if name is None:  # an ad-hoc run: no saved query to belong to
+                    conn.execute('INSERT INTO execution_history (query_name, version, executed_at, entry_json, '
+                                 'status, key_name) VALUES (NULL, NULL, ?, ?, ?, ?)',
+                                 (executed_at, entry_json, status, key_name))
+                    continue
                 conn.execute(
                     'INSERT INTO execution_history (query_name, version, executed_at, entry_json, status, key_name) '
                     'SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS '
@@ -229,11 +252,20 @@ def write(rows, target=None):
 
 
 def _trim(name, version, target):
-    """Keep only the newest history_limit() rows of one version. Its own transaction, after the runs are safely
+    """Keep only the newest history_limit() rows of one version - or, for ad-hoc runs (name None), the newest
+    history_adhoc_limit() of them all. Its own transaction, after the runs are safely
     recorded: on Postgres two concurrent trims of the same version can contend for the same rows, and losing
     that race must never cost a run its history row. A trim that loses is harmless - the next one catches up."""
     try:
         with db.transaction(append_only=True, target=target) as conn:
+            if name is None:
+                conn.execute("""
+                    DELETE FROM execution_history WHERE rowid IN (
+                        SELECT rowid FROM execution_history WHERE query_name IS NULL
+                        ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
+                    )
+                """, (config.history_adhoc_limit(),))
+                return
             conn.execute("""
                 DELETE FROM execution_history WHERE rowid IN (
                     SELECT rowid FROM execution_history WHERE query_name = ? AND version = ?
@@ -298,7 +330,8 @@ def _decode_cursor(cursor):
     raise ApiError('cursor is not one this server returned')
 
 
-def search(query=None, version=None, status=None, key=None, since=None, until=None, limit=100, cursor=None):
+def search(query=None, version=None, status=None, key=None, since=None, until=None, limit=100, cursor=None,
+           kind=None):
     """One page of every stored run matching the filters, newest first, as (entries, next_cursor) - next_cursor
     is None on the last page. ``since`` is inclusive and ``until`` exclusive; either takes a date or a time
     (executed_at's own format, in this server's local time). Each entry is the run's own record plus the
@@ -306,6 +339,8 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     history_limit() runs per version that lists show, e.g. across a retention period's worth of runs."""
     if status not in (None, '', 'success', 'error'):
         raise ApiError("status must be 'success' or 'error'")
+    if kind not in (None, '', 'saved', 'adhoc'):
+        raise ApiError("kind must be 'saved' or 'adhoc'")
     if not 1 <= limit <= MAX_PAGE:
         raise ApiError(f'limit must be between 1 and {MAX_PAGE}')
     since, until = _time_bound(since, 'since'), _time_bound(until, 'until')
@@ -314,6 +349,10 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
         if value not in (None, ''):
             clauses.append(f'{column} = ?')
             params.append(value)
+    if kind == 'saved':
+        clauses.append('query_name IS NOT NULL')
+    elif kind == 'adhoc':
+        clauses.append('query_name IS NULL')
     if since:
         clauses.append('executed_at >= ?')
         params.append(since)
@@ -329,7 +368,8 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     rows = db.connection().execute(
         f'SELECT query_name, version, executed_at, rowid, entry_json FROM execution_history {where} '
         'ORDER BY executed_at DESC, rowid DESC LIMIT ?', (*params, limit + 1)).fetchall()
-    entries = [{'query': row['query_name'], 'version': row['version'], **json.loads(row['entry_json'])}
+    entries = [{'query': row['query_name'], 'version': row['version'],
+                'kind': 'saved' if row['query_name'] is not None else 'adhoc', **json.loads(row['entry_json'])}
                for row in rows[:limit]]
     last = rows[limit - 1] if len(rows) > limit else None
     return entries, (_encode_cursor(last['executed_at'], last['rowid']) if last is not None else None)

@@ -10,7 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from unittest import mock
 
-from queryapigate import cli, config, store
+from queryapigate import cli, config, history, store
 from tests.helpers import write_connections
 
 
@@ -53,6 +53,15 @@ class ExportTests(unittest.TestCase):
         self.assertIn('Wrote 3 rows', out)
         with open(out_path) as f:
             self.assertEqual(f.read().splitlines(), ['id,name', '1,a', '2,b', '3,c'])
+
+    def test_an_export_is_recorded_in_run_history_with_cli_as_the_caller(self):
+        code, _, err = self.run_cli(['export', 'all_rows', '--out', os.path.join(self.home, 'out.csv')])
+        self.assertEqual(code, 0, err)
+        runs, _ = history.search(query='all_rows')
+        self.assertEqual([(r['key_name'], r['status'], r['rows']) for r in runs], [('cli', 'success', 3)])
+        self.run_cli(['export', 'all_rows', '--connection', 'nope', '--out', os.path.join(self.home, 'x.csv')])
+        runs, _ = history.search(query='all_rows', status='error')
+        self.assertEqual([r['key_name'] for r in runs], ['cli'])
 
     def test_date_and_name_placeholders_are_resolved(self):
         code, _, err = self.run_cli(['export', 'all_rows', '--out', os.path.join(self.home, '{name}_{date}.csv')])

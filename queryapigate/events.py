@@ -55,7 +55,11 @@ _RETRY_MS = 3000            # reconnection delay suggested to EventSource client
 
 
 def event_payload(query_name, version, entry):
-    """The JSON an event carries - the same shape the main server's GET /events uses."""
+    """The JSON an event carries - the same shape the main server's GET /events uses: an `execution` of a saved
+    query, or an `adhoc_execution` (ad-hoc SQL, which has no query or version; its entry carries the SQL as
+    QUERYAPIGATE_HISTORY_ADHOC_SQL keeps it)."""
+    if query_name is None:
+        return {'type': 'adhoc_execution', 'connection_name': entry.get('connection_name'), 'entry': entry}
     return {'type': 'execution', 'filename': query_name, 'version': version,
             'connection_name': entry.get('connection_name'), 'entry': entry}
 
@@ -99,10 +103,10 @@ def _replay(after, key_name):
 
 
 def _authenticate(credentials, client_ip):
-    """The caller's Permission from (X-API-Key, Authorization) - exactly the main server's rules
-    (app.authenticate_headers()): an API key, or a signed-in user's bearer token (jwtauth.py)."""
-    from .app import authenticate_headers  # imported here: app pulls in Flask, which `events` needs no more of
-    return authenticate_headers(credentials[0], credentials[1], client_ip)
+    """The caller's Permission from (X-API-Key, Authorization) - every front door's rules (governance.py): an API
+    key, or a signed-in user's bearer token (jwtauth.py)."""
+    from .governance import authenticate
+    return authenticate(credentials[0], credentials[1], client_ip)
 
 
 class _Client:

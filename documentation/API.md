@@ -973,7 +973,7 @@ of the metrics themselves.
 
 ## Live events (Server-Sent Events)
 
-Every saved-query run can be streamed to clients as it happens - a mobile app showing a user their own requests
+Every recorded run - of a saved query, or of ad-hoc SQL - can be streamed to clients as it happens - a mobile app showing a user their own requests
 completing, a dashboard, the admin UI's Home tab. There are two ways to serve that stream, with the same format:
 
 | | `GET /events` on the main server | `queryapigate events` |
@@ -997,6 +997,14 @@ data: {"type": "execution", "filename": "monthly_revenue", "version": 3, "connec
        "entry": {"executed_at": "2026-09-30 12:00:00", "status": "success", "rows": 42,
                  "duration_ms": 118.4, "key_name": "mobile-alice", "request_id": "a1b2c3d4e5f6"}}
 ```
+
+An [ad-hoc run](#ad-hoc-runs) arrives as `"type": "adhoc_execution"`, with `connection_name` and no `filename`
+or `version`; its `entry` carries the SQL as `QUERYAPIGATE_HISTORY_ADHOC_SQL` keeps it, and `transport`.
+
+**Event ids** are opaque integers that only increase: store the last one and send it back, but don't read
+anything else into it. Today an id is the run's history row id; a future dedicated event log keeps the sequence
+going rather than restarting it, so an id held across that upgrade still resumes
+([ADR 0002](adr/0002-event-ids.md)). Live events are expected to be marked experimental for 1.0 until then.
 
 A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client library
 doesn't time it out as idle - not an event, safe to ignore.
@@ -1050,8 +1058,9 @@ disconnects frees its slot at the next keepalive, within 15 seconds.
 
 ## Run history
 
-Every saved-query run is recorded: when, against which connection, by which key, with what status, row count
-and duration. How that history is written and kept is configurable:
+Every saved-query run is recorded: when, against which connection, by which key, through which front door
+(`transport`: `rest` or `mcp`), with what status, row count and duration. So is every [ad-hoc run](#ad-hoc-runs).
+How that history is written and kept is configurable:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -1059,6 +1068,8 @@ and duration. How that history is written and kept is configurable:
 | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep **every** run for this many days instead of a per-version count; a sweep every 10 minutes deletes older ones. Best with a [PostgreSQL metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of *successful* runs recorded, e.g. `0.1` for one in ten on a very busy query. Failed runs are always recorded. |
 | `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes. `0` writes each run inside its own request. |
+| `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` | `1000` | Ad-hoc runs kept in all, newest first, unless a retention period is set. |
+| `QUERYAPIGATE_HISTORY_ADHOC_SQL` | `text` | What an ad-hoc run's entry keeps of its SQL: `text` (the first 4,000 characters, with `sql_truncated` when cut), `hash` (`sql_sha256` only - which statements repeat, never their text) or `none`. SQL can embed literal values; choose `hash` or `none` if those may be sensitive. |
 
 **Batched writes.** A request never waits on its history entry: the run is queued in memory and a background
 thread writes everything queued in one transaction every `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` seconds. Reads in
@@ -1069,13 +1080,35 @@ queued per process and newer ones are dropped rather than slowing requests - cou
 `queryapigate_history_runs_total{outcome="dropped"}`, alongside `recorded`, `sampled_out` and `failed`, with
 `queryapigate_history_pending` for the current queue.
 
+### Ad-hoc runs
+
+`POST /execute_sql`, `POST /execute_mongo` (including streamed exports) and MCP's `execute_sql` tool are recorded
+too: the questions agents and people ask with no saved query behind them are the ones most worth being able to
+look back on. An ad-hoc entry has `"kind": "adhoc"`, `query` and `version` `null`, and:
+
+- the caller (`key_name`), `transport`, `connection_name`, status, rows, duration and error, as for a saved run;
+- the SQL, as `QUERYAPIGATE_HISTORY_ADHOC_SQL` says;
+- `params`: the names of its bound parameters, **never their values**.
+
+Ad-hoc runs are sampled like saved ones (`QUERYAPIGATE_HISTORY_SAMPLE_RATE`; failures always kept) and kept to
+`QUERYAPIGATE_HISTORY_ADHOC_LIMIT` in all, or the retention period if one is set. `queryapigate export` records its
+runs as saved-query runs by `key_name` `cli`.
+
+~~~json
+{"kind": "adhoc", "query": null, "version": null, "executed_at": "2026-10-04 09:12:40", "status": "success",
+ "rows": 12, "duration_ms": 9, "key_name": "agent", "transport": "mcp", "connection_name": "warehouse",
+ "sql": "SELECT region, SUM(total) FROM orders WHERE placed_at >= :since GROUP BY region", "params": ["since"],
+ "request_id": "4be1f07c9d22"}
+~~~
+
 ### `GET /api/v1/history`
 
-Pages through every stored run of every saved query, newest first - across a retention period, for example. Admin
+Pages through every stored run, saved and ad-hoc, newest first - across a retention period, for example. Admin
 only (it shows every key's activity). `GET /api/v1/queries/{name}/history` is the same for one query.
 
 | Parameter | Meaning |
 |-----------|---------|
+| `kind` | `saved` or `adhoc`. Each item says which it is. |
 | `query`, `version` | Only this saved query (and version). |
 | `status` | `success` or `error`. |
 | `key` | Only runs made with this API key (`admin` for the admin key). |

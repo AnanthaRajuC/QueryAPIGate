@@ -378,14 +378,14 @@ def delete_role(name):
 
 @bp.route('/history', methods=['GET'])
 def search_history():
-    """Every saved query's runs, newest first, paged with a cursor. Filters: query, version, status, key, since
-    (inclusive) and until (exclusive) - a date or a time."""
+    """Every run - of a saved query, or ad-hoc SQL - newest first, paged with a cursor. Filters: kind (saved or
+    adhoc), query, version, status, key, since (inclusive) and until (exclusive) - a date or a time."""
     args = request.args
     limit = get_int(args.get('limit'), 'limit')
     entries, next_cursor = history.search(
         query=args.get('query'), version=get_int(args.get('version'), 'version'), status=args.get('status'),
         key=args.get('key'), since=args.get('since'), until=args.get('until'),
-        limit=100 if limit is None else limit, cursor=args.get('cursor'))
+        limit=100 if limit is None else limit, cursor=args.get('cursor'), kind=args.get('kind'))
     return jsonify({'items': entries, 'next_cursor': next_cursor}), 200
 
 

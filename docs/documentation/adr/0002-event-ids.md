@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0002-event-ids.md"

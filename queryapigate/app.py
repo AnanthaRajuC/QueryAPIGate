@@ -25,6 +25,8 @@ from . import (
     definitions,
     engine,
     examples,
+    governance,
+    history,
     jwtauth,
     logging_setup,
     metrics,
@@ -230,7 +232,7 @@ def create_app():
             response.headers['Link'] = f'<{DEPRECATED_ENDPOINTS[request.endpoint]}>; rel="successor-version"'
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
-        metrics.observe_request(request.method, endpoint, str(response.status_code), elapsed, caller_key_name())
+        governance.observe(request.method, endpoint, response.status_code, elapsed, caller_key_name())
         cache_status = response.headers.get('X-Cache')
         if cache_status == 'HIT':
             metrics.inc_cache_hit()
@@ -266,45 +268,35 @@ def error_body(message, status, extra=None):
 # Request helpers
 # --------------------------------------------------------------------------------------
 
-def check_rate_limit():
-    """Count this request against its client's quota; returns a 429 response when it is over the limit."""
-    limit = config.rate_limit()
-    if limit is None or request.method == 'OPTIONS' or request.endpoint in RATE_LIMIT_EXEMPT:
-        return None
-    count, period = limit
-    client = request.remote_addr or 'unknown'
-    allowed, remaining, retry_after = current_app.extensions['queryapigate_limiter'].hit(client, count, period)
-    g.rate_limit = (count, remaining)
-    if allowed:
-        return None
-    metrics.inc_rate_limit_rejection()
-    response = jsonify({'error': 'Rate limit exceeded', 'retry_after': retry_after})
+def _too_many(verdict, message):
+    response = jsonify({'error': message, 'retry_after': verdict.retry_after})
     response.status_code = 429
-    response.headers['Retry-After'] = str(retry_after)
+    response.headers['Retry-After'] = str(verdict.retry_after)
     return response
+
+
+def check_rate_limit():
+    """Count this request against its client's quota (governance.py); returns a 429 response when it is over."""
+    if request.method == 'OPTIONS' or request.endpoint in RATE_LIMIT_EXEMPT:
+        return None
+    verdict = governance.check_client_limit(current_app, request.remote_addr)
+    if verdict is None:
+        return None
+    g.rate_limit = (verdict.limit, verdict.remaining)
+    return None if verdict.allowed else _too_many(verdict, 'Rate limit exceeded')
 
 
 def check_key_rate_limit():
-    """Like check_rate_limit() above, but for a key's own optional `rate_limit` grant - checked in
-    *addition* to the server-wide, IP-based limit, never instead of it (see apikeys.py's module docstring).
-    Runs after g.permission is resolved, unlike the IP-based check, since there is no per-key identity to
-    limit by before then. Naturally a no-op for the admin key and the open/no-key case, both of which
-    always resolve rate_limit=None - no special-casing needed for either."""
-    permission = g.get('permission')
-    if permission is None or permission.rate_limit is None or request.method == 'OPTIONS' \
-            or request.endpoint in RATE_LIMIT_EXEMPT:
+    """Like check_rate_limit() above, but for the caller's own optional `rate_limit` grant - checked in *addition* to
+    the server-wide, IP-based limit, never instead of it. Runs after g.permission is resolved, since there is no
+    per-key identity to limit by before then; a no-op for the admin key and the open/no-key case."""
+    if request.method == 'OPTIONS' or request.endpoint in RATE_LIMIT_EXEMPT:
         return None
-    count, period = permission.rate_limit
-    limiter = current_app.extensions['queryapigate_key_limiter']
-    allowed, remaining, retry_after = limiter.hit(permission.name, count, period)
-    g.key_rate_limit = (count, remaining)
-    if allowed:
+    verdict = governance.check_key_limit(current_app, g.get('permission'))
+    if verdict is None:
         return None
-    metrics.inc_rate_limit_rejection()
-    response = jsonify({'error': "Rate limit exceeded for this API key", 'retry_after': retry_after})
-    response.status_code = 429
-    response.headers['Retry-After'] = str(retry_after)
-    return response
+    g.key_rate_limit = (verdict.limit, verdict.remaining)
+    return None if verdict.allowed else _too_many(verdict, 'Rate limit exceeded for this API key')
 
 
 def resolve_permission():
@@ -317,16 +309,8 @@ def resolve_permission():
 
 
 def authenticate_headers(api_key, authorization, client_ip):
-    """resolve_permission() without Flask - shared with `queryapigate events` (events.py)."""
-    if api_key:
-        permission = apikeys.authenticate(api_key, client_ip=client_ip)
-    elif authorization and config.jwt_enabled():
-        permission = jwtauth.authenticate(authorization, client_ip=client_ip)
-    else:
-        permission = None
-    if permission is not None:
-        return permission
-    return None if apikeys.auth_required() else apikeys.OPEN
+    """resolve_permission() without Flask - governance.authenticate(), kept under this name for events.py."""
+    return governance.authenticate(api_key, authorization, client_ip)
 
 
 def require_admin():
@@ -431,10 +415,10 @@ def get_stream_flag():
 
 
 def stream_sql_response(sql, connection_name, params, timeout, output_format, filename, saved=None,
-                        allowed_tables=None):
+                        allowed_tables=None, database=None):
     """Shared by execute_sql_endpoint() and run_saved(): validates the stream=true-specific constraints
-    (format, no pagination) and returns the chunked Response. ``saved``, when given, is (path, version) for
-    a saved query whose run should still be recorded in its execution_history once the stream finishes."""
+    (format, no pagination) and returns the chunked Response, the run recorded in history once the stream
+    finishes - in its saved query's, when ``saved`` is (path, version), or as an ad-hoc run."""
     if output_format not in STREAM_FORMATTERS:
         raise ApiError(f"stream=true only supports these formats: {', '.join(sorted(STREAM_FORMATTERS))}")
     if request.args.get('page') or request.args.get('page_size'):
@@ -442,18 +426,42 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
     key_name = caller_key_name()
     columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
                                       allowed_tables=allowed_tables)
+    # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the response
+    # streams out - by then the request/app context this view function runs in is long gone (no
+    # flask.stream_with_context() wrapping is used), so g, caller_key_name() and current_app are only safe to read
+    # up front, while still inside the request that's actually issuing the query - this is why the broadcaster
+    # instance itself is captured here too.
+    broadcaster = current_app.extensions['queryapigate_broadcaster']
+    entry = run_entry(connection_name)
     if saved is not None:
         path, number = saved
-        # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the
-        # response streams out - by then the request/app context this view function runs in is long gone
-        # (no flask.stream_with_context() wrapping is used), so g, caller_key_name() and current_app are
-        # only safe to read up front, while still inside the request that's actually issuing the query -
-        # this is why the broadcaster instance itself is captured here too, not looked up inside the
-        # generator the way _record_and_broadcast()'s other callers do.
-        broadcaster = current_app.extensions['queryapigate_broadcaster']
-        rows = _record_stream_history(rows, path, number, connection_name, g.get('request_id'), key_name,
-                                      broadcaster)
+
+        def record(finished):
+            _record_and_broadcast(path, number, connection_name, finished, broadcaster)
+    else:
+        if database:
+            entry['database'] = database
+
+        def record(finished):
+            _record_adhoc_and_broadcast(sql, params, connection_name, finished, broadcaster)
+    rows = _record_stream_history(rows, entry, record)
     return stream_response(output_format, columns, rows, filename)
+
+
+def run_entry(connection_name):
+    """The start of one run's history entry: when, where, by whom, through which front door."""
+    return {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': g.get('request_id'),
+            'key_name': caller_key_name(), 'transport': g.get('transport', 'rest')}
+
+
+def _record_adhoc_and_broadcast(sql, params, connection_name, entry, broadcaster=None):
+    """An ad-hoc run's _record_and_broadcast(): into run history (history.record_adhoc()) and the live feed, as an
+    `adhoc_execution` event, under the same per-key rule as a saved query's run."""
+    recorded = history.record_adhoc(entry, sql, params)
+    if broadcaster is None:
+        broadcaster = current_app.extensions['queryapigate_broadcaster']
+    broadcaster.publish({'type': 'adhoc_execution', 'connection_name': connection_name, 'entry': recorded},
+                        entry['key_name'])
 
 
 def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None):
@@ -471,12 +479,10 @@ def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None
                         'connection_name': connection_name, 'entry': entry}, entry['key_name'])
 
 
-def _record_stream_history(rows, path, number, connection_name, request_id, key_name, broadcaster):
-    """Records a saved query's streamed run in its execution_history once fully drained or failed partway
-    through (not on a client disconnect, GeneratorExit) - counting rows as they pass through, since the
-    total is not known up front, the same trade-off engine._drain() makes for the streaming metric."""
-    entry = {'executed_at': store.now(), 'connection_name': connection_name,
-             'request_id': request_id, 'key_name': key_name}
+def _record_stream_history(rows, entry, record):
+    """Records a streamed run, through ``record``, once fully drained or failed partway through (not on a client
+    disconnect, GeneratorExit) - counting rows as they pass through, since the total is not known up front, the
+    same trade-off engine._drain() makes for the streaming metric."""
     count = 0
     try:
         for row in rows:
@@ -485,16 +491,13 @@ def _record_stream_history(rows, path, number, connection_name, request_id, key_
     except GeneratorExit:
         raise
     except ApiError as error:
-        _record_and_broadcast(path, number, connection_name,
-                              {**entry, 'status': 'error', 'error': error.message, 'rows': count}, broadcaster)
+        record({**entry, 'status': 'error', 'error': error.message, 'rows': count})
         raise
     except Exception as error:
-        _record_and_broadcast(path, number, connection_name,
-                              {**entry, 'status': 'error', 'error': str(error), 'rows': count}, broadcaster)
+        record({**entry, 'status': 'error', 'error': str(error), 'rows': count})
         raise
     else:
-        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': count},
-                              broadcaster)
+        record({**entry, 'status': 'success', 'rows': count})
 
 
 # --------------------------------------------------------------------------------------
@@ -520,12 +523,23 @@ def execute_sql_endpoint():
     timeout = get_timeout(data)
     if get_stream_flag():
         return stream_sql_response(data['sql'], data['connection_name'], params, timeout, output_format,
-                                   filename=data['connection_name'], allowed_tables=g.permission.allowed_tables)
+                                   filename=data['connection_name'], allowed_tables=g.permission.allowed_tables,
+                                   database=database)
     limit, offset, page = get_pagination()
-    result = engine.execute_sql(data['sql'], data['connection_name'], limit, offset, params, timeout,
-                                allow_writes=g.permission.allow_writes, key_name=caller_key_name(),
-                                allowed_write_ops=g.permission.allowed_write_ops, database=database,
-                                allowed_tables=g.permission.allowed_tables)
+    entry = run_entry(data['connection_name'])
+    if database:
+        entry['database'] = database
+    try:
+        result, elapsed_ms = engine.timed(engine.execute_sql, data['sql'], data['connection_name'], limit, offset,
+                                          params, timeout, allow_writes=g.permission.allow_writes,
+                                          key_name=caller_key_name(), allowed_write_ops=g.permission.allowed_write_ops,
+                                          database=database, allowed_tables=g.permission.allowed_tables)
+    except ApiError as error:
+        _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
+                                    {**entry, 'status': 'error', 'error': error.message})
+        raise
+    _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
+                                {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
     return render(result, output_format, page, limit)
 
 
@@ -545,9 +559,19 @@ def execute_mongo_endpoint():
     output_format = get_output_format(data)
     timeout = get_timeout(data)
     limit, offset, page = get_pagination()
-    result = engine.execute_mongo(data['collection'], filter_doc, data['connection_name'], limit, offset,
-                                  params, timeout, projection=data.get('projection'), sort=data.get('sort'),
-                                  key_name=caller_key_name())
+    entry = {**run_entry(data['connection_name']), 'query_type': 'mongo', 'mongo_collection': data['collection']}
+    statement = json.dumps({'collection': data['collection'], 'filter': filter_doc}, default=str)
+    try:
+        result, elapsed_ms = engine.timed(engine.execute_mongo, data['collection'], filter_doc,
+                                          data['connection_name'], limit, offset, params, timeout,
+                                          projection=data.get('projection'), sort=data.get('sort'),
+                                          key_name=caller_key_name())
+    except ApiError as error:
+        _record_adhoc_and_broadcast(statement, params, data['connection_name'],
+                                    {**entry, 'status': 'error', 'error': error.message})
+        raise
+    _record_adhoc_and_broadcast(statement, params, data['connection_name'],
+                                {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
     return render(result, output_format, page, limit)
 
 
@@ -692,8 +716,7 @@ def run_saved(ref, body, url_params):
             if cached is not None:
                 return cached
 
-    entry = {'executed_at': store.now(), 'connection_name': connection_name,
-             'request_id': g.get('request_id'), 'key_name': caller_key_name()}
+    entry = run_entry(connection_name)
     try:
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, limit, offset, values, timeout,
                                           allow_writes=effective_allow_writes, key_name=caller_key_name(),
@@ -721,8 +744,7 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     filter_doc = mongotools.fill_placeholders(saved.get('mongo_filter') or {}, values)
     limit, offset, page = get_pagination()
-    entry = {'executed_at': store.now(), 'connection_name': connection_name,
-             'request_id': g.get('request_id'), 'key_name': caller_key_name()}
+    entry = run_entry(connection_name)
     try:
         result, elapsed_ms = engine.timed(engine.execute_mongo, saved['mongo_collection'], filter_doc,
                                           connection_name, limit, offset, timeout=timeout,

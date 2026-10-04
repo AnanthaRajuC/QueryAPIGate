@@ -255,7 +255,7 @@ class SchemaUpgradeTests(unittest.TestCase):
             self.addCleanup(db.close)
             schema = db._PG_SCHEMA if TEST_DATABASE_URL else db._SCHEMA
             old = '\n'.join(line for line in schema.splitlines()
-                            if not line.strip().startswith(('status TEXT', 'key_name TEXT')))
+                            if not line.strip().startswith(('status TEXT,', 'key_name TEXT,')))
             conn = db.connection()
             conn.executescript(old)
             conn.execute('INSERT INTO schema_version (version) VALUES (2)')

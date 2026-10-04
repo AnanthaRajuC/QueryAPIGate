@@ -26,7 +26,8 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 4  # 3: execution_history.status/key_name; 4: saved_queries.published_version - see _upgrade()
+SCHEMA_VERSION = 5  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+#                    5: ad-hoc runs in execution_history (query_name/version nullable) - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -68,8 +69,8 @@ CREATE TABLE IF NOT EXISTS saved_query_versions (
 -- free and per-column NULLs cannot. `executed_at` is pulled out as a real column since it's what every
 -- ordering/capping query needs.
 CREATE TABLE IF NOT EXISTS execution_history (
-  query_name TEXT NOT NULL,
-  version INTEGER NOT NULL,
+  query_name TEXT,   -- with version: the saved query that ran; both NULL for an ad-hoc run (/execute_sql, MCP's
+  version INTEGER,   -- execute_sql), whose SQL and connection are in entry_json (schema 5)
   executed_at TEXT NOT NULL,
   entry_json TEXT NOT NULL,
   status TEXT,    -- copies of entry_json's own status/key_name, as real columns so GET /api/v1/history can filter on
@@ -111,6 +112,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 """
 
 
+# The SQLite execution_history table as schema 5 defines it - what _upgrade() rebuilds an older one into.
+_SQLITE_HISTORY_V5 = _SCHEMA[_SCHEMA.index('CREATE TABLE IF NOT EXISTS execution_history ('):]
+_SQLITE_HISTORY_V5 = _SQLITE_HISTORY_V5[:_SQLITE_HISTORY_V5.index(');') + 2]
+
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
@@ -145,8 +150,8 @@ CREATE TABLE IF NOT EXISTS saved_query_versions (
 -- the oldest runs by it, so the SQL that does so runs unchanged on both backends.
 CREATE TABLE IF NOT EXISTS execution_history (
   rowid BIGSERIAL PRIMARY KEY,
-  query_name TEXT COLLATE "C" NOT NULL,
-  version INTEGER NOT NULL,
+  query_name TEXT COLLATE "C",  -- NULL, with version, for an ad-hoc run (schema 5)
+  version INTEGER,
   executed_at TEXT NOT NULL,
   entry_json TEXT NOT NULL,
   status TEXT,
@@ -329,12 +334,16 @@ def init_schema():
     if is_postgres():
         with transaction() as conn:
             conn.executescript(_PG_SCHEMA)
+            _refuse_newer(conn)
             _upgrade(conn, postgres=True)
+            check_shape(conn, postgres=True)
             _record_schema_version(conn)
         return
     connection().executescript(_SCHEMA)
     with transaction() as conn:  # BEGIN IMMEDIATE: another process starting at once can't upgrade alongside
+        _refuse_newer(conn)
         _upgrade(conn, postgres=False)
+        check_shape(conn, postgres=False)
         _record_schema_version(conn)
 
 
@@ -351,9 +360,17 @@ def _upgrade(conn, postgres):
     never alters a table that already exists, so a column added since has to be added here - each step checks
     for itself rather than trusting the recorded version, so it is safe to re-run.
 
+    2: execution_history as one entry_json per run. 0.10 created a columnar placeholder it never wrote to (its
+       runs still lived in saved_sql/*.json, imported from there), and no release replaced it - see
+       _replace_placeholder_history().
     3: execution_history.status/key_name, backfilled from each row's own entry_json.
     4: saved_queries.published_version. Before it, the newest version was always the one served, so every
-       existing query is published at its newest version: an upgrade changes nothing a caller can see."""
+       existing query is published at its newest version: an upgrade changes nothing a caller can see.
+    5: execution_history.query_name/version nullable, for ad-hoc runs. SQLite can't relax NOT NULL in place, so
+       the table is rebuilt - keeping every row's rowid, which is also its live event's id (events.py), so a
+       client resuming with Last-Event-ID still finds its place."""
+    if 'entry_json' not in _columns(conn, 'execution_history', postgres):
+        _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
         conn.execute('ALTER TABLE execution_history ADD COLUMN status TEXT')
         conn.execute('ALTER TABLE execution_history ADD COLUMN key_name TEXT')
@@ -367,6 +384,87 @@ def _upgrade(conn, postgres):
         conn.execute('ALTER TABLE saved_queries ADD COLUMN published_version INTEGER')
         conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
                      'WHERE saved_query_versions.query_name = saved_queries.name)')
+    if _history_requires_a_query(conn, postgres):
+        if postgres:
+            conn.execute('ALTER TABLE execution_history ALTER COLUMN query_name DROP NOT NULL')
+            conn.execute('ALTER TABLE execution_history ALTER COLUMN version DROP NOT NULL')
+        else:
+            conn.execute(_SQLITE_HISTORY_V5.replace('execution_history (', 'execution_history_v5 (', 1))
+            conn.execute('INSERT INTO execution_history_v5 (rowid, query_name, version, executed_at, entry_json, '
+                         'status, key_name) SELECT rowid, query_name, version, executed_at, entry_json, status, '
+                         'key_name FROM execution_history')
+            conn.execute('DROP TABLE execution_history')
+            conn.execute('ALTER TABLE execution_history_v5 RENAME TO execution_history')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_qv '
+                         'ON execution_history(query_name, version, executed_at)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at)')
+
+
+def _refuse_newer(conn):
+    """A store a newer release has upgraded is not this version's to run on: its tables may mean things this code
+    doesn't know, and recording this version's number over that release's would hide the mismatch from it."""
+    row = conn.execute('SELECT version FROM schema_version').fetchone()
+    if row is not None and row[0] > SCHEMA_VERSION:
+        raise ValueError(f'the metadata store {describe()} is at schema {row[0]}, from a newer release of '
+                         f'QueryAPIGate than this one (schema {SCHEMA_VERSION}). Run that release or a later one; '
+                         'downgrading in place is not supported - restore a backup taken before the upgrade instead.')
+
+
+def _replace_placeholder_history(conn, postgres):
+    """Swap 0.10's never-used, columnar execution_history for the current table. Only an empty one is replaced: a
+    table with rows in it is not the placeholder, and dropping it would lose them, so startup refuses instead."""
+    if conn.execute('SELECT COUNT(*) FROM execution_history').fetchone()[0]:
+        raise ValueError(f'the execution_history table in {describe()} has rows but not the shape any release of '
+                         'QueryAPIGate wrote (no entry_json column), so it was not upgraded. Back up the store, '
+                         'then move that table aside (ALTER TABLE execution_history RENAME TO '
+                         'execution_history_old) and start again: a new, empty run history is created.')
+    conn.execute('DROP TABLE execution_history')
+    if postgres:
+        conn.executescript(_PG_SCHEMA)
+    else:
+        conn.execute(_SQLITE_HISTORY_V5)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_qv '
+                     'ON execution_history(query_name, version, executed_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at)')
+
+
+@functools.lru_cache(maxsize=1)
+def expected_columns():
+    """{table: columns} as this version's schema defines them - what check_shape() holds a store to."""
+    conn = sqlite3.connect(':memory:')
+    try:
+        conn.executescript(_SCHEMA)
+        tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                                       "AND name NOT LIKE 'sqlite_%'")]
+        return {table: {row[1] for row in conn.execute(f'PRAGMA table_info({table})')} for table in tables}
+    finally:
+        conn.close()
+
+
+def check_shape(conn, postgres):
+    """Refuse to start on a store whose tables, after _upgrade(), still lack a column this version reads or writes -
+    one some other tool altered, or a release newer than this one rebuilt - rather than start and then fail on the
+    first request that touches it (BACKLOG #65). Extra columns are fine: a newer release's additions are ignored."""
+    problems = []
+    for table, wanted in sorted(expected_columns().items()):
+        missing = wanted - _columns(conn, table, postgres)
+        if missing:
+            problems.append(f'{table} is missing {", ".join(sorted(missing))}')
+    if problems:
+        raise ValueError(f'the metadata store {describe()} does not have the shape this version of QueryAPIGate '
+                         f'(schema {SCHEMA_VERSION}) needs: {"; ".join(problems)}. Restore it from a backup taken '
+                         'before it was changed, or start the release that last ran on it and export what you need '
+                         '(`queryapigate collection export`) before moving to a new QUERYAPIGATE_HOME.')
+
+
+def _history_requires_a_query(conn, postgres):
+    """Whether execution_history still predates schema 5 (query_name NOT NULL)."""
+    if postgres:
+        row = conn.execute("SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() "
+                           "AND table_name = 'execution_history' AND column_name = 'query_name'").fetchone()
+        return row is not None and row[0] == 'NO'
+    return any(row[1] == 'query_name' and row[3] for row in
+               conn.execute('PRAGMA table_info(execution_history)').fetchall())
 
 
 def _record_schema_version(conn):

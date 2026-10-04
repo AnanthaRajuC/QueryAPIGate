@@ -20,9 +20,9 @@ by accident.
 
 | Item | Why before 1.0 |
 |---|---|
-| #61 One governed core for every front door | Applying rate limits to MCP calls, and accepting JWT there, changes MCP behaviour |
-| #62 Ad-hoc SQL runs in history and events | Touches the history schema and `GET /history` response shapes |
-| #59 Dedicated event log (*storage decision only*) | Decides where event ids come from; the full event log can ship later |
+| ~~#61 One governed core for every front door~~ (shipped) | Applying rate limits to MCP calls, and accepting JWT there, changes MCP behaviour |
+| ~~#62 Ad-hoc SQL runs in history and events~~ (shipped) | Touches the history schema and `GET /history` response shapes |
+| ~~#59 Dedicated event log (*storage decision only*)~~ (decided: [ADR 0002](documentation/adr/0002-event-ids.md)) | Decides where event ids come from; the full event log can ship later |
 | #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
 | #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
 | ~~#74 Respect a saved query's own `LIMIT`~~ (shipped) | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
@@ -33,7 +33,7 @@ by accident.
 | Item | What |
 |---|---|
 | #64 Experimental features label | A documented way to ship outside the freeze; live events are the first candidate |
-| #65 Upgrade guarantee and upgrade CI | Every 0.x store upgrades automatically or refuses with a clear message |
+| ~~#65 Upgrade guarantee and upgrade CI~~ (shipped; PostgreSQL dump fixtures still open) | Every 0.x store upgrades automatically or refuses with a clear message |
 | #66 Database support matrix | Tier 1 vs experimental database types |
 | #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
 | #68 Supported Python versions | Raise the floor from 3.9 (end of life since October 2025) |
@@ -44,7 +44,7 @@ if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC
 JWKS support.
 
 **Suggested sequence:**
-1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision.
+1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (#61, #62, #65 and the #59 decision done; #69 left.)
 2. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 3. **1.0.0.**
 
@@ -1829,7 +1829,11 @@ each is something an operator would trip over.
 
 ## 59. A dedicated event log, so events stop being a view on run history
 
-**Status: open.** Prerequisite for #60 and for any event type other than "a query ran".
+**Status: open; storage decision made** ([ADR 0002](documentation/adr/0002-event-ids.md)). Event ids stay
+`execution_history` row ids in 0.13, documented as opaque and increasing. When this table ships, its id sequence
+**must be seeded above `MAX(execution_history.rowid)`**, so a client's `Last-Event-ID` resumes across the upgrade,
+and it uses AUTOINCREMENT/identity ids, which removes SQLite's id reuse after the newest run is deleted.
+Prerequisite for #60 and for any event type other than "a query ran".
 
 **Impact:** live events (`GET /events`, `queryapigate events`) are rows of `execution_history`: the history
 id is the event id. That made resume and cross-instance delivery cheap, but it also ties delivery to history
@@ -1891,8 +1895,15 @@ Start with route 1 and table-level visibility only.
 
 ## 61. One governed core for every front door: move rate limits, metrics and authentication out of REST's Flask hooks
 
-**Status: open, needs verification first.** Found by reading the code, not yet confirmed by a test. Step one
-is to prove or disprove gaps 1 and 2 below; implement only what the check confirms.
+**Status: shipped.** Gaps 1 and 2 were confirmed by a test first (an MCP key with `rate_limit` 2/minute made 5
+calls, none counted in metrics; a bearer token was refused). `queryapigate/governance.py` now holds
+authentication, both rate limits and request metrics; REST's hooks, `mcp_server.handle_call()` and
+`queryapigate events` call it. MCP metrics are labelled method `MCP`, endpoint `mcp.<tool kind>`, and served on
+the MCP process's own `/metrics`. `GovernanceParityTests` (tests/test_mcp.py) runs the same scenarios over both
+front doors. Gap 3: the CLI stays outside grants by design, documented in MCP.md; `queryapigate export` runs are
+now recorded in history as `cli`. Limiters remain per process until #55.
+
+The original analysis follows.
 
 **Impact:** the project's strongest architectural property is that REST and MCP share one execution path.
 MCP's saved-query tools call `app.run_saved()`, the same function behind `GET /q/<name>`, so grants,
@@ -1937,7 +1948,9 @@ door that doesn't go through those hooks may silently skip it.
 
 ## 62. Record ad-hoc SQL runs (REST and MCP) in run history and live events
 
-**Status: open.** Probably the highest-value, lowest-effort item for "governed access for AI agents".
+**Status: shipped.** Rows in `execution_history` with `query_name`/`version` NULL (schema 5; chosen together with
+#59, see ADR 0002), `GET /api/v1/history?kind=`, `adhoc_execution` events, the Console's Home.
+`QUERYAPIGATE_HISTORY_ADHOC_SQL` (`text`/`hash`/`none`) and `QUERYAPIGATE_HISTORY_ADHOC_LIMIT`.
 
 **Impact:** only saved-query runs are recorded. Ad-hoc SQL (`POST /execute_sql`, and MCP's `execute_sql`
 tool) goes through `engine.execute_sql()`, which writes one `log.info` line to the server log and nothing
@@ -2022,7 +2035,13 @@ breaks its own promise.
 
 ## 65. Upgrade guarantee: every 0.x store upgrades or refuses clearly, tested in CI
 
-**Status: open.** 1.0 milestone.
+**Status: shipped (SQLite and JSON stores); PostgreSQL dump fixtures still open.** `tests/fixtures/stores/`
+holds a home built by each of 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0 and 0.12.0 through its own API
+(`generate.py`); `tests/test_upgrades.py` starts the current code on each and checks connections, query versions
+and the published one, history, keys, roles and audit through `/api/v1`, then runs the query. It found the bug
+described below: 0.10 created a columnar `execution_history` placeholder that no release replaced; startup now
+replaces it when empty. `db.check_shape()` refuses a store missing any column after upgrading, and a store from a
+newer schema is refused rather than having its version written back down. Releasing: add the new version's fixture.
 
 **Impact:** "a newer version can always read a database an older version wrote" is already in the versioning
 policy, but nothing tests it end to end. `db._upgrade()` handles the layouts it knows about. A store with an

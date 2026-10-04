@@ -39,6 +39,14 @@ function tone(action: string) {
 const today = () => new Date().toISOString().slice(0, 10);
 const inAWeek = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+/** What an ad-hoc run shows in place of a query name: the start of its SQL, or that it wasn't kept. */
+function adhocLabel(run: Run) {
+  if (run.sql) return run.sql.length > 60 ? run.sql.slice(0, 60) + '…' : run.sql;
+  return run.sql_sha256
+    ? 'sql ' + run.sql_sha256.slice(0, 12)
+    : String(run.mongo_collection ?? 'SQL not kept');
+}
+
 async function runs(limit: number): Promise<Run[]> {
   return unwrap(await api.GET('/api/v1/history', { params: { query: { limit } } })).items;
 }
@@ -315,15 +323,12 @@ function Requests() {
       view === 'recent' ? (
         <div className="empty">
           <strong>No saved-query runs recorded yet</strong>
-          <span>
-            Ad-hoc API Designer calls aren’t tracked here - only runs of a saved query through
-            /q/&lt;name&gt;.
-          </span>
+          <span>Runs of a saved query through /q/&lt;name&gt;, and ad-hoc SQL, show up here.</span>
         </div>
       ) : (
         <div className="empty">
           <strong>No timed runs recorded yet</strong>
-          <span>Shows up once a saved query has run through /q/&lt;name&gt; at least once.</span>
+          <span>Shows up once a query has run at least once.</span>
         </div>
       );
   else
@@ -352,19 +357,26 @@ function Requests() {
                   {String(e.executed_at ?? '')}
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="target"
-                    onClick={() =>
-                      navigate(`/queries/${encodeURIComponent(e.query)}`, {
-                        state: { tab: 'history', version: e.version },
-                      })
-                    }
-                  >
-                    {e.query}
-                  </button>
+                  {e.query === null ? (
+                    // ad-hoc SQL (BACKLOG #62): no saved query to open - its SQL, as history keeps it
+                    <span title={e.sql ?? undefined}>
+                      <span className="tag">ad-hoc</span> <span className="mono dim">{adhocLabel(e)}</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="target"
+                      onClick={() =>
+                        navigate(`/queries/${encodeURIComponent(e.query!)}`, {
+                          state: { tab: 'history', version: e.version },
+                        })
+                      }
+                    >
+                      {e.query}
+                    </button>
+                  )}
                 </td>
-                <td className="mono dim">{e.connection_name ?? connectionOf(e.query)}</td>
+                <td className="mono dim">{e.connection_name ?? (e.query ? connectionOf(e.query) : '')}</td>
                 <td className="mono">{String(e.key_name ?? '')}</td>
                 <td className="mono num">{e.rows === undefined || e.rows === null ? '—' : String(e.rows)}</td>
                 <td className="mono num">

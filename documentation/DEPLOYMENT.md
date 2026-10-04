@@ -314,6 +314,11 @@ responses at least, since that's the one piece of state this setup can actually 
 4. Check `docker compose logs queryapigate` and `curl .../health`.
 
 The `queryapigate.db` schema is migrated automatically on the container's first start against it - nothing
-to run by hand. If you're upgrading from the project's old name (SQL2API), see
+to run by hand. Every release since 0.7 is tested this way: a store each one built through its own API is
+started under the current code, which must read back its connections, queries and their versions, run history,
+keys and roles (`tests/test_upgrades.py`). A store this version can't safely run on - one with a column missing,
+or one a *newer* release has already upgraded - stops startup with a message naming the problem and what to do,
+before anything is changed; it never starts and then fails on first use. Going back to an older release is not
+supported in place: restore the backup from step 2. If you're upgrading from the project's old name (SQL2API), see
 [Upgrading from SQL2API](INSTALLATION_AND_SETUP.md#upgrading-from-sql2api) first; environment variables
 renamed and the server refuses to start until they're renamed too.

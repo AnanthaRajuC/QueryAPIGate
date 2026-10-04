@@ -127,8 +127,36 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   remove). The Console now calls only the Management API and the runtime routes.
 - **End-to-end tests of the Console** (`frontend/e2e/`, Playwright): every screen and the main flows, in Chromium
   against a real server, in CI on every push.
+- **Ad-hoc SQL runs are recorded in run history and live events** (BACKLOG #62): `POST /execute_sql`,
+  `POST /execute_mongo` and MCP's `execute_sql`, with the caller, `transport` (`rest`/`mcp`), connection, SQL,
+  parameter names (never values), rows, duration and status. `GET /api/v1/history?kind=saved|adhoc` separates them;
+  live events carry them as `adhoc_execution`; the Console's Home shows them. New settings:
+  `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` (default 1000) and `QUERYAPIGATE_HISTORY_ADHOC_SQL` (`text`, `hash` or `none`).
+  Saved-query runs now record `transport` too. See [Ad-hoc runs](documentation/API.md#ad-hoc-runs).
+- **`queryapigate export` runs are recorded in run history**, by `key_name` `cli`. The CLI stays outside grants
+  and rate limits: it is a local operator with the store's files already in reach.
+- **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
+- **The upgrade guarantee is tested** (BACKLOG #65): stores built by released 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0
+  and 0.12.0 through their own APIs (`tests/fixtures/stores/`) are started under the current code on every CI run,
+  which must read back their connections, queries and versions, run history, keys and roles, and run the query.
+  Each release adds its fixture.
+- **[ADR 0002](documentation/adr/0002-event-ids.md): event ids** (BACKLOG #59, the storage decision). Event ids
+  stay history row ids for now and are documented as opaque, increasing integers; a future event log continues
+  their sequence, so a client's `Last-Event-ID` survives that upgrade.
 
 ### Changed
+- **MCP calls are governed exactly like REST requests** (BACKLOG #61). They now count against
+  `QUERYAPIGATE_RATE_LIMIT` (checked before authentication) and the caller's own `rate_limit` grant, appear in
+  `/metrics` (method `MCP`, endpoint `mcp.saved_query`, `mcp.execute_sql` or `mcp.list_tables`), and accept a
+  signed-in user's `Authorization: Bearer` token, so `from_claim` queries work for an agent acting for a user.
+  REST, MCP and `queryapigate events` share one implementation (`queryapigate/governance.py`). **Behaviour change:**
+  an agent that called faster than its key's `rate_limit` now gets a rate-limit error. See
+  [Governance](documentation/MCP.md#governance-the-same-rules-as-rest).
+- **The metadata store moves to schema 5:** `execution_history.query_name` and `version` may be NULL, for ad-hoc
+  runs. On SQLite the table is rebuilt on first start, keeping every run and its id (live events' resume ids).
+- **Startup refuses a store it can't safely run on**, with a message naming the problem and what to do, instead of
+  starting and failing on first use: a table missing a column this version needs, or a store a newer release has
+  already upgraded (which used to have its schema version silently written back down).
 - **`/ui` redirects to `/console`.** The hand-written admin page it served (`queryapigate/ui.py`) is removed; the
   Console has every screen it had, and looks the same.
 
@@ -170,6 +198,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
   **Behaviour change:** a client that relied on the page size overriding a saved query's `LIMIT` now gets the
   query's own limit. Raise or remove the `LIMIT` in the query to get the old result.
+- **A store first created by 0.10 no longer breaks run history after upgrading.** 0.10 created an
+  `execution_history` table in an early shape it never wrote to (its runs still lived in `saved_sql/*.json`), and
+  no later release replaced it, so recording or reading runs failed with `no such column: entry_json`. Startup now
+  replaces that empty table; one that somehow has rows stops startup with instructions rather than being dropped.
 
 ### Changed
 - **The metadata store moves to schema 4** (`saved_queries.published_version`). On first start, every existing

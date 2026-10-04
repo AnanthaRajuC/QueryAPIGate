@@ -99,4 +99,35 @@ describe('Home', () => {
       expect(document.querySelector('#query-detail button[data-subtab="history"]')).toHaveClass('on'),
     );
   });
+
+  it('shows an ad-hoc run as ad-hoc SQL, not as a query to open', async () => {
+    fakeBackend({
+      ...routes(),
+      'GET /api/v1/history': () => ({
+        items: [
+          {
+            query: null,
+            version: null,
+            kind: 'adhoc',
+            executed_at: '2026-10-04 10:00:03',
+            status: 'success',
+            key_name: 'agent',
+            transport: 'mcp',
+            connection_name: 'lite',
+            sql: 'SELECT id, title FROM film WHERE rating = :rating',
+            params: ['rating'],
+            rows: 4,
+            duration_ms: 2,
+          },
+        ],
+        next_cursor: null,
+      }),
+    });
+    renderAt('/');
+    const requests = await panel();
+    await waitFor(() => expect(within(requests).getByText('ad-hoc')).toBeInTheDocument());
+    expect(requests).toHaveTextContent('SELECT id, title FROM film WHERE rating = :rating');
+    expect(requests).toHaveTextContent('lite');
+    expect(within(requests).queryByRole('button', { name: /SELECT/ })).toBeNull();
+  });
 });

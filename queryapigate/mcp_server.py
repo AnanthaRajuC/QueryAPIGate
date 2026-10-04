@@ -18,15 +18,18 @@ Every ``mcp`` package import is deferred into run()/build_server(), so this modu
 unit-tested without the optional ``queryapigate[mcp]`` extra installed) can be imported even when that
 package isn't."""
 import json
+import logging
+import time
 import urllib.parse
 
-from . import apikeys, config, definitions, engine, params, schema, sqltools, store
+from . import apikeys, config, definitions, engine, history, metrics, params, schema, sqltools, store
 from .errors import ApiError
 
 # A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
 # hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
 # same thing.
 RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql'})
+log = logging.getLogger('queryapigate')
 
 # Generic result-envelope outputSchemas, deliberately not per-query/per-column: a saved query's actual result
 # columns are only known once it runs, not from its stored definition, so declaring real per-column types
@@ -188,12 +191,19 @@ def call_tool_for(flask_app, permission, name, arguments):
         from . import app as app_module  # deferred: app.py imports Flask, a heavier import than this
         g.request_id = app_module.new_request_id(None)                       # module's pure helpers need
         g.permission = permission
+        g.transport = 'mcp'  # recorded on the run's history entry
         try:
             response = app_module.run_saved(name, {}, arguments)
         except ApiError as error:
-            return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
+            return _error(error.message, error.status)
         structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
         return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
+
+
+def _error(message, status):
+    """A tool error result; `_status` (the HTTP status REST would answer) is for handle_call's metrics and never
+    leaves this module."""
+    return {'isError': True, 'content': [{'type': 'text', 'text': message}], '_status': status}
 
 
 def _connection_error(permission, connection_name, database):
@@ -202,13 +212,11 @@ def _connection_error(permission, connection_name, database):
     /execute_sql already enforce over REST (require_connection(), and "only the admin key may browse/query a
     different database on this connection"), reused here rather than re-derived."""
     if not connection_name:
-        return {'isError': True, 'content': [{'type': 'text', 'text': 'connection_name is required'}]}
+        return _error('connection_name is required', 400)
     if not apikeys.can_use(permission, connection_name):
-        return {'isError': True, 'content': [{'type': 'text',
-                'text': f"This API key is not permitted to use the connection '{connection_name}'"}]}
+        return _error(f"This API key is not permitted to use the connection '{connection_name}'", 403)
     if database and not permission.admin:
-        return {'isError': True, 'content': [{'type': 'text',
-                'text': 'Only the admin key may browse or query a different database on this connection'}]}
+        return _error('Only the admin key may browse or query a different database on this connection', 403)
     return None
 
 
@@ -225,7 +233,7 @@ def list_tables_tool(permission, arguments):
     try:
         result = schema.fetch_schema(connection_name, database=database)
     except ApiError as error:
-        return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
+        return _error(error.message, error.status)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
 
 
@@ -243,7 +251,7 @@ def execute_sql_tool(permission, arguments):
     if error is not None:
         return error
     if not sql:
-        return {'isError': True, 'content': [{'type': 'text', 'text': 'sql is required'}]}
+        return _error('sql is required', 400)
     query_params = arguments.pop('params', None) or {}
     requested_page_size = arguments.pop('page_size', None)
     try:
@@ -251,12 +259,20 @@ def execute_sql_tool(permission, arguments):
             else config.mcp_max_rows()
     except (TypeError, ValueError):
         page_size = config.mcp_max_rows()
+
+    entry = {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': None,
+             'key_name': permission.name or '-', 'transport': 'mcp'}
+    if database:
+        entry['database'] = database
     try:
-        result = engine.execute_sql(sql, connection_name, page_size, 0, query_params, None, allow_writes=False,
-                                    key_name=permission.name or '-', database=database,
-                                    allowed_tables=permission.allowed_tables)
+        result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, page_size, 0, query_params, None,
+                                          allow_writes=False, key_name=permission.name or '-', database=database,
+                                          allowed_tables=permission.allowed_tables)
     except ApiError as error:
-        return {'isError': True, 'content': [{'type': 'text', 'text': error.message}]}
+        history.record_adhoc({**entry, 'status': 'error', 'error': error.message}, sql, query_params)
+        return _error(error.message, error.status)
+    history.record_adhoc({**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms},
+                         sql, query_params)
     structured = {'rows': [dict(zip(result.columns, row)) for row in result.rows], 'truncated': result.has_more}
     return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
@@ -271,16 +287,48 @@ def dispatch_tool_call(flask_app, permission, name, arguments):
     return call_tool_for(flask_app, permission, name, arguments)
 
 
-def _permission_for(request):
-    """The same X-API-Key -> Permission resolution app.resolve_permission() does for the REST API
-    (apikeys.authenticate(), falling back to apikeys.OPEN when no server key is configured at all) - against
-    a Starlette Request instead of a Flask one, since that's what the MCP transport hands a tool handler."""
-    header = request.headers.get('x-api-key', '') if request is not None else ''
-    client_ip = request.client.host if request is not None and request.client else None
-    permission = apikeys.authenticate(header, client_ip=client_ip)
-    if permission is not None:
-        return permission
-    return None if apikeys.auth_required() else apikeys.OPEN
+def _tool_kind(name):
+    return 'mcp.' + (name if name in RESERVED_TOOL_NAMES else 'saved_query')
+
+
+def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
+    """One tools/call, from the caller's credentials to its result - what the SDK handler in build_server() runs, as a
+    plain function so it can be tested without the SDK. It applies exactly what REST's request hooks apply
+    (governance.py): the client's rate limit, authentication by API key or bearer token, the caller's own rate limit,
+    and a request in /metrics (method MCP, endpoint mcp.<tool kind>)."""
+    from . import governance
+    started = time.monotonic()
+    permission = None
+    verdict = governance.check_client_limit(flask_app, client_ip)
+    if verdict is not None and not verdict.allowed:
+        result = _error(f'Rate limit exceeded - retry after {verdict.retry_after}s', 429)
+    else:
+        permission = governance.authenticate(api_key, authorization, client_ip)
+        verdict = governance.check_key_limit(flask_app, permission)
+        if permission is None:
+            result = _error('Unauthorized: missing or invalid X-API-Key or bearer token', 401)
+        elif verdict is not None and not verdict.allowed:
+            result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429)
+        else:
+            result = dispatch_tool_call(flask_app, permission, name, arguments)
+    status = result.pop('_status', 200)
+    elapsed = time.monotonic() - started
+    key = (permission.name if permission else None) or '-'
+    governance.observe('MCP', _tool_kind(name), status, elapsed, key)
+    log.info('MCP tools/call %s -> %s in %.1fms', name, status, elapsed * 1000,
+             extra={'method': 'MCP', 'path': f'tools/call {name}', 'status': status,
+                    'duration_ms': round(elapsed * 1000, 1)})
+    return result
+
+
+def permission_for_listing(flask_app, api_key, authorization, client_ip):
+    """Who is asking for tools/list - authenticated like a call (API key or bearer token) and counted against the
+    client's rate limit; None when the caller may see no tools."""
+    from . import governance
+    verdict = governance.check_client_limit(flask_app, client_ip)
+    if verdict is not None and not verdict.allowed:
+        return None
+    return governance.authenticate(api_key, authorization, client_ip)
 
 
 def build_server(flask_app):
@@ -295,8 +343,11 @@ def build_server(flask_app):
 
     @server.list_tools()
     async def list_tools():
-        ctx = server.request_context
-        permission = _permission_for(ctx.request)
+        request = server.request_context.request
+        headers = request.headers if request is not None else {}
+        client_ip = request.client.host if request is not None and request.client else None
+        permission = permission_for_listing(flask_app, headers.get('x-api-key', ''), headers.get('authorization', ''),
+                                            client_ip)
         if permission is None:
             return []  # an unauthenticated client sees no tools, the same way an unauthenticated REST
         return [types.Tool(name=t['name'], description=t['description'], inputSchema=t['inputSchema'],
@@ -307,13 +358,11 @@ def build_server(flask_app):
 
     @server.call_tool()
     async def call_tool(name, arguments):
-        ctx = server.request_context
-        permission = _permission_for(ctx.request)
-        if permission is None:
-            return types.CallToolResult(
-                content=[types.TextContent(type='text', text='Unauthorized: missing or invalid X-API-Key')],
-                isError=True)
-        result = dispatch_tool_call(flask_app, permission, name, arguments)
+        request = server.request_context.request
+        headers = request.headers if request is not None else {}
+        client_ip = request.client.host if request is not None and request.client else None
+        result = handle_call(flask_app, headers.get('x-api-key', ''), headers.get('authorization', ''), client_ip,
+                             name, arguments)
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
                                     structuredContent=result.get('structuredContent'),
                                     isError=result.get('isError', False))
@@ -321,15 +370,19 @@ def build_server(flask_app):
     return server
 
 
-def run(flask_app, host, port):
-    """Serves the MCP server over Streamable HTTP (stateless - no server-side session tied to one API key
-    across calls, matching this server's own per-request auth model) until interrupted."""
+def build_asgi_app(flask_app):
+    """The MCP server over Streamable HTTP at /mcp (stateless - no server-side session tied to one API key across
+    calls, matching this server's own per-request auth model), plus this process's own /metrics and /health. Like
+    REST's, those two need no key: MCP calls are counted here, in this process, so REST's /metrics can't show them
+    (BACKLOG #61)."""
     import contextlib
 
-    import uvicorn
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
-    from starlette.routing import Mount
+    from starlette.responses import JSONResponse, PlainTextResponse
+    from starlette.routing import Mount, Route
+
+    from . import __version__
 
     server = build_server(flask_app)
     session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
@@ -339,5 +392,19 @@ def run(flask_app, host, port):
         async with session_manager.run():
             yield
 
-    asgi_app = Starlette(routes=[Mount('/mcp', app=session_manager.handle_request)], lifespan=lifespan)
-    uvicorn.run(asgi_app, host=host, port=port)
+    async def metrics_endpoint(_request):
+        return PlainTextResponse(metrics.render(flask_app.extensions.get('queryapigate_cache')),
+                                 media_type='text/plain; version=0.0.4; charset=utf-8')
+
+    async def health(_request):
+        return JSONResponse({'status': 'ok', 'version': __version__})
+
+    return Starlette(routes=[Mount('/mcp', app=session_manager.handle_request),
+                             Route('/metrics', metrics_endpoint), Route('/health', health)], lifespan=lifespan)
+
+
+def run(flask_app, host, port):
+    """Serves build_asgi_app() until interrupted."""
+    import uvicorn
+
+    uvicorn.run(build_asgi_app(flask_app), host=host, port=port)

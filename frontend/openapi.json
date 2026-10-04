@@ -939,7 +939,24 @@
             "nullable": true,
             "type": "string"
           },
+          "kind": {
+            "description": "A saved query run, or ad-hoc SQL (/execute_sql, /execute_mongo, MCP execute_sql).",
+            "enum": [
+              "saved",
+              "adhoc"
+            ],
+            "type": "string"
+          },
+          "params": {
+            "description": "Ad-hoc only: the parameters' names - never their values.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "query": {
+            "description": "The saved query; null for ad-hoc SQL.",
+            "nullable": true,
             "type": "string"
           },
           "request_id": {
@@ -950,6 +967,14 @@
             "nullable": true,
             "type": "integer"
           },
+          "sql": {
+            "description": "Ad-hoc only, unless QUERYAPIGATE_HISTORY_ADHOC_SQL says 'hash' or 'none'; at most 4000 characters (sql_truncated).",
+            "type": "string"
+          },
+          "sql_sha256": {
+            "description": "Ad-hoc only, with QUERYAPIGATE_HISTORY_ADHOC_SQL=hash.",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "success",
@@ -957,13 +982,23 @@
             ],
             "type": "string"
           },
+          "transport": {
+            "description": "The front door it came through.",
+            "enum": [
+              "rest",
+              "mcp"
+            ],
+            "type": "string"
+          },
           "version": {
+            "nullable": true,
             "type": "integer"
           }
         },
         "required": [
           "query",
           "version",
+          "kind",
           "executed_at"
         ],
         "type": "object"
@@ -3696,6 +3731,17 @@
           },
           {
             "in": "query",
+            "name": "kind",
+            "schema": {
+              "enum": [
+                "saved",
+                "adhoc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "version",
             "schema": {
               "type": "integer"
@@ -3801,7 +3847,7 @@
             "description": "Not found"
           }
         },
-        "summary": "Every saved query's runs, newest first",
+        "summary": "Every run - of a saved query, or ad-hoc SQL - newest first",
         "tags": [
           "Management API v1"
         ]

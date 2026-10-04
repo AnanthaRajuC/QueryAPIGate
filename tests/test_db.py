@@ -11,7 +11,7 @@ import unittest
 from contextlib import redirect_stderr
 from unittest import mock
 
-from queryapigate import config, db
+from queryapigate import config, db, history
 from tests import TEST_DATABASE_URL
 from tests.helpers import save_query, write_connections
 
@@ -392,6 +392,7 @@ class MigrateToPostgresTests(unittest.TestCase):
             client.post('/api/v1/roles', headers=admin, json={'name': 'reader', 'connections': ['lite']})
             for _ in range(3):
                 client.get('/q/a_query', headers=admin)
+            history.flush()  # runs are written in batches - land them in this SQLite store, not the next one
             snapshot = self.snapshot()
             db.close()
         return snapshot

@@ -163,10 +163,21 @@ SCHEMAS = {
         },
     },
     'HistoryEntry': {
-        'type': 'object', 'required': ['query', 'version', 'executed_at'],
+        'type': 'object', 'required': ['query', 'version', 'kind', 'executed_at'],
         'additionalProperties': True,
         'properties': {
-            'query': {'type': 'string'}, 'version': {'type': 'integer'}, 'executed_at': {'type': 'string'},
+            'query': {'type': 'string', 'nullable': True, 'description': 'The saved query; null for ad-hoc SQL.'},
+            'version': {'type': 'integer', 'nullable': True},
+            'kind': {'type': 'string', 'enum': ['saved', 'adhoc'],
+                     'description': 'A saved query run, or ad-hoc SQL (/execute_sql, /execute_mongo, MCP '
+                                    'execute_sql).'},
+            'transport': {'type': 'string', 'enum': ['rest', 'mcp'], 'description': 'The front door it came through.'},
+            'sql': {'type': 'string', 'description': "Ad-hoc only, unless QUERYAPIGATE_HISTORY_ADHOC_SQL says 'hash' "
+                                                     "or 'none'; at most 4000 characters (sql_truncated)."},
+            'sql_sha256': {'type': 'string', 'description': "Ad-hoc only, with QUERYAPIGATE_HISTORY_ADHOC_SQL=hash."},
+            'params': {'type': 'array', 'items': {'type': 'string'},
+                       'description': "Ad-hoc only: the parameters' names - never their values."},
+            'executed_at': {'type': 'string'},
             'status': {'type': 'string', 'enum': ['success', 'error']},
             'connection_name': {'type': 'string'}, 'key_name': {'type': 'string', 'nullable': True},
             'request_id': {'type': 'string', 'nullable': True}, 'rows': {'type': 'integer', 'nullable': True},
@@ -583,8 +594,10 @@ PATHS = {
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
     },
     '/api/v1/history': {
-        'get': _op("Every saved query's runs, newest first", {'200': _ok(_ref('HistoryPage'))}, parameters=[
+        'get': _op('Every run - of a saved query, or ad-hoc SQL - newest first', {'200': _ok(_ref('HistoryPage'))},
+                   parameters=[
             {'name': 'query', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'kind', 'in': 'query', 'schema': {'type': 'string', 'enum': ['saved', 'adhoc']}},
             {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'}},
             {'name': 'status', 'in': 'query', 'schema': {'type': 'string', 'enum': ['success', 'error']}},
             {'name': 'key', 'in': 'query', 'schema': {'type': 'string'}},

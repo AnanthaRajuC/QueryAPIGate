@@ -58,7 +58,9 @@ endpoints either):
   enforced. Results are capped to `QUERYAPIGATE_MCP_MAX_ROWS` the same way a saved-query tool call is.
 
 Both reuse the exact permission checks and execution code the REST API already has - there is no separate
-ad-hoc-SQL path for MCP to drift out of sync with REST's own.
+ad-hoc-SQL path for MCP to drift out of sync with REST's own. An `execute_sql` call is recorded in run history
+like a `POST /execute_sql` one, with `"transport": "mcp"` - see
+[Ad-hoc runs](API.md#ad-hoc-runs).
 
 ## Running it
 
@@ -70,7 +72,8 @@ queryapigate mcp
 
 It listens on its own port (`QUERYAPIGATE_MCP_PORT`, default `5001`) - separate from `queryapigate serve`'s
 port, so both can run side by side against the same `QUERYAPIGATE_HOME`. The MCP endpoint is
-`http://<host>:<port>/mcp`, speaking Streamable HTTP.
+`http://<host>:<port>/mcp`, speaking Streamable HTTP; `/metrics` and `/health` on the same port report on this
+process.
 
 It's a **separate process** from the REST server, not a mode of it: MCP's HTTP transport is
 [ASGI](https://asgi.readthedocs.io/)-native, while QueryAPIGate's REST API is WSGI (Flask on gunicorn). What
@@ -80,10 +83,37 @@ process each server runs in.
 
 ## Authentication
 
-Same as the REST API: an `X-API-Key` header, checked against the same `QUERYAPIGATE_API_KEY`/scoped keys.
-MCP's `EventSource`-based transport can't carry a custom header, so QueryAPIGate's MCP client integration
-must send the key as a request header the way any HTTP-capable MCP client configuration allows - never as a
-URL parameter, which would leak it into logs. An unset server key means open access, same as the REST API.
+Same as the REST API: an `X-API-Key` header, checked against the same `QUERYAPIGATE_API_KEY`/scoped keys - or,
+when [signed-in users](API.md#signed-in-users-jwt) are enabled, an `Authorization: Bearer` token, so an agent
+acting for a user gets that user's role and its `from_claim` row filters. A call carrying an API key is judged on
+that key alone; a wrong key never falls back to the token. Send either as a request header, the way any
+HTTP-capable MCP client configuration allows - never as a URL parameter, which would leak it into logs. An unset
+server key means open access, same as the REST API.
+
+## Governance: the same rules as REST
+
+Every tool call passes through the same checks a REST request does, in the same order, by calling the same code
+(`queryapigate/governance.py`):
+
+1. **`QUERYAPIGATE_RATE_LIMIT`**, per client address, before authentication - so guessing keys is throttled too.
+2. **Authentication**, as above.
+3. **The caller's own `rate_limit` grant** (a key's, or a signed-in user's role's).
+4. **Grants** - connections, queries, collections, `allowed_tables`, IP allowlists - then the tool itself.
+
+A call refused by a rate limit gets a tool error saying so and when to retry. Every call is counted in `/metrics`'
+request counters and latency histograms with method `MCP` and endpoint `mcp.saved_query`, `mcp.execute_sql` or
+`mcp.list_tables`, so agent traffic can be told apart from REST's. Saved-query and ad-hoc runs are recorded in
+run history (and live events) with `"transport": "mcp"`.
+
+**Limits are counted per process.** `queryapigate mcp` is a separate process from `queryapigate serve`, so a key
+with `rate_limit` 100/minute may make 100 calls a minute over REST *and* 100 over MCP - the same as two REST
+instances behind a load balancer (BACKLOG #55). Metrics are per process too: `queryapigate mcp` serves its own
+`GET /metrics` (and `GET /health`) on its port, beside `/mcp`, with no key needed - the same as the REST server's.
+Scrape both.
+
+**The CLI is a local operator, not a caller.** `queryapigate export` reads the store directly with no key, so no
+grant or rate limit applies - whoever can run it can already read `QUERYAPIGATE_HOME`. Its runs are still recorded
+in run history, with `key_name` `cli`.
 
 ## Result size
 
