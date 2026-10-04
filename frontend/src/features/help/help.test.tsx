@@ -39,6 +39,28 @@ describe('Help', () => {
     expect(calls.map((c) => c.path)).toContain('/AnanthaRajuC/QueryAPIGate/v9.9.9/documentation/API.md');
   });
 
+  it('keeps the how-to guides in a tab of their own, each tab remembering its page', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /AnanthaRajuC/QueryAPIGate/v9.9.9/README.md': () =>
+        new Response('# QueryAPIGate', { status: 200 }),
+      'GET /AnanthaRajuC/QueryAPIGate/v9.9.9/how-to/how-to.md': () =>
+        new Response('# How-to', { status: 200 }),
+    });
+    renderAt('/help');
+    const nav = () => [...document.querySelectorAll('#docs-nav button')].map((b) => b.textContent);
+    await userEvent.click(await screen.findByRole('button', { name: 'Overview' })); // the page is remembered across tests
+    await screen.findByRole('heading', { name: 'QueryAPIGate' });
+    expect(nav()).toContain('API Reference');
+    expect(nav()).not.toContain('All how-to guides');
+    await userEvent.click(screen.getByRole('button', { name: 'How-to guides' }));
+    expect(await screen.findByRole('heading', { name: 'How-to' })).toBeInTheDocument();
+    expect(nav()[0]).toBe('All how-to guides');
+    expect(nav()).not.toContain('API Reference');
+    await userEvent.click(screen.getByRole('button', { name: 'Docs' }));
+    expect(await screen.findByRole('heading', { name: 'QueryAPIGate' })).toBeInTheDocument();
+  });
+
   it('has the quick reference', async () => {
     fakeBackend(baseRoutes());
     renderAt('/help');

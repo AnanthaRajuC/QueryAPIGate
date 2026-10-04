@@ -131,13 +131,25 @@ async function fetchDoc(doc: Doc, version: string | null): Promise<string> {
   return DOMPurify.sanitize(await marked.parse(await response.text()));
 }
 
-// Which view and doc are open, kept while the page lives - as the classic tab did.
-const memory = { view: 'docs' as 'quickref' | 'docs', doc: DOCS[0]!.id };
+type View = 'quickref' | 'docs' | 'howto';
+
+// The Docs and How-to guides tabs: each lists one group of DOCS.
+const GROUP_OF: Record<Exclude<View, 'quickref'>, Doc['group']> = {
+  docs: 'Reference',
+  howto: 'How-to guides',
+};
+
+// Which view is open, and which doc in each docs tab, kept while the page lives - as the classic tab did.
+const memory: { view: View; docs: string; howto: string } = {
+  view: 'docs',
+  docs: DOCS.find((d) => d.group === 'Reference')!.id,
+  howto: DOCS.find((d) => d.group === 'How-to guides')!.id,
+};
 const remember = (patch: Partial<typeof memory>) => Object.assign(memory, patch);
 
 export function HelpPage() {
   const [view, setViewState] = useState(memory.view);
-  const setView = (next: 'quickref' | 'docs') => {
+  const setView = (next: View) => {
     remember({ view: next });
     setViewState(next);
   };
@@ -168,21 +180,30 @@ export function HelpPage() {
         >
           Docs
         </button>
+        <button
+          type="button"
+          className={'minitab' + (view === 'howto' ? ' active' : '')}
+          data-help-view="howto"
+          onClick={() => setView('howto')}
+        >
+          How-to guides
+        </button>
       </div>
       <QuickReference hidden={view !== 'quickref'} />
-      {view === 'docs' && <DocsBrowser />}
+      {view !== 'quickref' && <DocsBrowser key={view} tab={view} />}
     </>
   );
 }
 
-function DocsBrowser() {
+function DocsBrowser({ tab }: { tab: Exclude<View, 'quickref'> }) {
   const health = useHealth();
-  const [docId, setDocState] = useState(memory.doc);
+  const docs = DOCS.filter((d) => d.group === GROUP_OF[tab]);
+  const [docId, setDocState] = useState(memory[tab]);
   const setDoc = (id: string) => {
-    remember({ doc: id });
+    remember({ [tab]: id });
     setDocState(id);
   };
-  const doc = DOCS.find((d) => d.id === docId) ?? DOCS[0]!;
+  const doc = docs.find((d) => d.id === docId) ?? docs[0]!;
   const version = health.data?.version ?? null;
   const html = useQuery({
     queryKey: ['help', 'doc', doc.id, version],
@@ -194,12 +215,7 @@ function DocsBrowser() {
   return (
     <div className="docs-browser" id="help-docs">
       <nav className="docs-nav" id="docs-nav">
-        {DOCS.map((d, i) => [
-          i === 0 || DOCS[i - 1]!.group !== d.group ? (
-            <div key={'g:' + d.group} className="nav-label" style={{ padding: '10px 10px 4px' }}>
-              {d.group}
-            </div>
-          ) : null,
+        {docs.map((d) => (
           <button
             key={d.id}
             type="button"
@@ -208,8 +224,8 @@ function DocsBrowser() {
             onClick={() => setDoc(d.id)}
           >
             {d.title}
-          </button>,
-        ])}
+          </button>
+        ))}
       </nav>
       <div className="docs-content" id="docs-content">
         {html.isError ? (
