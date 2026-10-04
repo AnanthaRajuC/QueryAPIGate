@@ -137,7 +137,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **`queryapigate export` runs are recorded in run history**, by `key_name` `cli`. The CLI stays outside grants
   and rate limits: it is a local operator with the store's files already in reach.
 - **A light/dark switch in the Console's top right corner.** It sets the same Theme preference as Settings ›
-  Interface (which is where to go back to following the operating system), and is remembered in this browser.
+  Appearance (which is where to go back to following the operating system), and is remembered in this browser.
+- **A font size preference in the Console: Small, Medium (the default) or Large**, under Settings › Appearance (the
+  section was called Interface). It scales the whole page, text and spacing together, and is remembered in this
+  browser.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and

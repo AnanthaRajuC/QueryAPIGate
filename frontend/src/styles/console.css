@@ -117,3 +117,27 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Settings > Appearance > Font size zooms the page (prefs.ts), and zoom scales viewport units with everything else:
+   at 115% a 100vh sidebar would be taller than the window. Each viewport size in classic.css, divided back. */
+aside.side {
+  height: calc(100vh / var(--zoom, 1));
+}
+#palette {
+  padding-top: calc(12vh / var(--zoom, 1));
+}
+.pal-box {
+  width: min(560px, calc(100vw / var(--zoom, 1) - 32px));
+  max-height: calc(60vh / var(--zoom, 1));
+}
+.runner {
+  min-height: calc(50vh / var(--zoom, 1));
+}
+.table-wrap,
+.res-pre,
+.jt-root {
+  max-height: calc(62vh / var(--zoom, 1));
+}
+#queries-panel {
+  max-height: calc(100vh / var(--zoom, 1) - 110px);
+}

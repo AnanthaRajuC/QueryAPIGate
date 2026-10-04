@@ -42,9 +42,21 @@ test('the breadcrumb, Ctrl+K search and sidebar collapse work', async ({ page })
   await page.keyboard.press('Control+b');
 });
 
+test('a larger font size scales the page and still fits the window', async ({ page }) => {
+  await open(page, '/settings', 'Settings');
+  await page.getByRole('button', { name: 'Appearance' }).click();
+  await page.getByRole('group', { name: 'Font size' }).getByRole('button', { name: 'Large' }).click();
+  await page.reload();
+  await expect(page.locator('html')).toHaveCSS('zoom', '1.15');
+  // zoom scales viewport units too; the sidebar must still end at the window's bottom edge, not below it
+  const side = (await page.locator('aside.side').boundingBox())!;
+  expect(Math.round(side.y + side.height)).toBe(page.viewportSize()!.height);
+  await page.evaluate(() => localStorage.removeItem('queryapigate-ui-prefs'));
+});
+
 test('dark theme and compact density apply at once and survive a reload', async ({ page }) => {
   await open(page, '/settings', 'Settings');
-  await page.getByRole('button', { name: 'Interface' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
   await page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Dark' }).click();
   await page.getByRole('group', { name: 'Table density' }).getByRole('button', { name: 'Compact' }).click();
   await page.reload();

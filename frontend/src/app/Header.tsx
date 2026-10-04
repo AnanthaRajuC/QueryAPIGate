@@ -101,7 +101,7 @@ export function Header() {
   );
 }
 
-/** Flips between light and dark from whatever is showing - the same preference as Settings > Interface > Theme,
+/** Flips between light and dark from whatever is showing - the same preference as Settings > Appearance > Theme,
  *  which is where to go back to following the operating system. */
 function ThemeToggle() {
   const dark = useIsDark();

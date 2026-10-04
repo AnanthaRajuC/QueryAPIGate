@@ -9,13 +9,19 @@ import { setPref, usePrefValues, type Prefs } from '@/app/prefs';
 import { lastSection, rememberSection } from './state';
 
 // The classic Settings screen (ui.py #tab-settings, renderSettings, renderMcpExtras, the copy-env button): the
-// server's configuration by section from /api/v1/settings, read-only, plus this browser's interface preferences.
+// server's configuration by section from /api/v1/settings, read-only, plus this browser's appearance preferences.
 // The MCP section adds a reachability check, run only when asked, and the tools an MCP client would see.
 
 type Section = Schemas['SettingsSection'];
 
 const PREF_ROWS: [keyof Prefs, string, string, string[]][] = [
   ['theme', 'Theme', 'Follows your operating system unless set.', ['System', 'Light', 'Dark']],
+  [
+    'fontSize',
+    'Font size',
+    'Text, and the spacing around it, across the Console.',
+    ['Small', 'Medium', 'Large'],
+  ],
   ['density', 'Table density', 'Row height in lists and result grids.', ['Compact', 'Comfortable']],
   [
     'format',
@@ -56,7 +62,7 @@ export function SettingsPage() {
   let body: React.ReactNode;
   const current = sections.find((s) => s.id === section) ?? sections[0];
   if (section === 'ui') {
-    body = <InterfacePrefs />;
+    body = <AppearancePrefs />;
   } else if (settings.isPending) {
     body = <Loading text="Loading settings…" />;
   } else if (!settings.data) {
@@ -104,7 +110,7 @@ export function SettingsPage() {
       <div className="settings">
         <nav id="settings-nav" aria-label="Settings sections">
           {sections.map((sec) => navButton(sec.id, sec.title, sec.rows.length))}
-          {navButton('ui', 'Interface', null)}
+          {navButton('ui', 'Appearance', null)}
         </nav>
         <div id="settings-body">{body}</div>
       </div>
@@ -138,12 +144,12 @@ function SectionPanel({ section }: { section: Section }) {
   );
 }
 
-function InterfacePrefs() {
+function AppearancePrefs() {
   const prefs = usePrefValues();
   return (
     <div className="panel">
       <div className="set-head">
-        <h2>Interface</h2>
+        <h2>Appearance</h2>
         <span>Stored in this browser only. Nothing is sent to the server.</span>
       </div>
       {PREF_ROWS.map(([key, label, description, options]) => (

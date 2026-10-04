@@ -112,10 +112,10 @@ describe('Settings', () => {
     expect(document.querySelector('.set-row .dot')).toHaveClass('bad');
   });
 
-  it('Interface preferences apply at once and are kept in this browser', async () => {
+  it('Appearance preferences apply at once and are kept in this browser', async () => {
     fakeBackend(routes());
     renderAt('/settings');
-    await userEvent.click(screen.getByRole('button', { name: 'Interface' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Appearance' }));
     const density = screen.getByRole('group', { name: 'Table density' });
     expect(within(density).getByRole('button', { name: 'Comfortable' })).toHaveClass('on');
     await userEvent.click(within(density).getByRole('button', { name: 'Compact' }));
@@ -124,6 +124,12 @@ describe('Settings', () => {
       within(screen.getByRole('group', { name: 'Theme' })).getByRole('button', { name: 'Dark' }),
     );
     expect(document.documentElement.style.colorScheme).toBe('dark');
+    const fontSize = screen.getByRole('group', { name: 'Font size' });
+    expect(within(fontSize).getByRole('button', { name: 'Medium' })).toHaveClass('on');
+    await userEvent.click(within(fontSize).getByRole('button', { name: 'Large' }));
+    expect(document.documentElement.style.zoom).toBe('1.15');
+    await userEvent.click(within(fontSize).getByRole('button', { name: 'Small' }));
+    expect(document.documentElement.style.zoom).toBe('0.9');
     await userEvent.click(
       within(screen.getByRole('group', { name: 'Default result format' })).getByRole('button', {
         name: 'csv',
@@ -131,6 +137,7 @@ describe('Settings', () => {
     );
     expect(JSON.parse(localStorage.getItem('queryapigate-ui-prefs')!)).toEqual({
       theme: 'Dark',
+      fontSize: 'Small',
       density: 'Compact',
       format: 'csv',
     });

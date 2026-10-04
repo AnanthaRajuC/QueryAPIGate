@@ -1,16 +1,21 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-// The interface preferences (Settings > Interface: theme, density and the default result format), stored per browser
+// The appearance preferences (Settings > Appearance: theme, font size, density and the default result format), stored per browser
 // - under the classic UI's key, so preferences set before the Console replaced it carry over.
 const PREFS_KEY = 'queryapigate-ui-prefs';
 
 export interface Prefs {
   theme: string;
+  fontSize: string;
   density: string;
   format: string;
 }
 
-const DEFAULTS: Prefs = { theme: 'System', density: 'Comfortable', format: 'json' };
+const DEFAULTS: Prefs = { theme: 'System', fontSize: 'Medium', density: 'Comfortable', format: 'json' };
+
+// Font size scales the whole page, like the browser's own zoom: the stylesheet sizes text in px (as the classic UI's
+// did), so scaling everything keeps text, spacing and icons in proportion instead of crowding larger text.
+const FONT_SCALE: Record<string, string> = { Small: '0.9', Medium: '1', Large: '1.15' };
 
 const listeners = new Set<() => void>();
 let cached: { raw: string | null; prefs: Prefs } | null = null;
@@ -62,14 +67,23 @@ export function usePrefValues(): Prefs {
   return useSyncExternalStore(subscribe, readPrefs);
 }
 
-/** Applies theme and density to the page, now and whenever they change. */
+/** The page's font-size scale. Mouse positions (clientX/Y) and getBoundingClientRect() are in screen pixels, while a
+ *  left/top/width set on an element inside the page is scaled by it - so convert one to the other by dividing. */
+export function pageZoom(): number {
+  return parseFloat(document.documentElement.style.zoom) || 1;
+}
+
+/** Applies theme, font size and density to the page, now and whenever they change. */
 export function usePrefs() {
   const prefs = usePrefValues();
   useEffect(() => {
     document.documentElement.style.colorScheme =
       { System: 'light dark', Light: 'light', Dark: 'dark' }[prefs.theme] ?? 'light dark';
+    const zoom = FONT_SCALE[prefs.fontSize] ?? '1';
+    document.documentElement.style.zoom = zoom;
+    document.documentElement.style.setProperty('--zoom', zoom); // for the stylesheet's viewport sizes (console.css)
     document.body.classList.toggle('compact', prefs.density === 'Compact');
-  }, [prefs.theme, prefs.density]);
+  }, [prefs.theme, prefs.fontSize, prefs.density]);
 }
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';

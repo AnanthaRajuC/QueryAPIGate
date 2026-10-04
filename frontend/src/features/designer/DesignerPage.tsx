@@ -6,6 +6,7 @@ import { api, timedFetch, unwrap } from '@/api/client';
 import { getApiKey } from '@/auth/apiKey';
 import { useAllQueries, useCollections, useConnections, type Connection } from '@/app/data';
 import { Field, FormActions, useFeedback } from '@/app/feedback';
+import { pageZoom } from '@/app/prefs';
 import { readResult, Results, widestColumn, type ResultData } from '@/components/Results';
 import { SchemaField, useSchema } from '@/components/SchemaBrowser';
 import { SqlEditor, type SqlEditorHandle } from '@/components/SqlEditor';
@@ -294,7 +295,7 @@ export function DesignerPage() {
     const sel = editor.current?.selection();
     if (!sel || sel.from === sel.to) return;
     const candidate = candidateAt(sel.doc, sel.from, sel.to);
-    if (candidate) setParamize({ x: event.clientX, y: event.clientY, candidate });
+    if (candidate) setParamize({ x: event.clientX / pageZoom(), y: event.clientY / pageZoom(), candidate });
   }
   function applyParamize(c: Candidate) {
     setParamize(null);
@@ -708,7 +709,8 @@ function Splitter() {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startX: number; startW: number } | null>(null);
   const runner = () => ref.current?.closest<HTMLElement>('.runner') ?? null;
-  const sideWidth = () => runner()?.querySelector('.runner-side')?.getBoundingClientRect().width ?? 280;
+  const sideWidth = () =>
+    (runner()?.querySelector('.runner-side')?.getBoundingClientRect().width ?? 280 * pageZoom()) / pageZoom();
   const setWidth = (px: number) => runner()?.style.setProperty('--runner-side-w', px + 'px');
   const persist = () => {
     const value = parseFloat(getComputedStyle(runner()!).getPropertyValue('--runner-side-w'));
@@ -731,10 +733,10 @@ function Splitter() {
       }}
       onPointerMove={(e) => {
         if (!drag.current) return;
-        const proposed = drag.current.startW - (e.clientX - drag.current.startX);
+        const proposed = drag.current.startW - (e.clientX - drag.current.startX) / pageZoom();
         const maxAllowed = Math.min(
           MAX_SIDE_W,
-          (runner()?.getBoundingClientRect().width ?? 0) - MIN_MAIN_W - 7,
+          (runner()?.getBoundingClientRect().width ?? 0) / pageZoom() - MIN_MAIN_W - 7,
         );
         setWidth(Math.max(MIN_SIDE_W, Math.min(maxAllowed, proposed)));
       }}
@@ -807,7 +809,7 @@ function ParamizePopover({
   const [left, setLeft] = useState(x);
   useEffect(() => {
     const width = ref.current?.offsetWidth ?? 260;
-    setLeft(Math.max(8, Math.min(x, window.innerWidth - width - 12)));
+    setLeft(Math.max(8, Math.min(x, window.innerWidth / pageZoom() - width - 12)));
     const outside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
