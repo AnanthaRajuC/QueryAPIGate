@@ -177,7 +177,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Start the demo (QueryAPIGate and a seeded PostgreSQL)
-        run: docker compose up -d --build --wait
+        # --wait treats a container that exits as a failure, even a one-shot one exiting 0, so the seed runs on its
+        # own once the server is healthy - failing this step if it fails.
+        run: |
+          docker compose up -d --build --wait db queryapigate
+          docker compose run --rm seed
       - name: The demo behaves as documented
         run: |
           set -e
