@@ -63,6 +63,16 @@ describe('Console shell - the classic frame', () => {
     expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
   });
 
+  it("opens API docs and OpenAPI in a new tab that keeps this tab's API key", () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    for (const name of ['API docs', 'OpenAPI']) {
+      const link = screen.getByRole('link', { name: new RegExp(name) });
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'opener'); // noopener would start /docs with empty sessionStorage
+    }
+  });
+
   it('shows the breadcrumb for the current screen', () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');

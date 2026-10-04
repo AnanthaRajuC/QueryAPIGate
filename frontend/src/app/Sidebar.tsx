@@ -86,10 +86,12 @@ export function Sidebar() {
       <div className="side-foot">
         {FOOT_ITEMS.map((item) => button(item, 'nav'))}
         <KeyDotNarrow />
-        <a className="side-link" href="/docs">
+        {/* A new tab, so the Console stays open. rel="opener" because target="_blank" is noopener by default, and a
+            noopener tab starts with empty sessionStorage: /docs would lose this tab's API key. Same origin, so safe. */}
+        <a className="side-link" href="/docs" target="_blank" rel="opener">
           API docs<span>/docs</span>
         </a>
-        <a className="side-link" href="/openapi.json">
+        <a className="side-link" href="/openapi.json" target="_blank" rel="opener">
           OpenAPI<span>.json</span>
         </a>
         <KeyPanel />
