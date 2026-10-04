@@ -171,6 +171,25 @@ SCHEMAS = {
                        'next_cursor': {'type': 'string', 'nullable': True,
                                        'description': 'Pass as ?cursor= for the next page; null on the last.'}},
     },
+    'AuditEntry': {
+        'type': 'object', 'required': ['timestamp', 'actor', 'action', 'target', 'changes'],
+        'properties': {
+            'timestamp': {'type': 'string'}, 'actor': _NULLABLE_STRING, 'action': {'type': 'string'},
+            'target': _NULLABLE_STRING,
+            'changes': {'nullable': True, 'description': 'For a change, each field as {from, to}; for a create or '
+                                                         'delete, the whole record. Never a secret.'},
+        },
+    },
+    'AuditLog': {
+        'type': 'object', 'required': ['items', 'total', 'actions', 'retention'],
+        'properties': {
+            'items': {'type': 'array', 'items': _ref('AuditEntry')},
+            'total': {'type': 'integer', 'description': 'Entries stored, before filtering.'},
+            'actions': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Every action in the log.'},
+            'retention': {'type': 'integer', 'description': 'The log keeps this many entries '
+                                                            '(QUERYAPIGATE_AUDIT_LOG_LIMIT).'},
+        },
+    },
     'Connection': {
         'type': 'object',
         'required': ['name', 'db', 'active', 'host', 'port', 'database', 'user', 'example', 'created_at', 'updated_at',
@@ -424,6 +443,25 @@ PATHS = {
             {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}},
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/history': {
+        'get': _op("Every saved query's runs, newest first", {'200': _ok(_ref('HistoryPage'))}, parameters=[
+            {'name': 'query', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'}},
+            {'name': 'status', 'in': 'query', 'schema': {'type': 'string', 'enum': ['success', 'error']}},
+            {'name': 'key', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'since', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 100}},
+            {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/audit': {
+        'get': _op('Administrative changes, newest first', {'200': _ok(_ref('AuditLog'))}, parameters=[
+            {'name': 'action', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'actor', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
+            {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
+             'description': 'Matches the time, actor or target.'}]),
     },
     '/api/v1/api-keys': {
         'get': _op('List API keys (grants, status, expiry, last use, usage - never secrets)',

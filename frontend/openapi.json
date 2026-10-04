@@ -182,6 +182,68 @@
         ],
         "type": "object"
       },
+      "AuditEntry": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "nullable": true,
+            "type": "string"
+          },
+          "changes": {
+            "description": "For a change, each field as {from, to}; for a create or delete, the whole record. Never a secret.",
+            "nullable": true
+          },
+          "target": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "actor",
+          "action",
+          "target",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "AuditLog": {
+        "properties": {
+          "actions": {
+            "description": "Every action in the log.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            },
+            "type": "array"
+          },
+          "retention": {
+            "description": "The log keeps this many entries (QUERYAPIGATE_AUDIT_LOG_LIMIT).",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Entries stored, before filtering.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "actions",
+          "retention"
+        ],
+        "type": "object"
+      },
       "Connection": {
         "properties": {
           "active": {
@@ -1632,6 +1694,97 @@
         ]
       }
     },
+    "/api/v1/audit": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Matches the time, actor or target.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLog"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Administrative changes, newest first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
     "/api/v1/connections": {
       "get": {
         "responses": {
@@ -2353,6 +2506,129 @@
           }
         },
         "summary": "A connection's tables and columns",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/history": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "success",
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Every saved query's runs, newest first",
         "tags": [
           "Management API v1"
         ]
@@ -4394,6 +4670,7 @@
     },
     "/audit_log": {
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Newest entry first, capped at 500 entries"
@@ -6150,6 +6427,7 @@
     },
     "/history": {
       "get": {
+        "deprecated": true,
         "parameters": [
           {
             "description": "Saved query name",

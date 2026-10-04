@@ -478,6 +478,49 @@ class AccessTests(V1TestCase):
         self.call('post', '/api/v1/roles', '/api/v1/roles', 403, headers={'X-API-Key': secret}, json={'name': 'x'})
 
 
+class HistoryAndAuditTests(V1TestCase):
+    def test_history_across_queries_pages_and_filters(self):
+        self.create('films', publish=True)
+        self.create('titles', sql='SELECT title FROM film', publish=True)
+        for name in ('films', 'titles', 'films'):
+            self.assertEqual(self.client.get(f'/q/{name}', headers=ADMIN).status_code, 200)
+        history.flush()
+        page = self.call('get', '/api/v1/history?limit=2', '/api/v1/history', 200).get_json()
+        self.assertEqual(len(page['items']), 2)
+        self.assertIsNotNone(page['next_cursor'])
+        rest = self.call('get', f"/api/v1/history?limit=10&cursor={page['next_cursor']}", '/api/v1/history',
+                         200).get_json()
+        self.assertIsNone(rest['next_cursor'])
+        everything = page['items'] + rest['items']
+        self.assertEqual({e['query'] for e in everything}, {'films', 'titles'})
+        only = self.call('get', '/api/v1/history?query=titles', '/api/v1/history', 200).get_json()['items']
+        self.assertEqual([e['query'] for e in only], ['titles'])
+        res = self.call('get', '/api/v1/history?status=maybe', '/api/v1/history', 400)
+        self.assertEqual(res.get_json()['code'], 'invalid_request')
+
+    def test_audit_newest_first_with_filters(self):
+        self.create('films')
+        self.call('post', '/api/v1/roles', '/api/v1/roles', 201, json={'name': 'analyst'})
+        self.call('delete', '/api/v1/roles/analyst', '/api/v1/roles/{name}', 204)
+        log = self.call('get', '/api/v1/audit', '/api/v1/audit', 200).get_json()
+        self.assertEqual([e['action'] for e in log['items']][:2], ['delete_role', 'create_role'])
+        self.assertEqual(log['total'], len(log['items']))
+        self.assertIn('create_role', log['actions'])
+        self.assertEqual(log['retention'], 500)
+        only = self.call('get', '/api/v1/audit?action=create_role', '/api/v1/audit', 200).get_json()
+        self.assertEqual([e['target'] for e in only['items']], ['analyst'])
+        self.assertEqual(only['total'], log['total'])  # the stored total, before filtering
+        self.assertEqual(only['actions'], log['actions'])
+        text = self.call('get', '/api/v1/audit?q=ANALY', '/api/v1/audit', 200).get_json()['items']
+        self.assertEqual({e['target'] for e in text}, {'analyst'})
+
+    def test_both_are_admin_only(self):
+        secret = self.call('post', '/api/v1/api-keys', '/api/v1/api-keys', 201,
+                           json={'name': 'k', 'connections': ['lite']}).get_json()['secret']
+        for path in ('/api/v1/audit', '/api/v1/history'):
+            self.call('get', path, path, 403, headers={'X-API-Key': secret})
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
@@ -488,6 +531,8 @@ class DeprecationTests(V1TestCase):
         self.assertNotIn('Deprecation', self.client.get('/connections/lite/schema', headers=ADMIN).headers)
         self.assertIn('/api/v1/api-keys', self.client.get('/api_keys', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/roles', self.client.get('/roles', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/audit', self.client.get('/audit_log', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/history', self.client.get('/history', headers=ADMIN).headers['Link'])
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

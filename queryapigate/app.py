@@ -70,6 +70,8 @@ DEPRECATED_ENDPOINTS = {
                     '/api/v1/api-keys'),
     **dict.fromkeys(('api.get_roles', 'api.create_role_endpoint', 'api.update_role_endpoint',
                      'api.delete_role_endpoint'), '/api/v1/roles'),
+    'api.audit_log_endpoint': '/api/v1/audit',
+    'api.history_endpoint': '/api/v1/history',
 }  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',

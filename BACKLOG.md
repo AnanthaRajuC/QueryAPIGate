@@ -2140,7 +2140,8 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: in progress - queries, connections, API keys and roles shipped; the other resources are open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: in progress - queries, connections, API keys, roles, history and audit shipped; the other resources are
+open.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2166,7 +2167,11 @@ field; `active: false` revokes) and delete, with `If-Match`; the key's secret is
 reports `keys_created`. Service in `queryapigate/services/access.py`; the grant model and its validation stay in
 `apikeys.py`.
 
-Remaining resources: collections, audit, settings and MCP. Each arrives with its Console screen.
+**`/api/v1/history` and `/api/v1/audit` (2026-10-04):** the cross-query run search (`GET /history`'s filters and
+cursor) and the audit log with filters, `total`, `actions` and `retention`; service in `queryapigate/services/audit.py`.
+`/metrics` stays as it is: it is Prometheus's contract, not a management route.
+
+Remaining resources: collections, settings and MCP. Each arrives with its Console screen.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2264,7 +2269,16 @@ Repository's API Keys and Roles tabs now edit in the Console too, and the shell'
 an end-to-end run (create with grants → reveal → the secret runs SQL; edit; key from a role; role create/delete; revoke
 → the secret gets 401); Vitest.
 
-Next slice: History, Metrics and Audit.
+**History, Metrics and Audit slice shipped, at visual parity (2026-10-04):** the Metrics screen (tiles with the 2 s
+pool poll, the two bar cards, the per-connection table, "Updated …") parses `/metrics` as the classic does; the Audit
+log screen (action and text filters, count, Refresh, Export as JSON) reads `/api/v1/audit`. The classic UI has no
+History screen of its own - run history lives in a query's History tab (already in the Console) and on Home - so
+`/api/v1/history` ships as the resource for Home's slice. Fixed in both UIs: an object in an audit change showed as
+`[object Object]`. Checked by side-by-side screenshots (Audit log identical in light and dark; Metrics identical but
+for its live numbers) and an end-to-end run (the pool poll every 2 s, Refresh, filter, Export, a new change on
+Refresh); Vitest.
+
+Next slice: MCP and Settings (with Home, Caching and the Access map, the remaining classic screens).
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

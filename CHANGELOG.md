@@ -97,6 +97,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   classic ones: both tables, the key drawer (Create from a role, the grant fields, Expires, Active), the one-time
   secret reveal, the role drawer and "New key from this". The API Repository's API Keys and Roles tabs now edit in
   the Console.
+- **Management API: `/api/v1/history` and `/api/v1/audit`.** The first searches every saved query's runs, with
+  the same filters and cursor paging as `GET /history`. The second lists administrative changes newest first, with
+  filters, and says how many entries are stored and how many the log keeps.
+- **The Console's Metrics and Audit log screens** (`/console/metrics`, `/console/audit-log`), at visual parity with
+  the classic ones. Metrics has the stat tiles (the two pool tiles live every 2 s), requests by status, queries by
+  connection and the per-connection table. Audit log has the action filter, the text filter, Refresh and Export.
 
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
@@ -107,8 +113,12 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `POST /connections/test`, `POST /connections/databases` and `DELETE /connections/{name}`, in the same way.
 - The API key and role routes replaced by `/api/v1/api-keys` and `/api/v1/roles`: `GET`/`POST /api_keys`,
   `PATCH`/`DELETE /api_keys/{name}`, `GET`/`POST /roles` and `PATCH`/`DELETE /roles/{name}`, in the same way.
+- `GET /history` and `GET /audit_log`, replaced by `/api/v1/history` and `/api/v1/audit`, in the same way.
 
 ### Fixed
+- **The audit log no longer shows `[object Object]`** for a grant like `{"name": "films", "allow_writes": true}`
+  (a key or role with write access through a named query). It now shows the object as JSON, in `/ui` and the
+  Console.
 - **A query's own `LIMIT` is respected** (BACKLOG #74). Paging used to replace a trailing `LIMIT`/`OFFSET` with the
   page window, so a saved "top 3" query (`... LIMIT 3`) returned a whole page: 10 rows by default, 50 with
   `?page_size=50`. Paging now happens within the statement's own window: `LIMIT 3` returns 3 rows, and `LIMIT 25`

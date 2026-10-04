@@ -146,6 +146,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'metrics',
+        path: '/metrics',
         group: 'Observability',
         label: 'Metrics',
         icon: svg(
@@ -158,6 +159,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'auditlog',
+        path: '/audit-log',
         group: 'Observability',
         label: 'Audit log',
         icon: svg(

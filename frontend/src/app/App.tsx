@@ -23,6 +23,14 @@ const ApiKeysPage = lazy(() =>
 
 const RolesPage = lazy(() => import('@/features/access/RolesPage').then((m) => ({ default: m.RolesPage })));
 
+const MetricsPage = lazy(() =>
+  import('@/features/observability/MetricsPage').then((m) => ({ default: m.MetricsPage })),
+);
+
+const AuditLogPage = lazy(() =>
+  import('@/features/observability/AuditLogPage').then((m) => ({ default: m.AuditLogPage })),
+);
+
 export function App() {
   return (
     <Routes>
@@ -67,6 +75,22 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RolesPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="metrics"
+          element={
+            <Suspense fallback={<Loading />}>
+              <MetricsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="audit-log"
+          element={
+            <Suspense fallback={<Loading />}>
+              <AuditLogPage />
             </Suspense>
           }
         />

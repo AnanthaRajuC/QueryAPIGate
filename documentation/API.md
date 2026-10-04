@@ -346,6 +346,13 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 A name is 1-100 letters, digits, spaces, `.`, `_` or `-` (`invalid_name`). Every change is audited, never with a
 secret.
 
+### History and audit
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
+| `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target` and `changes`. Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
+
 ### Deprecated routes
 
 The management routes replaced by an `/api/v1` resource keep working, unchanged. Their responses carry
@@ -358,11 +365,12 @@ deprecated:
   `POST /connections/databases` and `DELETE /connections/{name}`;
 - replaced by `/api/v1/api-keys`: `GET /api_keys`, `POST /api_keys`, `PATCH /api_keys/{name}` and
   `DELETE /api_keys/{name}`;
-- replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`.
+- replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`;
+- replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`.
 
 `GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
 schema of a connection it is granted. Runtime routes
-(`/q/<name>`, `/execute_sql`, `/catalog`, `/events`, `/history`) are not deprecated.
+(`/q/<name>`, `/execute_sql`, `/catalog`, `/events`) and `/metrics` are not deprecated.
 
 ## Collections
 
@@ -1046,6 +1054,8 @@ queued per process and newer ones are dropped rather than slowing requests - cou
 
 ### `GET /history`
 
+*Deprecated: use [`GET /api/v1/history`](#history-and-audit), which takes the same filters.*
+
 Pages through every stored run of every saved query, newest first - the way to look beyond the newest runs a
 list shows, for example across a retention period. Admin only (it shows every key's activity).
 
@@ -1072,6 +1082,8 @@ curl -H 'X-API-Key: admin-key' 'localhost:5000/history?key=partner&status=error&
 `next` is `null` on the last page.
 
 ## Audit log
+
+*`GET /audit_log` is deprecated: use [`GET /api/v1/audit`](#history-and-audit).*
 
 `GET /audit_log` (admin only) is a durable record of administrative changes - distinct from
 [Observability](#observability) above, which covers live request/query traffic, not configuration changes.

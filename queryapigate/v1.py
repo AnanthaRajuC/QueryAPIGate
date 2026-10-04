@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request
 from . import collection_admin, history, schema, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
-from .services import access, connections, queries
+from .services import access, audit, connections, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -354,3 +354,28 @@ def delete_role(name):
     _check_entry_if_match(access.load_role(name), 'role')
     access.delete_role(name, caller_key_name())
     return '', 204
+
+
+# --------------------------------------------------------------------------------------
+# History and audit
+# --------------------------------------------------------------------------------------
+
+@bp.route('/history', methods=['GET'])
+def search_history():
+    """Every saved query's runs, newest first, paged with a cursor. Filters: query, version, status, key, since
+    (inclusive) and until (exclusive) - a date or a time."""
+    args = request.args
+    limit = get_int(args.get('limit'), 'limit')
+    entries, next_cursor = history.search(
+        query=args.get('query'), version=get_int(args.get('version'), 'version'), status=args.get('status'),
+        key=args.get('key'), since=args.get('since'), until=args.get('until'),
+        limit=100 if limit is None else limit, cursor=args.get('cursor'))
+    return jsonify({'items': entries, 'next_cursor': next_cursor}), 200
+
+
+@bp.route('/audit', methods=['GET'])
+def list_audit():
+    """Administrative changes, newest first. `q` matches the time, actor or target."""
+    args = request.args
+    return jsonify(audit.listing(action=args.get('action'), actor=args.get('actor'), target=args.get('target'),
+                                 text=args.get('q'))), 200

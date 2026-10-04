@@ -2653,8 +2653,9 @@ function renderAuditLog() {
 
 function auditValueText(v) {
   if (v === null || v === undefined || v === '') return 'none';
-  if (Array.isArray(v)) return v.length ? v.join(', ') : 'none';
-  return String(v);
+  function one(x) { return x && typeof x === 'object' ? JSON.stringify(x) : String(x); } // e.g. {name, allow_writes}
+  if (Array.isArray(v)) return v.length ? v.map(one).join(', ') : 'none';
+  return one(v);
 }
 
 /** true for a value renderAuditChanges() should skip in a full snapshot (create/delete) - unset/empty, not
