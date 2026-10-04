@@ -1,0 +1,119 @@
+# QueryAPIGate on Kubernetes: several instances on one PostgreSQL store and one Redis, plus the events server.
+# See how-to/42-run-several-instances.md. Needs the Secret in secret.example.yaml (filled in), a PostgreSQL database
+# and a Redis - managed services in production; dev-dependencies.yaml starts throwaway ones for trying it out.
+#
+#   kubectl apply -f secret.yaml -f queryapigate.yaml
+#
+# Pin the image to a release (an upgrade is a deliberate change of this line - DEPLOYMENT.md, Rolling upgrades).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queryapigate
+  labels: {app: queryapigate}
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: queryapigate}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # replace one at a time: the previous release keeps serving
+  template:
+    metadata:
+      labels: {app: queryapigate}
+    spec:
+      enableServiceLinks: false   # else a Service named queryapigate sets QUERYAPIGATE_PORT=tcp://... in the pod
+      terminationGracePeriodSeconds: 45   # the preStop pause plus gunicorn's 30 s to finish requests in flight
+      containers:
+        - name: queryapigate
+          image: ghcr.io/anantharajuc/queryapigate:0.15.0
+          ports: [{name: http, containerPort: 5000}]
+          envFrom: [{secretRef: {name: queryapigate}}]
+          env:
+            - {name: QUERYAPIGATE_TRUST_PROXY, value: "1"}   # one proxy in front: the ingress controller
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          lifecycle:
+            # Keep serving for a few seconds after being told to stop, while the endpoint is removed everywhere -
+            # otherwise a rolling update drops the requests that still arrive in that moment.
+            preStop: {exec: {command: ["sleep", "10"]}}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queryapigate
+spec:
+  selector: {app: queryapigate}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: queryapigate
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: queryapigate}
+---
+# Live events for many clients, from the shared store: route /events here (the Ingress below).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queryapigate-events
+  labels: {app: queryapigate-events}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: queryapigate-events}
+  template:
+    metadata:
+      labels: {app: queryapigate-events}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: events
+          image: ghcr.io/anantharajuc/queryapigate:0.15.0
+          command: ["queryapigate", "events", "--host", "0.0.0.0"]
+          ports: [{name: http, containerPort: 5002}]
+          envFrom: [{secretRef: {name: queryapigate}}]
+          env:
+            - {name: QUERYAPIGATE_TRUST_PROXY, value: "1"}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queryapigate-events
+spec:
+  selector: {app: queryapigate-events}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+# One host for both: /events to the events server, the rest to the instances. ingress-nginx shown; with another
+# controller, keep the two rules and switch off response buffering for /events.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: queryapigate
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls: [{hosts: [api.example.com], secretName: queryapigate-tls}]
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - {path: /events, pathType: Prefix, backend: {service: {name: queryapigate-events, port: {name: http}}}}
+          - {path: /, pathType: Prefix, backend: {service: {name: queryapigate, port: {name: http}}}}

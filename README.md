@@ -676,8 +676,9 @@ ghcr.io/anantharajuc/queryapigate queryapigate init`). The named volume above wo
 out of the box. To use a folder on the host instead (`-v "$PWD/data:/data"`), create it yourself first (`mkdir data`) and make sure
 it is writable by uid 1000, the container's user - a folder that Docker creates for you is owned by root, which the container
 cannot write to (or run with `--user "$(id -u):$(id -g)"`). It runs as a non-root user under
-gunicorn with one worker (the built-in rate limiter and in-memory `/metrics` are per-process state with no
-cross-worker aggregation) and a health check on `/health`. Behind a
+gunicorn with one worker (each process keeps its own `/metrics`; scale out with more containers - see
+[Scaling out](documentation/DEPLOYMENT.md#scaling-out) and the
+[reference deployment](deploy/scale-out/)) and a health check on `/health`. Behind a
 reverse proxy or load balancer, set `QUERYAPIGATE_TRUST_PROXY=1`. To build it yourself:
 `docker build -t queryapigate .` (add `--build-arg WITH_H2=true` for H2).
 

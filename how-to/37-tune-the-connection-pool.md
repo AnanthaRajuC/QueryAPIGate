@@ -57,7 +57,7 @@ Symptoms and what to change:
 
 | You see | Likely cause | Change |
 |---|---|---|
-| Latency rises with traffic, CPU is low, `queryapigate_active_queries` sits at the thread count | requests are queuing for threads | more `--threads` (see [DEPLOYMENT.md](../documentation/DEPLOYMENT.md#why-one-worker-not-a-replica-count)) |
+| Latency rises with traffic, CPU is low, `queryapigate_active_queries` sits at the thread count | requests are queuing for threads | more `--threads` (see [Scaling out](../documentation/DEPLOYMENT.md#scaling-out)) |
 | "too many connections" errors from the database | threads (or several QueryAPIGate processes) exceed its limit | fewer threads, a higher `max_connections`, or a pooler such as PgBouncer in front of the database |
 | Every request pays connection setup; `queryapigate_pool_idle_connections` stays at 0 | pooling is off, or traffic is so sparse that connections expire | default `QUERYAPIGATE_POOL_SIZE`, longer `QUERYAPIGATE_POOL_IDLE_TIMEOUT` |
 | The DBA asks why connections sit idle all night | the lazy timeout above | `QUERYAPIGATE_POOL_SIZE=1` or `2` on that server, or accept it - idle connections cost little |

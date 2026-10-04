@@ -149,11 +149,13 @@ Add them to the same Compose file when you need them - the same image, different
 
 Give each the same `env_file` and volume (or `QUERYAPIGATE_DATABASE_URL`), so they share the store.
 
-## Don't scale it with replicas
+## When one instance isn't enough
 
-One container, one worker, on purpose: rate limits and `/metrics` live in each process's memory, so two replicas would
-each enforce their own limits and report half the numbers. For more capacity, give it more threads or CPU - see
-[Why one worker](../documentation/DEPLOYMENT.md#why-one-worker-not-a-replica-count).
+This guide runs one instance - with SQLite on a volume, or PostgreSQL, that's fully supported. For more capacity or
+availability, run several: they need a PostgreSQL store and Redis, and then share everything. Don't just raise the
+replica count of this Compose file - each would get its own SQLite volume and be a separate server. See
+[Run several instances](42-run-several-instances.md), and keep one gunicorn worker per container either way
+([Scaling out](../documentation/DEPLOYMENT.md#scaling-out)).
 
 ## Checklist before going live
 

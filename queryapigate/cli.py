@@ -21,6 +21,7 @@ def _serve(args):
     except ValueError as error:  # a malformed setting, e.g. QUERYAPIGATE_RATE_LIMIT
         print(f'queryapigate: {error}', file=sys.stderr)
         return 2
+    args.port = args.port or config.port_setting('QUERYAPIGATE_PORT', 5000)  # checked by create_app() above
     if args.host not in LOOPBACK_HOSTS and not config.api_key():
         logging.getLogger('queryapigate').warning(
             'Listening on %s without QUERYAPIGATE_API_KEY set: anyone who can reach this port can run SQL '
@@ -47,6 +48,7 @@ def _mcp(args):
              file=sys.stderr)
         return 2
     instances.register('mcp')  # create_app() recorded it as 'serve'
+    args.port = args.port or config.mcp_port()
     logging.getLogger('queryapigate').info('Serving MCP tools for %s at http://%s:%s/mcp',
                                            config.home(), args.host, args.port)
     run(app, host=args.host, port=args.port)
@@ -82,6 +84,7 @@ def _events(args):
                              also=('live_events',))
     db.init_schema()
     instances.register('events')
+    args.port = args.port or config.events_port()
     from .events import run
     run(host=args.host, port=args.port)
     return 0
@@ -359,7 +362,7 @@ def build_parser():
 
     serve = commands.add_parser('serve', help='start the HTTP server (default)')
     serve.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    serve.add_argument('--port', type=int, default=int(os.environ.get('QUERYAPIGATE_PORT', 5000)))
+    serve.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_PORT, or 5000 - read in _serve()
     serve.add_argument('--debug', action='store_true', default=config.env_flag('QUERYAPIGATE_DEBUG'),
                        help='Flask debug mode - never use on a reachable host')
     serve.set_defaults(func=_serve)
@@ -367,14 +370,14 @@ def build_parser():
     mcp_parser = commands.add_parser('mcp', help='start an MCP server exposing read-only saved queries as '
                                                  'tools (needs `pip install "queryapigate[mcp]"`)')
     mcp_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    mcp_parser.add_argument('--port', type=int, default=config.mcp_port())
+    mcp_parser.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_MCP_PORT, or 5001
     mcp_parser.set_defaults(func=_mcp)
 
     events_parser = commands.add_parser('events', help='serve GET /events to many clients at once - apps, phones, '
                                                        'dashboards - with resume (Last-Event-ID) and every '
                                                        "instance's runs; run beside `queryapigate serve`")
     events_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    events_parser.add_argument('--port', type=int, default=config.events_port())
+    events_parser.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_EVENTS_PORT, or 5002
     events_parser.set_defaults(func=_events)
 
     backup = commands.add_parser('backup', help='copy queryapigate.db to FILE, consistently, while the server '

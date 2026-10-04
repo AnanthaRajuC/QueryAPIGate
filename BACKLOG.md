@@ -24,7 +24,7 @@ by accident.
 | ~~#62 Ad-hoc SQL runs in history and events~~ (shipped) | Touches the history schema and `GET /history` response shapes |
 | ~~#59 Dedicated event log (*storage decision only*)~~ (decided: [ADR 0002](documentation/adr/0002-event-ids.md)) | Decides where event ids come from; the full event log can ship later |
 | ~~#69 Consistent error format~~ (shipped) | `detail` just changed in 0.12.0; settle the error shape once |
-| #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
+| ~~#70 Decide 1.0's deployment shape~~ (decided: several instances supported, #55-#58 shipped) | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
 | ~~#74 Respect a saved query's own `LIMIT`~~ (shipped) | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
 | ~~#72 Management API v1 (`/api/v1`)~~ (shipped; legacy routes removed) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
 
@@ -39,9 +39,8 @@ by accident.
 | ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 
-**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #55-#58
-if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC discovery beyond the current
-JWKS support.
+**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, a Helm chart
+(plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
 
 **More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (shipped),
 #76 Trino, #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
@@ -51,7 +50,7 @@ tables (federation considered and deferred, see #83).
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
-3. **#70**, the deployment-shape decision - the last item before the freeze.
+3. **0.15:** #70 decided - several instances supported - and delivered by #55-#58; #75 files through DuckDB.
 4. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 5. **1.0.0.**
 
@@ -1780,7 +1779,13 @@ in-memory fake Redis client #47's tests use. Estimate: 2-3 days.
 
 ## 56. A reference multi-instance deployment, and DEPLOYMENT.md rewritten for it
 
-**Status: open.** Depends on #55 to be honest about rate limits.
+**Status: shipped (for 0.15).** `deploy/scale-out/` (Compose: three instances, PostgreSQL, Redis, events, Caddy) and
+`deploy/kubernetes/` (Deployment with probes, maxUnavailable 0, preStop pause, PDB, events, Ingress), both run end to
+end - Kubernetes on kind, including a rolling update under traffic. Running it found a real bug: Kubernetes service
+links set QUERYAPIGATE_*_PORT (now ignored with a warning; the manifests set enableServiceLinks: false). DEPLOYMENT.md
+*Scaling out*; how-to guide 42.
+
+Original notes:
 
 **Impact:** the pieces for running several instances shipped separately (PostgreSQL store, Redis cache,
 `queryapigate events`), but nothing shows them assembled. DEPLOYMENT.md's "Why one worker (not a replica
@@ -2183,7 +2188,10 @@ Settling the shape now is cheap; changing it after 1.0 is breaking.
 
 ## 70. Decide and document 1.0's deployment shape
 
-**Status: open.** 1.0 milestone, a decision rather than code.
+**Status: decided (2026-10-04): Option B** - several instances supported, on a PostgreSQL store with Redis, alongside
+one instance. Reason: the warehouse users #77 aims at deploy with replicas from day one, and decisions such as the
+Redis-down rate-limit policy are cheap before the 1.0 freeze and breaking after it. Delivered by #55, #56, #57 and
+#58; written into DEPLOYMENT.md's *Scaling out*.
 
 **Impact:** an organization reading "1.0" will assume a supported way to run it in production. Today one
 instance (SQLite or PostgreSQL store) is solid. Several instances work for stored state but not for rate

@@ -63,10 +63,10 @@ Behaviour is controlled by environment variables - see the table in the
 
 ## Running in production
 
-`queryapigate serve` uses Flask's development server. For production use gunicorn with **one worker** (the built-in
-rate limiter and in-memory `/metrics` are per-process state with no cross-worker aggregation - every persistent
-store is SQLite-backed and safe across processes, but a rate limit or `/metrics` count would be split across
-workers instead of shared) and several threads, behind a TLS-terminating reverse proxy:
+`queryapigate serve` uses Flask's development server. For production use gunicorn with **one worker** and several
+threads, behind a TLS-terminating reverse proxy - one worker because `/metrics` is per process (a scraper would reach
+one worker at random), and, without Redis, so are rate limits. For more capacity run more instances, each with one
+worker ([Scaling out](DEPLOYMENT.md#scaling-out)):
 
 ~~~bash
 pip install "queryapigate[server]"

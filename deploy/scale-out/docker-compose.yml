@@ -1,0 +1,84 @@
+# QueryAPIGate scaled out: three instances behind Caddy, one PostgreSQL store, one Redis, one events server.
+# See how-to/42-run-several-instances.md and documentation/DEPLOYMENT.md ("Scaling out").
+#
+#   cp .env.example .env      # then fill it in - and pin QUERYAPIGATE_IMAGE to a release
+#   docker compose up -d
+#   curl -k https://localhost/health
+#
+# Everything an instance owns lives in PostgreSQL (connections, saved queries, keys, roles, history, audit) or
+# Redis (rate limits, the response cache), so instances are interchangeable: add one by copying a block below.
+
+x-queryapigate: &queryapigate
+  image: ${QUERYAPIGATE_IMAGE:?set QUERYAPIGATE_IMAGE in .env, e.g. ghcr.io/anantharajuc/queryapigate:0.15.0}
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:${POSTGRES_PASSWORD}@postgres:5432/queryapigate
+    QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
+    QUERYAPIGATE_TRUST_PROXY: "1"                       # one proxy in front: Caddy
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks: [internal]
+
+services:
+  queryapigate-1: *queryapigate
+  queryapigate-2: *queryapigate
+  queryapigate-3: *queryapigate
+
+  # Live events for many clients: reads every instance's runs from the store (see API.md, Live events).
+  events:
+    <<: *queryapigate
+    command: ["queryapigate", "events", "--host", "0.0.0.0"]
+    healthcheck:                                         # the image's own check probes port 5000
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: queryapigate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: queryapigate
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U queryapigate"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  # The only service with published ports: TLS, load balancing across the instances, /events to the events server.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["443:443", "80:80"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [queryapigate-1, queryapigate-2, queryapigate-3, events]
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  postgres-data:
+  caddy-data:

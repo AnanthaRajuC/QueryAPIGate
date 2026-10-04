@@ -216,11 +216,11 @@ Being explicit about these is as important as everything above:
 - **The regex-based read-only/single-statement guard is defence in depth, never a substitute for
   least-privileged database credentials.** Connect with an account that only has the grants the API
   actually needs; assume the guard could someday have another gap like the one already found and fixed.
-- **Rate limits and `/metrics` are per process** - this is why the shipped image runs a single worker rather
-  than a horizontally-scaled deployment: several processes would each enforce their own limits. The store itself
-  is safe for several processes (SQLite with its write-ahead log, or a shared PostgreSQL store), but two replicas
-  each with their *own* volume are two separate servers with their own keys, connections and audit trail, not one
-  logical service with shared state.
+- **Several instances are one service only on a shared store and Redis.** With a PostgreSQL store and
+  `QUERYAPIGATE_REDIS_URL`, every instance shares keys, connections, the audit trail and rate limits; without Redis,
+  each counts limits on its own (the `instances_not_shared` alert says so), and two replicas each with their *own*
+  SQLite volume are two separate servers with their own keys, connections and audit trail. `/metrics` is always per
+  process - scrape each one.
 - **The audit log and execution history are not tamper-evident.** They record what happened for
   operational visibility and accountability, not as a forensic-grade, append-only ledger - export them
   externally if that guarantee matters for your deployment.

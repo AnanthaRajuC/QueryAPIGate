@@ -958,9 +958,10 @@ format](https://prometheus.io/docs/instrumenting/exposition_formats/):
   see `/api/v1/settings`). Counted from the same `X-Cache: HIT`/`MISS` header a cacheable response already carries.
 - `queryapigate_cache_entries` - responses currently held in the response cache.
 
-Metrics are kept in memory for this one process. This is correct for the image this project ships (a
-single gunicorn worker - see the comment next to `--workers 1` in the Dockerfile); running several worker
-processes would need a shared backing store instead, which nothing here provides.
+Metrics are kept in memory for this one process - the standard Prometheus model: with several instances, scrape each
+one and aggregate in queries (the bundled dashboard sums them). That's also why the image runs one gunicorn worker per
+container: a scraper reaching a container with several workers would get one of them at random. Scale out with more
+containers ([Scaling out](DEPLOYMENT.md#scaling-out)).
 
 ### Seeing it: a built-in view, or a real dashboard
 
@@ -977,8 +978,7 @@ For real history, trends and alerting, scrape `/metrics` with Prometheus and imp
 into Grafana (*Dashboards → New → Import*, then upload the file or paste its contents) - it builds on exactly
 the metric names listed above, with panels for request/query rate and latency (p50/p95/p99), error rate,
 rows returned, active queries, pool occupancy and rate-limit rejections. Each QueryAPIGate process needs its own
-scrape target; the dashboard doesn't aggregate across instances, matching the in-memory, per-process nature
-of the metrics themselves.
+scrape target, and the dashboard sums across them.
 
 ## Live events (Server-Sent Events)
 

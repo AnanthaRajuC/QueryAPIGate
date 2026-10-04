@@ -279,6 +279,12 @@ const DOCS = [
     path: 'how-to/41-publish-files-in-s3-as-an-api.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-42',
+    title: 'Run several instances',
+    path: 'how-to/42-run-several-instances.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

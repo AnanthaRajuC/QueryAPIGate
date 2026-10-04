@@ -1,5 +1,6 @@
 """Runtime configuration, read from environment variables at call time."""
 import functools
+import logging
 import math
 import os
 import re
@@ -283,6 +284,34 @@ def proxy_hops():
         return 0
 
 
+_SERVICE_LINK_RE = re.compile(r'^tcp://[^:/]+:\d+$')
+PORT_SETTINGS = ('QUERYAPIGATE_PORT', 'QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_MCP_PORT')
+
+
+_ignored_links: set = set()
+
+
+def port_setting(name, default):
+    """A port from the environment. A value like tcp://10.0.0.7:80 is not one anyone sets: Kubernetes injects it into
+    every pod when a Service is named like this setting (a Service `queryapigate-events` sets
+    QUERYAPIGATE_EVENTS_PORT) - so it is ignored, with a warning saying why, and the default applies."""
+    raw = os.environ.get(name, '').strip()
+    if not raw:
+        return default
+    if _SERVICE_LINK_RE.match(raw):
+        if name not in _ignored_links:
+            _ignored_links.add(name)
+            service = name[:-len('_PORT')].lower().replace('_', '-')
+            logging.getLogger('queryapigate').warning(
+                "%s is '%s', which Kubernetes sets for a Service named '%s' (service links) - ignored. Set "
+                'enableServiceLinks: false in the pod spec to stop it (deploy/kubernetes/queryapigate.yaml does).',
+                name, raw, service)
+        return default
+    if not raw.isdigit() or int(raw) < 1:
+        raise ValueError(f'{name} must be a positive integer')
+    return int(raw)
+
+
 def check_settings():
     """Raise ValueError for a malformed setting, so a typo fails at startup instead of silently switching off a
     protection."""
@@ -320,10 +349,11 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS must be a whole number of days (0 turns the check off)')
-    for name in ('QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS'):
-        raw = os.environ.get(name, '').strip()
-        if raw and (not raw.isdigit() or int(raw) < 1):
-            raise ValueError(f'{name} must be a positive integer')
+    for name in PORT_SETTINGS:
+        port_setting(name, None)
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', '').strip()
+    if raw and (not raw.isdigit() or int(raw) < 1):
+        raise ValueError('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS must be a positive integer')
     raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_STREAMS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_EVENTS_MAX_STREAMS must be a whole number (0 turns GET /events off on this '
@@ -339,9 +369,6 @@ def check_settings():
     if raw and not _number_in(raw, lambda v: 0 <= v <= 60):
         raise ValueError('QUERYAPIGATE_HISTORY_FLUSH_INTERVAL must be a number of seconds from 0 to 60 '
                          '(0 writes each run inside its own request)')
-    raw = os.environ.get('QUERYAPIGATE_MCP_PORT', '').strip()
-    if raw and (not raw.isdigit() or int(raw) < 1):
-        raise ValueError('QUERYAPIGATE_MCP_PORT must be a positive integer')
     raw = os.environ.get('QUERYAPIGATE_MCP_MAX_ROWS', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
@@ -565,8 +592,7 @@ def check_jwt_settings():
 
 def events_port():
     """Bind port for `queryapigate events` (QUERYAPIGATE_EVENTS_PORT), default 5002 - see events.py."""
-    raw = os.environ.get('QUERYAPIGATE_EVENTS_PORT', '').strip()
-    return int(raw) if raw else DEFAULT_EVENTS_PORT
+    return port_setting('QUERYAPIGATE_EVENTS_PORT', DEFAULT_EVENTS_PORT)
 
 
 def events_max_connections():
@@ -595,8 +621,7 @@ def mcp_port():
     """Bind port for `queryapigate mcp` (QUERYAPIGATE_MCP_PORT), default DEFAULT_MCP_PORT (5001) - distinct
     from QUERYAPIGATE_PORT so the MCP server and the REST server can run side by side against the same
     QUERYAPIGATE_HOME without a port clash."""
-    raw = os.environ.get('QUERYAPIGATE_MCP_PORT', '').strip()
-    return int(raw) if raw else DEFAULT_MCP_PORT
+    return port_setting('QUERYAPIGATE_MCP_PORT', DEFAULT_MCP_PORT)
 
 
 def mcp_max_rows():

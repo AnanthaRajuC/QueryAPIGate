@@ -28,7 +28,7 @@ other dependency - read the [Changelog](../CHANGELOG.md) first, especially aroun
 
 The image already does the things a production container should: runs as a non-root user (`uid 1000`),
 ships a `HEALTHCHECK` against `/health`, and starts gunicorn with `--worker-class gthread` and one worker
-(see [Why one worker](#why-one-worker-not-a-replica-count) below) - none of that needs reconfiguring.
+(see [Scaling out](#scaling-out) below) - none of that needs reconfiguring.
 
 ## 2. Compose file
 
@@ -333,21 +333,33 @@ Caddy streams `text/event-stream` responses without buffering. With nginx, use `
 `proxy_read_timeout` above the 15-second keepalive for that location. The events server sees runs from every
 instance sharing the store - one events service is enough for several `queryapigate` replicas.
 
-## Why one worker (not a replica count)
+## Scaling out
 
-The image runs gunicorn with **one worker** on purpose, and that's not a knob to turn up for more capacity.
-The rate limiter and `/metrics` are per-process, in-memory state with no cross-worker or cross-replica
-aggregation - two workers (or two containers) would each enforce rate limits and count metrics
-independently, silently doubling effective limits and splitting the numbers Grafana shows. With the default
-store, two replicas each with their own `/data` volume are also two independent servers with their own
-connections, keys and audit log, not one logical service. A [shared metadata store](#8-shared-metadata-store-optional)
-fixes that part - replicas pointed at one PostgreSQL database share connections, saved queries and keys - but
-rate limits and `/metrics` stay per process until they get a shared backend too (live events don't: see section 9).
+Two shapes are supported:
 
-For more headroom on one instance, raise `--threads` (`gthread` already lets a slow request - a large
-export, a slow query - not block every other connection) or give the container more CPU. The image's `CMD`
-is fixed, so change the thread count with a `command:` override in the compose file rather than an
-environment variable:
+| | One instance | Several instances |
+|---|---|---|
+| Store | SQLite on a volume, or PostgreSQL | **PostgreSQL** ([section 8](#8-shared-metadata-store-optional)) |
+| Redis | optional (shared cache across restarts) | **required** - rate limits and the response cache ([section 7](#7-shared-response-cache-optional)) |
+| Live events | `GET /events` on the instance | **`queryapigate events`** ([section 9](#9-live-events-for-many-clients-optional)), routed by the proxy |
+| Availability | restart on failure | the load balancer skips an instance that fails its health check |
+
+With a PostgreSQL store and Redis, everything an instance owns is shared - connections, saved queries and versions,
+keys, roles, history, the audit log, rate limits, the cache - so instances are interchangeable and a load balancer can
+send any request to any of them. `tests/test_multinode.py` checks this on every CI run with three real servers.
+
+**The reference deployment** is
+[`deploy/scale-out/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/deploy/scale-out): three instances,
+PostgreSQL, Redis, the events server and Caddy load-balancing them, in one Compose file. Run end to end before it was
+published: requests rotated across the three instances, a key's `4/minute` limit allowed exactly four calls in total
+across them, live events arrived through `/events`, and with one instance stopped twelve calls in a row still
+succeeded - Caddy retried them on the others. Walkthrough:
+[Run several instances](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/42-run-several-instances.md).
+
+**One worker per container, more containers for more capacity.** The image runs gunicorn with one worker and eight
+threads, and that stays right when scaling out: each process keeps its own `/metrics`, and Prometheus scraping a
+container with several workers would reach one of them at random. For more headroom inside one container, raise
+`--threads` - `gthread` keeps a slow request from blocking the others - with a `command:` override:
 
 ~~~yaml
     command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread",
@@ -355,10 +367,13 @@ environment variable:
               "queryapigate.app:create_app()"]
 ~~~
 
-If you genuinely need redundancy, run a second, fully independent instance (its own volume, its own DNS
-record or a failover-only load balancer in front of both) rather than a shared-state replica pair - and
-keep the [Redis-backed cache](#7-shared-response-cache-optional) if the two need to agree on cached
-responses at least, since that's the one piece of state this setup can actually share.
+**What stays per instance:** `/metrics` (scrape each instance; the bundled dashboard sums them), the Console's Metrics
+screen, and the main server's own `GET /events` (use `queryapigate events`). `GET /api/v1/instances` lists the
+instances; an `instances_not_shared` alert means some of them run without Redis.
+
+**Several instances without a PostgreSQL store** - each with its own SQLite volume - are separate servers with their
+own keys and connections, not one service. For simple redundancy without PostgreSQL, run one active instance and a
+standby restored from backups.
 
 ## Upgrading
 

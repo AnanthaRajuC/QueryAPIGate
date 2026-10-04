@@ -51,6 +51,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   configuration is locked as it opens. A refused path answers `403 path_not_allowed`.
 
 ### Added
+- **Several instances, supported** (BACKLOG #56, #70): one instance, or several on a PostgreSQL store with Redis,
+  are both supported deployment shapes. `deploy/scale-out/` is a reference Compose deployment (three instances,
+  PostgreSQL, Redis, the events server, Caddy) and `deploy/kubernetes/` the same on Kubernetes (Deployment, probes,
+  zero-downtime rolling updates, a PodDisruptionBudget, Ingress) - both run end to end, including failover and a
+  rolling update under traffic. DEPLOYMENT.md's "Why one worker" became *Scaling out*; how-to guide 42 walks
+  through both.
 - **Which instances are running** (BACKLOG #58): `GET /api/v1/instances` lists every process using the store - role,
   host, version, whether it shares limits through Redis - and two new alerts, also logged at startup, flag several
   instances without Redis (`instances_not_shared`) and instances on different versions (`instances_versions_differ`).
@@ -150,6 +156,11 @@ Read these first.
   copying the pre-SQLite JSON files that 0.14 deprecates.
 
 ### Fixed
+- **Kubernetes Services named like QueryAPIGate's settings no longer break it.** Kubernetes injects
+  `<SERVICE>_PORT=tcp://...` into every pod for each Service, so a Service named `queryapigate-events` set
+  `QUERYAPIGATE_EVENTS_PORT` and the server refused to start (and a Service named `queryapigate` broke every CLI
+  command, which read `QUERYAPIGATE_PORT` while parsing arguments). Such a value is now ignored with a warning
+  naming the cause.
 - **A table-restricted key sees only its tables in the schema.** `allowed_tables` refused statements on other
   tables, but the schema browser and MCP's `list_tables` still listed every table and column on the connection, and
   `table_ddl` showed any table's `CREATE TABLE`. Now the others are left out (and a foreign key pointing at one shows

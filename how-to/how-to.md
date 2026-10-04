@@ -105,3 +105,8 @@ guide covers one scenario end to end, and every command and response in it was r
 
 41. [**Publish Parquet, CSV or JSON files in S3 as an API**](41-publish-files-in-s3-as-an-api.md) (experimental) -
     DuckDB reads them where they are; `allowed_paths`, credentials, views.
+
+## Scaling out
+
+42. [**Run several instances behind a load balancer**](42-run-several-instances.md) - Docker Compose or Kubernetes,
+    PostgreSQL and Redis shared, failover and rolling updates.

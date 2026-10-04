@@ -177,5 +177,32 @@ class McpToolsEndpointTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
 
 
+
+class KubernetesServiceLinkTests(unittest.TestCase):
+    """Kubernetes injects <SERVICE>_PORT=tcp://ip:port into every pod for each Service, so a Service named
+    `queryapigate-events` sets QUERYAPIGATE_EVENTS_PORT - a value of ours, by accident. It is ignored, with a warning
+    naming the cause, rather than stopping the server."""
+
+    def setUp(self):
+        patcher = mock.patch.object(config, '_ignored_links', set())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_injected_service_link_is_ignored_with_a_warning(self):
+        for name, default in (('QUERYAPIGATE_PORT', 5000), ('QUERYAPIGATE_EVENTS_PORT', 5002),
+                              ('QUERYAPIGATE_MCP_PORT', 5001)):
+            with self.subTest(name=name), mock.patch.dict(os.environ, {name: 'tcp://10.96.0.7:80'}), \
+                    self.assertLogs('queryapigate', level='WARNING') as logs:
+                self.assertEqual(config.port_setting(name, default), default)
+                config.check_settings()  # starts, rather than refusing the setting
+            self.assertIn('Kubernetes sets for a Service named', logs.output[0])
+
+    def test_a_real_port_is_used_and_a_bad_one_refused(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_PORT': '7002'}):
+            self.assertEqual(config.events_port(), 7002)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_PORT': 'seven'}):
+            with self.assertRaisesRegex(ValueError, 'QUERYAPIGATE_EVENTS_PORT must be a positive integer'):
+                config.check_settings()
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,16 @@
+{$SITE_ADDRESS} {
+	# Live events go to the events server, which serves every client from the shared store.
+	reverse_proxy /events* events:5002
+
+	# Everything else, spread across the instances. An instance failing its health check is taken out of the
+	# rotation until it passes again; a request that can't reach one is retried on another.
+	reverse_proxy queryapigate-1:5000 queryapigate-2:5000 queryapigate-3:5000 {
+		lb_policy round_robin
+		lb_try_duration 5s
+		health_uri /health
+		health_interval 10s
+	}
+
+	# /metrics is public on each instance; keep it off the internet - scrape the instances directly instead.
+	respond /metrics 403
+}

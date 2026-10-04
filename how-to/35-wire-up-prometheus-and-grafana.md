@@ -116,7 +116,7 @@ often slow - things that need a person to act, rather than paging anyone.
   histograms deliberately don't, and all signed-in (JWT) users share one `jwt` label, so the series count stays
   bounded.
 - **One worker per process** keeps the numbers whole; see
-  [Why one worker](../documentation/DEPLOYMENT.md#why-one-worker-not-a-replica-count).
+  [Scaling out](../documentation/DEPLOYMENT.md#scaling-out).
 
 ## Next steps
 
