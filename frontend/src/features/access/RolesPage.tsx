@@ -1,5 +1,6 @@
 import { useCollections, useRoles } from '@/app/data';
 import { Loading } from '@/app/feedback';
+import { PencilIcon, TrashIcon } from '@/components/icons';
 import { AccessCell } from '@/features/repository/reach';
 
 import { useAccessDrawers, useDeleteRole } from './forms';
@@ -89,11 +90,23 @@ export function RolesPage() {
                       <button type="button" className="btn ghost sm" onClick={() => drawers.newKey(name)}>
                         New key from this
                       </button>
-                      <button type="button" className="btn ghost sm" onClick={() => drawers.editRole(name)}>
-                        Edit
+                      <button
+                        type="button"
+                        className="btn ghost sm icon"
+                        title={`Edit ${name}`}
+                        aria-label="Edit"
+                        onClick={() => drawers.editRole(name)}
+                      >
+                        <PencilIcon />
                       </button>
-                      <button type="button" className="btn ghost sm danger" onClick={() => void remove(name)}>
-                        Delete
+                      <button
+                        type="button"
+                        className="btn ghost sm icon danger"
+                        title={`Delete ${name}`}
+                        aria-label="Delete"
+                        onClick={() => void remove(name)}
+                      >
+                        <TrashIcon />
                       </button>
                     </div>
                   </td>
