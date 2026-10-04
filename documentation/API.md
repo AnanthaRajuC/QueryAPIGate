@@ -12,8 +12,8 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 |----------|--------|---------|
 | [`/execute_sql`](#execute-sql) | POST | Run ad-hoc SQL |
 | [`/q/<name>`](#run-a-saved-query) | GET, POST | Run a saved query as an endpoint |
-| [`/execute_sql_from_file`](#run-a-saved-query) | POST | Run a saved query by file path |
-| [`/execute_sql_with_parameters_from_file`](#run-a-saved-query) | POST | Same as above (kept for compatibility) |
+| [`/execute_sql_from_file`](#run-a-saved-query) | POST | Deprecated - use `/q/{name}`. Run a saved query by file path |
+| [`/execute_sql_with_parameters_from_file`](#run-a-saved-query) | POST | Deprecated - use `/q/{name}`. Same as above |
 | [`/connections/<name>/schema`](#connections) | GET | List a connection's tables/views and their columns |
 | [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
 | [`/events`](#live-events-server-sent-events) | GET | Live saved-query runs (Server-Sent Events) |
@@ -162,8 +162,11 @@ at all: `/q/<name>` answers 404.
 Stores created before this (schema 3 and older) are upgraded on first start with every query published at its
 newest version, so nothing a caller sees changes.
 
-The older endpoints `POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file` do the same thing
-with the query named in the body:
+> **Deprecated since 0.14.0; 0.15.0 may remove them.** The older endpoints `POST /execute_sql_from_file` and
+> `POST /execute_sql_with_parameters_from_file` still work, but use `/q/{name}` instead. Their responses carry
+> `Deprecation` and `Link: </q/{name}>; rel="successor-version"` headers, and `/openapi.json` marks them deprecated.
+
+They do the same thing with the query named in the body:
 
 ~~~json
 {
@@ -383,8 +386,9 @@ successor shipped, and all were removed together before 1.0, so they are not par
 | `/collections`, `/examples` | `/api/v1/collections`, `/api/v1/examples` |
 
 `GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay: a scoped key may browse the schema of
-a connection it is granted. A route deprecated in 1.x will carry `Deprecation: true` and a
-`Link: <successor>; rel="successor-version"` header, and `/openapi.json` will mark it, until 2.0 removes it.
+a connection it is granted. A deprecated route carries a `Deprecation` header (RFC 9745) and a
+`Link: <successor>; rel="successor-version"` header, and `/openapi.json` marks it, for as long as the changelog's
+deprecation policy says it keeps working.
 
 ## Collections
 

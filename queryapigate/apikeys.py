@@ -94,7 +94,7 @@ import time
 from collections import namedtuple
 from datetime import datetime
 
-from . import config, db, store
+from . import config, db, deprecations, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -750,6 +750,8 @@ def import_legacy_keys_if_empty():
             keys = json.load(f).get('keys', {})
     except (FileNotFoundError, json.JSONDecodeError):
         return
+    if keys:
+        deprecations.warn('legacy_json_import')
     with db.transaction() as conn:
         for name, entry in keys.items():
             if isinstance(entry, dict) and entry.get('hash'):
@@ -765,6 +767,8 @@ def import_legacy_roles_if_empty():
             roles = json.load(f).get('roles', {})
     except (FileNotFoundError, json.JSONDecodeError):
         return
+    if roles:
+        deprecations.warn('legacy_json_import')
     with db.transaction() as conn:
         for name, entry in roles.items():
             if isinstance(entry, dict):

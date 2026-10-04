@@ -24,6 +24,7 @@ from . import (
     cors,
     db,
     definitions,
+    deprecations,
     engine,
     examples,
     experimental,
@@ -55,10 +56,6 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
-# Routes on their way out: each sends a Deprecation header (RFC 9745) and a Link to its successor, and /openapi.json
-# marks it. None today - the legacy management routes were removed once /api/v1 replaced them (BACKLOG #72); this is
-# how a 1.x deprecation is announced before 2.0 removes it.
-DEPRECATED_ENDPOINTS: dict[str, str] = {}  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
 # entry is therefore plain identifier characters - no whitespace, quotes or control characters to forge a log line
@@ -224,9 +221,11 @@ def create_app():
             response.headers['X-RateLimit-Key-Limit'] = str(limit)
             response.headers['X-RateLimit-Key-Remaining'] = str(remaining)
         response.headers['X-Request-Id'] = g.get('request_id', '-')
-        if request.endpoint in DEPRECATED_ENDPOINTS:
-            response.headers['Deprecation'] = 'true'
-            response.headers['Link'] = f'<{DEPRECATED_ENDPOINTS[request.endpoint]}>; rel="successor-version"'
+        rule = request.url_rule.rule if request.url_rule is not None else None
+        if rule in deprecations.ROUTES:  # on its way out (deprecations.py): say so, and name its successor
+            response.headers['Deprecation'] = deprecations.header_value(rule)
+            response.headers['Link'] = f'<{deprecations.ROUTES[rule]["successor"]}>; rel="successor-version"'
+            deprecations.warn(rule)
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
         governance.observe(request.method, endpoint, response.status_code, elapsed, caller_key_name())

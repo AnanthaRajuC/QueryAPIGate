@@ -13,7 +13,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, history
+from . import config, db, deprecations, history
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -150,6 +150,7 @@ def import_legacy_connections_if_empty():
     except (OSError, json.JSONDecodeError):
         return
     if connections:
+        deprecations.warn('legacy_json_import')
         update_connections(connections)
 
 
@@ -732,6 +733,8 @@ def import_legacy_saved_queries_if_empty():
     saved_dir = config.saved_sql_dir()
     if not saved_dir.is_dir():
         return
+    if any(name.endswith('.json') for name in os.listdir(str(saved_dir))):
+        deprecations.warn('legacy_json_import')
     with db.transaction() as conn:
         for filename in sorted(os.listdir(str(saved_dir))):
             path = saved_dir / filename
@@ -788,6 +791,8 @@ def import_legacy_audit_log_if_empty():
             entries = json.load(f).get('entries', [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
+    if entries:
+        deprecations.warn('legacy_json_import')
     with db.transaction() as conn:
         for entry in entries:
             if not isinstance(entry, dict):

@@ -2,7 +2,7 @@
 import re
 from urllib.parse import quote
 
-from . import config, experimental, schema, v1_spec
+from . import config, deprecations, experimental, schema, v1_spec
 from .params import json_schema
 
 _FORMAT_PARAM = {'name': 'format', 'in': 'query', 'schema': {
@@ -253,8 +253,12 @@ def build_spec(version, saved_queries=None, jwt=None):
     spec['components']['schemas'] = dict(v1_spec.SCHEMAS)
     spec['paths'].update(v1_spec.PATHS)
     # The legacy saved-query management routes /api/v1/queries replaces: still working, marked deprecated.
-    for path, method in _DEPRECATED_OPERATIONS:
-        spec['paths'][path][method]['deprecated'] = True
+    for path, entry in deprecations.ROUTES.items():  # on their way out (deprecations.py)
+        for method, operation in list(spec['paths'][path].items()):
+            spec['paths'][path] = {**spec['paths'][path], method: {
+                **operation, 'deprecated': True,
+                'description': (f"**Deprecated** since {entry['since']} - use `{entry['successor']}`; may be removed "
+                                f"in {entry['removal']}. " + operation.get('description', '')).strip()}}
     # Outside the compatibility promise (experimental.py, BACKLOG #64): flagged for tools, and said for people.
     for method, path in experimental.OPERATIONS:
         # Copies: the operations are module-level dicts (v1_spec.PATHS) shared by every build of this document
@@ -269,10 +273,6 @@ def build_spec(version, saved_queries=None, jwt=None):
                          'description': 'One endpoint per saved query, generated from its published version: its '
                                         'declared parameters and their rules, and its default connection.'}]
     return spec
-
-
-# Kept in step with app.DEPRECATED_ENDPOINTS (the routes that send a Deprecation header) - tested.
-_DEPRECATED_OPERATIONS: tuple = ()  # (path, method) pairs - none today
 
 
 DOCS_HTML = """<!doctype html>

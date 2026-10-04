@@ -11,7 +11,6 @@ from unittest import mock
 
 import jsonschema
 
-from queryapigate import app as app_module
 from queryapigate import create_app, history, openapi, store
 from tests.helpers import write_connections
 
@@ -655,25 +654,6 @@ class DeprecationTests(V1TestCase):
         # what stays: the runtime routes, and browsing a schema (a scoped key may, for a connection it is granted)
         self.assertEqual(self.client.get('/connections/lite/schema', headers=ADMIN).status_code, 200)
 
-    def test_a_deprecated_route_says_so_in_its_headers(self):
-        # none today - the mechanism a 1.x deprecation will use
-        with mock.patch.dict(app_module.DEPRECATED_ENDPOINTS, {'api.catalog': '/api/v1/somewhere'}):
-            res = self.client.get('/catalog', headers=ADMIN)
-        self.assertEqual(res.headers['Deprecation'], 'true')
-        self.assertIn('</api/v1/somewhere>; rel="successor-version"', res.headers['Link'])
-        self.assertNotIn('Deprecation', self.client.get('/catalog', headers=ADMIN).headers)
-
-    def test_the_headers_and_the_spec_name_the_same_operations(self):
-        flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
-                   if isinstance(op, dict) and op.get('deprecated')}
-        app = create_app()
-        by_endpoint = {}
-        for rule in app.url_map.iter_rules():
-            for method in rule.methods - {'HEAD', 'OPTIONS'}:
-                path = rule.rule.replace('<', '{').replace('>', '}')
-                by_endpoint.setdefault(rule.endpoint, set()).add((path, method.lower()))
-        from_headers = set().union(set(), *(by_endpoint[e] for e in app_module.DEPRECATED_ENDPOINTS))
-        self.assertEqual(flagged, from_headers)
 
 if __name__ == '__main__':
     unittest.main()

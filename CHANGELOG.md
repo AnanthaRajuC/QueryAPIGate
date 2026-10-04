@@ -30,6 +30,16 @@ release (`0.10.x` -> `0.11.0`) is this project's pre-1.0 equivalent of a major b
 always called out under its own **Breaking** note in that release's entry below, never left to be
 discovered. Once a 1.0 ships, that same rule simply moves to major versions, as SemVer intends.
 
+**Deprecations.** Something covered is deprecated only once its successor has shipped, and is announced everywhere
+you could meet it: a **Deprecated** note in that release's entry below, a callout where its documentation describes
+it, a `Deprecation` header ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745)) and a `Link: <successor>;
+rel="successor-version"` header on every response from a deprecated route, `deprecated: true` on its operation in
+`/openapi.json`, and a warning in the log the first time it is used in a process. It keeps working, unchanged,
+until it is removed: before 1.0, no sooner than the next minor release after the one that deprecated it; from 1.0,
+not before the next major release. Removing it is always listed under **Breaking**. Two exceptions: experimental
+features (above) need no deprecation period, and a security fix that can't be made compatibly may remove something
+sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
+
 ## [Unreleased]
 
 ### Breaking
@@ -37,7 +47,17 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   reaches its own this month, so neither is carried into 1.0. pip on 3.9 or 3.10 keeps installing 0.13.0, the last
   release for them. The Docker image already runs Python 3.12 and is unaffected.
 
+### Deprecated
+- **`POST /execute_sql_from_file` and `POST /execute_sql_with_parameters_from_file`** (BACKLOG #67), in favour of
+  `GET` or `POST /q/{name}`, which runs the same saved query by name. They work as before, now with `Deprecation`
+  and `Link` headers, `deprecated: true` in `/openapi.json` and a log warning on first use; 0.15.0 may remove them.
+- **Importing the pre-SQLite JSON files** (`db_connections.json`, `saved_sql/`, `api_keys.json`, `roles.json`,
+  `audit_log.json`) on first start. A home last run by 0.9 or older should be started once by 0.14 before 0.15.0,
+  which may stop reading them; stores from 0.10 on never wrote them. An import now logs a warning.
+
 ### Added
+- **A deprecation policy** (BACKLOG #67), under *Versioning and compatibility* above: what is deprecated, how
+  you'll find out, and how long it keeps working before it may go.
 - **A database support matrix** (BACKLOG #66) in DATABASE_CONNECTION_CONFIGURATION.md: what each of the eight types
   supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming, MCP and more - and
   which are **tier 1** (PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse: every feature, tested against a real server

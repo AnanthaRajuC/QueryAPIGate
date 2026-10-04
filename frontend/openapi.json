@@ -6582,6 +6582,8 @@
     },
     "/execute_sql_from_file": {
       "post": {
+        "deprecated": true,
+        "description": "**Deprecated** since 0.14.0 - use `/q/{name}`; may be removed in 0.15.0.",
         "parameters": [
           {
             "in": "query",
@@ -6732,6 +6734,8 @@
     },
     "/execute_sql_with_parameters_from_file": {
       "post": {
+        "deprecated": true,
+        "description": "**Deprecated** since 0.14.0 - use `/q/{name}`; may be removed in 0.15.0.",
         "parameters": [
           {
             "in": "query",

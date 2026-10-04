@@ -35,7 +35,7 @@ by accident.
 | ~~#64 Experimental features label~~ (shipped) | A documented way to ship outside the freeze; live events are the first candidate |
 | ~~#65 Upgrade guarantee and upgrade CI~~ (shipped) | Every 0.x store upgrades automatically or refuses with a clear message |
 | ~~#66 Database support matrix~~ (shipped) | Tier 1 vs experimental database types |
-| #67 Deprecation policy | How long a 1.x deprecation lives before 2.0 removes it |
+| ~~#67 Deprecation policy~~ (shipped) | How long a 1.x deprecation lives before 2.0 removes it |
 | ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 
@@ -2087,7 +2087,10 @@ equally at 1.0 means freezing behaviour on the least-tested ones.
 
 ## 67. A deprecation policy
 
-**Status: open.** 1.0 milestone.
+**Status: shipped** (0.14.0): the policy is in CHANGELOG.md's *Versioning and compatibility*; the list is
+`queryapigate/deprecations.py`, which the route headers, `/openapi.json` and the log warning read, and
+`tests/test_deprecations.py` checks the changelog and API.md agree with it. Deprecated: the two `*_from_file`
+routes and the pre-SQLite JSON import. The `SQL2API_*` startup check stays - it is a hint, not a surface.
 
 **Impact:** after 1.0, removing anything covered needs 2.0. A deprecation policy says how a surface gets there,
 so users have time to move and contributors know how to retire things.
