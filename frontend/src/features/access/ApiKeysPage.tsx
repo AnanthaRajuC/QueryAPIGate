@@ -5,6 +5,7 @@ import { AccessCell } from '@/features/repository/reach';
 import { useAccessDrawers, useRevokeKey } from './forms';
 import { ScopeNode } from './grants';
 import { Time } from '@/components/Time';
+import { PencilIcon } from '@/components/icons';
 
 // The classic API keys screen (ui.py #tab-apikeys, renderApiKeys), on /api/v1/api-keys.
 
@@ -140,8 +141,14 @@ export function ApiKeysPage() {
                   )}
                   <td>
                     <div className="actions">
-                      <button type="button" className="btn ghost sm" onClick={() => drawers.editKey(name)}>
-                        Edit
+                      <button
+                        type="button"
+                        className="btn ghost sm icon"
+                        title={`Edit ${name}`}
+                        aria-label="Edit"
+                        onClick={() => drawers.editKey(name)}
+                      >
+                        <PencilIcon />
                       </button>
                       <button type="button" className="btn ghost sm danger" onClick={() => void revoke(name)}>
                         Revoke

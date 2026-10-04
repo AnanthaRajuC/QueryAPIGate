@@ -5,8 +5,8 @@ requests/responses, not a full feature reference (see [documentation/](../docume
 [API.md](../documentation/API.md) for that). Each guide in this folder covers exactly one scenario end to
 end.
 
-This file is the index only - nothing here is written yet. Tell me which number(s) to start with, or ask
-for a different grouping/priority order.
+Guides marked ✅ are written and linked. The others are planned topics, not written yet - until they are, the
+[documentation](../documentation/) covers the features they are about.
 
 ## Getting started
 
