@@ -69,12 +69,13 @@ class ExecuteSqlTests(ApiTestCase):
         rows = self.run_sql('SELECT * FROM actor ORDER BY actor_id', '?page=3&page_size=10').get_json()
         self.assertEqual([r['actor_id'] for r in rows], [21, 22, 23, 24, 25])
 
-    def test_existing_limit_is_replaced_by_pagination(self):
+    def test_the_statements_own_limit_is_kept_and_paged_within(self):
+        # BACKLOG #74: this used to assert the opposite - the page size replaced the query's own LIMIT
         rows = self.run_sql('SELECT actor_id FROM actor ORDER BY actor_id LIMIT 2;', '?page_size=4').get_json()
-        self.assertEqual(len(rows), 4)
+        self.assertEqual([r['actor_id'] for r in rows], [1, 2])
         rows = self.run_sql('select actor_id from actor order by actor_id limit 3 offset 1',
                             '?page_size=4').get_json()
-        self.assertEqual(len(rows), 4)
+        self.assertEqual([r['actor_id'] for r in rows], [2, 3, 4])
 
     def test_trailing_line_comment_does_not_swallow_limit(self):
         rows = self.run_sql('SELECT actor_id FROM actor -- everything', '?page_size=3').get_json()

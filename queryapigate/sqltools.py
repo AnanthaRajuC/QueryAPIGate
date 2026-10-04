@@ -29,7 +29,18 @@ _PARAM_DIALECT_LITERALS = ((None, _ANSI_LITERAL), *((d, _BACKSLASH_LITERAL) for 
 _PARAM_RE = {dialect: re.compile(rf'(?P<skip>{literal}|::)|:(?P<name>[A-Za-z_]\w*)', re.S)
             for dialect, literal in _PARAM_DIALECT_LITERALS}
 _BRACE_RE = re.compile(r'\{(\w+)\}')
-_TRAILING_LIMIT_RE = re.compile(r'\s+LIMIT\s+\d+(?:\s*,\s*\d+|\s+OFFSET\s+\d+)?\s*$', re.I)
+# A statement's own trailing row window, in every form the paginated dialects accept: LIMIT n [OFFSET m],
+# LIMIT ALL, MySQL/SQLite/ClickHouse's LIMIT m, n (offset first), OFFSET m [ROWS] alone, and the SQL-standard
+# [OFFSET m ROWS] FETCH {FIRST|NEXT} [n] {ROW|ROWS} ONLY. Each number may instead be a bound :parameter.
+# Matched against the statement with its literals and comments masked (see _window_mask()), never the raw text.
+_N = r'(\d+|:[A-Za-z_]\w*)'
+_TRAILING_WINDOW_RES = (
+    ('offset_count', re.compile(rf'\s+LIMIT\s+{_N}\s*,\s*{_N}\s*$', re.I)),
+    ('limit_offset', re.compile(rf'\s+LIMIT\s+(?:{_N}|ALL)(?:\s+OFFSET\s+{_N}(?:\s+ROWS?)?)?\s*$', re.I)),
+    ('offset_fetch', re.compile(
+        rf'\s+OFFSET\s+{_N}(?:\s+ROWS?)?(?:\s+FETCH\s+(?:FIRST|NEXT)\s+{_N}?\s*ROWS?\s+ONLY)?\s*$', re.I)),
+    ('fetch', re.compile(rf'\s+FETCH\s+(?:FIRST|NEXT)\s+{_N}?\s*ROWS?\s+ONLY\s*$', re.I)),
+)
 _SAFE_TEXT_RE = re.compile(r'^[\w\s.,:@%+/\-]*$')
 
 READ_ONLY_STATEMENTS = ('select', 'with', 'show', 'describe', 'desc', 'explain', 'values', 'table')
@@ -109,10 +120,61 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     return sql
 
 
-def paginate(sql, limit, offset):
-    """Replace any trailing LIMIT/OFFSET on a SELECT with the requested window."""
-    sql = _TRAILING_LIMIT_RE.sub('', sql)
-    return f'{sql}\nLIMIT {int(limit)} OFFSET {int(offset)}'
+def _window_mask(sql, dialect):
+    """`sql` with the same length, comments turned into spaces and string literals/quoted identifiers into a
+    filler no window pattern matches - so a trailing comment never hides a LIMIT, and a LIMIT-looking piece of
+    a string is never taken for one."""
+    def mask(match):
+        text = match.group(0)
+        return ' ' * len(text) if text.startswith(('--', '/*')) else '\0' * len(text)
+    return _literals_re(dialect).sub(mask, sql)
+
+
+def _window_value(token, params, clause):
+    """A LIMIT/OFFSET operand as an integer: a literal, or a bound :parameter's value."""
+    if not token.startswith(':'):
+        return int(token)
+    name = token[1:]
+    value = (params or {}).get(name)
+    if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit())) \
+            or int(value) < 0:
+        raise ApiError(f'{clause} :{name} must be a non-negative whole number')
+    return int(value)
+
+
+def paginate(sql, limit, offset, params=None, dialect=None):
+    """Apply the requested page window (`limit` rows from `offset`) *within* the statement's own row window.
+
+    A statement that ends in its own LIMIT/OFFSET (any form in _TRAILING_WINDOW_RES) keeps meaning what its author
+    wrote: "LIMIT 3" returns at most 3 rows however large the page, and paging moves through those rows only. The
+    statement's window is replaced by the intersection of the two - offset `own_offset + offset`, at most
+    `own_limit - offset` rows - so a caller's "one more row than the page" probe (has_more) is naturally false
+    once the author's limit is reached. Without a window of its own, the page window is simply appended."""
+    limit, offset = int(limit), int(offset)
+    own_limit, own_offset = None, 0
+    masked = _window_mask(sql, dialect)
+    for kind, pattern in _TRAILING_WINDOW_RES:
+        match = pattern.search(masked)
+        if not match:
+            continue
+        groups = [sql[match.start(i):match.end(i)] if match.start(i) != -1 else None
+                  for i in range(1, pattern.groups + 1)]
+        if kind == 'offset_count':
+            own_offset = _window_value(groups[0], params, 'OFFSET')
+            own_limit = _window_value(groups[1], params, 'LIMIT')
+        elif kind == 'limit_offset':
+            own_limit = _window_value(groups[0], params, 'LIMIT') if groups[0] else None  # LIMIT ALL: no limit
+            own_offset = _window_value(groups[1], params, 'OFFSET') if groups[1] else 0
+        elif kind == 'offset_fetch':
+            own_offset = _window_value(groups[0], params, 'OFFSET')
+            if 'FETCH' in masked[match.start():].upper():
+                own_limit = _window_value(groups[1], params, 'FETCH') if groups[1] else 1
+        else:  # fetch
+            own_limit = _window_value(groups[0], params, 'FETCH') if groups[0] else 1
+        sql = sql[:match.start()]
+        break
+    window = limit if own_limit is None else max(0, min(limit, own_limit - offset))
+    return f'{sql}\nLIMIT {window} OFFSET {own_offset + offset}'
 
 
 # --------------------------------------------------------------------------------------

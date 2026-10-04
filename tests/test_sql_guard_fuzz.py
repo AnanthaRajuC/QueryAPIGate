@@ -43,6 +43,7 @@ sqlite, h2 and no dialect at all) is unchanged and continues to *accept* that pa
 """
 import math
 import os
+import re
 import unittest
 from unittest import mock
 
@@ -345,7 +346,7 @@ class FillPlaceholdersFuzzTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------------------
-# paginate: the appended LIMIT/OFFSET is always well-formed and integer-only
+# paginate: the appended LIMIT/OFFSET is always well-formed and integer-only, and never widens the page
 # --------------------------------------------------------------------------------------
 
 class PaginateFuzzTests(unittest.TestCase):
@@ -353,9 +354,23 @@ class PaginateFuzzTests(unittest.TestCase):
           offset=st.integers(min_value=0, max_value=10 ** 9))
     @settings(max_examples=300)
     def test_the_last_line_is_always_a_well_formed_integer_limit_offset(self, sql, limit, offset):
-        result = sqltools.paginate(sql, limit, offset)
+        try:
+            result = sqltools.paginate(sql, limit, offset)
+        except ApiError:
+            return  # a soup ending in "LIMIT :name" with no value for it - refused, never interpolated
         last_line = result.rsplit('\n', 1)[-1]
-        self.assertEqual(last_line, f'LIMIT {limit} OFFSET {offset}')
+        match = re.fullmatch(r'LIMIT (\d+) OFFSET (\d+)', last_line)
+        self.assertIsNotNone(match, last_line)
+        # The statement's own window can narrow the page and move its start, never widen it or move it back
+        self.assertLessEqual(int(match.group(1)), limit)
+        self.assertGreaterEqual(int(match.group(2)), offset)
+
+    @given(sql=sql_soup, limit=st.integers(min_value=0, max_value=10 ** 6),
+          offset=st.integers(min_value=0, max_value=10 ** 9))
+    @settings(max_examples=300)
+    def test_without_a_window_of_its_own_the_page_is_appended_unchanged(self, sql, limit, offset):
+        sql = sql + ' AS x'  # can no longer end in a LIMIT/OFFSET/FETCH clause
+        self.assertEqual(sqltools.paginate(sql, limit, offset).rsplit('\n', 1)[-1], f'LIMIT {limit} OFFSET {offset}')
 
     @given(sql=sql_soup, limit=st.text(alphabet="abcXYZ; DROP TABLE-'\"", max_size=15))
     @settings(max_examples=100)

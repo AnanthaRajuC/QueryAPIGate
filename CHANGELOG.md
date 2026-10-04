@@ -69,6 +69,17 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow`. They keep working unchanged, and now send a `Deprecation`
   header with a `Link` to their successor; `/openapi.json` marks them deprecated. `/ui` still uses them.
 
+### Fixed
+- **A query's own `LIMIT` is respected** (BACKLOG #74). Paging used to replace a trailing `LIMIT`/`OFFSET` with the
+  page window, so a saved "top 3" query (`... LIMIT 3`) returned a whole page: 10 rows by default, 50 with
+  `?page_size=50`. Paging now happens within the statement's own window: `LIMIT 3` returns 3 rows, and `LIMIT 25`
+  pages 10, 10 and 5, then `X-Has-More: false`. This applies to `/q/<name>`, `/execute_sql`, MCP tools and the Console's Run tab. Also fixed in the same place:
+  - `LIMIT :n` (a bound parameter), a bare `OFFSET m` and `FETCH FIRST n ROWS ONLY` used to produce invalid SQL;
+  - a comment after the `LIMIT` (`... LIMIT 3 -- top three`) used to break the query.
+
+  **Behaviour change:** a client that relied on the page size overriding a saved query's `LIMIT` now gets the
+  query's own limit. Raise or remove the `LIMIT` in the query to get the old result.
+
 ### Changed
 - **The metadata store moves to schema 4** (`saved_queries.published_version`). On first start, every existing
   query is published at its newest version, so nothing a caller sees changes. The legacy save route,

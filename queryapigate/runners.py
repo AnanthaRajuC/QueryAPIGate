@@ -62,7 +62,7 @@ def _prepare(sql, params, style, limit, offset, dialect):
     database already applied the requested window (LIMIT/OFFSET) for us."""
     window = limit + 1
     if is_paginated(sql, dialect):
-        sql, sliced = paginate(sql, window, offset), True
+        sql, sliced = paginate(sql, window, offset, params, dialect), True
     else:
         sliced = False
     sql, args = bind_parameters(sql, params or {}, style, dialect)

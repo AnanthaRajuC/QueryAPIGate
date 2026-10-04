@@ -25,7 +25,7 @@ by accident.
 | #59 Dedicated event log (*storage decision only*) | Decides where event ids come from; the full event log can ship later |
 | #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
 | #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
-| #74 Respect a saved query's own `LIMIT` | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
+| ~~#74 Respect a saved query's own `LIMIT`~~ (shipped) | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
 | #72 Management API v1 (`/api/v1`) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
 
 **Needed for 1.0 to be a credible promise:**
@@ -2283,8 +2283,18 @@ project is becoming:
 
 ## 74. A saved query's own `LIMIT` is silently replaced by the page size
 
-**Status: open - a correctness bug, found 2026-10-03 while testing the Console's editor end to end.** Present since
-at least 0.7.0.
+**Status: shipped (2026-10-04).** Found 2026-10-03 while testing the Console's editor end to end; present since at
+least 0.7.0. `sqltools.paginate()` now finds the statement's own trailing window on a copy with literals and
+comments masked, and applies the page *within* it (`own_offset + offset`, at most `own_limit - offset` rows), so
+`has_more` comes out right with no other change. Every form is handled: `LIMIT n [OFFSET m]`, `LIMIT m, n`, `LIMIT
+ALL`, a bare `OFFSET m`, `[OFFSET m ROWS] FETCH FIRST n ROWS ONLY`, and bound `:parameters` in any of them. Tested
+in `tests/test_query_window.py` and the fuzz test, end to end on SQLite, and checked against real PostgreSQL 16 and
+DuckDB. The test that had pinned the old behaviour was rewritten to assert the fix. Not run against real MySQL,
+ClickHouse or H2. The generated SQL keeps the `LIMIT x OFFSET y` shape their integration tests already run, and the
+one new case, `LIMIT 0` for a page past the query's own limit, is valid syntax on all three. A window test in
+`tests/test_integration.py` would close this.
+
+Original report:
 
 **Impact:** `sqltools.paginate()` "replaces any trailing LIMIT/OFFSET on a SELECT with the requested window". So a
 saved query written as `... ORDER BY revenue DESC LIMIT 3` ("top 3") returns a whole page (10 rows by default, 50

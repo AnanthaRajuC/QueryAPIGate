@@ -43,7 +43,11 @@ These apply to every endpoint that returns rows.
 | `page_size` | `10` | Rows per page, at most `QUERYAPIGATE_MAX_PAGE_SIZE` (default 1000). |
 | `timeout` | server limit | Seconds the query may run before it is cancelled with a 504. It can lower the server limit (`QUERYAPIGATE_QUERY_TIMEOUT`, default 30; `0` disables it) but never raise it. For the POST endpoints it may also be given in the JSON body. |
 
-Any trailing `LIMIT`/`OFFSET` in the SQL is replaced by the requested page. Responses carry
+Paging happens *within* the statement's own row window. A query that ends in `LIMIT 3` returns at most 3 rows
+whatever `page_size` is, and `LIMIT 25` with `page_size=10` gives pages of 10, 10 and 5, then `X-Has-More: false`.
+Every form is understood: `LIMIT n [OFFSET m]`, `LIMIT m, n`, `LIMIT ALL`, `OFFSET m` alone, and
+`[OFFSET m ROWS] FETCH FIRST n ROWS ONLY`. Each number may be a bound `:parameter`, whose value must then be a
+non-negative whole number. A `LIMIT` inside a subquery, a string or a comment is left alone. Responses carry
 `X-Page`, `X-Page-Size` and `X-Has-More` (`true` when another page exists). A query that returns no rows answers
 `{"message": "No results returned"}`.
 
