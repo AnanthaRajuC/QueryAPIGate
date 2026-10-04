@@ -87,6 +87,22 @@ describe('Console shell - the classic frame', () => {
     }
   });
 
+  it('collapses the sidebar on Help, and leaves the saved choice alone', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    expect(document.body).not.toHaveClass('side-collapsed');
+    await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
+    await waitFor(() => expect(document.body).toHaveClass('side-collapsed'));
+    await userEvent.click(screen.getByRole('button', { name: 'Expand sidebar' })); // still yours to open on Help
+    expect(document.body).not.toHaveClass('side-collapsed');
+    await userEvent.click(screen.getByRole('tab', { name: /API keys/ }));
+    await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
+    await waitFor(() => expect(document.body).toHaveClass('side-collapsed')); // collapsed again on the next visit
+    await userEvent.click(screen.getByRole('tab', { name: /API keys/ }));
+    await waitFor(() => expect(document.body).not.toHaveClass('side-collapsed'));
+    expect(localStorage.getItem('queryapigate-ui-side-collapsed')).toBe('0');
+  });
+
   it('shows the breadcrumb for the current screen', () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');

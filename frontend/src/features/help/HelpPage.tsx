@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useHealth } from '@/app/data';
+import { withAnchors, type TocEntry } from '@/lib/toc';
 
 // The classic Help screen (ui.py #tab-help, DOCS, loadDoc, initDocsBrowser): a quick reference, and a browser over
 // this project's own markdown docs, read from GitHub at the tag of the version this server runs (main for a build
@@ -123,12 +124,12 @@ type Doc = (typeof DOCS)[number];
 const rawUrl = (path: string, ref: string) =>
   `https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/${encodeURIComponent(ref)}/${path}`;
 
-async function fetchDoc(doc: Doc, version: string | null): Promise<string> {
+async function fetchDoc(doc: Doc, version: string | null): Promise<{ html: string; toc: TocEntry[] }> {
   const ref = version ? 'v' + version : 'main';
   let response = await fetch(rawUrl(doc.path, ref));
   if (response.status === 404 && ref !== 'main') response = await fetch(rawUrl(doc.path, 'main'));
   if (!response.ok) throw new Error('GitHub returned ' + response.status);
-  return DOMPurify.sanitize(await marked.parse(await response.text()));
+  return withAnchors(DOMPurify.sanitize(await marked.parse(await response.text())));
 }
 
 type View = 'quickref' | 'docs' | 'howto';
@@ -212,6 +213,55 @@ function DocsBrowser({ tab }: { tab: Exclude<View, 'quickref'> }) {
     staleTime: Infinity,
     retry: false,
   });
+
+  // "On this page": jump to a section, and mark the one being read as the page scrolls.
+  const content = useRef<HTMLDivElement>(null);
+  const toc = html.data?.toc ?? [];
+  const [reading, setReading] = useState<{ doc: string; id: string } | null>(null);
+  const current = reading?.doc === doc.id ? reading.id : null; // a new doc starts with nothing marked
+  const setCurrent = (id: string) => setReading({ doc: doc.id, id });
+  const goTo = (id: string) => {
+    const target = content.current?.querySelector<HTMLElement>('#' + CSS.escape(id));
+    if (!target || !content.current) return;
+    content.current.scrollTo?.({ top: target.offsetTop - 16 });
+    setCurrent(id);
+  };
+  const track = () => {
+    const box = content.current;
+    if (!box || !toc.length) return;
+    const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+    let passed = toc[0]!.id;
+    for (const entry of toc) {
+      const heading = box.querySelector<HTMLElement>('#' + CSS.escape(entry.id));
+      if (heading && heading.offsetTop - 24 <= box.scrollTop) passed = entry.id;
+    }
+    setCurrent(atEnd ? toc[toc.length - 1]!.id : passed);
+  };
+  // The doc's own links to #a-section scroll within it, rather than changing the Console's address.
+  const followAnchor = (e: React.MouseEvent) => {
+    const link = (e.target as HTMLElement).closest('a');
+    const href = link?.getAttribute('href') ?? '';
+    if (!href.startsWith('#') || href.length < 2) return;
+    e.preventDefault();
+    goTo(decodeURIComponent(href.slice(1)));
+  };
+  useEffect(() => {
+    content.current?.scrollTo?.({ top: 0 });
+  }, [doc.id]);
+  // A long contents list scrolls too: keep the section being read in view in it.
+  const tocBox = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const box = tocBox.current;
+    const link = box?.querySelector<HTMLElement>('a.active');
+    if (!box || !link) return;
+    if (
+      link.offsetTop < box.scrollTop ||
+      link.offsetTop + link.offsetHeight > box.scrollTop + box.clientHeight
+    ) {
+      box.scrollTop = link.offsetTop - box.clientHeight / 3;
+    }
+  }, [current]);
+
   return (
     <div className="docs-browser" id="help-docs">
       <nav className="docs-nav" id="docs-nav">
@@ -227,7 +277,7 @@ function DocsBrowser({ tab }: { tab: Exclude<View, 'quickref'> }) {
           </button>
         ))}
       </nav>
-      <div className="docs-content" id="docs-content">
+      <div className="docs-content" id="docs-content" ref={content} onScroll={track} onClick={followAnchor}>
         {html.isError ? (
           <div className="docs-error">
             {`Could not load this doc from GitHub (${html.error.message}). It needs a network connection to raw.githubusercontent.com - or read it directly at `}
@@ -240,9 +290,28 @@ function DocsBrowser({ tab }: { tab: Exclude<View, 'quickref'> }) {
           <div className="empty">Loading…</div>
         ) : (
           // sanitized by DOMPurify in fetchDoc()
-          <div dangerouslySetInnerHTML={{ __html: html.data }} />
+          <div dangerouslySetInnerHTML={{ __html: html.data.html }} />
         )}
       </div>
+      {toc.length > 1 && (
+        <nav className="docs-toc" id="docs-toc" aria-label="On this page" ref={tocBox}>
+          <div className="nav-label">On this page</div>
+          {toc.map((entry) => (
+            <a
+              key={entry.id}
+              href={'#' + entry.id}
+              className={(entry.level === 3 ? 'sub' : '') + (entry.id === current ? ' active' : '')}
+              aria-current={entry.id === current ? 'location' : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                goTo(entry.id);
+              }}
+            >
+              {entry.text}
+            </a>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -59,6 +59,28 @@ describe('Help', () => {
     expect(nav()).not.toContain('API Reference');
     await userEvent.click(screen.getByRole('button', { name: 'Docs' }));
     expect(await screen.findByRole('heading', { name: 'QueryAPIGate' })).toBeInTheDocument();
+  });
+
+  it('lists the sections of the open doc under On this page, and goes to one', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /AnanthaRajuC/QueryAPIGate/v9.9.9/README.md': () =>
+        new Response('# QueryAPIGate\n\n## Install\n\nSee [usage](#usage).\n\n## Usage\n\n### Flags\n', {
+          status: 200,
+        }),
+    });
+    renderAt('/help');
+    await userEvent.click(await screen.findByRole('button', { name: 'Overview' }));
+    const toc = await screen.findByRole('navigation', { name: 'On this page' });
+    expect([...toc.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['Install', '#install'],
+      ['Usage', '#usage'],
+      ['Flags', '#flags'],
+    ]);
+    await userEvent.click(within(toc).getByRole('link', { name: 'Usage' }));
+    expect(within(toc).getByRole('link', { name: 'Usage' })).toHaveAttribute('aria-current', 'location');
+    await userEvent.click(screen.getByRole('link', { name: 'usage' })); // the doc's own #link
+    expect(within(toc).getByRole('link', { name: 'Usage' })).toHaveClass('active');
   });
 
   it('has the quick reference', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { onRateLimit, type RateLimit } from '@/api/client';
@@ -23,26 +23,39 @@ function readCollapsed() {
 export function Header() {
   const { pathname } = useLocation();
   const active = activeItem(pathname);
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [saved, setSaved] = useState(readCollapsed); // the sidebar as the viewer left it, remembered per browser
+  // Help collapses the sidebar to give the docs room, each time it's opened, without changing the saved choice:
+  // toggling there lasts until you leave, and other screens keep the sidebar as it was.
+  const onHelp = pathname.startsWith('/help');
+  const [helpCollapsed, setHelpCollapsed] = useState(true);
+  const [wasOnHelp, setWasOnHelp] = useState(onHelp);
+  if (onHelp !== wasOnHelp) {
+    setWasOnHelp(onHelp);
+    if (onHelp) setHelpCollapsed(true);
+  }
+  const collapsed = onHelp ? helpCollapsed : saved;
+  const toggle = useCallback(() => (onHelp ? setHelpCollapsed((c) => !c) : setSaved((c) => !c)), [onHelp]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [rate, setRate] = useState<RateLimit | null>(null);
 
   useEffect(() => onRateLimit(setRate), []);
   useEffect(() => {
     document.body.classList.toggle('side-collapsed', collapsed);
+  }, [collapsed]);
+  useEffect(() => {
     try {
-      localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+      localStorage.setItem(COLLAPSE_KEY, saved ? '1' : '0');
     } catch {
       // remembered for this page only
     }
-  }, [collapsed]);
+  }, [saved]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (k === 'b') {
         e.preventDefault();
-        setCollapsed((c) => !c);
+        toggle();
       } else if (k === 'k') {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -50,7 +63,7 @@ export function Header() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [toggle]);
 
   const low = rate ? rate.remaining <= Math.max(1, rate.limit * 0.1) : false;
   return (
@@ -62,7 +75,7 @@ export function Header() {
           title={collapsed ? 'Expand sidebar (Ctrl B)' : 'Collapse sidebar (Ctrl B)'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-expanded={!collapsed}
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={toggle}
         >
           <span>
             <i />

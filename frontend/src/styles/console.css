@@ -189,3 +189,50 @@ body.reduce-motion {
     transition: none !important;
   }
 }
+
+/* Help's "On this page": a third column of the docs box, its own scroll, hidden where the box is too narrow. */
+.docs-content {
+  position: relative; /* headings' offsetTop is measured from here */
+}
+.docs-toc {
+  position: relative; /* its links' offsetTop is measured from here */
+  width: 210px;
+  flex: none;
+  border-left: 1px solid var(--line);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.docs-toc .nav-label {
+  padding: 0 8px 6px;
+}
+.docs-toc a {
+  display: block;
+  padding: 4px 8px;
+  border-left: 2px solid transparent;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.docs-toc a.sub {
+  padding-left: 20px;
+  color: var(--ink-3);
+}
+.docs-toc a:hover {
+  color: var(--ink);
+}
+.docs-toc a.active {
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+@media (max-width: 1100px) {
+  .docs-toc {
+    display: none;
+  }
+}
+.docs-browser {
+  height: calc(100vh / var(--zoom, 1) - 210px); /* the font size zoom (see aside.side above) */
+}

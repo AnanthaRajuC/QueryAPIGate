@@ -150,6 +150,9 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   NULL shown as `NULL` or blank, thousands separators in result grids, and line wrapping and line numbers in the SQL
   editor. **Settings › Appearance › Reduce motion** turns off sliding drawers and pulsing indicators, and is on
   whenever the operating system asks for less motion.
+- **Help in the Console:** How-to guides have a tab of their own, next to Docs; both show an "On this page" list of the
+  open page's sections, marking the one being read, and a doc's own links to its sections now work. Opening Help
+  collapses the sidebar for room (your saved sidebar choice is kept for every other screen).
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and
