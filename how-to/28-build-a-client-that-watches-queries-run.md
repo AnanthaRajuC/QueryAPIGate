@@ -4,9 +4,12 @@
 receives a live event the moment any saved query runs, with real reconnect-on-drop handling. Both examples
 below are verified against a real running server, including a real mid-stream server drop and reconnect.
 
+> **Experimental** - live events (`GET /events`) may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+
 This is about building your *own* consumer of `GET /events` - if you just want to know what the endpoint
 does and how per-key filtering works, see
-[Give each user of your own app their own private activity feed](29-per-key-live-feeds.md) instead; this
+[`GET /events` on the main server](../documentation/API.md#get-events-on-the-main-server) instead; this
 guide is the "how do I actually parse the stream" one both of those build on.
 
 ## The wire format, exactly
@@ -131,14 +134,14 @@ async function watchEvents(apiKey, onEvent) {
 
 The admin UI's own reconnect strategy, worth knowing since it's a real, deliberate design choice and not
 the only valid one: it does **not** retry the SSE connection itself on a drop - it falls back to 5-second
-polling instead, and only re-opens the stream the next time the relevant tab becomes visible again. That's
+polling instead, and only re-opens the stream the next time Home is opened. That's
 the right call for a UI panel where "briefly polling instead of streaming" is invisible to the person
 looking at it; the exponential-backoff reconnect in the Python example above is usually the better choice
 for a standalone client with no human watching a screen to paper over the gap.
 
 ## Next steps
 
-- [Give each user of your own app their own private activity feed](29-per-key-live-feeds.md) - scoping
-  what this client actually sees to one API key's own activity.
+- [`GET /events` on the main server](../documentation/API.md#get-events-on-the-main-server) - per-key
+  filtering: what a scoped key sees is its own activity only.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - use a real scoped key here, not the
   admin one, once you're past just experimenting.

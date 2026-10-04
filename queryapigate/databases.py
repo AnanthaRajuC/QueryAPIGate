@@ -47,14 +47,15 @@ def matrix():
         ('`allowed_tables` (refused where not supported)', {t: YES if t in tableguard._DIALECT_MAP else NO
                                                             for t in TYPES}),
         ('Schema browser, MCP `list_tables`', {t: YES if t in schema._QUERIES or t == 'mongo' else NO for t in TYPES}),
-        ('Primary and foreign keys in the schema', {t: YES if t in schema._KEY_QUERIES else (NO if _sql(t) else NA)
+        ('Primary and foreign keys in the schema', {t: YES if t in schema._KEY_QUERIES or t == 'sqlite' else
+                                                    (NO if _sql(t) else NA)  # SQLite's come with its schema query
                                                     for t in TYPES}),
         ('Listing and switching databases', {t: YES if t in engine.LIST_DATABASES_QUERIES or t == 'mongo' else
                                              (NA if t in ('sqlite', 'duckdb') else NO)  # one file: nothing to switch to
                                              for t in TYPES}),
         ('Table DDL', {t: YES if t in schema._DDL_DIALECTS else (NO if _sql(t) else NA) for t in TYPES}),
         ('Streaming exports', {t: YES if t in STREAM_RUNNERS else NO for t in TYPES}),
-        ('Response caching (`cache_ttl`)', {t: YES for t in TYPES}),
+        ('Response caching (`cache_ttl`)', {t: YES if _sql(t) else NO for t in TYPES}),  # app.run_saved_mongo
         ('MCP `execute_sql`', {t: YES if _sql(t) else NO for t in TYPES}),
         ('Tables-and-joins diagram', {t: YES if t in sqlflow._DIALECT_MAP else (NO if _sql(t) else NA)
                                       for t in TYPES}),

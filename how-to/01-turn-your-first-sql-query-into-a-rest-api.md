@@ -11,7 +11,7 @@ and repeat exactly the same steps against it.
 ## What you'll need
 
 - QueryAPIGate installed: `pip install "queryapigate[server]"` (or use the Docker image - see
-  [README.md](../README.md#installation)).
+  [README.md](../README.md#install)).
 - A terminal, and a browser.
 
 ## Step 1: Start a server with real data to query

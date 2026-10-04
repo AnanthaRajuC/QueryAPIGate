@@ -46,6 +46,11 @@ Verified against a real SQLite schema with a real foreign key - the response abo
 not a hand-written example. This is the exact same data the admin UI's Schema tab renders; there's no
 separate documentation or cache to keep in sync with the real database.
 
+Primary and foreign keys are filled in on PostgreSQL, MySQL, SQLite and DuckDB; on the other types
+`primary_key` is always `false` and `foreign_key` always `null` - see the
+[support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix) for what each type's schema
+browser covers.
+
 `truncated: true` means there was more than `ROW_CAP` (5000) rows of catalogue data to show - large enough
 that no real schema should ever actually hit it, there purely to bound one request's memory use.
 
@@ -60,7 +65,7 @@ curl 'http://127.0.0.1:5000/connections/shop/table_ddl?table=orders' -H 'X-API-K
 ```
 
 ```json
-{"ddl": "CREATE TABLE orders (\n  id INTEGER PRIMARY KEY,\n  customer_id INTEGER NOT NULL,\n  total REAL,\n  FOREIGN KEY (customer_id) REFERENCES customers(id)\n)"}
+{"ddl": "CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL, total REAL, FOREIGN KEY (customer_id) REFERENCES customers(id))"}
 ```
 
 Verified real, exact DDL from SQLite's own catalogue. **Only MySQL, SQLite and ClickHouse support this** -

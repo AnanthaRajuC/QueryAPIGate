@@ -57,11 +57,11 @@ work, with the gaps below, and may change in a minor release.
 | Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes |
 | `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | no |
 | Schema browser, MCP `list_tables` | yes | yes | yes | yes | yes | yes | no | yes |
-| Primary and foreign keys in the schema | yes | yes | no | yes | no | no | no | n/a |
+| Primary and foreign keys in the schema | yes | yes | yes | yes | no | no | no | n/a |
 | Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
 | Table DDL | no | yes | yes | no | yes | no | no | n/a |
 | Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
-| Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | yes |
+| Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
 | MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
 | Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
 | Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | no |

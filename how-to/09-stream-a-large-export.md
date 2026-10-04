@@ -87,7 +87,8 @@ not) open and close its own connection instead, if that trade-off suits your dep
 
 ## Next steps
 
-- [Get the exact CLI command for a specific saved query](31-get-the-cli-command-for-a-query.md) -
-  `queryapigate export` runs the same streaming path, no server or API key needed, good for a cron job.
+- [Scheduled exports to a file](../documentation/INSTALLATION_AND_SETUP.md#scheduled-exports-to-a-file) -
+  `queryapigate export` runs the same streaming path, no server or API key needed, good for a cron job. The
+  API Repository's **CLI** tab gives the exact command for a query.
 - [Connect a database](02-connect-a-database.md) - pick MySQL, PostgreSQL or ClickHouse if real
   constant-memory streaming at scale is a requirement, not just a nice-to-have.

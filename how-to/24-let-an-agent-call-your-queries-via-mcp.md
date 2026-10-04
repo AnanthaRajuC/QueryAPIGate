@@ -7,7 +7,7 @@ simulation.
 ## Step 1: Start the MCP server
 
 ```bash
-pip install "queryapigate[mcp]"   # needs Python >= 3.10 - higher than queryapigate's own >= 3.9 floor
+pip install "queryapigate[mcp]"
 queryapigate mcp
 ```
 
@@ -78,8 +78,8 @@ name here would likely be stale by the time you read it.
 `GET /catalog` already enforces for REST, so an agent's key never sees or calls more than the identical
 REST key could - plus two fixed, ad-hoc tools (`list_tables`, `execute_sql`) when the key has any
 connection-level access at all. See
-[Let an agent explore your schema and run ad-hoc SQL](25-mcp-ad-hoc-tools.md) for those two specifically,
-and [Read structured MCP results properly](26-mcp-structured-results.md) for what `structuredContent`
+[Let an agent explore your schema and run ad-hoc SQL](../documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql) for those two specifically,
+and [Read structured MCP results properly](../documentation/MCP.md#structured-results-outputschema) for what `structuredContent`
 actually contains and why it's shaped the way it is.
 
 A write-capable saved query is **not** reachable over MCP in this version - it stays available over REST
@@ -103,7 +103,7 @@ without needing an MCP client at all.
 
 ## Next steps
 
-- [Let an agent explore your schema and run ad-hoc SQL](25-mcp-ad-hoc-tools.md) - `list_tables`/`execute_sql`,
+- [Let an agent explore your schema and run ad-hoc SQL](../documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql) - `list_tables`/`execute_sql`,
   always read-only.
-- [Read structured MCP results properly](26-mcp-structured-results.md) - `outputSchema`/`structuredContent`.
+- [Read structured MCP results properly](../documentation/MCP.md#structured-results-outputschema) - `outputSchema`/`structuredContent`.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - don't hand an agent the admin key.

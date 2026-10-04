@@ -18,7 +18,7 @@ curl http://127.0.0.1:5000/api/v1/collections/catalog/postman -H 'X-API-Key: dem
 
 Admin only - verified: a scoped key gets the same "not authorized to manage the server configuration" error
 every other admin-only endpoint gives. An empty or nonexistent collection name is a clean 404
-(`"Collection 'does-not-exist' not found or empty"`).
+(`"Collection 'does-not-exist' not found"`).
 
 ## What's actually in the file, verified against a real export
 

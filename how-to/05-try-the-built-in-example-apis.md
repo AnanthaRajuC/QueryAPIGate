@@ -109,7 +109,7 @@ Open **<http://127.0.0.1:5000/console>**. Two things worth noticing right away:
 
 From there, the same tabs work as they would for a query you wrote yourself: **SQL** (the query text),
 **History** (every run, seeded or real), **Curl**/**CLI** (copy-pasteable commands), **API Keys**/**Roles**
-(which of the five keys can reach this specific query), **Cache** (for the dashboard scenario's
+(which of the five keys can reach this specific query), **Access**, **Cache** (for the dashboard scenario's
 `cache_ttl=30` queries), **Metrics**. Visit **Access map** (under **Access** in the sidebar) to see all
 five keys and every query they reach laid out at once - the fastest way to build intuition for how
 `connections`/`queries`/`collections` grants actually compose, before designing your own.
@@ -132,5 +132,5 @@ a connection or collection name. Real data you connected in the meantime is unto
 - [Turn your first SQL query into a REST API](01-turn-your-first-sql-query-into-a-rest-api.md) - the same
   walkthrough, but starting from a blank query instead of an example.
 - [Connect your own database](02-connect-a-database.md) once you're ready to move past the generated one.
-- [Verify who can reach what](21-verify-access-with-the-access-map.md) - the Access map, explored here
-  against a known-good example setup first.
+- The **Access map** (under **Access**) and [`GET /catalog`](../documentation/API.md#the-api-catalogue) -
+  who can reach what, explored here against a known-good example setup first.

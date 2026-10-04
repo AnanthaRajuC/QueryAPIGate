@@ -13,11 +13,11 @@ Guides marked ✅ are written and linked. The others are planned topics, not wri
 1. ✅ **Turn your first SQL query into a REST API** - connect a database, run a query in API Designer, save
    it as an endpoint, call it with `curl`. The 10-minute on-ramp. See
    [01-turn-your-first-sql-query-into-a-rest-api.md](01-turn-your-first-sql-query-into-a-rest-api.md).
-2. ✅ **Connect to MySQL, PostgreSQL, ClickHouse, SQLite or H2** - `db_connections.json`/the Connections tab,
+2. ✅ **Connect to MySQL, PostgreSQL, ClickHouse, SQLite, DuckDB or H2** - the Connections screen or the API,
    one worked example per dialect. See [02-connect-a-database.md](02-connect-a-database.md).
-3. **Connect to anything else via generic JDBC** - Oracle, SQL Server, Snowflake, DB2, or any JDBC-
+3. **Connect to anything else via generic JDBC** (experimental) - Oracle, SQL Server, Snowflake, DB2, or any JDBC-
    compliant database QueryAPIGate has no native driver for.
-4. ✅ **Connect to MongoDB** - `find()`-only saved queries, filters, projections, sort. See
+4. ✅ **Connect to MongoDB** (experimental) - `find()`-only saved queries, filters, projections, sort. See
    [04-connect-to-mongodb.md](04-connect-to-mongodb.md).
 5. ✅ **Try it without any setup, using the built-in example APIs** - `queryapigate examples load`, what it
    installs, and how to explore it in the admin UI. See
@@ -83,7 +83,7 @@ Guides marked ✅ are written and linked. The others are planned topics, not wri
 
 ## Live updates (SSE)
 
-28. ✅ **Build a client that watches your saved queries run in real time** (`GET /events`) - `fetch()` over
+28. ✅ **Build a client that watches your saved queries run in real time** (`GET /events`, experimental) - `fetch()` over
     `EventSource`, reading `data:`/keepalive frames, reconnect-on-drop. See
     [28-build-a-client-that-watches-queries-run.md](28-build-a-client-that-watches-queries-run.md).
 29. **Give each user of your own app (e.g. a mobile app) their own private activity feed** - per-key SSE
@@ -100,10 +100,10 @@ Guides marked ✅ are written and linked. The others are planned topics, not wri
 
 32. **Deploy with Docker for real** - the production `docker-compose.yml` shape, secrets in an env file,
     persistent volume, health checks (distinct from the one-command demo compose file).
-33. **Back up and restore `queryapigate.db`** - the WAL-mode gotcha, the Python-`sqlite3`-module approach
-    (no CLI tool needed in the image), restoring onto a fresh instance.
+33. **Back up and restore the store** - `queryapigate backup` while the server runs, the PostgreSQL store's
+    `pg_dump`, restoring onto a fresh instance, and what a backup doesn't contain.
 34. **Upgrade to a new version safely** - reading the versioning policy, what "breaking" means pre-1.0,
-    pinning `X.Y.Z` instead of `latest`.
+    acting on deprecation warnings, pinning `X.Y.Z` instead of `latest`.
 35. **Wire up Prometheus and Grafana** - scrape config, importing the bundled dashboard, what each panel
     means.
 36. **Read structured logs and trace one request end to end** (`X-Request-Id`, `QUERYAPIGATE_JSON_LOGS`) -
@@ -122,6 +122,6 @@ Guides marked ✅ are written and linked. The others are planned topics, not wri
 
 ---
 
-Numbering is just for reference when you pick one - not a priority order. Some of these are naturally
-short (a few steps); others (MCP, production deployment) will be longer. Say a number (or a few) and I'll
-write that guide as its own file in this folder.
+Numbering is just for reference - not a priority order. Want to write one of the planned guides? See
+[CONTRIBUTING.md](../CONTRIBUTING.md): one scenario per file, named `NN-what-it-does.md`, with every command
+and response run against a real server.

@@ -74,24 +74,26 @@ Every rule, exactly as enforced:
 ## Calling it, and what a validation failure actually looks like
 
 ```bash
-curl 'http://127.0.0.1:5000/q/products_search'
+curl 'http://127.0.0.1:5000/q/products_search' -H 'X-API-Key: demo-key'
 # defaults apply: category=electronics, min_price=0, max_price=1000, name=NULL
 ```
 
 ```bash
-curl 'http://127.0.0.1:5000/q/products_search?category=tools&min_price=5'
+curl 'http://127.0.0.1:5000/q/products_search?category=tools&min_price=5' -H 'X-API-Key: demo-key'
 # [{"id": 1, "name": "Widget", "category": "tools", "price": 9.99}]
 ```
 
 Every problem is reported **at once**, in one 400 response, before the query ever touches the database:
 
 ```bash
-curl 'http://127.0.0.1:5000/q/products_search?category=furniture&min_price=bogus'
+curl 'http://127.0.0.1:5000/q/products_search?category=furniture&min_price=bogus' -H 'X-API-Key: demo-key'
 ```
 ```json
 {
   "error": "Invalid parameters: category must be one of: tools, electronics, kitchen; min_price must be a number",
-  "errors": {"category": "must be one of: tools, electronics, kitchen", "min_price": "must be a number"}
+  "code": "param_invalid",
+  "errors": {"category": "must be one of: tools, electronics, kitchen", "min_price": "must be a number"},
+  "request_id": "945fb02c9970"
 }
 ```
 
@@ -104,9 +106,9 @@ Still works - it's just required, with no validation beyond "a value was supplie
 through:
 
 ```bash
-curl 'http://127.0.0.1:5000/q/by_category_undeclared'
+curl 'http://127.0.0.1:5000/q/by_category_undeclared' -H 'X-API-Key: demo-key'
 # {"error": "No value provided for parameter(s): category"}
-curl 'http://127.0.0.1:5000/q/by_category_undeclared?category=tools'
+curl 'http://127.0.0.1:5000/q/by_category_undeclared?category=tools' -H 'X-API-Key: demo-key'
 # [{"id": 1, "name": "Widget", "category": "tools", "price": 9.99}]
 ```
 

@@ -3,6 +3,10 @@
 **Time:** 10 minutes. **You'll end up with:** a `find()`-based saved query - with bound parameters,
 projection and sort - callable as a versioned, validated REST endpoint, exactly like a SQL one.
 
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)). MongoDB isn't yet tested against a real server in CI; see the
+> [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
+
 MongoDB support in QueryAPIGate is **`find()`-only, read-only, full stop** - no aggregation pipelines, no
 writes, no streaming, no response caching (yet). Everything below is what's actually built; nothing here
 is a partial feature with hidden gaps.

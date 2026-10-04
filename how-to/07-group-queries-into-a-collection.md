@@ -108,5 +108,5 @@ Both are valid, additive grants - the difference is what you're modeling:
 
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - the full grant-field reference
   (`connections`, `queries`, `collections`, and the rest) this guide only used one corner of.
-- [Verify who can reach what](21-verify-access-with-the-access-map.md) - the Access map shows every key's
-  reach, collection grants included, at a glance.
+- The **Access map** (under **Access** in the sidebar) shows every key's reach, collection grants included, at
+  a glance; [`GET /catalog`](../documentation/API.md#the-api-catalogue) answers the same for the calling key.
