@@ -92,6 +92,11 @@ class StartupWarningTests(unittest.TestCase):
         [line] = self.warnings()
         self.assertIn('H2, JDBC and MongoDB connections are experimental (connection docs)', line)
 
+    def test_an_inactive_connection_isnt_in_use(self):
+        # `queryapigate init` seeds an inactive H2 template; a fresh server shouldn't warn about it.
+        write_connections({'example-h2': {'db': 'h2', 'host': 'h', 'database': 'd', 'active': False}})
+        self.assertEqual(self.warnings(), [])
+
     def test_the_events_server_always_says_so(self):
         log = logging.getLogger('queryapigate')
         with self.assertLogs(log, level=logging.WARNING) as logs:

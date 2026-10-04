@@ -341,11 +341,12 @@ def _validate_allowed_ips(allowed_ips):
 
 def _ip_allowed(entry, client_ip):
     """Whether client_ip satisfies entry's allowed_ips restriction - True when the key carries no
-    restriction at all (the common case), or when client_ip falls inside one of its listed addresses/CIDR
-    ranges. A missing or unparseable client_ip fails a *restricted* key closed rather than open: an address
+    restriction at all (None, the common case), or when client_ip falls inside one of its listed addresses/CIDR
+    ranges. An empty list allows no address, like an empty allowed_tables or allowed_write_ops - never "no
+    restriction". A missing or unparseable client_ip fails a *restricted* key closed rather than open: an address
     QueryAPIGate could not resolve should not be treated as trusted just because it's unusual."""
     allowed = entry.get('allowed_ips')
-    if not allowed:
+    if allowed is None:
         return True
     if not client_ip:
         return False

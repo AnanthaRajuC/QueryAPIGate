@@ -38,7 +38,8 @@ class CorsTests(AppTestCase):
         res = self.client().get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], ORIGIN)
         self.assertIn('Origin', res.headers['Vary'])
-        for name in ('X-Page', 'X-Has-More', 'X-RateLimit-Remaining'):  # a page's JS cannot read them otherwise
+        for name in ('X-Page', 'X-Has-More', 'X-RateLimit-Remaining', 'X-RateLimit-Key-Remaining', 'X-Cache',
+                     'Deprecation', 'Link'):  # a page's JS cannot read them otherwise
             self.assertIn(name, res.headers['Access-Control-Expose-Headers'])
         self.assertNotIn('Access-Control-Allow-Credentials', res.headers)
 
@@ -116,6 +117,16 @@ class CorsTests(AppTestCase):
         with mock.patch('queryapigate.app.log.warning') as warning:  # not assertNoLogs: other threads may log
             create_app()
         self.assertEqual([c for c in warning.call_args_list if 'QUERYAPIGATE_CORS_ORIGINS=*' in str(c)], [])
+
+    def test_a_server_without_any_key_says_so_at_startup(self):
+        # Under gunicorn (the Docker image) nothing else would: `queryapigate serve`'s own warning needs a public host.
+        with mock.patch('queryapigate.app.log.warning') as warning:
+            create_app()
+        self.assertTrue([c for c in warning.call_args_list if 'No API key is configured' in str(c)])
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
+        with mock.patch('queryapigate.app.log.warning') as warning:
+            create_app()
+        self.assertEqual([c for c in warning.call_args_list if 'No API key is configured' in str(c)], [])
 
     def test_helpers(self):
         self.assertIsNone(cors.allow_origin_value(ORIGIN))  # off

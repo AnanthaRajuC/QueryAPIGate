@@ -54,9 +54,8 @@ isError: False
 structuredContent: {'rows': [{'title': 'Electric Signal', 'category': 'Comedy', ...}], 'truncated': False}
 ```
 
-**The header matters, not the URL.** MCP's `EventSource`-based transport can't set custom headers the way
-a normal HTTP client can, so the key travels as `X-API-Key` in the same way every REST request already
-does - never as a URL query parameter, which would leak it into access logs. Every real MCP client library
+**The header matters, not the URL.** The key travels as an `X-API-Key` request header, the same way every REST
+request already does - never as a URL query parameter, which would leak it into access logs. Every real MCP client library
 (this one included) supports setting request headers on the connection; that's the thing to configure,
 whatever client you're using.
 
@@ -78,8 +77,8 @@ name here would likely be stale by the time you read it.
 `GET /catalog` already enforces for REST, so an agent's key never sees or calls more than the identical
 REST key could - plus two fixed, ad-hoc tools (`list_tables`, `execute_sql`) when the key has any
 connection-level access at all. See
-[Let an agent explore your schema and run ad-hoc SQL](../documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql) for those two specifically,
-and [Read structured MCP results properly](../documentation/MCP.md#structured-results-outputschema) for what `structuredContent`
+[Let an agent explore your schema and run ad-hoc SQL](25-mcp-ad-hoc-tools.md) for those two specifically,
+and [Read structured MCP results properly](26-mcp-structured-results.md) for what `structuredContent`
 actually contains and why it's shaped the way it is.
 
 A write-capable saved query is **not** reachable over MCP in this version - it stays available over REST
@@ -103,7 +102,8 @@ without needing an MCP client at all.
 
 ## Next steps
 
-- [Let an agent explore your schema and run ad-hoc SQL](../documentation/MCP.md#ad-hoc-tools-list_tables-and-execute_sql) - `list_tables`/`execute_sql`,
+- [Let an agent explore your schema and run ad-hoc SQL](25-mcp-ad-hoc-tools.md) - `list_tables`/`execute_sql`,
   always read-only.
-- [Read structured MCP results properly](../documentation/MCP.md#structured-results-outputschema) - `outputSchema`/`structuredContent`.
+- [Read structured MCP results properly](26-mcp-structured-results.md) - `outputSchema`/`structuredContent`.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - don't hand an agent the admin key.
+- [Check the MCP server from the Console](27-check-the-mcp-server-from-the-console.md).

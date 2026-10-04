@@ -28,11 +28,10 @@ called `examples`.
 | `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, keys, connection and database file. |
 | `queryapigate examples status` | Say whether they are loaded (`Loaded`, `Partly loaded`, or `Not loaded`). |
 | `QUERYAPIGATE_LOAD_EXAMPLES=yes` | Load them at server start - for a container (`docker run -e QUERYAPIGATE_LOAD_EXAMPLES=yes -v qag:/data ...`). Idempotent across restarts. Unset, or `no`, leaves things as they are: it never removes anything - use `unload`. |
-| Admin UI | Saved Queries shows **Load example APIs** when the home is empty, and once loaded an "Example APIs are loaded" bar with **Remove examples**. |
+| Admin UI | Once loaded, API Repository shows an "Example APIs are loaded" bar with **Remove examples** (and **Finish loading** after an interrupted load). Loading itself is the command above, the variable below or the API. |
 | `POST` / `DELETE` / `GET /api/v1/examples` | The same, over [HTTP](API.md#example-apis) (admin only). |
 
-Everything installed is **marked `example`** (a top-level `"example": true` on each query file, and on the role, key
-and connection entries), and removal deletes exactly what is marked:
+Everything installed is **marked `example`** (`"example": true` on each query, role, key and connection), and removal deletes exactly what is marked:
 
 - A query, role, key, connection or file of yours that merely shares a name is **never overwritten and never
   removed** - loading stops with a clear message and changes nothing until you rename it.
@@ -158,14 +157,14 @@ Granting a second collection to any role - yours or this one - works the same wa
 - **Admin UI** (`/console`): the API Repository groups these by collection; **Move…** shows which keys would gain or lose
   access before anything changes; the Audit Log records every change.
 - **Docs and OpenAPI**: `/docs` lists exactly the queries the key you paste in can run - try it with the partner key.
-- **Schema browser** (Run SQL → Schema → Columns): PK/FK badges throughout - `rental.film_id`/`customer_id`,
+- **Schema browser** (API Designer → Schema → Columns): PK/FK badges throughout - `rental.film_id`/`customer_id`,
   `payment.rental_id`/`staff_id`, `staff.store_id` and `address.customer_id` are all real foreign keys, not just
   similarly-named columns. `category` has a primary key and no foreign key into it from anywhere - a deliberate
   contrast, a plain lookup table rather than something joined into the example queries.
-- **Query flow diagram** (Saved Queries → `example_all_rentals` → Access tab): a real node-link diagram of all
+- **Query flow diagram** (API Repository → `example_all_rentals` → Access tab): a real node-link diagram of all
   six tables and five joins that query's SQL actually touches (`rental` → `film`/`customer`/`payment` →
   `staff` → `store`), built from real SQL parsing, not a text-search guess.
-- **Table-scoped autocomplete**: in Run SQL against the `examples` connection, type `r.` or `f.` after
+- **Table-scoped autocomplete**: in the API Designer against the `examples` connection, type `r.` or `f.` after
   `FROM rental r JOIN film f ON f.film_id = r.film_id` - a popup of that table's real columns.
 - **Real SQL pretty-printing**: the SQL tab of any of these queries shows a real, `sqlglot`-formatted rendering,
   not just a plain reflow.

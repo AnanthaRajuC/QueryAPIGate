@@ -13,7 +13,7 @@ roughly descending order of damage if lost:
 
 1. **The ability to execute arbitrary SQL/Mongo operations** against a connected database - the whole
    point of the service, and therefore its biggest liability if it reaches the wrong caller.
-2. **Database credentials** - held in `db_connections.json`/`queryapigate.db`, needed to reach the
+2. **Database credentials** - held in the store (`queryapigate.db`, or a PostgreSQL schema), needed to reach the
    databases at all.
 3. **Query results and SQL text** - a saved query's SQL, and the rows it returns, can themselves be
    sensitive (customer data, schema details, business logic) independent of write access.
@@ -74,8 +74,9 @@ somewhere another party can reach, setting `QUERYAPIGATE_API_KEY` stops being op
 
 ### Authorization: what a scoped key can actually do
 
-A key's reach is the intersection of several independent grant fields, each narrowing a different
-dimension - none of them widen what another one restricts:
+Three grant fields say what a key reaches, and they **add up** - a saved query is reachable if `connections`,
+`collections` or `queries` reaches it. The rest **narrow** what that reach may do, and none of them widens what
+another restricts:
 
 | Grant | Narrows |
 |---|---|
@@ -129,7 +130,7 @@ test on every change, not just trusted to keep working.
 
 ### Secrets at rest
 
-Connection passwords in `db_connections.json`/`queryapigate.db` can be a literal string, an
+Connection passwords in the store can be a literal string, an
 `"${ENV_VAR}"` reference resolved from the process environment at load time (never written back to disk),
 or - with `QUERYAPIGATE_SECRET_KEY` set - Fernet-encrypted at rest. Encryption is **opt-in, not the
 default**; without a secret key, a connection password is only as protected as the file/volume it sits in.
@@ -191,9 +192,10 @@ authorization path - the same `X-API-Key` header, the same `apikeys.authenticate
 fallback when no server key is configured. Only read-only saved queries are exposed as MCP tools in this
 first version - a write-capable query stays reachable over REST, deliberately not yet reachable through an
 LLM-initiated tool call, because that needs a considered confirmation flow this version doesn't build for
-you. One transport-specific note: MCP's `EventSource`-based transport can't carry a custom header the way
-a normal HTTP client can, so an MCP client integration has to be configured to send the key as a genuine
-request header - never as a URL query parameter, which would leak it into access logs.
+you. One transport-specific note: an MCP client has to be configured to send the key as a request header
+(Streamable HTTP clients can) - never as a URL query parameter, which would leak it into access logs. The MCP
+server doesn't read `QUERYAPIGATE_TRUST_PROXY`: behind a proxy it sees the proxy's address for every caller, so
+`allowed_ips` and the server-wide rate limit can't tell MCP callers apart there.
 
 ## Non-goals: what this does not defend against
 
@@ -208,16 +210,23 @@ Being explicit about these is as important as everything above:
 - **The regex-based read-only/single-statement guard is defence in depth, never a substitute for
   least-privileged database credentials.** Connect with an account that only has the grants the API
   actually needs; assume the guard could someday have another gap like the one already found and fixed.
-- **The file-based/SQLite store is not safe for more than one worker process concurrently** - this is why
-  the shipped image runs a single worker rather than a horizontally-scaled deployment; two independent
-  replicas each with their own volume are two separate servers with their own keys, connections and audit
-  trail, not one logical service with shared state.
+- **Rate limits and `/metrics` are per process** - this is why the shipped image runs a single worker rather
+  than a horizontally-scaled deployment: several processes would each enforce their own limits. The store itself
+  is safe for several processes (SQLite with its write-ahead log, or a shared PostgreSQL store), but two replicas
+  each with their *own* volume are two separate servers with their own keys, connections and audit trail, not one
+  logical service with shared state.
 - **The audit log and execution history are not tamper-evident.** They record what happened for
   operational visibility and accountability, not as a forensic-grade, append-only ledger - export them
   externally if that guarantee matters for your deployment.
-- **`GET /api/v1/connections` reveals connection metadata (hosts, ports, usernames, database names) to anyone
-  holding a key that can reach it** - passwords are always masked, but the rest is not treated as secret
-  by the API itself.
+- **Connection metadata (hosts, ports, usernames, database names) is visible to the admin key** -
+  `GET /api/v1/connections` is admin-only, and passwords are always masked, but the rest is not treated as
+  secret.
+- **`allowed_tables` limits what a statement touches, not what a key can see of the schema.** A key with a
+  `connections` grant can list every table and column on that connection (the schema browser, `table_ddl`,
+  MCP's `list_tables`) - names and structure, never rows of a forbidden table. Hide a table's existence with
+  database permissions.
+- **Names can be probed.** A saved query a key can't reach answers `403` naming its connection; a name that
+  doesn't exist answers `404`. Don't put anything sensitive in query or connection names.
 - **`/metrics` is intentionally unauthenticated**, on the assumption that a metrics scraper shouldn't need
   a credential either - treat it as public within whatever network can reach the service at all.
 

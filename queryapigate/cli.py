@@ -380,7 +380,8 @@ def build_parser():
     backup.add_argument('--force', action='store_true', help='replace FILE if it exists')
     backup.set_defaults(func=_backup)
 
-    init = commands.add_parser('init', help='create db_connections.json and saved_sql/ in the home folder')
+    init = commands.add_parser('init', help='create queryapigate.db in the home folder, with an inactive template '
+                                            'connection per database type')
     init.set_defaults(func=_init)
 
     migrate = commands.add_parser('migrate-to-postgres',
@@ -449,7 +450,7 @@ def build_parser():
 
     for sub in (serve, init, export, collection_export, collection_import, examples_load, examples_unload,
                 examples_status):
-        sub.add_argument('--home', help='folder holding db_connections.json and saved_sql/ '
+        sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
     return parser
 

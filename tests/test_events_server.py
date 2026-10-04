@@ -162,6 +162,21 @@ class RequestTests(EventServerTestCase):
         self.assertEqual(stream.headers['content-type'], 'text/event-stream')
         self.assertEqual(stream.headers['cache-control'], 'no-cache')
 
+    def test_the_stream_is_chunked_so_each_event_can_be_read_as_it_arrives(self):
+        # Delimited only by the connection closing, some clients (Python's requests) hand over nothing until it does.
+        stream = self.open('admin')
+        self.assertEqual(stream.headers['transfer-encoding'], 'chunked')
+
+        def chunk():
+            size = int(stream.file.readline(), 16)
+            data = stream.file.read(size)
+            self.assertEqual(stream.file.read(2), b'\r\n')
+            return data
+
+        self.assertEqual(chunk(), b'retry: 3000\n\n')
+        self.run_query(self.alice)
+        self.assertRegex(chunk().decode(), r'^id: \d+\ndata: \{.*"filename": "q".*\}\n\n$')
+
 
 class DeliveryTests(EventServerTestCase):
     def test_a_recorded_run_arrives_with_its_history_id(self):

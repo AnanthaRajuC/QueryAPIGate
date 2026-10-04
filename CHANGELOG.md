@@ -56,6 +56,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   which may stop reading them; stores from 0.10 on never wrote them. An import now logs a warning.
 
 ### Added
+- **All 40 how-to guides are written** - the 26 that were planned topics, from connecting via generic JDBC to
+  deciding how to expose QueryAPIGate: partner keys, roles, table and IP restrictions, rate limits, expiry, the audit
+  log, encryption, reverse proxies, MCP's ad-hoc tools and structured results, private live feeds, scheduled
+  exports, Docker, backups, upgrades, Prometheus and Grafana, logs, the connection pool, CORS and the threat model.
+  Every command and response in them was run against a real server, and the Console's Help lists them all.
+  `tests/test_howto.py` checks every guide is listed and every link in them resolves.
 - **A deprecation policy** (BACKLOG #67), under *Versioning and compatibility* above: what is deprecated, how
   you'll find out, and how long it keeps working before it may go.
 - **A database support matrix** (BACKLOG #66) in DATABASE_CONNECTION_CONFIGURATION.md: what each of the eight types
@@ -78,7 +84,30 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). Each is
   marked in its docs, with `x-experimental: true` in `/openapi.json`, with a tag in the Console (its Settings rows,
   the database-type picker, the Alerts screen), and with a warning in the log at startup while one is in use.
+### Changed
+- **The one-command demo (`docker compose up`) seeds itself through the Management API** (`demo/seed.sh`) instead of
+  copying the pre-SQLite JSON files that 0.14 deprecates.
+
 ### Fixed
+- **An empty `allowed_ips` list allows no address.** `"allowed_ips": []` on a key or role used to mean "no
+  restriction" - failing open, unlike an empty `allowed_tables` or `allowed_write_ops`, which allow nothing. `null`
+  is still how to say "any address"; the Console sends `null` for an empty field, as before.
+- **`queryapigate events` streams can be read by every HTTP client.** Its responses were delimited only by the
+  connection closing, so some clients - Python's `requests`, reading with `iter_content(chunk_size=None)` - received
+  nothing until the stream ended. They now use HTTP/1.1 chunked encoding, as `GET /events` on the main server
+  already did.
+- **The Docker image includes every optional feature the documentation describes**: DuckDB (a tier 1 database),
+  `allowed_tables` (sqlglot - a table-restricted key's queries failed with `500` in the image), the Redis response
+  cache, `queryapigate mcp` and MongoDB. Only H2 and generic JDBC still need the `-h2` variant, for its Java runtime.
+  The image is about 90 MB larger.
+- **No "experimental" warning for an inactive connection.** `queryapigate init` seeds an inactive H2 template, so
+  every fresh server warned about H2 connections nobody used.
+- **Browser pages can read every header the API sends them.** CORS responses now also expose
+  `X-RateLimit-Key-Limit`/`-Remaining` (a key's own rate limit), `X-Cache`, `ETag`, `Deprecation` and `Link` - before,
+  a page's JavaScript couldn't see them.
+- **A server with no API key says so in its log at startup**, wherever it runs - before, only `queryapigate serve`
+  on a non-local address warned, so a Docker container started without `QUERYAPIGATE_API_KEY` was open with nothing
+  in its log to say so (the Console's `open_server` alert did).
 - **SQL sent to a MongoDB connection is refused clearly** - `400 wrong_connection_type`, pointing to
   `/execute_mongo` - on `/execute_sql`, streamed exports and MCP's `execute_sql`. It used to fail inside the driver
   lookup, as a `500` whose detail was just `'mongo'`.

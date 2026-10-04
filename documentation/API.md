@@ -393,7 +393,7 @@ deprecation policy says it keeps working.
 ## Collections
 
 A **collection** is one named group a saved query belongs to - at most one, unlike `tags`, which are free-form
-and multi-valued. It exists for three things: browsing (the admin UI groups the Saved Queries list by
+and multi-valued. It exists for three things: browsing (the admin UI groups the API Repository list by
 collection), access (a key can be granted a whole collection instead of a hand-maintained list of names) and
 moving queries around as a unit ([export and import](#exporting-and-importing-a-collection)).
 
@@ -1243,9 +1243,10 @@ Both are off unless the server enables them (`QUERYAPIGATE_RATE_LIMIT`, `QUERYAP
   from the key's own limit reads `{"error": "Rate limit exceeded for this API key", ...}` - distinguishable from
   the server-wide rejection's plain `"Rate limit exceeded"`.
 - **CORS.** For listed origins the server answers preflight (`OPTIONS`) requests and adds
-  `Access-Control-Allow-Origin` to responses, exposing `X-Page`, `X-Page-Size`, `X-Has-More`, `X-RateLimit-*` and
-  `Retry-After` to the page's JavaScript. Allowed methods are `GET, POST, PATCH, DELETE, OPTIONS`; allowed request
-  headers are `Content-Type` and `X-API-Key`. Credentials (cookies) are not used.
+  `Access-Control-Allow-Origin` to responses, exposing `X-Page`, `X-Page-Size`, `X-Has-More`, `X-RateLimit-*`
+  (server-wide and per-key), `Retry-After`, `X-Request-Id`, `X-Cache`, `ETag`, `Deprecation` and `Link` to the page's
+  JavaScript. Allowed methods are `GET, POST, PATCH, DELETE, OPTIONS`; allowed request headers are `Content-Type`,
+  `X-API-Key`, `Authorization` and `X-Request-Id`. Credentials (cookies) are not used.
 
 ## Admin UI
 

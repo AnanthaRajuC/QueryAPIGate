@@ -40,12 +40,14 @@ OPERATIONS = frozenset(op for f in FEATURES.values() for op in f.get('operations
 
 def in_use(environ, connections):
     """The experimental features this server is using - an environment variable of theirs set, or a connection of an
-    experimental type configured - as {feature id: what shows it}."""
+    experimental type active - as {feature id: what shows it}. An inactive connection isn't in use: `queryapigate init`
+    seeds an inactive template of every type, H2 included, and that alone shouldn't warn."""
     used = {}
     for key, feature in FEATURES.items():
         set_here = sorted(s for s in feature.get('settings', ()) if environ.get(s, '').strip())
         typed = sorted(name for name, details in connections.items()
-                       if isinstance(details, dict) and details.get('db') in feature.get('db_types', ()))
+                       if isinstance(details, dict) and details.get('db') in feature.get('db_types', ())
+                       and details.get('active', True))
         if set_here:
             used[key] = ', '.join(set_here)
         elif typed:

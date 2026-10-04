@@ -192,7 +192,7 @@ integration, whatever the operator already has) works unmodified:
 
 ~~~bash
 curl http://127.0.0.1:5000/health
-curl http://127.0.0.1:5000/connections
+curl http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: <your admin key>'
 ~~~
 
 ## Upgrading from SQL2API

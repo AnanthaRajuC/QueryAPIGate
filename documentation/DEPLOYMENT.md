@@ -18,7 +18,7 @@ docker pull ghcr.io/anantharajuc/queryapigate:latest
 
 | Tag | Contents |
 |-----|----------|
-| `X.Y.Z`, `latest` | QueryAPIGate with the MySQL, PostgreSQL and ClickHouse drivers (SQLite is built in) |
+| `X.Y.Z`, `latest` | QueryAPIGate with every optional feature: the PostgreSQL, MySQL, ClickHouse, DuckDB and MongoDB drivers (SQLite is built in), `allowed_tables`, password encryption, signed-in users (JWT), the Redis cache and `queryapigate mcp` |
 | `X.Y.Z-h2`, `latest-h2` | The same plus Java and the H2 driver - also the variant for a generic `jdbc` connection (mount your vendor's jar) |
 
 **Pin to `X.Y.Z` in production, not `latest`.** An upgrade should be a deliberate, one-line version bump you
@@ -110,33 +110,26 @@ PROD_DB_PASSWORD=<your database password>
 (`openssl rand -hex 32`), not a word you'll remember; create scoped keys for anything that only needs to run
 queries (`POST /api/v1/api-keys`, from the admin UI or the API - see [API.md](API.md#permission-roles-templates)).
 
-A connection's own password never goes in `db_connections.json` (or the admin UI's connection form) as
-plain text - reference an environment variable instead, resolved from whatever's in the container's
-environment (i.e. anything in `.env` above):
+A connection's own password shouldn't be stored as plain text - give it as a reference to an environment
+variable instead (in the Console's connection form, or the API), resolved from the container's environment (i.e.
+anything in `.env` above):
 
 ~~~json
-{"connections": {"prod": {"db": "postgres", "host": "db.internal", "user": "app",
-  "password": "${PROD_DB_PASSWORD}", "database": "app", "active": true}}}
+{"name": "prod", "db": "postgres", "host": "db.internal", "user": "app",
+ "password": "${PROD_DB_PASSWORD}", "database": "app", "active": true}
 ~~~
 
-`QUERYAPIGATE_SECRET_KEY` (a Fernet key) additionally encrypts every connection password *at rest* in
+`QUERYAPIGATE_SECRET_KEY` (a Fernet key) additionally encrypts every literal connection password *at rest* in
 `queryapigate.db` itself, independent of the `${VAR}` convention above - worth setting if the volume or its
-backups might be read by someone who shouldn't see connection credentials. It needs the `cryptography`
-package, which **the published image does not include** (the server refuses to start with a clear error if
-the key is set without it, rather than silently skipping encryption) - build your own image with the
-`encryption` extra added to get it:
-
-~~~dockerfile
-# Dockerfile.encrypted - one line on top of the published image
-FROM ghcr.io/anantharajuc/queryapigate:1.2.3
-RUN pip install --no-cache-dir cryptography
-~~~
+backups might be read by someone who shouldn't see connection credentials. Generate one and add it to `.env`
+(keep a copy in your secrets manager - backups of the store are useless for these passwords without it):
 
 ~~~bash
-docker build -t queryapigate-encrypted -f Dockerfile.encrypted .
-# generate the key - no cryptography needed for this part, a Fernet key is just 32 random bytes, base64url-encoded
+# a Fernet key is 32 random bytes, base64url-encoded
 python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ~~~
+
+See [Keep connection passwords out of the store](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md).
 
 Read the full [hardening checklist](../SECURITY.md#hardening-checklist-for-deployments) before going live -
 `QUERYAPIGATE_ALLOW_WRITES`, `QUERYAPIGATE_RATE_LIMIT`, `QUERYAPIGATE_CORS_ORIGINS` and the rest all matter
@@ -150,11 +143,9 @@ docker compose up -d
 curl https://api.example.com/health
 ~~~
 
-Run `init` *before* the first `up`, as a one-off (`run --rm`), not `exec` against the already-running
-service: `queryapigate serve` initializes an empty `queryapigate.db` the moment it starts, and won't
-retroactively pick up `init`'s template file once it already has - `docker compose exec ... init` after
-`up` writes the file, but the connections it describes then only actually appear once you restart the
-container. Running `init` first avoids that ordering trap entirely.
+`init` is optional - it only adds templates - and works either before the first `up` (as above) or afterwards with
+`docker compose exec queryapigate queryapigate init`; the running server sees the templates at once. It does nothing
+on a store that already has connections.
 
 `init` writes one template connection per supported database type, all inactive - activate the ones you
 need from the admin UI (`https://api.example.com/console`) or `PATCH /api/v1/connections/{name}`. Do **not** run

@@ -132,6 +132,9 @@ is still honored.
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for a tool call's result. Always a positive count; a malformed value stops startup. |
 
 Both show up as a read-only "MCP server" section on the admin UI's Settings screen (BACKLOG #54) - the
-effective value and whether it's the default, same as every other setting there. `queryapigate mcp` is a
-separate process, so this is its configuration only: the REST server showing this section has no way to know
-whether an MCP process is actually running or reachable on that port.
+effective value and whether it's the default, same as every other setting there. Below them, **Check now** tries
+a TCP connection to that port on `127.0.0.1` (only when asked - `GET /api/v1/mcp/status`), and **Tools** lists what
+`tools/list` returns for the admin key (`GET /api/v1/mcp/tools`). Both are worked out by the REST server: the check
+only says whether *something* listens on that port on the same host, and the settings shown are the REST server's -
+an MCP process started with different variables isn't reflected. See
+[Check the MCP server from the Console](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/27-check-the-mcp-server-from-the-console.md).

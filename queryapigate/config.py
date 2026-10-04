@@ -63,7 +63,7 @@ def load_examples():
 
 
 def home():
-    """Folder holding db_connections.json and saved_sql/ (QUERYAPIGATE_HOME, default: current directory)."""
+    """Folder holding queryapigate.db (QUERYAPIGATE_HOME, default: current directory)."""
     return _resolved_home(os.environ.get('QUERYAPIGATE_HOME') or '', os.getcwd())
 
 
@@ -780,8 +780,8 @@ def describe_settings():
                 'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS',
                 f'{alert_key_unused_days()} days' if alert_key_unused_days() else 'off')]},
         {'id': 'mcp', 'title': 'MCP server',
-         'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process, not started or '
-             'checked for reachability by this one.', 'rows': [
+         'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process this one doesn\'t '
+             'start. "Check now" tries its port on this host.', 'rows': [
             row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
             row('MCP max rows', 'Row cap for a tools/call result - an LLM\'s context can\'t hold a huge one.',
                 'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows')]},

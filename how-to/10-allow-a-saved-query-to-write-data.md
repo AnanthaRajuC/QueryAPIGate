@@ -129,7 +129,7 @@ thing in the whole system.
 
 ## Next steps
 
-- [Restrict a key to specific tables](../documentation/API.md#table-access-restrictions) - `allowed_tables` narrows *what* a
+- [Restrict a key to specific tables](16-restrict-a-key-to-tables.md) - `allowed_tables` narrows *what* a
   key can touch, read or write, independent of everything above.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - the full grant reference this guide
   only used the write-related corner of.

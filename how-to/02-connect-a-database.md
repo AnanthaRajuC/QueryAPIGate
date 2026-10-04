@@ -13,7 +13,7 @@ in the [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#su
 SQLite, DuckDB and ClickHouse are tier 1: every feature, tested against a real server in CI. H2 is experimental.
 
 For anything not listed here - Oracle, SQL Server, Snowflake, DB2, or any other JDBC-compliant database -
-see [Generic JDBC connections](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#generic-jdbc-connections)
+see [Connect to anything else via generic JDBC](03-connect-via-generic-jdbc.md)
 (experimental); the mechanics below (test, activate, query) are identical once a `jdbc` connection exists.
 
 ## Two ways to add a connection
@@ -68,7 +68,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 Needs the driver: `pip install "queryapigate[postgres]"` (already included if you installed
 `queryapigate[all]` or the published Docker image). `${POSTGRES_PASSWORD}` is a reference to an
 environment variable, resolved when the connection is actually used - keep the real password out of
-`queryapigate.db` entirely; see [Encryption at rest for connection passwords](../documentation/API.md#encryption-at-rest-for-connection-passwords)
+`queryapigate.db` entirely; see [Keep connection passwords out of the store](22-encrypt-passwords-at-rest.md)
 for the alternative (encrypting a literal value instead of using an env reference). Verified for this
 guide against a real PostgreSQL 16 container: connect, test, query all worked as shown.
 
@@ -102,8 +102,10 @@ already accounts for this per-dialect, nothing you need to configure.
 
 ## DuckDB - no server needed either
 
-An embedded analytical database: `database` is its own `.duckdb` file, created on first write. It can also read
-CSV and Parquet files straight from a query's SQL - see
+An embedded analytical database: `database` is its own `.duckdb` file, which must already exist - like SQLite,
+QueryAPIGate never creates one, so a mistyped path fails rather than opening an empty database. Create it with
+`python -c "import duckdb; duckdb.connect('analytics.duckdb')"` (or the DuckDB CLI). It can also read CSV and Parquet
+files straight from a query's SQL - see
 [DuckDB connections](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#duckdb-connections).
 
 ```bash
@@ -156,8 +158,8 @@ A connection you're not ready to use yet, or want to disable temporarily, doesn'
 
 - [Turn a query into a REST API](01-turn-your-first-sql-query-into-a-rest-api.md) against your new
   connection instead of the built-in example one.
-- [Encrypt connection passwords at rest](../documentation/API.md#encryption-at-rest-for-connection-passwords) - a
-  real alternative to `${VAR}` references.
+- [Keep connection passwords out of the store](22-encrypt-passwords-at-rest.md) - encryption, a real alternative
+  to `${VAR}` references.
 - [Connect to MongoDB](04-connect-to-mongodb.md) - `find()` queries instead of SQL.
-- Oracle, SQL Server, Snowflake or another JDBC-only database:
-  [Generic JDBC connections](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#generic-jdbc-connections).
+- [Connect via generic JDBC](03-connect-via-generic-jdbc.md) - Oracle, SQL Server, Snowflake or another
+  JDBC-only database.

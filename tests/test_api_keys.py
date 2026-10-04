@@ -545,6 +545,11 @@ class IpAllowlistTests(AppTestCase):
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
+    def test_an_empty_list_allows_no_address(self):
+        # Like an empty allowed_tables or allowed_write_ops: it used to mean "no restriction", failing open.
+        key = self.create_key('pinned', connections=['a'], allowed_ips=[])
+        self.assertEqual(self.run_as(key, '203.0.113.5').status_code, 401)
+
     def test_allowed_ips_appears_in_the_listing(self):
         self.create_key('pinned', connections=['a'], allowed_ips=['203.0.113.5', '10.0.0.0/8'])
         listed = self.keys()['pinned']

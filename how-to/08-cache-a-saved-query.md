@@ -128,6 +128,6 @@ TTL.
 - [Group queries into a collection](07-group-queries-into-a-collection.md) - the dashboard-scenario
   pattern (several cheap, cached, frequently-polled queries under one collection) is worth combining with
   this.
-- [Wire up Prometheus and Grafana](../documentation/DEPLOYMENT.md#6-observability) - `queryapigate_cache_hits_total`/
+- [Wire up Prometheus and Grafana](35-wire-up-prometheus-and-grafana.md) - `queryapigate_cache_hits_total`/
   `queryapigate_cache_misses_total` show up in `/metrics` either way (in-process or Redis-backed), worth
   watching once caching is live.

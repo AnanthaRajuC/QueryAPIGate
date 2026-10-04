@@ -132,5 +132,6 @@ a connection or collection name. Real data you connected in the meantime is unto
 - [Turn your first SQL query into a REST API](01-turn-your-first-sql-query-into-a-rest-api.md) - the same
   walkthrough, but starting from a blank query instead of an example.
 - [Connect your own database](02-connect-a-database.md) once you're ready to move past the generated one.
-- The **Access map** (under **Access**) and [`GET /catalog`](../documentation/API.md#the-api-catalogue) -
-  who can reach what, explored here against a known-good example setup first.
+- [Verify who can reach what](21-verify-who-can-reach-what.md) - the Access map, explored here against a
+  known-good example setup first.
+- [Read the example APIs as a template for your own](39-walk-through-the-example-apis.md).

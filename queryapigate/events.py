@@ -65,6 +65,12 @@ def event_payload(query_name, version, entry):
             'connection_name': entry.get('connection_name'), 'entry': entry}
 
 
+def _chunk(data):
+    """One piece of the stream in HTTP/1.1 chunked framing. Without it the body is delimited only by the connection
+    closing, and some clients (Python's requests, for one) then wait for the close before handing over anything."""
+    return b'%x\r\n%s\r\n' % (len(data), data)
+
+
 def _format(rowid, query_name, version, entry_json):
     entry = json.loads(entry_json)
     return f'id: {rowid}\ndata: {json.dumps(event_payload(query_name, version, entry))}\n\n'.encode()
@@ -308,19 +314,21 @@ class EventServer:
         self.by_key.setdefault(key_name, set()).add(client)  # live events queue up from here on...
         try:
             head = ['HTTP/1.1 200 OK', 'Content-Type: text/event-stream', 'Cache-Control: no-cache',
-                    'X-Accel-Buffering: no', 'Connection: close']
+                    'X-Accel-Buffering: no', 'Transfer-Encoding: chunked', 'Connection: close']
             if allow_origin:
                 head += [f'Access-Control-Allow-Origin: {allow_origin}', 'Vary: Origin']
-            writer.write(('\r\n'.join(head) + '\r\n\r\n' + f'retry: {_RETRY_MS}\n\n').encode())
+            writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + _chunk(f'retry: {_RETRY_MS}\n\n'.encode()))
             sent = 0
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
                 for rowid, query_name, version, entry_json in await asyncio.to_thread(_replay, last_id, key_name):
-                    writer.write(_format(rowid, query_name, version, entry_json))
+                    writer.write(_chunk(_format(rowid, query_name, version, entry_json)))
                     sent = rowid
                 await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
             watcher = asyncio.create_task(self._watch(reader, client))
             try:
                 await self._pump(client, secret, client_ip, sent)
+                if not writer.is_closing():
+                    writer.write(b'0\r\n\r\n')  # the last chunk: the stream ended cleanly
             finally:
                 watcher.cancel()
         finally:
@@ -347,14 +355,14 @@ class EventServer:
             try:
                 item = await asyncio.wait_for(client.queue.get(), timeout=_HEARTBEAT_SECONDS)
             except asyncio.TimeoutError:
-                writer.write(b': keepalive\n\n')
+                writer.write(_chunk(b': keepalive\n\n'))
             else:
                 if item is None:
                     return  # too slow: see _deliver()
                 rowid, data = item
                 if rowid <= sent:
                     continue  # already sent as part of the replay
-                writer.write(data)
+                writer.write(_chunk(data))
             await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
             if time.monotonic() >= next_check:
                 next_check = time.monotonic() + _RECHECK_SECONDS

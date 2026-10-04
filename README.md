@@ -664,7 +664,7 @@ docker run -p 5000:5000 -v queryapigate-data:/data -e QUERYAPIGATE_API_KEY=chang
 
 | Tag | Contents |
 |-----|----------|
-| `X.Y.Z`, `latest` | QueryAPIGate with the MySQL, PostgreSQL and ClickHouse drivers (SQLite is built in) |
+| `X.Y.Z`, `latest` | QueryAPIGate with every optional feature: the PostgreSQL, MySQL, ClickHouse, DuckDB and MongoDB drivers (SQLite is built in), `allowed_tables`, password encryption, JWT, the Redis cache and `queryapigate mcp` |
 | `X.Y.Z-h2`, `latest-h2` | The same plus Java and the H2 driver - also the variant to use for a generic `jdbc` connection (mount your vendor's jar) |
 
 The container keeps `queryapigate.db` in `/data` (create a starter with `docker run --rm -v queryapigate-data:/data
@@ -691,11 +691,10 @@ curl -H 'X-API-Key: demo-key' 'http://127.0.0.1:5000/q/films_by_rating?rating=PG
 ~~~
 
 Open <http://127.0.0.1:5000/docs>, paste `demo-key` into the box at the top, and both saved queries appear as endpoints.
-The demo listens on localhost only. Its seed data - the connection and saved queries in
-[`demo/data/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/demo/data), including the database
-password read from an environment variable (`${DEMO_DB_PASSWORD}`) - is copied into a writable Docker
-volume once at startup by a small init container, so the repository files themselves are never modified.
-Clean up with `docker compose down -v`.
+The demo listens on localhost only. Once the server is healthy, a one-shot `seed` container
+([`demo/seed.sh`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/demo/seed.sh)) creates the connection -
+its password stored as a reference to an environment variable, `${DEMO_DB_PASSWORD}` - and the two saved queries
+through the Management API, the same calls the Console makes. Clean up with `docker compose down -v`.
 
 ## API overview
 

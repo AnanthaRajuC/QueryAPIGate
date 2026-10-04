@@ -110,11 +110,11 @@ def load_examples_at_startup():
 def create_app():
     from . import __version__
     config.check_settings()
+    logging_setup.configure(log)  # before anything below logs - the legacy import's deprecation warning, for one
     db.init_schema()
     store.import_legacy_data_if_empty()
     apikeys.import_legacy_keys_if_empty()
     apikeys.import_legacy_roles_if_empty()
-    logging_setup.configure(log)
     experimental.warn_in_use(log, os.environ, store.read_connections())
     app = Flask(__name__)
     hops = config.proxy_hops()
@@ -137,6 +137,9 @@ def create_app():
             log.warning('%s holds this home\'s connections, saved queries and keys, but the PostgreSQL metadata '
                         'database is empty - run `queryapigate migrate-to-postgres` to copy them across.',
                         config.db_file())
+    if not apikeys.auth_required():  # the open_server alert's condition (alerts.py)
+        log.warning('No API key is configured: every request is allowed, including changing connections and keys. '
+                    'Fine on your own machine - set QUERYAPIGATE_API_KEY before anyone else can reach this server.')
     if config.cors_origins() == '*' and not config.api_key():
         log.warning('QUERYAPIGATE_CORS_ORIGINS=* without QUERYAPIGATE_API_KEY: any website a user visits can call '
                     'this API from their browser and reach every active connection. Set an API key or list the '

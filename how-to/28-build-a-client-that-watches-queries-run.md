@@ -9,7 +9,7 @@ below are verified against a real running server, including a real mid-stream se
 
 This is about building your *own* consumer of `GET /events` - if you just want to know what the endpoint
 does and how per-key filtering works, see
-[`GET /events` on the main server](../documentation/API.md#get-events-on-the-main-server) instead; this
+[Give each user of your app their own private activity feed](29-per-key-live-feeds.md) instead; this
 guide is the "how do I actually parse the stream" one both of those build on.
 
 ## The wire format, exactly
@@ -141,7 +141,7 @@ for a standalone client with no human watching a screen to paper over the gap.
 
 ## Next steps
 
-- [`GET /events` on the main server](../documentation/API.md#get-events-on-the-main-server) - per-key
-  filtering: what a scoped key sees is its own activity only.
+- [Give each user of your app their own private activity feed](29-per-key-live-feeds.md) - per-key
+  filtering, JWT users, and resuming with `Last-Event-ID`.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - use a real scoped key here, not the
   admin one, once you're past just experimenting.

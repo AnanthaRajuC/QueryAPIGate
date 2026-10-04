@@ -104,13 +104,13 @@ saved queries. That boundary is absolute, not something any grant field widens.
 Each of these is the same `POST /api/v1/api-keys` call, just with one more field:
 
 - [Give a key access to a whole collection](07-group-queries-into-a-collection.md) - `collections`.
-- [Give an external partner access to one query only](../documentation/API.md#per-saved-query-access-external-clients) - `queries`,
+- [Give an external partner access to one query only](14-give-a-partner-one-query-only.md) - `queries`,
   with no `connections` grant at all.
-- [Create a role to stamp out several similarly-scoped keys](../documentation/API.md#permission-roles-templates) - a reusable template for
+- [Create a role to stamp out several similarly-scoped keys](15-create-a-role.md) - a reusable template for
   everything above.
-- [Restrict a key to specific tables](../documentation/API.md#table-access-restrictions) - `allowed_tables`.
-- [Rate-limit a key](../documentation/API.md#per-key-rate-limiting) - `rate_limit`.
-- [Restrict a key to specific source IPs](../documentation/API.md#ip-allowlisting) - `allowed_ips`.
-- [Give a key an expiry date](../documentation/API.md#key-expiry) - `expires_at`.
+- [Restrict a key to specific tables](16-restrict-a-key-to-tables.md) - `allowed_tables`.
+- [Rate-limit a key](17-rate-limit-a-key.md) - `rate_limit`.
+- [Restrict a key to specific source IPs](18-restrict-a-key-to-ips.md) - `allowed_ips`.
+- [Give a key an expiry date](19-give-a-key-an-expiry-date.md) - `expires_at`.
 - [Allow a saved query to write data](10-allow-a-saved-query-to-write-data.md) - `allow_writes`,
   `allowed_write_ops`, and the narrowest option of all: write access scoped to one named query.

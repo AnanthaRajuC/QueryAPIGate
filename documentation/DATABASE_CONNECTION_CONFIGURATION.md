@@ -206,8 +206,9 @@ process to run - that also happens to read flat files directly. One connection t
 }
 ~~~
 
-**As a general embedded database**, it behaves like `sqlite`: point `database` at a file (created on first write, an
-existing empty or populated file otherwise), then `CREATE TABLE`/`INSERT`/`SELECT` against it as usual. Its SQL
+**As a general embedded database**, it behaves like `sqlite`: point `database` at an existing file (QueryAPIGate never
+creates one, so a mistyped path fails instead of opening an empty database - create it first, e.g.
+`python -c "import duckdb; duckdb.connect('analytics.duckdb')"`), then `CREATE TABLE`/`INSERT`/`SELECT` against it as usual. Its SQL
 dialect is close to PostgreSQL, so it uses the same quote-doubling string-literal rules as `postgres`/`sqlite`/`h2`
 (no backslash escaping).
 

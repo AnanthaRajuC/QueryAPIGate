@@ -14,7 +14,7 @@ FROM python:3.12-slim
 ARG WITH_H2=false
 
 LABEL org.opencontainers.image.title="QueryAPIGate" \
-      org.opencontainers.image.description="Turn SQL into a REST API: run queries against MySQL, PostgreSQL, ClickHouse, SQLite or H2 over HTTP." \
+      org.opencontainers.image.description="Turn saved SQL queries into secure REST APIs and MCP tools, on PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and more." \
       org.opencontainers.image.source="https://github.com/AnanthaRajuC/QueryAPIGate" \
       org.opencontainers.image.licenses="FSL-1.1-MIT"
 
@@ -31,7 +31,10 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY queryapigate ./queryapigate
 COPY --from=console /queryapigate/console_dist ./queryapigate/console_dist
-RUN pip install ".[mysql,postgres,clickhouse,server,jwt]" \
+# Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
+# tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption and jwt back features a deployment turns
+# on with an environment variable or a second command - none of them should need a custom image.
+RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,server]" \
     && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
 
 RUN useradd --create-home app && mkdir /data && chown app /data
