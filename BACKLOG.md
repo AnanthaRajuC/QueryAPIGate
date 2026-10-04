@@ -1798,7 +1798,15 @@ many workers and threads per node. Estimate: 1-2 days.
 
 ## 57. A multi-node integration test in CI
 
-**Status: open.** Should land before any release claims "multi-instance supported".
+**Status: shipped (for 0.15).** `tests/test_multinode.py`, in CI's PostgreSQL job (which has PostgreSQL and Redis):
+three `queryapigate serve` processes, each with its own home, plus one `queryapigate events`, on one store and one
+Redis. Eight checks, each a change through one node seen on another: a key created and revoked, a new published
+version, a changed connection (pooled connections included), a key's rate limit, the response cache and clearing it,
+run history, the audit log, and one live-events stream receiving every node's runs. Verified that it catches what it
+should: pointed at an unreachable Redis, the rate-limit and cache checks fail. Not covered yet: old and new versions
+side by side (#58's rolling-upgrade policy).
+
+Original notes:
 
 **Impact:** every multi-instance property is currently tested in one process, at most with a second
 connection. Nothing proves two real servers sharing one store behave as one service. That proof is what

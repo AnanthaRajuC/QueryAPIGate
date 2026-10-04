@@ -58,6 +58,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   tries Redis again after a few seconds rather than on every request, logs it at most once a minute, counts it in
   `queryapigate_rate_limit_fallbacks_total`, and raises the new `rate_limits_not_shared` alert. Settings shows where
   limits are counted.
+- **A multi-server test** (BACKLOG #57): CI starts three servers and an events server on one PostgreSQL store and
+  one Redis, and checks that a change made through one - keys, query versions, connections, rate limits, the cache,
+  history, the audit log, live events - takes effect on the others.
 - **Files on S3, GCS, R2 and the web as an API** (BACKLOG #75, experimental): a DuckDB connection's `allowed_paths`
   takes `s3://`, `gs://` and `r2://` prefixes and `http(s)://` files; `user`/`password` carry the access key (masked,
   encrypted and `${VAR}`-capable like any password), with `region`, `endpoint`, `url_style`, `use_ssl` and `storage`
