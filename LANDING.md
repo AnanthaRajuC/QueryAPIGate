@@ -6,6 +6,8 @@
 <iframe src="https://www.youtube-nocookie.com/embed/WWImFj4m95o" title="QueryAPIGate: demo" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>
 </div>
 
+Every feature, one by one: [the full walkthrough](https://youtu.be/cTkv6smFtWA) (6 minutes, in chapters).
+
 **QueryAPIGate** is a self-hosted, single Flask service that runs SQL against your databases and returns the
 results as JSON, NDJSON, XML, YAML, CSV, TSV or Excel. Save a query once and it becomes a versioned endpoint
 with typed, injection-safe parameters and run history - without writing a controller, a repository layer,

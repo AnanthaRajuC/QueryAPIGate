@@ -17,6 +17,8 @@
   <a href="https://www.youtube.com/watch?v=WWImFj4m95o">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/demo-thumbnail.png" alt="Watch the demo: saved SQL queries as REST endpoints, scoped API keys, and the Move preview showing which keys gain or lose access" width="640">
   </a>
+  <br>
+  <sub>Every feature, one by one: <a href="https://youtu.be/cTkv6smFtWA"><b>the full walkthrough</b></a> (6 minutes, in chapters)</sub>
 </p>
 
 **QueryAPIGate** is a self-hosted, single Flask service that runs SQL against your databases and returns the results as
