@@ -1114,6 +1114,94 @@
         ],
         "type": "object"
       },
+      "Instance": {
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_seen": {
+            "description": "Refreshed at most every 30 seconds while it serves.",
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "serve",
+              "mcp",
+              "events"
+            ],
+            "type": "string"
+          },
+          "shared_limits": {
+            "description": "Whether it counts rate limits in Redis (QUERYAPIGATE_REDIS_URL).",
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "this": {
+            "description": "The process answering this request.",
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "host",
+          "pid",
+          "role",
+          "version",
+          "shared_limits",
+          "started_at",
+          "last_seen",
+          "this"
+        ],
+        "type": "object"
+      },
+      "InstanceList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Instance"
+            },
+            "type": "array"
+          },
+          "problems": {
+            "items": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "instances_not_shared",
+                    "instances_versions_differ"
+                  ],
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "problems"
+        ],
+        "type": "object"
+      },
       "McpStatus": {
         "properties": {
           "port": {
@@ -4014,6 +4102,66 @@
           }
         },
         "summary": "Every run - of a saved query, or ad-hoc SQL - newest first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/instances": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "The processes using this store now - serve, mcp and events, seen in the last 90 seconds - and what looks wrong about them",
         "tags": [
           "Management API v1"
         ]

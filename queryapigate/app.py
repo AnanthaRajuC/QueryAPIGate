@@ -30,6 +30,7 @@ from . import (
     experimental,
     governance,
     history,
+    instances,
     jwtauth,
     logging_setup,
     metrics,
@@ -116,6 +117,8 @@ def create_app():
     apikeys.import_legacy_keys_if_empty()
     apikeys.import_legacy_roles_if_empty()
     experimental.warn_in_use(log, os.environ, store.read_connections())
+    instances.register('serve')
+    instances.warn_if_unshared(log)
     app = Flask(__name__)
     hops = config.proxy_hops()
     if hops:  # behind reverse proxies: take the client address and scheme from their X-Forwarded-* headers
@@ -198,6 +201,7 @@ def create_app():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
+        instances.heartbeat()  # at most one small write per HEARTBEAT seconds
         # Order matters: a browser's preflight cannot carry the API key, and rate limiting comes before the key
         # check so that guessing keys is throttled too.
         if cors.is_preflight(request):

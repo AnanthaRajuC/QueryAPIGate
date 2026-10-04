@@ -277,12 +277,35 @@ def _trim(name, version, target):
                   exc_info=True)
 
 
+_SWEEP_LOCK_ID = 0x51A7  # next to db._PG_LOCK_ID: an advisory-lock key this app owns in its database
+
+
 def sweep(target=None, now=None):
     """Delete runs older than history_retention_days(), in chunks. Returns how many were deleted. Run by each
-    process's writer thread every _SWEEP_INTERVAL; several processes sweeping at once is harmless."""
+    process's writer thread every _SWEEP_INTERVAL. On PostgreSQL, where several instances share the store, only the
+    one that gets the sweep lock does it - the others skip that round rather than delete the same rows in parallel."""
     days = config.history_retention_days()
     if days is None:
         return 0
+    if not db.is_postgres():
+        return _sweep(days, target, now)
+    conn = db.connection(target)
+    try:
+        if not conn.execute('SELECT pg_try_advisory_lock(?)', (_SWEEP_LOCK_ID,)).fetchone()[0]:
+            return 0  # another instance is sweeping right now
+    except (OSError, *db.Error):
+        log.warning('History retention sweep failed; the next one retries', exc_info=True)
+        return 0
+    try:
+        return _sweep(days, target, now)
+    finally:
+        try:
+            conn.execute('SELECT pg_advisory_unlock(?)', (_SWEEP_LOCK_ID,))
+        except (OSError, *db.Error):
+            pass  # a lost connection takes its session lock with it
+
+
+def _sweep(days, target, now):
     cutoff = ((now or datetime.now()) - timedelta(days=days)).strftime(TIME_FORMAT)
     deleted = 0
     while True:

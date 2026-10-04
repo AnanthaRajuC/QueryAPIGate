@@ -246,6 +246,9 @@ from this repo - panels for request/query rate and latency (p50/p95/p99), error 
 queries, pool occupancy and rate-limit rejections, built on exactly the metric names `/metrics` already
 exposes. `/metrics` is public (no API key needed) precisely so a scraper doesn't need one either.
 
+**With several instances, scrape each one** - every process keeps its own counters, as Prometheus expects - and the
+bundled dashboard sums across them. The Console's Metrics screen shows only the instance that served it.
+
 ## 7. Shared response cache (optional)
 
 A saved query's `cache_ttl` is served from an in-process cache by default - zero setup, but wiped on every
@@ -281,6 +284,19 @@ docker compose run --rm queryapigate queryapigate migrate-to-postgres
 The image already includes the PostgreSQL driver. See
 [Shared metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql) for what it changes and what
 it doesn't.
+
+**How many PostgreSQL connections.** Each process holds one connection to the store per request thread, plus one for
+its history writer: about `threads + 1` per instance (9 with the image's 8 threads), plus one per `queryapigate events`
+and `queryapigate mcp` process. Three instances and an events server need about 30 - well inside PostgreSQL's default
+`max_connections = 100`, which the databases QueryAPIGate *queries* don't share. For many more instances, put PgBouncer
+in front in **session** pooling mode: the store's transactions take advisory locks, which transaction pooling would
+break.
+
+**Which instances are running.** `GET /api/v1/instances` (admin key) lists every process using the store - role,
+host, version, whether it shares rate limits through Redis - seen in the last 90 seconds; each refreshes itself as it
+serves requests and health checks. Two **Alerts** watch it: several instances without Redis
+(`instances_not_shared`), and instances on different versions (`instances_versions_differ`), expected only during a
+rolling upgrade.
 
 ## 9. Live events for many clients (optional)
 
@@ -358,6 +374,25 @@ started under the current code, which must read back its connections, queries an
 keys and roles (`tests/test_upgrades.py`). A store this version can't safely run on - one with a column missing,
 or one a *newer* release has already upgraded - stops startup with a message naming the problem and what to do,
 before anything is changed; it never starts and then fails on first use. Going back to an older release is not
-supported in place: restore the backup from step 2. If you're upgrading from the project's old name (SQL2API), see
+supported in place: restore the backup from step 2.
+
+### Rolling upgrades (several instances on one store)
+
+Replace instances one at a time - no downtime - because of this rule: **within 1.x, a release changes the store only
+additively** (new tables, new nullable columns, new indexes; never a rename, a drop or a changed meaning). So while
+some instances run the new release and have upgraded the store, the ones still on the previous release keep working
+against it. `tests/test_rolling_upgrade.py` checks exactly that on every CI run: the previous release from PyPI keeps
+serving, writing and recording runs on a store the current code has just upgraded, and each sees the other's changes.
+
+1. Back up the store.
+2. Start one instance on the new version - it upgrades the store on its first start - and check its `/health`.
+3. Replace the others one by one. `GET /api/v1/instances` shows who is on which version meanwhile.
+
+Two limits:
+- **An instance can't *start* on the previous release once the store is upgraded** - it refuses, naming the newer
+  release. If one restarts mid-upgrade, bring it back on the new version.
+- **Upgrade one minor version at a time** (0.15 -> 0.16, not 0.15 -> 0.17) when rolling: the guarantee is about the
+  release just before. A release that can't keep it says so under **Breaking** in its changelog entry, and then all
+  instances must be stopped before the first one starts on it. If you're upgrading from the project's old name (SQL2API), see
 [Upgrading from SQL2API](INSTALLATION_AND_SETUP.md#upgrading-from-sql2api) first; environment variables
 renamed and the server refuses to start until they're renamed too.

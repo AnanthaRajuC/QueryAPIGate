@@ -32,7 +32,7 @@ import time
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, history, ratelimit
+from . import config, cors, db, history, instances, ratelimit
 from .errors import code_for
 
 try:
@@ -182,6 +182,7 @@ class EventServer:
                 pass
             self.wake.clear()
             try:
+                await asyncio.to_thread(instances.heartbeat)  # a no-op until HEARTBEAT has passed
                 while await self._check():
                     pass
             except Exception:  # a store hiccup: log it, and the next round simply tries again

@@ -26,8 +26,8 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 5  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
-#                    5: ad-hoc runs in execution_history (query_name/version nullable) - see _upgrade()
+SCHEMA_VERSION = 6  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+#                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -109,6 +109,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entry_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+
+-- Every running process using this store, refreshed as it serves requests (instances.py): which are alive, on what
+-- version, and whether they share rate limits through Redis. Rows of processes gone for a day are removed.
+CREATE TABLE IF NOT EXISTS instances (
+  id TEXT PRIMARY KEY,
+  host TEXT NOT NULL,
+  pid INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  version TEXT NOT NULL,
+  shared_limits INTEGER NOT NULL,
+  started_at REAL NOT NULL,
+  last_seen REAL NOT NULL
+);
 """
 
 
@@ -183,6 +196,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entry_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+
+CREATE TABLE IF NOT EXISTS instances (
+  id TEXT COLLATE "C" PRIMARY KEY,
+  host TEXT NOT NULL,
+  pid INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  version TEXT NOT NULL,
+  shared_limits INTEGER NOT NULL,
+  started_at DOUBLE PRECISION NOT NULL,
+  last_seen DOUBLE PRECISION NOT NULL
+);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -387,7 +411,10 @@ def _upgrade(conn, postgres):
        existing query is published at its newest version: an upgrade changes nothing a caller can see.
     5: execution_history.query_name/version nullable, for ad-hoc runs. SQLite can't relax NOT NULL in place, so
        the table is rebuilt - keeping every row's rowid, which is also its live event's id (events.py), so a
-       client resuming with Last-Event-ID still finds its place."""
+       client resuming with Last-Event-ID still finds its place.
+    6: the instances table - new, so CREATE TABLE IF NOT EXISTS makes it; nothing to change in place. Additive, as
+       every change within a minor line must be (see DEPLOYMENT.md, Rolling upgrades): a 0.14 process still
+       running against the upgraded store keeps working."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):

@@ -1103,6 +1103,8 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `key_rate_limited` | warning | A key's own `rate_limit` refused it 10 times or more in the last hour |
 | `client_rate_limited` | warning | `QUERYAPIGATE_RATE_LIMIT` refused one client address 10 times or more in the last hour |
 | `history_failed`, `history_dropped` | warning | Runs could not be recorded, or were dropped because the store could not keep up |
+| `instances_not_shared` | warning | Several processes share this store, and some of them without Redis - their rate limits and cache are per process |
+| `instances_versions_differ` | warning | Processes sharing this store run different versions - expected only during a rolling upgrade |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 
@@ -1115,6 +1117,22 @@ The history checks read the newest 5,000 runs, so their cost doesn't grow with h
 and history-write counts are this process's own, since it started (like `/metrics`): with several instances, each
 reports its share. For production paging, alert on `/metrics` from Prometheus too - this list is for the people
 running QueryAPIGate day to day, not a replacement for an on-call alerting system.
+
+## Instances
+
+`GET /api/v1/instances` (admin only) lists the processes using this store now - every `queryapigate serve` worker,
+`mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
+
+~~~json
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.15.0",
+            "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
+            "this": true}],
+ "problems": []}
+~~~
+
+Each process records itself at startup and refreshes `last_seen` as it serves requests (at most every 30 seconds), so
+the health checks a deployment already runs keep an idle one listed. `problems` holds `instances_not_shared` and
+`instances_versions_differ`, the same as the alerts of those names; both are also logged at startup.
 
 ## Run history
 

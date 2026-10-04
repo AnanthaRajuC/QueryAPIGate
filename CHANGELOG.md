@@ -51,6 +51,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   configuration is locked as it opens. A refused path answers `403 path_not_allowed`.
 
 ### Added
+- **Which instances are running** (BACKLOG #58): `GET /api/v1/instances` lists every process using the store - role,
+  host, version, whether it shares limits through Redis - and two new alerts, also logged at startup, flag several
+  instances without Redis (`instances_not_shared`) and instances on different versions (`instances_versions_differ`).
+  The store moves to schema 6 for it (a new `instances` table), upgraded automatically on first start.
+- **Rolling upgrades, as a rule and a test** (BACKLOG #58): within 1.x a release changes the store only additively,
+  so the previous release keeps serving on a store the new one has upgraded - DEPLOYMENT.md's *Rolling upgrades*.
+  `tests/test_rolling_upgrade.py` runs the previous release from PyPI beside the current code on one store in CI.
+- **One instance runs the history retention sweep**: on a shared PostgreSQL store the instances take turns through an
+  advisory lock rather than all deleting the same rows. The Grafana dashboard's stat panels sum across instances;
+  DEPLOYMENT.md says how many PostgreSQL connections several instances need.
 - **Rate limits shared across instances** (BACKLOG #55). With `QUERYAPIGATE_REDIS_URL` set, the server-wide limit
   per client address and every key's (and signed-in user's) `rate_limit` are counted in Redis - an atomic token
   bucket on Redis's own clock - so every instance, and `queryapigate mcp` and `events`, enforce one budget instead of

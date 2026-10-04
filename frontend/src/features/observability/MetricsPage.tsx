@@ -184,8 +184,9 @@ export function MetricsPage() {
         <div className="titles">
           <h1>Metrics</h1>
           <span className="sub">
-            Live totals since this process started. For trends, scrape <code>/metrics</code> with Prometheus
-            and import the bundled Grafana dashboard.
+            Live totals since this process started - with several instances, this one only. For trends and
+            every instance together, scrape each one's <code>/metrics</code> with Prometheus and import the
+            bundled Grafana dashboard.
           </span>
         </div>
         <span className="spacer" />

@@ -169,6 +169,22 @@ class RetentionTests(HistoryTestCase):
                 self.assertEqual(history.sweep(now=now), 3)
             self.assertEqual(self.stored(), 2)
 
+    @unittest.skipUnless(TEST_DATABASE_URL, 'several instances only share a PostgreSQL store')
+    def test_while_another_instance_sweeps_this_one_skips(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '7'}):
+            now = datetime(2026, 3, 1, 12, 0, 0)
+            self.seed(3, now - timedelta(days=10))
+            other = db._open(db._target())  # another instance's session
+            try:
+                locked = other.execute('SELECT pg_try_advisory_lock(?)', (history._SWEEP_LOCK_ID,)).fetchone()[0]
+                self.assertTrue(locked)
+                self.assertEqual(history.sweep(now=now), 0)
+                self.assertEqual(self.stored(), 3)
+                other.execute('SELECT pg_advisory_unlock(?)', (history._SWEEP_LOCK_ID,))
+            finally:
+                other.close()
+            self.assertEqual(history.sweep(now=now), 3)
+
     def test_no_retention_no_sweep(self):
         self.seed(3, datetime(2000, 1, 1))
         self.assertEqual(history.sweep(), 0)

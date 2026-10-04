@@ -210,6 +210,31 @@ SCHEMAS = {
         'properties': {'items': {'type': 'array', 'items': _ref('Alert')},
                        'checked_at': {'type': 'string', 'description': 'Server time the checks ran.'}},
     },
+    'Instance': {
+        'type': 'object',
+        'required': ['id', 'host', 'pid', 'role', 'version', 'shared_limits', 'started_at', 'last_seen', 'this'],
+        'properties': {
+            'id': {'type': 'string'}, 'host': {'type': 'string'}, 'pid': {'type': 'integer'},
+            'role': {'type': 'string', 'enum': ['serve', 'mcp', 'events']},
+            'version': {'type': 'string'},
+            'shared_limits': {'type': 'boolean',
+                              'description': 'Whether it counts rate limits in Redis (QUERYAPIGATE_REDIS_URL).'},
+            'started_at': {'type': 'string'},
+            'last_seen': {'type': 'string', 'description': 'Refreshed at most every 30 seconds while it serves.'},
+            'this': {'type': 'boolean', 'description': 'The process answering this request.'},
+        },
+    },
+    'InstanceList': {
+        'type': 'object', 'required': ['items', 'problems'],
+        'properties': {
+            'items': {'type': 'array', 'items': _ref('Instance')},
+            'problems': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['kind', 'message'],
+                'properties': {'kind': {'type': 'string', 'enum': ['instances_not_shared',
+                                                                   'instances_versions_differ']},
+                               'message': {'type': 'string'}}}},
+        },
+    },
     'HistoryPage': {
         'type': 'object', 'required': ['items', 'next_cursor'],
         'properties': {'items': {'type': 'array', 'items': _ref('HistoryEntry')},
@@ -639,6 +664,10 @@ PATHS = {
     '/api/v1/alerts': {
         'get': _op('What needs attention now - expiring keys, failing connections, slow or failing queries, '
                    'rate limits being hit - most severe first', {'200': _ok(_ref('AlertList'))}),
+    },
+    '/api/v1/instances': {
+        'get': _op('The processes using this store now - serve, mcp and events, seen in the last 90 seconds - and '
+                   'what looks wrong about them', {'200': _ok(_ref('InstanceList'))}),
     },
     '/api/v1/audit': {
         'get': _op('Administrative changes, newest first', {'200': _ok(_ref('AuditLog'))}, parameters=[

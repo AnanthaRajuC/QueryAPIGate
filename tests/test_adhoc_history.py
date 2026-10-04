@@ -186,7 +186,8 @@ class SchemaFiveUpgradeTests(unittest.TestCase):
             self.assertFalse(db._history_requires_a_query(db.connection(), False))
             rows = db.connection().execute('SELECT rowid, query_name FROM execution_history ORDER BY rowid').fetchall()
             self.assertEqual([(r[0], r[1]) for r in rows], [(7, 'q'), (9, 'q')])
-            self.assertEqual(db.connection().execute('SELECT version FROM schema_version').fetchone()[0], 5)
+            version = db.connection().execute('SELECT version FROM schema_version').fetchone()[0]
+            self.assertEqual(version, db.SCHEMA_VERSION)
             db.connection().execute("INSERT INTO execution_history (executed_at, entry_json) VALUES ('now', '{}')")
             db.close()
 

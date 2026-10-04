@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime
 
-from . import __version__, apikeys, bundle, config, db, examples, experimental, logging_setup, postman, store
+from . import __version__, apikeys, bundle, config, db, examples, experimental, instances, logging_setup, postman, store
 from .app import create_app
 from .errors import ApiError
 
@@ -46,6 +46,7 @@ def _mcp(args):
         print('queryapigate: the "mcp" package is not installed - run `pip install "queryapigate[mcp]"`',
              file=sys.stderr)
         return 2
+    instances.register('mcp')  # create_app() recorded it as 'serve'
     logging.getLogger('queryapigate').info('Serving MCP tools for %s at http://%s:%s/mcp',
                                            config.home(), args.host, args.port)
     run(app, host=args.host, port=args.port)
@@ -79,6 +80,8 @@ def _events(args):
     logging_setup.configure(logging.getLogger('queryapigate'))
     experimental.warn_in_use(logging.getLogger('queryapigate'), os.environ, store.read_connections(),
                              also=('live_events',))
+    db.init_schema()
+    instances.register('events')
     from .events import run
     run(host=args.host, port=args.port)
     return 0

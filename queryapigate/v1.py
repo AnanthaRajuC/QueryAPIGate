@@ -14,7 +14,7 @@ Routes here translate HTTP to services/ calls and back; the meaning of each oper
 """
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from . import alerts, collection_admin, config, history, schema, sqlflow, store
+from . import alerts, collection_admin, config, history, instances, schema, sqlflow, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
 from .services import access, audit, collections, connections, mcp, queries
@@ -380,6 +380,13 @@ def delete_role(name):
 def list_alerts():
     """What needs an admin's attention now (alerts.py), worked out afresh each time."""
     return jsonify({'items': alerts.collect(), 'checked_at': store.now()}), 200
+
+
+@bp.route('/instances', methods=['GET'])
+def list_instances():
+    """The processes using this store right now (instances.py) - and what looks wrong about them."""
+    return jsonify({'items': instances.alive(),
+                    'problems': [{'kind': kind, 'message': message} for kind, message in instances.problems()]}), 200
 
 
 @bp.route('/history', methods=['GET'])

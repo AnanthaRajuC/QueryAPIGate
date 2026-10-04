@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import apikeys, config, db, history, metrics, ratelimit
+from . import apikeys, config, db, history, instances, metrics, ratelimit
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -229,6 +229,14 @@ def _rate_limited():
 def _history_health():
     counts = metrics.history_counts()
     found = []
+    try:
+        for kind, message in instances.problems():
+            found.append(_alert('warning', kind, 'server', {
+                'instances_not_shared': 'Instances share this store without sharing rate limits',
+                'instances_versions_differ': 'Instances are running different versions'}[kind], message,
+                {'type': 'settings', 'name': 'traffic'}))
+    except Exception:  # an older store without the instances table, say - no alert rather than no alerts
+        pass
     since = ratelimit.degraded()
     if since is not None:
         found.append(_alert(

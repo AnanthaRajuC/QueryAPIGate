@@ -302,7 +302,8 @@ def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
     plain function so it can be tested without the SDK. It applies exactly what REST's request hooks apply
     (governance.py): the client's rate limit, authentication by API key or bearer token, the caller's own rate limit,
     and a request in /metrics (method MCP, endpoint mcp.<tool kind>)."""
-    from . import governance
+    from . import governance, instances
+    instances.heartbeat()
     started = time.monotonic()
     permission = None
     verdict = governance.check_client_limit(flask_app, client_ip)

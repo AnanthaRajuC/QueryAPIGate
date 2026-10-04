@@ -195,4 +195,6 @@ mkdocs serve
    python tests/fixtures/stores/generate.py --postgres postgresql://postgres:pw@localhost:5432/postgres \
      /tmp/qag-X.Y.Z/bin/queryapigate   # a scratch database; needs pg_dump on PATH
    ~~~
-4. Retake the screenshots (`npm run screenshots`, above) - the Console's Help now reads that release's docs.
+4. Point the rolling-upgrade test at it: set `queryapigate[postgres]==X.Y.Z` in CI's "previous release" step
+   (`.github/workflows/ci.yml`), so the next version is tested serving beside this one on an upgraded store.
+5. Retake the screenshots (`npm run screenshots`, above) - the Console's Help now reads that release's docs.

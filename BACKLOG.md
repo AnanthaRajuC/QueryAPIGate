@@ -1824,8 +1824,15 @@ Estimate: 1-2 days.
 
 ## 58. Multi-instance operational polish
 
-**Status: open.** Smaller items found while assessing #55-#57; none blocks running several instances, but
-each is something an operator would trip over.
+**Status: shipped (for 0.15).** Metrics across nodes: documented (scrape each; the dashboard's stat panels now sum),
+the Console's Metrics screen is per instance. Cache actions without Redis, and every other "several instances without
+Redis" case: the new instances table (schema 6, `instances.py`, `GET /api/v1/instances`) and the
+`instances_not_shared` alert, logged at startup too. Rolling upgrades: the additive-changes rule in DEPLOYMENT.md, a
+version-skew alert, and `tests/test_rolling_upgrade.py` running the previous release from PyPI on an upgraded store.
+Connection budget: documented, with PgBouncer in session mode. Retention sweep: one instance at a time, through
+`pg_try_advisory_lock`.
+
+Original notes:
 
 **Impact and notes, per item:**
 - **Metrics across nodes.** `/metrics` is in-process, which is normal for Prometheus (scrape every node, sum
