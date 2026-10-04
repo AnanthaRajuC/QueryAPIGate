@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import apikeys, config, create_app, mcp_server, store
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 try:
     import mcp  # noqa: F401
@@ -43,10 +43,10 @@ class McpTestCase(unittest.TestCase):
         self.admin_headers = {'X-API-Key': 'admin-key'}
 
     def save(self, filename, sql='SELECT * FROM t ORDER BY id', **extra):
-        res = self.client.patch('/save_sql_to_file', json={
+        res = save_query(self.client, {
             'author': 'a', 'description': 'd', 'sql_query': sql, 'filename': filename,
             'connection_name': 'a', **extra}, headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 
     def catalog(self, headers):
         res = self.client.get('/catalog', headers=headers)
@@ -54,9 +54,9 @@ class McpTestCase(unittest.TestCase):
         return res.get_json()['queries']
 
     def create_scoped_key(self, **fields):
-        res = self.client.post('/api_keys', json={'name': 'scoped', 'connections': [], **fields},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': [], **fields},
                                headers=self.admin_headers)
-        return res.get_json()['key']
+        return res.get_json()['secret']
 
 
 class IsReadOnlyTests(unittest.TestCase):

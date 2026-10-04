@@ -11,6 +11,7 @@ from unittest import mock
 from queryapigate import config, create_app, runners, schema, sqltools
 from queryapigate.errors import ApiError
 from tests import helpers
+from tests.helpers import put_connections
 
 
 class ConfigTests(unittest.TestCase):
@@ -126,11 +127,11 @@ class ConnectionApiTests(unittest.TestCase):
         self.client = create_app().test_client()
 
     def test_a_jdbc_connection_can_be_saved_and_listed(self):
-        res = self.client.patch('/connections', json={'connections': {'ora': {
+        res = put_connections(self.client, {'ora': {
             'db': 'jdbc', 'jar': '/opt/ojdbc.jar', 'driver_class': 'oracle.jdbc.OracleDriver',
-            'jdbc_url': 'jdbc:oracle:thin:@host:1521:orcl', 'user': 'app', 'password': 'secret', 'active': True}}})
-        self.assertEqual(res.status_code, 200)
-        listed = self.client.get('/connections').get_json()['connections']['ora']
-        self.assertEqual(listed['driver_class'], 'oracle.jdbc.OracleDriver')
-        self.assertEqual(listed['jdbc_url'], 'jdbc:oracle:thin:@host:1521:orcl')
+            'jdbc_url': 'jdbc:oracle:thin:@host:1521:orcl', 'user': 'app', 'password': 'secret', 'active': True}})
+        self.assertEqual(res.status_code, 201)
+        listed = self.client.get('/api/v1/connections/ora').get_json()
+        self.assertEqual(listed['options']['driver_class'], 'oracle.jdbc.OracleDriver')  # driver settings
+        self.assertEqual(listed['options']['jdbc_url'], 'jdbc:oracle:thin:@host:1521:orcl')
         self.assertEqual(listed['password'], config.PASSWORD_MASK)  # masked like every other connection

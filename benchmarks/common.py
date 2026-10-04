@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -167,18 +168,26 @@ def build_connections_file(home, dialect, details, file_path=None, name='bench')
 
 
 def save_query(server, filename, sql_query, connection_name='bench', cache_ttl=None, query_parameters=None):
-    """Creates (or replaces) a saved query over the real admin HTTP API, the same PATCH /save_sql_to_file
-    every real client uses - not a direct store.py call, so this benchmark exercises the exact same code
-    path a saved query normally goes through (parameter validation, versioning) rather than a shortcut."""
+    """Creates a saved query - or adds a version to one - published at once, over the real Management API
+    (POST /api/v1/queries), not a direct store.py call, so this benchmark exercises the exact same code path a saved
+    query normally goes through (parameter validation, versioning) rather than a shortcut."""
     body = {
-        'filename': filename, 'author': 'benchmarks', 'description': 'benchmarks/README.md scratch query',
-        'sql_query': sql_query, 'connection_name': connection_name, 'query_parameters': query_parameters or {},
+        'description': 'benchmarks/README.md scratch query', 'author': 'benchmarks', 'sql': sql_query,
+        'connection_name': connection_name, 'parameters': query_parameters or {}, 'publish': True,
     }
     if cache_ttl is not None:
         body['cache_ttl'] = cache_ttl
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(f'http://127.0.0.1:{server.port}/save_sql_to_file', data=data,
-                                 headers={'Content-Type': 'application/json'}, method='PATCH')
-    with urllib.request.urlopen(req, timeout=30) as res:
-        if res.status != 200:
-            raise RuntimeError(f'save_query failed: HTTP {res.status}')
+
+    def post(path, payload):
+        req = urllib.request.Request(f'http://127.0.0.1:{server.port}{path}', data=json.dumps(payload).encode(),
+                                     headers={'Content-Type': 'application/json'}, method='POST')
+        with urllib.request.urlopen(req, timeout=30) as res:
+            if res.status != 201:
+                raise RuntimeError(f'save_query failed: HTTP {res.status}')
+
+    try:
+        post('/api/v1/queries', {'name': filename, **body})
+    except urllib.error.HTTPError as error:
+        if error.code != 409:  # 409: it exists already - add a version instead
+            raise
+        post(f'/api/v1/queries/{urllib.parse.quote(filename)}/versions', body)

@@ -18,7 +18,7 @@ Security fixes are made against the latest released version.
 
 - Set `QUERYAPIGATE_API_KEY`, and put the service behind TLS (a reverse proxy) - the key is sent in a header. It is a
   full-access admin key; give anyone or anything that only needs to run queries a scoped key instead
-  (`POST /api_keys`), limited to specific connections and, separately, to read-only access.
+  (`POST /api/v1/api-keys`), limited to specific connections and, separately, to read-only access.
 - Leave `QUERYAPIGATE_ALLOW_WRITES` unset unless you really need writes, and connect with a database account that only
   has the privileges the API should have. The read-only guard - including the single-statement check it relies on -
   is defence in depth, not a substitute for grants; it is dialect-aware (MySQL/ClickHouse honour backslash escapes
@@ -33,4 +33,4 @@ Security fixes are made against the latest released version.
 - Keep the query time limit (`QUERYAPIGATE_QUERY_TIMEOUT`, 30 seconds by default) and `QUERYAPIGATE_MAX_PAGE_SIZE` so one
   expensive request cannot monopolise the service; setting the timeout to `0` removes that protection.
 - Prefer bound `:name` parameters over `{name}` text placeholders.
-- Note that `GET /connections` reveals hosts, ports, users and database names (passwords are masked).
+- Note that `GET /api/v1/connections` reveals hosts, ports, users and database names (passwords are masked).

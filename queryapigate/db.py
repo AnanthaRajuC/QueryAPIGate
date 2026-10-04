@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS execution_history (
   version INTEGER NOT NULL,
   executed_at TEXT NOT NULL,
   entry_json TEXT NOT NULL,
-  status TEXT,    -- copies of entry_json's own status/key_name, as real columns so GET /history can filter on
+  status TEXT,    -- copies of entry_json's own status/key_name, as real columns so GET /api/v1/history can filter on
   key_name TEXT,  -- them the same way on both backends (schema 3; see _upgrade())
   FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
 );

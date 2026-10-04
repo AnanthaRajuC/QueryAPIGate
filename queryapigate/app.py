@@ -18,7 +18,6 @@ from . import (
     apikeys,
     broadcast,
     cache,
-    collection_admin,
     config,
     console,
     cors,
@@ -26,16 +25,12 @@ from . import (
     definitions,
     engine,
     examples,
-    history,
     jwtauth,
     logging_setup,
     metrics,
     mongotools,
     openapi,
-    pool,
-    postman,
     schema,
-    sqlflow,
     sqltools,
     store,
 )
@@ -56,27 +51,10 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
-# Legacy management routes replaced by an /api/v1 resource (v1.py, BACKLOG #72). They keep working; responses say so
-# (RFC 9745 Deprecation header, plus a Link to the successor) and /openapi.json marks them.
-DEPRECATED_ENDPOINTS = {
-    **dict.fromkeys(('api.list_files', 'api.view_file_content', 'api.save_sql_to_file', 'api.delete_saved_query',
-                     'api.move_query', 'api.set_query_cache_ttl', 'api.query_flow'), '/api/v1/queries'),
-    **dict.fromkeys(('api.get_connections', 'api.update_connections', 'api.list_databases_route',
-                     'api.test_connection_route', 'api.delete_connection'), '/api/v1/connections'),
-    **dict.fromkeys(('api.get_api_keys', 'api.create_api_key', 'api.update_api_key', 'api.delete_api_key'),
-                    '/api/v1/api-keys'),
-    **dict.fromkeys(('api.get_roles', 'api.create_role_endpoint', 'api.update_role_endpoint',
-                     'api.delete_role_endpoint'), '/api/v1/roles'),
-    'api.audit_log_endpoint': '/api/v1/audit',
-    'api.history_endpoint': '/api/v1/history',
-    'api.settings_endpoint': '/api/v1/settings',
-    'api.mcp_status_endpoint': '/api/v1/mcp/status',
-    'api.mcp_tools_endpoint': '/api/v1/mcp/tools',
-    **dict.fromkeys(('api.cache_entries', 'api.clear_cache_entries', 'api.cache_entry_body',
-                     'api.delete_cache_entry'), '/api/v1/cache/entries'),
-    **dict.fromkeys(('api.get_collections', 'api.rename_collection', 'api.collection_postman'), '/api/v1/collections'),
-    **dict.fromkeys(('api.get_examples', 'api.load_examples', 'api.unload_examples'), '/api/v1/examples'),
-}  # endpoint -> its successor
+# Routes on their way out: each sends a Deprecation header (RFC 9745) and a Link to its successor, and /openapi.json
+# marks it. None today - the legacy management routes were removed once /api/v1 replaced them (BACKLOG #72); this is
+# how a 1.x deprecation is announced before 2.0 removes it.
+DEPRECATED_ENDPOINTS: dict[str, str] = {}  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
                      405: 'method_not_allowed', 409: 'conflict', 412: 'precondition_failed', 413: 'payload_too_large',
@@ -172,7 +150,7 @@ def create_app():
                     'queries or other API keys until it is - only a scoped key\'s own allowed connections work.')
     if config.secret_key():
         # Encrypt any literal password already on disk immediately, rather than waiting for its next
-        # PATCH /connections - a connection saved before QUERYAPIGATE_SECRET_KEY existed benefits right away.
+        # PATCH /api/v1/connections - a connection saved before QUERYAPIGATE_SECRET_KEY existed benefits right away.
         store.encrypt_plaintext_passwords_in_place()
     else:
         encrypted = store.encrypted_password_connections()
@@ -368,21 +346,6 @@ def caller_key_name():
     before permission is resolved, e.g. while rendering a CORS preflight or a 429 in decorate()."""
     permission = g.get('permission')
     return (permission.name if permission else None) or '-'
-
-
-def _dict_diff(before, after):
-    """{field: {'from':.., 'to':..}} for every field that differs between two dicts (union of both sets of
-    keys) - used to build audit_log 'changes' for an update. Only the fields that actually changed, not the
-    whole entry, so a reviewer doesn't have to spot the difference themselves."""
-    keys = set(before or {}) | set(after or {})
-    return {k: {'from': (before or {}).get(k), 'to': (after or {}).get(k)}
-            for k in keys if (before or {}).get(k) != (after or {}).get(k)}
-
-
-def _connection_audit_changes(before, after):
-    """A connection's changed fields for the audit log - one implementation, shared with /api/v1/connections."""
-    from .services import connections as connection_service
-    return connection_service.audit_changes(before, after)
 
 
 def get_json_body(required=True):
@@ -790,190 +753,8 @@ def run_named_query(name):
 
 
 # --------------------------------------------------------------------------------------
-# Saved queries
+# Live events
 # --------------------------------------------------------------------------------------
-
-@bp.route('/view_file_content', methods=['GET'])
-def view_file_content():
-    """The admin UI's "Show raw file" toggle. No real file exists once saved queries live in SQLite, so
-    this reconstructs the same JSON text a saved-query file always looked like (same shape
-    store.load_versions() returns, same indent=4 the old write_json_atomic() used) - the UI already just
-    JSON.parses this string and reads it the normal way, so it can't tell the difference."""
-    require_admin()
-    path = store.resolve_saved_file(request.args.get('filename'))
-    content = store.load_versions(path)
-    return jsonify({'content': json.dumps(content, indent=4)}), 200
-
-
-@bp.route('/query_flow', methods=['GET'])
-def query_flow():
-    """Best-effort tables/joins a saved query's SQL touches - see sqlflow.py. Never raises: a query this
-    can't analyze (unsupported dialect, a Mongo query, a parse failure) comes back with an `error` string
-    and empty tables/joins for the UI to show as a plain hint, not a broken panel."""
-    require_admin()
-    path = store.resolve_saved_file(request.args.get('filename'))
-    content = store.load_versions(path)
-    _, saved = store.select_version(content, get_int(request.args.get('version'), 'version'), default='latest')
-    if saved.get('query_type') == 'mongo' or not isinstance(saved.get('sql_query'), str):
-        return jsonify({'tables': [], 'joins': [], 'formatted': None,
-                        'error': "SQL analysis isn't available for this query"}), 200
-    connection_name = saved.get('connection_name')
-    dialect = store.get_connection(connection_name)['db'] if connection_name else None
-    return jsonify(sqlflow.extract_flow(saved['sql_query'], dialect)), 200
-
-
-@bp.route('/save_sql_to_file', methods=['PATCH'])
-def save_sql_to_file():
-    require_admin()
-    data = get_json_body()
-    fields, collection = definitions.validate_definition(data)
-    query_uuid, version = store.save_version(data['filename'], fields, collection)
-    audit = {'version': version, 'connection_name': fields.get('connection_name'), 'author': data['author']}
-    if collection is not definitions.NO_COLLECTION_GIVEN:
-        audit['collection'] = collection
-    store.record_audit(caller_key_name(), 'save_query', data['filename'], audit)
-    return jsonify({'message': 'SQL query saved successfully', 'filename': data['filename'],
-                    'uuid': query_uuid, 'version': version}), 200
-
-
-@bp.route('/saved_sql/<name>', methods=['DELETE'])
-def delete_saved_query(name):
-    require_admin()
-    version = get_int(request.args.get('version'), 'version')
-    store.delete_saved(name, version)
-    store.record_audit(caller_key_name(), 'delete_query', name,
-                       {'version': version} if version is not None else None)
-    what = f'Version {version} of {name}' if version is not None else name
-    return jsonify({'message': f'{what} deleted'}), 200
-
-
-@bp.route('/saved_sql/<name>/collection', methods=['PUT'])
-def move_query(name):
-    """File a saved query under a collection (``{"collection": "name"}``) or take it out of any
-    (``{"collection": null}``). Not a new version. Because a key's collection grant is live, this is the one
-    edit that can change what other keys can reach without touching them - so the audit entry records exactly
-    which keys and roles gain or lose access, and so does the response."""
-    require_admin()
-    data = get_json_body()
-    if 'collection' not in data:
-        raise ApiError('collection is missing (use null to remove the query from its collection)')
-    path = store.resolve_saved_file(name)
-    query = store.query_name(path)
-    previous = store.set_collection(name, data['collection'])
-    current = data['collection']
-    access = collection_admin.access_change(previous, current)
-    if previous != current:
-        # Flat lists (not the nested `access` object the response carries) so the audit view can show each on
-        # its own line; empty ones are thinned out of a snapshot like any other unset field.
-        store.record_audit(caller_key_name(), 'move_query', query,
-                           {'collection': {'from': previous, 'to': current},
-                            'keys_gaining_access': access['keys']['gain'],
-                            'keys_losing_access': access['keys']['lose'],
-                            'roles_now_including': access['roles']['gain'],
-                            'roles_no_longer_including': access['roles']['lose']})
-    return jsonify({'message': f"'{query}' moved", 'filename': query, 'from': previous, 'to': current,
-                    'access': access}), 200
-
-
-@bp.route('/saved_sql/<name>/cache_ttl', methods=['PUT'])
-def set_query_cache_ttl(name):
-    """Set (``{"cache_ttl": <seconds>}``) or clear (``0`` or ``null``) one version's cache_ttl in place -
-    not a new version, same treatment as move_query() above for a query's collection. ?version= targets a
-    specific version; omitted means the newest one (published or a draft)."""
-    require_admin()
-    data = get_json_body()
-    if 'cache_ttl' not in data:
-        raise ApiError('cache_ttl is missing (use 0 or null to turn caching off)')
-    ttl = data['cache_ttl']
-    definitions.validate_cache_ttl(ttl)
-    version = get_int(request.args.get('version'), 'version')
-    path = store.resolve_saved_file(name)
-    query = store.query_name(path)
-    number = store.set_cache_ttl(name, version, ttl)
-    store.record_audit(caller_key_name(), 'set_cache_ttl', query, {'version': number, 'cache_ttl': ttl or None})
-    return jsonify({'message': f"'{query}' v{number} cache_ttl updated", 'filename': query, 'version': number,
-                    'cache_ttl': ttl or None}), 200
-
-
-@bp.route('/collections', methods=['GET'])
-def get_collections():
-    require_admin()
-    return jsonify(collection_admin.describe()), 200
-
-
-@bp.route('/examples', methods=['GET'])
-def get_examples():
-    require_admin()
-    return jsonify(examples.status()), 200
-
-
-@bp.route('/examples', methods=['POST'])
-def load_examples():
-    """Install the example APIs (see examples.py). Idempotent; 409 and nothing changed if something that is not an
-    example already holds one of their names."""
-    require_admin()
-    added = examples.load()
-    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
-        store.record_audit(caller_key_name(), 'load_examples', 'examples', examples.redact_for_audit(added))
-    return jsonify({'message': 'Examples loaded', **added, **examples.status()}), 200
-
-
-@bp.route('/examples', methods=['DELETE'])
-def unload_examples():
-    """Remove exactly what is marked as an example - nothing else."""
-    require_admin()
-    removed = examples.unload()
-    if removed['connection'] or removed['queries'] or removed['roles'] or removed['keys']:
-        store.record_audit(caller_key_name(), 'unload_examples', 'examples', removed)
-    return jsonify({'message': 'Examples removed', **removed}), 200
-
-
-@bp.route('/collections/<name>/postman', methods=['GET'])
-def collection_postman(name):
-    """The collection as a Postman Collection v2.1 file (a download). Admin only; the base URL is the one this
-    request arrived on, and the file holds no key - see postman.py."""
-    require_admin()
-    document = postman.build_collection(name, request.host_url)
-    response = jsonify(document)
-    response.headers['Content-Disposition'] = f'attachment; filename="{name}.postman_collection.json"'
-    return response, 200
-
-
-@bp.route('/collections/<name>', methods=['PATCH'])
-def rename_collection(name):
-    require_admin()
-    data = get_json_body()
-    new = data.get('name')
-    if not isinstance(new, str):
-        raise ApiError('name (the new collection name) is missing')
-    merge = data.get('merge', False)
-    if not isinstance(merge, bool):
-        raise ApiError('merge must be true or false')
-    result = collection_admin.rename_collection(name, new, merge=merge)
-    store.record_audit(caller_key_name(), 'rename_collection', name, {'to': new, **result})
-    return jsonify({'message': f"Collection '{name}' renamed to '{new}'", **result}), 200
-
-
-@bp.route('/list_files', methods=['GET'])
-def list_files():
-    require_admin()
-    sort_by = request.args.get('sort_by', 'name')
-    if sort_by not in ('name', 'modified'):
-        raise ApiError("sort_by must be 'name' or 'modified'")
-    sort_order = request.args.get('sort_order', 'asc')
-    if sort_order not in ('asc', 'desc'):
-        raise ApiError("sort_order must be 'asc' or 'desc'")
-
-    files = store.list_saved()
-    if sort_by == 'name':
-        def key(f):
-            return f['filename'].lower()
-    else:
-        def key(f):
-            return (f['versions'][-1].get('last_modified_at') or '') if f['versions'] else ''
-    files.sort(key=key, reverse=sort_order == 'desc')
-    return jsonify({'files': files}), 200
-
 
 _SSE_HEARTBEAT_SECONDS = 15  # module constant so tests can shrink it
 _open_streams = 0  # GET /events streams this process holds open right now - see stream_events()
@@ -987,8 +768,8 @@ def stream_events():
     tab; open to any authenticated key now, each getting its own personal activity feed - a scoped key sees
     only executions triggered by that same key (broadcast.Broadcaster's key_name filter), the admin key
     keeps its original unfiltered view of everything, matching the admin-sees-all/scoped-sees-its-own
-    pattern /catalog already uses elsewhere. Still requires a real key or open-access mode - never public -
-    replaces polling /list_files every 5s for the admin UI's own panel.
+    pattern /catalog already uses elsewhere. Still requires a real key or open-access mode - never public. The
+    Console's Home reads it to stay live.
 
     The client reads this with fetch()'s streamed response body rather than a plain `new EventSource(...)`:
     EventSource cannot set custom request headers, and this app has no cookie-based auth to fall back on -
@@ -1045,97 +826,6 @@ def stream_events():
 # Connections
 # --------------------------------------------------------------------------------------
 
-@bp.route('/connections', methods=['GET'])
-def get_connections():
-    require_admin()
-    connections = store.mask_passwords(store.read_connections())
-    for name, conn in connections.items():
-        conn['usage'] = metrics.summary_for_connection(name)
-    return jsonify({'connections': connections}), 200
-
-
-@bp.route('/connections', methods=['PATCH'])
-def update_connections():
-    require_admin()
-    connections = get_json_body().get('connections')
-    if not connections or not isinstance(connections, dict):
-        raise ApiError('Connections data is missing')
-    before = store.read_connections()  # raw, unmasked - in memory only, never itself logged; see below
-    store.update_connections(connections)
-    after = store.read_connections()
-    actor = caller_key_name()
-    for name in connections:
-        if name not in before:
-            store.record_audit(actor, 'create_connection', name, store.mask_passwords({name: after[name]})[name])
-        else:
-            changes = _connection_audit_changes(before.get(name), after.get(name))
-            if changes:
-                store.record_audit(actor, 'update_connection', name, changes)
-    pool.close_pooled_connections()  # new settings or credentials must not be served by old connections
-    return jsonify({'message': 'Connections updated successfully'}), 200
-
-
-@bp.route('/connections/databases', methods=['POST'])
-def list_databases_route():
-    """Every database on the server a connection points at - saved, or not yet saved. Give 'name' alone for
-    an already-saved connection (Run SQL's database picker); give the connection's own fields (as
-    /connections/test does) to probe one that isn't saved yet - the New/Edit connection form's 'Default
-    database' dropdown - or to try changed fields before saving them. Admin only, like every other endpoint
-    that reveals the server's own configuration or reaches into a connection's server ahead of a real query."""
-    require_admin()
-    body = get_json_body()
-    if not isinstance(body, dict):
-        raise ApiError('Connection fields are missing')
-    if body.get('name') and not body.get('db'):
-        databases = schema.list_databases(body['name'])
-    else:
-        if body.get('db') not in config.SUPPORTED_DB_TYPES:
-            raise ApiError(f"'db' must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}")
-        if body.get('password') == config.PASSWORD_MASK:
-            existing = store.read_connections().get(body.get('name') or '', {})
-            body = {**body, 'password': existing.get('password', '')}
-        databases = engine.list_databases(store.resolve_ad_hoc(body))
-    return jsonify({'databases': databases}), 200
-
-
-@bp.route('/connections/test', methods=['POST'])
-def test_connection_route():
-    """Try to connect with the given fields - not a saved connection's name, the fields themselves, exactly
-    as the New/Edit connection form has them right now. Nothing is written anywhere; a masked password
-    (unchanged from an existing connection's form) is resolved to the real stored value first, the same way
-    update_connections() already treats one."""
-    require_admin()
-    details = get_json_body()
-    if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
-        raise ApiError(f"'db' must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}")
-    if details.get('password') == config.PASSWORD_MASK:
-        existing = store.read_connections().get(details.get('name') or '', {})
-        details = {**details, 'password': existing.get('password', '')}
-    result = engine.test_connection(store.resolve_ad_hoc(details))
-    return jsonify({'message': 'Connected', **result}), 200
-
-
-@bp.route('/connections/<name>', methods=['DELETE'])
-def delete_connection(name):
-    """Deleting a connection is destructive and hard to reason about after the fact - every saved query that
-    used it stops working - so the caller must say why. The reason is stored nowhere but the audit log (there
-    is no separate "deleted connections" table); the admin UI's own Deleted tab reads it straight from there,
-    the same as everything else on this route already does."""
-    require_admin()
-    before = store.read_connections().get(name)
-    if before is None:
-        raise ApiError(f"Connection '{name}' not found", 404)
-    data = get_json_body(required=False)
-    reason = (data.get('reason') or '').strip()
-    if not reason:
-        raise ApiError('A reason is required to delete a connection')
-    store.delete_connection(name)
-    changes = {**store.mask_passwords({name: before})[name], 'deleted_reason': reason}
-    store.record_audit(caller_key_name(), 'delete_connection', name, changes)
-    pool.close_pooled_connections()  # a removed connection must not keep serving from idle sockets
-    return jsonify({'message': f"Connection '{name}' deleted"}), 200
-
-
 @bp.route('/connections/<name>/schema', methods=['GET'])
 def connection_schema(name):
     require_connection(name)
@@ -1157,216 +847,6 @@ def connection_table_ddl(name):
     if database and not g.permission.admin:
         raise ApiError('Only the admin key may browse a different database on this connection', 403)
     return jsonify(schema.fetch_table_ddl(name, table, database=database)), 200
-
-
-# --------------------------------------------------------------------------------------
-# API keys
-# --------------------------------------------------------------------------------------
-
-@bp.route('/api_keys', methods=['GET'])
-def get_api_keys():
-    require_admin()
-    keys = apikeys.list_keys()
-    for name, key in keys.items():
-        key['usage'] = metrics.summary_for_key(name)
-    return jsonify({'keys': keys}), 200
-
-
-@bp.route('/api_keys', methods=['POST'])
-def create_api_key():
-    require_admin()
-    data = get_json_body()
-    secret = apikeys.create_key(data.get('name'), connections=data.get('connections'),
-                                allow_writes=data.get('allow_writes'), queries=data.get('queries'),
-                                expires_at=data.get('expires_at'), rate_limit=data.get('rate_limit'),
-                                allowed_ips=data.get('allowed_ips'),
-                                allowed_write_ops=data.get('allowed_write_ops'), role=data.get('role'),
-                                collections=data.get('collections'), allowed_tables=data.get('allowed_tables'))
-    store.record_audit(caller_key_name(), 'create_key', data.get('name'), apikeys.list_keys().get(data.get('name')))
-    return jsonify({'name': data.get('name'), 'key': secret,
-                    'message': "Store this key now - it can't be shown again."}), 200
-
-
-@bp.route('/api_keys/<name>', methods=['PATCH'])
-def update_api_key(name):
-    require_admin()
-    data = get_json_body()
-    before = apikeys.list_keys().get(name)
-    # expires_at, rate_limit, allowed_ips and allowed_write_ops all need a real presence check, not .get():
-    # an explicit null in the request body means "clear it", which must be distinguishable from the field
-    # being absent ("leave it alone") - see apikeys.update_key's _UNSET sentinel.
-    unset_kwargs = {k: data[k] for k in
-                    ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables')
-                    if k in data}
-    apikeys.update_key(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
-                       active=data.get('active'), queries=data.get('queries'),
-                       collections=data.get('collections'), **unset_kwargs)
-    changes = _dict_diff(before, apikeys.list_keys().get(name))
-    if changes:
-        store.record_audit(caller_key_name(), 'update_key', name, changes)
-    return jsonify({'message': f"API key '{name}' updated"}), 200
-
-
-@bp.route('/api_keys/<name>', methods=['DELETE'])
-def delete_api_key(name):
-    require_admin()
-    before = apikeys.list_keys().get(name)
-    apikeys.delete_key(name)
-    store.record_audit(caller_key_name(), 'delete_key', name, before)
-    return jsonify({'message': f"API key '{name}' deleted"}), 200
-
-
-@bp.route('/roles', methods=['GET'])
-def get_roles():
-    require_admin()
-    return jsonify({'roles': apikeys.list_roles()}), 200
-
-
-@bp.route('/roles', methods=['POST'])
-def create_role_endpoint():
-    require_admin()
-    data = get_json_body()
-    apikeys.create_role(data.get('name'), connections=data.get('connections'),
-                        allow_writes=bool(data.get('allow_writes', False)), queries=data.get('queries'),
-                        rate_limit=data.get('rate_limit'), allowed_ips=data.get('allowed_ips'),
-                        allowed_write_ops=data.get('allowed_write_ops'), collections=data.get('collections'),
-                        allowed_tables=data.get('allowed_tables'))
-    store.record_audit(caller_key_name(), 'create_role', data.get('name'), apikeys.list_roles().get(data.get('name')))
-    return jsonify({'message': f"Role '{data.get('name')}' created"}), 200
-
-
-@bp.route('/roles/<name>', methods=['PATCH'])
-def update_role_endpoint(name):
-    require_admin()
-    data = get_json_body()
-    before = apikeys.list_roles().get(name)
-    # Same _UNSET-sentinel presence check update_api_key() already uses for these three fields.
-    unset_kwargs = {k: data[k] for k in ('rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables')
-                    if k in data}
-    apikeys.update_role(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
-                        queries=data.get('queries'), collections=data.get('collections'), **unset_kwargs)
-    changes = _dict_diff(before, apikeys.list_roles().get(name))
-    if changes:
-        store.record_audit(caller_key_name(), 'update_role', name, changes)
-    return jsonify({'message': f"Role '{name}' updated"}), 200
-
-
-@bp.route('/roles/<name>', methods=['DELETE'])
-def delete_role_endpoint(name):
-    require_admin()
-    before = apikeys.list_roles().get(name)
-    apikeys.delete_role(name)
-    store.record_audit(caller_key_name(), 'delete_role', name, before)
-    return jsonify({'message': f"Role '{name}' deleted"}), 200
-
-
-@bp.route('/audit_log', methods=['GET'])
-def audit_log_endpoint():
-    """A durable record of administrative changes - who created, changed or removed an API key, connection
-    or saved query, and when (see store.record_audit()). Admin only, like everything else that reveals the
-    server's own configuration; newest entry first, capped at config.audit_log_limit()."""
-    require_admin()
-    return jsonify({'entries': list(reversed(store.read_audit_log()))}), 200
-
-
-@bp.route('/history', methods=['GET'])
-def history_endpoint():
-    """Every stored run of every saved query, newest first and paged - for looking past the newest runs per
-    version that /list_files and the admin UI show, e.g. "every failed call by the partner key last week" over
-    a retention period's worth of history (QUERYAPIGATE_HISTORY_RETENTION_DAYS). Filters: query, version,
-    status (success|error), key, since (inclusive) and until (exclusive) - a date or a time. Admin only: it
-    reveals every key's activity. Pass the response's `next` back as ?cursor= for the following page."""
-    require_admin()
-    args = request.args
-    limit = get_int(args.get('limit'), 'limit')
-    entries, next_cursor = history.search(
-        query=args.get('query'), version=get_int(args.get('version'), 'version'), status=args.get('status'),
-        key=args.get('key'), since=args.get('since'), until=args.get('until'),
-        limit=100 if limit is None else limit, cursor=args.get('cursor'))
-    return jsonify({'entries': entries, 'next': next_cursor}), 200
-
-
-@bp.route('/settings', methods=['GET'])
-def settings_endpoint():
-    """The server's own configuration as the admin UI's Settings screen shows it: every environment variable
-    that matters, its effective value and whether it was set or is the default. Read-only, and admin only
-    like the rest of what reveals the server's configuration. Secrets are reported as configured or not,
-    never returned."""
-    require_admin()
-    return jsonify({'sections': config.describe_settings()}), 200
-
-
-@bp.route('/settings/mcp_status', methods=['GET'])
-def mcp_status_endpoint():
-    """An on-demand reachability probe for the separate `queryapigate mcp` process (BACKLOG #54's own
-    still-open "no reachability check" note) - a plain TCP connect attempt against its configured port, not
-    a full MCP handshake, so it costs nothing beyond a bounded-timeout socket connect. Deliberately never
-    run automatically alongside GET /settings, which is exactly why #54 skipped this originally (a probe's
-    own latency and failure mode added to every settings load) - the admin UI only calls this on an explicit
-    "Check now" click."""
-    require_admin()
-    from .services import mcp as mcp_service
-    return jsonify(mcp_service.status()), 200
-
-
-@bp.route('/settings/mcp_tools', methods=['GET'])
-def mcp_tools_endpoint():
-    """What `tools/list` currently returns for an unrestricted (admin) caller, computed in-process via
-    mcp_server.list_tools_for() - the exact function the real MCP server itself calls - rather than a live
-    probe of that separate process, so this works whether or not `queryapigate mcp` actually happens to be
-    running right now. BACKLOG #54's own still-open "tool-listing panel" note."""
-    require_admin()
-    from .services import mcp as mcp_service
-    return jsonify({'tools': mcp_service.tools()}), 200
-
-
-# --------------------------------------------------------------------------------------
-# Cache entries - the admin UI's Caching screen "browse the cache" panel. Scoped to what
-# QueryAPIGate itself put in the response cache (in-process or Redis, whichever is
-# configured - see cache.py/rediscache.py, both implementing the same list_entries()/
-# get_body()/delete()/clear() shape) rather than a general key-value browser: Redis here
-# is an internal cache implementation detail, not a modeled connection.
-# --------------------------------------------------------------------------------------
-
-@bp.route('/cache/entries', methods=['GET'])
-def cache_entries():
-    """Every live cache entry's metadata (name/version/connection/format/page, content type, size, TTL
-    remaining) - never the body itself, so listing stays cheap. Admin only, like everything else that
-    reveals server-side state a caller didn't ask for."""
-    require_admin()
-    entries = current_app.extensions['queryapigate_cache'].list_entries()
-    entries.sort(key=lambda e: e['ttl_remaining_s'])
-    return jsonify({'entries': entries}), 200
-
-
-@bp.route('/cache/entries', methods=['DELETE'])
-def clear_cache_entries():
-    """Evicts every entry - the "Clear cache" button. Not audited: this is cache housekeeping (a miss just
-    re-populates from a real query), not a configuration change."""
-    require_admin()
-    current_app.extensions['queryapigate_cache'].clear()
-    return jsonify({'message': 'Cache cleared'}), 200
-
-
-@bp.route('/cache/entries/<key>', methods=['GET'])
-def cache_entry_body(key):
-    """The cached response body itself, served with its real content type - exactly as a caller would have
-    received it on a hit. Lets the admin UI's cache browser reuse the same result renderer API Designer and
-    a saved query's own Run tab already use, instead of a bespoke preview widget."""
-    require_admin()
-    hit = current_app.extensions['queryapigate_cache'].get_body(key)
-    if hit is None:
-        raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404)
-    body, content_type = hit
-    return Response(body, content_type=content_type)
-
-
-@bp.route('/cache/entries/<key>', methods=['DELETE'])
-def delete_cache_entry(key):
-    """Evicts one entry early. Not audited - see clear_cache_entries()."""
-    require_admin()
-    current_app.extensions['queryapigate_cache'].delete(key)
-    return jsonify({'message': 'Entry deleted'}), 200
 
 
 # --------------------------------------------------------------------------------------

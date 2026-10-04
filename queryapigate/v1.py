@@ -88,7 +88,7 @@ def update_query(name):
             store.record_audit(caller_key_name(), 'move_query', name,
                                {'collection': {'from': previous, 'to': data['collection']},
                                 'keys_gaining_access': access['keys']['gain'],
-                                'keys_losing_access': access['keys']['lose'], 'via': 'api/v1'})
+                                'keys_losing_access': access['keys']['lose']})
     return _detail_response(name)
 
 
@@ -97,7 +97,7 @@ def delete_query(name):
     name, content = queries.load(name)
     _check_if_match(content)
     store.delete_saved(name)
-    store.record_audit(caller_key_name(), 'delete_query', name, {'via': 'api/v1'})
+    store.record_audit(caller_key_name(), 'delete_query', name, None)
     return '', 204
 
 
@@ -151,7 +151,7 @@ def update_version(name, version):
             raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         store.set_cache_ttl(name, version, data['cache_ttl'])
         store.record_audit(caller_key_name(), 'set_cache_ttl', name,
-                           {'version': version, 'cache_ttl': data['cache_ttl'] or None, 'via': 'api/v1'})
+                           {'version': version, 'cache_ttl': data['cache_ttl'] or None})
     return _detail_response(name)
 
 
@@ -162,7 +162,7 @@ def delete_version(name, version):
     if not isinstance(content.get(str(version)), dict):
         raise ApiError(f'Version {version} not found', 404, code='version_not_found')
     store.delete_saved(name, version)
-    store.record_audit(caller_key_name(), 'delete_query', name, {'version': version, 'via': 'api/v1'})
+    store.record_audit(caller_key_name(), 'delete_query', name, {'version': version})
     if not store.saved_query_exists(name):
         return '', 204
     return _detail_response(name)

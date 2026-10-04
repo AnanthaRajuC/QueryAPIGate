@@ -26,7 +26,7 @@ by accident.
 | #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
 | #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
 | ~~#74 Respect a saved query's own `LIMIT`~~ (shipped) | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
-| #72 Management API v1 (`/api/v1`) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
+| ~~#72 Management API v1 (`/api/v1`)~~ (shipped; legacy routes removed) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
 
 **Needed for 1.0 to be a credible promise:**
 
@@ -2090,10 +2090,11 @@ breaking the promise to drop it.
 
 ## 69. A consistent, machine-readable error format
 
-**Status: partly shipped - in place for `/api/v1` (#72); the legacy routes and MCP are open.** 1.0 milestone, before
-the freeze. v1 errors are `{error, code, request_id}`, with a status-derived `code` whenever a raiser doesn't give
-its own (`app.error_body()`). What remains: decide whether the legacy routes adopt it (an additive change), and
-mirror `code` in MCP tool errors.
+**Status: partly shipped - in place for `/api/v1` (#72), which is now the only management interface; the runtime
+routes and MCP are open.** 1.0 milestone, before the freeze. v1 errors are `{error, code, request_id}`, with a
+status-derived `code` whenever a raiser doesn't give its own (`app.error_body()`). What remains: decide whether the
+runtime routes (`/q/<name>`, `/execute_sql`, `/catalog`, ...) adopt it - an additive change, since they keep
+`error` - and mirror `code` in MCP tool errors.
 
 **Impact:** errors are `{"error": "<message>"}` plus optional extras (`detail`, and per-error fields), with
 messages free to change wording under the current policy. That leaves clients nothing stable to branch on.
@@ -2140,8 +2141,7 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: shipped for the Console (2026-10-04) - every management route has a `/api/v1` successor. Open: removing the
-deprecated routes (with the 1.0 API freeze).** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: shipped (2026-10-04) - `/api/v1` is the only management interface; the legacy routes are removed.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2183,9 +2183,12 @@ summaries and `run_count` on a query's versions (one grouped read each).
 `merge`), Postman export; examples status, install, remove. Service in `queryapigate/services/collections.py`. The
 Console now calls no legacy management route.
 
-Every management route has a v1 successor; the legacy ones send `Deprecation` headers and nothing in QueryAPIGate
-calls them. Open: whether and when to remove them, decided with the 1.0 API freeze; and the MCP server, which isn't
-part of `/api/v1`.
+**Legacy routes removed (2026-10-04).** All 35 unversioned management routes are gone, before the 1.0 freeze, so 1.x
+carries only `/api/v1`. Their tests were ported onto `/api/v1` (`tests/helpers.py` gained `save_query()`,
+`put_connections()` and `create_key()`), as were the benchmarks, the how-tos, the README, API.md and the Postman
+collection in `documentation/`. Porting found two v1 gaps, both fixed: creating a query didn't audit its collection,
+and creating a connection didn't close pooled connections. The deprecation mechanism (`app.DEPRECATED_ENDPOINTS`,
+mirrored in the spec, and tested) stays for 1.x deprecations (#67).
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.

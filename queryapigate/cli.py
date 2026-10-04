@@ -94,8 +94,8 @@ def _init(args):
         print(f'{db.describe()} already has connections - left untouched')
         return 0
     store.update_connections(config.EXAMPLE_CONNECTIONS['connections'])
-    print(f'Created {db.describe()}\nEdit it (queryapigate serve, then the admin UI, or PATCH /connections) - '
-          'set "active": true on the connections you want, then run: queryapigate serve')
+    print(f'Created {db.describe()}\nEdit it (queryapigate serve, then the admin UI, or PATCH '
+          '/api/v1/connections/<name>) - set "active": true on the connections you want, then run: queryapigate serve')
     return 0
 
 

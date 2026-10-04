@@ -498,19 +498,20 @@ admin UI to manage connections and saved queries and run ad-hoc SQL without leav
 
 For your own databases, run `queryapigate init` in an empty folder: it creates `queryapigate.db` with an
 inactive template connection for every supported database type. Edit them (admin UI, or `PATCH
-/connections`), set `"active": true`, and start the server there.
+/api/v1/connections/<name>`), set `"active": true`, and start the server there.
 
 ## Saving a query as an endpoint
 
 This uses the `examples` connection that `queryapigate examples load` sets up:
 
 ~~~bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "film_by_id",
-  "sql_query": "SELECT * FROM film WHERE film_id = :id",
-  "query_parameters": {"id": {"type": "int", "min": 1, "max": 60, "description": "Film id"}},
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "film_by_id",
+  "sql": "SELECT * FROM film WHERE film_id = :id",
+  "parameters": {"id": {"type": "int", "min": 1, "max": 60, "description": "Film id"}},
   "connection_name": "examples",
-  "author": "me", "description": "Look up a film"
+  "author": "me", "description": "Look up a film",
+  "publish": true
 }'
 
 curl 'http://127.0.0.1:5000/q/film_by_id?id=7&format=yaml' -H 'X-API-Key: demo-key'
@@ -521,7 +522,8 @@ curl 'http://127.0.0.1:5000/q/film_by_id?id=0' -H 'X-API-Key: demo-key'
 Rules: `type` (`int`, `float`, `str`, `bool`), `default`, `required`, `enum`, `min`/`max`, `min_length`/`max_length`,
 `pattern` and `description` - see [the API reference](documentation/API.md#parameter-rules).
 
-Saving again under the same name adds version 2; `DELETE /saved_sql/film_by_id?version=1` removes one version.
+`POST /api/v1/queries/film_by_id/versions` adds version 2 - a draft until published (`"publish": true`, or
+`POST .../publish`); `DELETE /api/v1/queries/film_by_id/versions/1` removes one version.
 
 Add `"cache_ttl": 60` to cache a response for that many seconds (`X-Cache: HIT`/`MISS`, `ETag`, `Cache-Control`) -
 opt-in, and never used for a query that writes. See
@@ -536,7 +538,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
 | `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](documentation/INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
-| `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api_keys`), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
+| `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api/v1/api-keys`), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
 | `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |
 | `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
@@ -552,7 +554,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |
 | `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` | `1` | Seconds a query may take before it is logged as a warning. `0` disables it. |
 | `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version (and shown in lists). |
-| `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /history`. Best with `QUERYAPIGATE_DATABASE_URL`. |
+| `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /api/v1/history`. Best with `QUERYAPIGATE_DATABASE_URL`. |
 | `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of successful runs recorded; failed runs always are. |
 | `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes; `0` writes inside each request. See [Run history](documentation/API.md#run-history). |
 | `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
@@ -572,7 +574,7 @@ QueryAPIGate runs whatever SQL it is given against your databases, so it ships l
 
 - Set `QUERYAPIGATE_API_KEY` and serve over TLS (put it behind a reverse proxy). It's a full-access admin key;
   for anyone who only needs to run queries against specific connections, create a scoped key instead
-  (`POST /api_keys`, admin only) - see [documentation/API.md](documentation/API.md#authentication-and-permissions).
+  (`POST /api/v1/api-keys`, admin only) - see [documentation/API.md](documentation/API.md#authentication-and-permissions).
   For an external client that should only reach a curated handful of saved queries and nothing else, scope
   the key to those query names specifically (`queries`) instead of a whole connection - see
   [Per-saved-query access](documentation/API.md#per-saved-query-access-external-clients).
@@ -665,19 +667,11 @@ Clean up with `docker compose down -v`.
 |----------|--------|---------|
 | `/execute_sql` | POST | Run ad-hoc SQL (`sql`, `connection_name`, optional `params`). |
 | `/q/<name>` | GET, POST | Run a saved query; query-string or body values become parameters. |
-| `/save_sql_to_file` | PATCH | Save a query (creates the next version). |
-| `/list_files` | GET | List saved queries and their versions (`sort_by`, `sort_order`). |
-| `/saved_sql/<name>` | DELETE | Delete a saved query or one `?version=`. |
-| `/view_file_content` | GET | Raw content of a saved query file. |
 | `/execute_sql_from_file`, `/execute_sql_with_parameters_from_file` | POST | Run a saved query by `filepath` (same as `/q/<name>`). |
-| `/connections` | GET, PATCH | List (passwords masked) / add / update connections. |
-| `/connections/<name>` | DELETE | Remove a connection. |
-| `/connections/<name>/schema` | GET | List its tables/views and their columns. |
-| `/api_keys` | GET, POST | List / create scoped API keys (admin only). |
-| `/api_keys/<name>` | PATCH, DELETE | Update / revoke a scoped API key (admin only). |
-| `/audit_log` | GET | Durable record of administrative changes - keys, connections, saved queries (admin only). |
-| `/settings` | GET | The server's own configuration - each setting's effective value and whether it comes from the environment or the default; read-only, secrets never returned (admin only). |
-| `/api/v1/...` | GET, POST, PATCH, DELETE | The versioned Management API: queries, connections, API keys, roles, history, audit, settings and MCP (admin only). It replaces the management routes above, which keep working but are deprecated - see [Management API (v1)](documentation/API.md#management-api-v1). |
+| `/connections/<name>/schema` | GET | List a connection's tables/views and their columns. |
+| `/catalog` | GET | The saved queries this caller can reach, and the terms they're offered under. |
+| `/events` | GET | Live saved-query runs (Server-Sent Events). |
+| `/api/v1/...` | GET, POST, PATCH, DELETE | The Management API (admin only): saved queries and their versions, drafts and publishing, connections, API keys, roles, collections, history, the audit log, settings, the response cache and the example APIs - see [Management API (v1)](documentation/API.md#management-api-v1). |
 | `/health`, `/docs`, `/openapi.json` | GET | Liveness, Swagger UI, OpenAPI spec. |
 | `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |
 | `/console` | GET | The admin UI (the QueryAPIGate Console). `/ui` redirects here. |

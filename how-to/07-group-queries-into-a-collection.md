@@ -8,26 +8,33 @@ scoped API key that can reach every query in it - present and future - without n
 Either at save time:
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "orders_count", "sql_query": "SELECT COUNT(*) AS n FROM orders",
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "orders_count", "sql": "SELECT COUNT(*) AS n FROM orders",
   "connection_name": "shop", "author": "you", "description": "Order count",
-  "collection": "reporting"
+  "collection": "reporting",
+  "publish": true
 }'
 ```
 
 ...or move an existing one in or out afterward, without creating a new version:
 
 ```bash
-curl -X PUT http://127.0.0.1:5000/saved_sql/products_count/collection -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
+curl -X PATCH http://127.0.0.1:5000/api/v1/queries/products_count -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
   -d '{"collection": "reporting"}'
-# {"message": "'products_count' moved", "from": null, "to": "reporting",
-#  "access": {"keys": {"gain": ["reporting-key"], "lose": []}, "roles": {"gain": [], "lose": []}}}
 ```
 
-That `access` object is worth reading, not just discarding - it names exactly which existing keys and
-roles gain or lose reach *because of this one move*, before you find out the hard way. Moving a query out
-again (`{"collection": null}`) works the same way, and shows up in the `access` object the same way, in
-reverse.
+Every move is written to the audit log with exactly which existing keys gain or lose reach *because of this one
+move* - and the admin UI's **Move…** shows the same before you confirm it, so you find out before, not the hard
+way:
+
+```bash
+curl 'http://127.0.0.1:5000/api/v1/audit?action=move_query' -H 'X-API-Key: demo-key'
+# {"items": [{"action": "move_query", "target": "products_count",
+#             "changes": {"collection": {"from": null, "to": "reporting"},
+#                         "keys_gaining_access": ["reporting-key"], "keys_losing_access": []}, ...}], ...}
+```
+
+Moving a query out again (`{"collection": null}`) works the same way, in reverse.
 
 A collection name is 1-63 characters - lowercase letters, digits, `.`, `_` and `-`, starting with a letter
 or digit; anything else is rejected with a clear error, the same rule everywhere a collection name is
@@ -36,7 +43,7 @@ accepted (saving, moving, granting a key, renaming).
 ## Grant a key the whole collection
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "name": "reporting-key", "connections": [], "collections": ["reporting"]
 }'
 ```
@@ -62,7 +69,7 @@ reaches it immediately - no key edit, no redeploy.
 
 ```bash
 # reporting-key already exists, already denied products_count above
-curl -X PUT http://127.0.0.1:5000/saved_sql/products_count/collection -H 'X-API-Key: demo-key' \
+curl -X PATCH http://127.0.0.1:5000/api/v1/queries/products_count -H 'X-API-Key: demo-key' \
   -H 'Content-Type: application/json' -d '{"collection": "reporting"}'
 
 curl http://127.0.0.1:5000/q/products_count -H 'X-API-Key: <reporting-key secret>'
@@ -75,16 +82,16 @@ next request.
 ## Renaming a collection updates every key and role that reference it
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/collections/reporting -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
+curl -X PATCH http://127.0.0.1:5000/api/v1/collections/reporting -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
   -d '{"name": "sales-reporting"}'
-# {"message": "Collection 'reporting' renamed to 'sales-reporting'",
-#  "queries": ["orders_count", "products_count"], "keys": ["reporting-key"], "roles": []}
+# {"name": "sales-reporting",
+#  "moved": {"queries": ["orders_count", "products_count"], "keys": ["reporting-key"], "roles": []}}
 ```
 
 Verified: `reporting-key`'s own stored `collections` grant is rewritten from `["reporting"]` to
 `["sales-reporting"]` automatically - it keeps working with no manual edit. `merge: true` in the same
 request body folds the renamed collection into an already-existing one with the target name instead of
-failing because it's taken.
+failing (409) because it's taken.
 
 ## Why use this instead of a `queries` grant listing each name
 

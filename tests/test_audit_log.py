@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import config, create_app, db, store
+from tests.helpers import put_connections, save_query
 
 
 class AppTestCase(unittest.TestCase):
@@ -27,32 +28,32 @@ class AppTestCase(unittest.TestCase):
         self.admin_headers = {'X-API-Key': 'admin-key'}
 
     def entries(self):
-        return self.client.get('/audit_log', headers=self.admin_headers).get_json()['entries']
+        return self.client.get('/api/v1/audit', headers=self.admin_headers).get_json()['items']
 
     def create_connection(self, name='a', **fields):
         body = {'db': 'sqlite', 'database': self.db_path, 'active': True, **fields}
-        res = self.client.patch('/connections', json={'connections': {name: body}}, headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = put_connections(self.client, {name: body}, headers=self.admin_headers)
+        self.assertIn(res.status_code, (200, 201), res.get_data(as_text=True))
 
     def create_key(self, name='scoped', **fields):
-        res = self.client.post('/api_keys', json={'name': name, **fields}, headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return res.get_json()['key']
+        res = self.client.post('/api/v1/api-keys', json={'name': name, **fields}, headers=self.admin_headers)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return res.get_json()['secret']
 
     def save_query(self, filename='q', **fields):
         body = {'author': 'a', 'description': 'd', 'filename': filename, 'sql_query': 'SELECT 1', **fields}
-        res = self.client.patch('/save_sql_to_file', json=body, headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = save_query(self.client, body, headers=self.admin_headers)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 
 
 class AdminOnlyTests(AppTestCase):
     def test_a_scoped_key_cannot_read_the_audit_log(self):
         scoped = self.create_key('scoped', connections=[])
-        res = self.client.get('/audit_log', headers={'X-API-Key': scoped})
+        res = self.client.get('/api/v1/audit', headers={'X-API-Key': scoped})
         self.assertEqual(res.status_code, 403)
 
     def test_anonymous_is_unauthorized_once_a_key_is_configured(self):
-        self.assertEqual(self.client.get('/audit_log').status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/audit').status_code, 401)
 
 
 class ApiKeyAuditTests(AppTestCase):
@@ -65,7 +66,7 @@ class ApiKeyAuditTests(AppTestCase):
 
     def test_update_is_recorded_as_a_diff_of_only_the_changed_fields(self):
         self.create_key('reporting', connections=['a'], allow_writes=False)
-        self.client.patch('/api_keys/reporting', json={'allow_writes': True}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/reporting', json={'allow_writes': True}, headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual(entry['action'], 'update_key')
         self.assertEqual(entry['changes'], {'allow_writes': {'from': False, 'to': True}})
@@ -73,12 +74,12 @@ class ApiKeyAuditTests(AppTestCase):
     def test_a_no_op_update_records_nothing_new(self):
         self.create_key('reporting', connections=['a'])
         before = len(self.entries())
-        self.client.patch('/api_keys/reporting', json={'connections': ['a']}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/reporting', json={'connections': ['a']}, headers=self.admin_headers)
         self.assertEqual(len(self.entries()), before)
 
     def test_delete_is_recorded_with_what_the_key_could_still_do(self):
         self.create_key('reporting', connections=['a'], allow_writes=True)
-        self.client.delete('/api_keys/reporting', headers=self.admin_headers)
+        self.client.delete('/api/v1/api-keys/reporting', headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual(entry['action'], 'delete_key')
         self.assertEqual(entry['changes']['connections'], ['a'])
@@ -135,7 +136,8 @@ class ConnectionAuditTests(AppTestCase):
 
     def test_delete_is_recorded_with_the_password_masked(self):
         self.create_connection('a', password='super-secret')
-        self.client.delete('/connections/a', json={'reason': 'retiring this database'}, headers=self.admin_headers)
+        self.client.delete('/api/v1/connections/a', json={'reason': 'retiring this database'},
+                           headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual(entry['action'], 'delete_connection')
         self.assertEqual(entry['changes']['password'], config.PASSWORD_MASK)
@@ -144,7 +146,7 @@ class ConnectionAuditTests(AppTestCase):
 
     def test_delete_without_a_reason_is_rejected_and_not_recorded(self):
         self.create_connection('a')
-        res = self.client.delete('/connections/a', headers=self.admin_headers)
+        res = self.client.delete('/api/v1/connections/a', headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
         self.assertEqual(self.entries()[0]['action'], 'create_connection')  # no delete entry was ever added
 
@@ -163,14 +165,14 @@ class SavedQueryAuditTests(AppTestCase):
 
     def test_delete_is_recorded(self):
         self.save_query('q1', connection_name='')
-        self.client.delete('/saved_sql/q1', headers=self.admin_headers)
+        self.client.delete('/api/v1/queries/q1', headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual((entry['action'], entry['target']), ('delete_query', 'q1'))
 
     def test_delete_of_one_version_is_recorded_with_that_version_number(self):
         self.save_query('q1', connection_name='')
         self.save_query('q1', connection_name='')
-        self.client.delete('/saved_sql/q1?version=1', headers=self.admin_headers)
+        self.client.delete('/api/v1/queries/q1/versions/1', headers=self.admin_headers)
         entry = self.entries()[0]
         self.assertEqual(entry['changes'], {'version': 1})
 

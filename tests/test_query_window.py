@@ -10,7 +10,7 @@ from unittest import mock
 
 from queryapigate import create_app, history, sqltools
 from queryapigate.errors import ApiError
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class PaginateTests(unittest.TestCase):
@@ -114,7 +114,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.run_sql('SELECT i FROM n ORDER BY i LIMIT 2 -- first two'), ([1, 2], 'false'))
 
     def test_a_saved_query_keeps_its_limit_on_q(self):
-        self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'top', 'filename': 'top3',
+        save_query(self.client, {'author': 'a', 'description': 'top', 'filename': 'top3',
                                                      'sql_query': 'SELECT i FROM n ORDER BY i DESC LIMIT 3',
                                                      'connection_name': 'lite'})
         res = self.client.get('/q/top3?page_size=50')

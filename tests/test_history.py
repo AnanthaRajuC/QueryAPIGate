@@ -9,9 +9,9 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, db, history, metrics
+from queryapigate import config, create_app, db, history, metrics, store
 from tests import TEST_DATABASE_URL
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 HISTORY_ENV = ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS', 'QUERYAPIGATE_HISTORY_SAMPLE_RATE',
                'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL')
@@ -39,9 +39,9 @@ class HistoryTestCase(unittest.TestCase):
         self.client = create_app().test_client()
         self.admin = {'X-API-Key': 'admin'}
         for name in ('q', 'other'):
-            self.assertEqual(self.client.patch('/save_sql_to_file', headers=self.admin, json={
+            self.assertEqual(save_query(self.client, headers=self.admin, body={
                 'author': 'a', 'description': 'd', 'filename': name, 'connection_name': 'lite',
-                'sql_query': 'SELECT id FROM t WHERE id >= :min', 'query_parameters': {'min': 'int'}}).status_code, 200)
+                'sql_query': 'SELECT id FROM t WHERE id >= :min', 'query_parameters': {'min': 'int'}}).status_code, 201)
 
     def run_query(self, name='q', minimum=0, headers=None):
         return self.client.get(f'/q/{name}?min={minimum}', headers=headers or self.admin)
@@ -51,8 +51,8 @@ class HistoryTestCase(unittest.TestCase):
         return db.connection().execute('SELECT COUNT(*) FROM execution_history').fetchone()[0]
 
     def listed(self, name='q'):
-        files = self.client.get('/list_files', headers=self.admin).get_json()['files']
-        return next(f for f in files if f['filename'] == name)['versions'][0]['execution_history']
+        """The newest runs a version carries with it (store.load_versions) - bounded by QUERYAPIGATE_HISTORY_LIMIT."""
+        return store.load_versions(name)['1']['execution_history']
 
     def seed(self, count, start, name='q', status='success', key='admin'):
         """``count`` runs one minute apart from ``start``, written straight to the store."""
@@ -117,7 +117,7 @@ class BatchingTests(HistoryTestCase):
         with mock.patch.object(history._Writer, '_ensure_thread'):
             self.run_query('q')
             self.run_query('other')
-            self.assertEqual(self.client.delete('/saved_sql/other', headers=self.admin).status_code, 200)
+            self.assertEqual(self.client.delete('/api/v1/queries/other', headers=self.admin).status_code, 204)
             history._writer().flush()
         self.assertEqual(len(self.listed('q')), 1)  # the batch's other run still landed
 
@@ -157,7 +157,7 @@ class RetentionTests(HistoryTestCase):
             self.seed(8, datetime(2026, 1, 1))
             self.assertEqual(self.stored(), 8)
             self.assertEqual([run['i'] for run in self.listed()], [3, 4, 5, 6, 7])  # lists stay bounded
-            entries = self.client.get('/history', headers=self.admin).get_json()['entries']
+            entries = self.client.get('/api/v1/history', headers=self.admin).get_json()['items']
             self.assertEqual(len(entries), 8)  # the whole history is still reachable
 
     def test_the_sweep_deletes_only_runs_older_than_the_retention_period(self):
@@ -179,7 +179,7 @@ class HistoryEndpointTests(HistoryTestCase):
     env = {'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '365'}
 
     def get(self, query='', headers=None):
-        return self.client.get(f'/history{query}', headers=headers or self.admin)
+        return self.client.get(f'/api/v1/history{query}', headers=headers or self.admin)
 
     def test_pages_through_everything_newest_first_without_gaps_or_repeats(self):
         start = datetime(2026, 2, 1)
@@ -188,10 +188,10 @@ class HistoryEndpointTests(HistoryTestCase):
         seen, cursor = [], ''
         while True:
             page = self.get(f'?limit=3{cursor}').get_json()
-            seen += [(e['query'], e['executed_at'], e['i']) for e in page['entries']]
-            if page['next'] is None:
+            seen += [(e['query'], e['executed_at'], e['i']) for e in page['items']]
+            if page['next_cursor'] is None:
                 break
-            cursor = f"&cursor={page['next']}"
+            cursor = f"&cursor={page['next_cursor']}"
         self.assertEqual(len(seen), 10)
         self.assertEqual(len(set(seen)), 10)
         self.assertEqual([s[1] for s in seen], sorted((s[1] for s in seen), reverse=True))
@@ -201,19 +201,19 @@ class HistoryEndpointTests(HistoryTestCase):
         self.seed(4, start, status='success', key='partner')
         self.seed(2, start + timedelta(days=1), status='error', key='partner')
         self.seed(3, start, name='other', key='admin')
-        count = lambda query: len(self.get(query).get_json()['entries'])  # noqa: E731
+        count = lambda query: len(self.get(query).get_json()['items'])  # noqa: E731
         self.assertEqual(count('?status=error'), 2)
         self.assertEqual(count('?key=partner&status=success'), 4)
         self.assertEqual(count('?query=other'), 3)
         self.assertEqual(count('?query=q&version=1'), 6)
         self.assertEqual(count('?since=2026-02-02'), 2)
         self.assertEqual(count('?until=2026-02-01 00:02:00'), 4)  # exclusive: 00:00 and 00:01 of each query
-        entry = self.get('?status=error&limit=1').get_json()['entries'][0]
+        entry = self.get('?status=error&limit=1').get_json()['items'][0]
         self.assertEqual((entry['query'], entry['version'], entry['key_name']), ('q', 1, 'partner'))
 
     def test_live_runs_show_up_with_their_caller(self):
         self.run_query()
-        entry = self.get().get_json()['entries'][0]
+        entry = self.get().get_json()['items'][0]
         self.assertEqual((entry['query'], entry['status'], entry['key_name'], entry['rows']),
                          ('q', 'success', 'admin', 5))
 
@@ -223,8 +223,8 @@ class HistoryEndpointTests(HistoryTestCase):
             self.assertEqual(self.get(query).status_code, 400, query)
 
     def test_admin_only(self):
-        key = self.client.post('/api_keys', headers=self.admin, json={'name': 'scoped', 'connections': ['lite']}
-                               ).get_json()['key']
+        key = self.client.post('/api/v1/api-keys', headers=self.admin, json={'name': 'scoped', 'connections': ['lite']}
+                               ).get_json()['secret']
         self.assertEqual(self.get(headers={'X-API-Key': key}).status_code, 403)
 
 

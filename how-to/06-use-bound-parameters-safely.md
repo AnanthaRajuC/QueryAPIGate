@@ -38,22 +38,23 @@ curl -X POST http://127.0.0.1:5000/execute_sql -H 'X-API-Key: demo-key' -H 'Cont
 # {"error": "An error occurred while executing the SQL query", "detail": "unrecognized token: \"{\""}
 ```
 
-## Declaring rules with `query_parameters`
+## Declaring rules with `parameters`
 
-Add a `query_parameters` object when saving a query - each key is a parameter name used somewhere in the
+Add a `parameters` object when saving a query - each key is a parameter name used somewhere in the
 SQL, each value either a bare type string or a full rules object:
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "products_search",
-  "sql_query": "SELECT id, name, category, price FROM products WHERE (:name IS NULL OR name LIKE :name) AND category = :category AND price BETWEEN :min_price AND :max_price ORDER BY price",
-  "query_parameters": {
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "products_search",
+  "sql": "SELECT id, name, category, price FROM products WHERE (:name IS NULL OR name LIKE :name) AND category = :category AND price BETWEEN :min_price AND :max_price ORDER BY price",
+  "parameters": {
     "name": {"type": "str", "required": false, "min_length": 2, "max_length": 30, "pattern": "[A-Za-z ]+", "description": "Partial name match"},
     "category": {"type": "str", "enum": ["tools", "electronics", "kitchen"], "default": "electronics"},
     "min_price": {"type": "float", "min": 0, "default": 0},
     "max_price": {"type": "float", "max": 1000, "default": 1000}
   },
-  "connection_name": "shop", "author": "you", "description": "Search products"
+  "connection_name": "shop", "author": "you", "description": "Search products",
+  "publish": true
 }'
 ```
 
@@ -109,27 +110,20 @@ curl 'http://127.0.0.1:5000/q/by_category_undeclared?category=tools'
 # [{"id": 1, "name": "Widget", "category": "tools", "price": 9.99}]
 ```
 
-Declaring `query_parameters` is opt-in extra safety and documentation, not a requirement for a parameter
+Declaring `parameters` is opt-in extra safety and documentation, not a requirement for a parameter
 to work at all - but an undeclared one gets none of `enum`/`min`/`max`/`pattern`'s protection, and won't
 show up with a description in `/docs` either.
 
-## One thing that will bite you: don't write your own `LIMIT`
+## Your own `LIMIT` is respected
 
-Every response from QueryAPIGate is already paginated (`?page`/`?page_size`) - the server wraps your query
-with its own pagination. Adding `LIMIT :n` (or a literal `LIMIT 10`) to the SQL yourself conflicts with
-that wrapper and fails:
-
-```
-SELECT ... ORDER BY price LIMIT :limit
-→ "detail": "near \"LIMIT\": syntax error"
-```
-
-Leave `LIMIT` out entirely; use `?page_size=` (and a `limit`-style *rule*, like `max: 50`, if you want to
-cap how large a page a caller can request) instead of a `LIMIT` clause in the SQL itself.
+Every response from QueryAPIGate is paginated (`?page`/`?page_size`), and paging happens *within* your query's own
+window: a "top 3" query (`... ORDER BY price DESC LIMIT 3`) returns 3 rows, never a whole page, and `LIMIT 25` pages
+through those 25. Use `LIMIT` for what the query means ("the top N"), and `?page_size=` (with a `max` rule on a
+parameter if you want to cap it) for how much of it a caller gets per request.
 
 ## Next steps
 
 - [Turn your first SQL query into a REST API](01-turn-your-first-sql-query-into-a-rest-api.md) - the same
-  `query_parameters` shape, from scratch.
+  `parameters` shape, from scratch.
 - [Connect to MongoDB](04-connect-to-mongodb.md) - the `:name` placeholder idea applies to a Mongo filter
   document too, just substituted as a real JSON value instead of SQL text.

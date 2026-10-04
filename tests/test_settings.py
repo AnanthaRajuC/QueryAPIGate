@@ -7,6 +7,7 @@ from unittest import mock
 
 from queryapigate import config, create_app
 from tests import TEST_DATABASE_URL
+from tests.helpers import save_query
 
 
 class SettingsTests(unittest.TestCase):
@@ -22,15 +23,15 @@ class SettingsTests(unittest.TestCase):
         self.admin = {'X-API-Key': 'admin-key'}
 
     def rows(self):
-        res = self.client.get('/settings', headers=self.admin)
+        res = self.client.get('/api/v1/settings', headers=self.admin)
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return {row['env']: row for section in res.get_json()['sections'] for row in section['rows']}
+        return {row['env']: row for section in res.get_json()['items'] for row in section['rows']}
 
     def test_requires_the_admin_key(self):
-        self.assertEqual(self.client.get('/settings').status_code, 401)
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
-        key = scoped.get_json()['key']
-        self.assertEqual(self.client.get('/settings', headers={'X-API-Key': key}).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/settings').status_code, 401)
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
+        key = scoped.get_json()['secret']
+        self.assertEqual(self.client.get('/api/v1/settings', headers={'X-API-Key': key}).status_code, 403)
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
@@ -74,8 +75,8 @@ class SettingsTests(unittest.TestCase):
         from cryptography.fernet import Fernet
         secret = Fernet.generate_key().decode()
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_KEY': secret}):
-            res = self.client.get('/settings', headers=self.admin)
-            rows = {row['env']: row for section in res.get_json()['sections'] for row in section['rows']}
+            res = self.client.get('/api/v1/settings', headers=self.admin)
+            rows = {row['env']: row for section in res.get_json()['items'] for row in section['rows']}
         body = res.get_data(as_text=True)
         self.assertNotIn(secret, body)
         self.assertNotIn('admin-key', body)
@@ -88,8 +89,8 @@ class SettingsTests(unittest.TestCase):
         url = 'postgresql://qag:s3cret-pw@db.internal:5432/meta'
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATABASE_URL': url}), \
                 mock.patch.object(config, 'database_url', return_value=url):
-            res = self.client.get('/settings', headers=self.admin)
-        rows = {row['env']: row for section in res.get_json()['sections'] for row in section['rows']}
+            res = self.client.get('/api/v1/settings', headers=self.admin)
+        rows = {row['env']: row for section in res.get_json()['items'] for row in section['rows']}
         self.assertNotIn('s3cret-pw', res.get_data(as_text=True))
         self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'],
                          'PostgreSQL (postgresql://qag:********@db.internal:5432/meta)')
@@ -110,14 +111,14 @@ class McpStatusEndpointTests(unittest.TestCase):
         self.admin = {'X-API-Key': 'admin-key'}
 
     def test_requires_the_admin_key(self):
-        self.assertEqual(self.client.get('/settings/mcp_status').status_code, 401)
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
-        key = scoped.get_json()['key']
-        self.assertEqual(self.client.get('/settings/mcp_status', headers={'X-API-Key': key}).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/mcp/status').status_code, 401)
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
+        key = scoped.get_json()['secret']
+        self.assertEqual(self.client.get('/api/v1/mcp/status', headers={'X-API-Key': key}).status_code, 403)
 
     def test_reports_unreachable_when_nothing_listens_on_the_port(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '18321'}):
-            res = self.client.get('/settings/mcp_status', headers=self.admin)
+            res = self.client.get('/api/v1/mcp/status', headers=self.admin)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.get_json(), {'reachable': False, 'port': 18321})
 
@@ -129,7 +130,7 @@ class McpStatusEndpointTests(unittest.TestCase):
         port = server.getsockname()[1]
         self.addCleanup(server.close)
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': str(port)}):
-            res = self.client.get('/settings/mcp_status', headers=self.admin)
+            res = self.client.get('/api/v1/mcp/status', headers=self.admin)
         self.assertEqual(res.get_json(), {'reachable': True, 'port': port})
 
 
@@ -147,24 +148,24 @@ class McpToolsEndpointTests(unittest.TestCase):
         self.admin = {'X-API-Key': 'admin-key'}
 
     def test_requires_the_admin_key(self):
-        self.assertEqual(self.client.get('/settings/mcp_tools').status_code, 401)
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
-        key = scoped.get_json()['key']
-        self.assertEqual(self.client.get('/settings/mcp_tools', headers={'X-API-Key': key}).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/mcp/tools').status_code, 401)
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=self.admin)
+        key = scoped.get_json()['secret']
+        self.assertEqual(self.client.get('/api/v1/mcp/tools', headers={'X-API-Key': key}).status_code, 403)
 
     def test_always_lists_the_two_ad_hoc_tools(self):
-        res = self.client.get('/settings/mcp_tools', headers=self.admin)
+        res = self.client.get('/api/v1/mcp/tools', headers=self.admin)
         self.assertEqual(res.status_code, 200)
-        tools = {t['name']: t for t in res.get_json()['tools']}
+        tools = {t['name']: t for t in res.get_json()['items']}
         self.assertEqual(tools['list_tables']['kind'], 'ad-hoc')
         self.assertEqual(tools['execute_sql']['kind'], 'ad-hoc')
 
     def test_lists_a_saved_query_with_its_params_and_kind(self):
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'author': 'a', 'description': 'By id', 'sql_query': 'SELECT * FROM t WHERE id = :id',
             'filename': 'q1', 'connection_name': 'nope'}, headers=self.admin)
-        res = self.client.get('/settings/mcp_tools', headers=self.admin)
-        tools = {t['name']: t for t in res.get_json()['tools']}
+        res = self.client.get('/api/v1/mcp/tools', headers=self.admin)
+        tools = {t['name']: t for t in res.get_json()['items']}
         self.assertEqual(tools['q1']['kind'], 'saved query')
         self.assertEqual(tools['q1']['description'], 'By id')
         self.assertEqual(tools['q1']['params'], ['id'])
@@ -172,7 +173,7 @@ class McpToolsEndpointTests(unittest.TestCase):
 
     def test_works_whether_or_not_the_mcp_process_is_actually_running(self):
         # No real MCP process is ever started in this test suite - the endpoint must not depend on one.
-        res = self.client.get('/settings/mcp_tools', headers=self.admin)
+        res = self.client.get('/api/v1/mcp/tools', headers=self.admin)
         self.assertEqual(res.status_code, 200)
 
 

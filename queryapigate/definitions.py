@@ -1,4 +1,4 @@
-"""Validation of a saved-query definition - shared by everything that creates one (``PATCH /save_sql_to_file``
+"""Validation of a saved-query definition - shared by everything that creates one (``POST /api/v1/queries``
 and ``queryapigate collection import``), so a query is held to the same rules however it arrives."""
 from . import mongotools, sqltools, store
 from . import params as param_rules
@@ -17,7 +17,7 @@ def as_object(value, label):
 
 def validate_cache_ttl(cache_ttl):
     """The one rule a cache_ttl must follow, however it arrives - saving a new version here, or editing an
-    existing version's in place via PUT /saved_sql/<name>/cache_ttl (app.py)."""
+    existing version's in place via PATCH /api/v1/queries/<name>/versions/<n> (v1.py)."""
     if cache_ttl is not None and (not isinstance(cache_ttl, int) or isinstance(cache_ttl, bool) or cache_ttl < 0):
         raise ApiError('cache_ttl must be a non-negative integer number of seconds')
 

@@ -15,10 +15,11 @@ accidentally end up with write access.
 ## Saving a write query needs nothing special
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "add_note", "sql_query": "INSERT INTO notes (body) VALUES (:body)",
-  "query_parameters": {"body": {"type": "str"}},
-  "connection_name": "shop", "author": "you", "description": "Add a note"
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "add_note", "sql": "INSERT INTO notes (body) VALUES (:body)",
+  "parameters": {"body": {"type": "str"}},
+  "connection_name": "shop", "author": "you", "description": "Add a note",
+  "publish": true
 }'
 ```
 
@@ -55,7 +56,7 @@ curl 'http://127.0.0.1:5000/q/add_note?body=blocked' -H 'X-API-Key: <a key with 
 A key with `"allow_writes": true` succeeds instead:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "name": "writer", "connections": ["shop"], "allow_writes": true
 }'
 curl 'http://127.0.0.1:5000/q/add_note?body=allowed' -H 'X-API-Key: <writer secret>'
@@ -72,7 +73,7 @@ the server allows, and the server being permissive doesn't make every key a writ
 but not `delete`:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "name": "insert-only", "connections": ["shop"], "allow_writes": true, "allowed_write_ops": ["insert"]
 }'
 
@@ -93,7 +94,7 @@ access scoped to a single saved query, with **no** blanket write grant and **no*
 own at all:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "name": "note-writer", "connections": [], "queries": [{"name": "add_note", "allow_writes": true}]
 }'
 ```

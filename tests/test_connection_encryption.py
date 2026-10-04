@@ -12,6 +12,7 @@ from unittest import mock
 from cryptography.fernet import Fernet
 
 from queryapigate import config, create_app, db, store
+from tests.helpers import put_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -93,8 +94,8 @@ class MigrationTests(AppTestCase):
 class EncryptionRoundTripTests(AppTestCase):
     def test_a_query_works_through_an_encrypted_password(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}},
             headers=self.admin_headers)
         res = client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                           headers=self.admin_headers)
@@ -103,28 +104,28 @@ class EncryptionRoundTripTests(AppTestCase):
 
     def test_get_connections_masks_an_encrypted_password(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}},
             headers=self.admin_headers)
-        listed = client.get('/connections', headers=self.admin_headers).get_json()['connections']['a']
+        listed = client.get('/api/v1/connections/a', headers=self.admin_headers).get_json()
         self.assertEqual(listed['password'], config.PASSWORD_MASK)
 
     def test_echoing_the_mask_back_keeps_the_encrypted_value_unchanged(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}},
             headers=self.admin_headers)
         before = self.stored()['a']['password']
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': config.PASSWORD_MASK, 'active': False}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': config.PASSWORD_MASK, 'active': False}},
             headers=self.admin_headers)
         self.assertEqual(self.stored()['a']['password'], before)
 
     def test_an_env_var_reference_is_never_encrypted(self):
         client = create_app().test_client()
         with mock.patch.dict(os.environ, {'PW': 'secret'}):
-            client.patch('/connections', json={'connections': {'a': {
-                'db': 'sqlite', 'database': self.db_path, 'password': '${PW}', 'active': True}}},
+            put_connections(client, {'a': {
+                'db': 'sqlite', 'database': self.db_path, 'password': '${PW}', 'active': True}},
                 headers=self.admin_headers)
             res = client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                               headers=self.admin_headers)
@@ -134,8 +135,8 @@ class EncryptionRoundTripTests(AppTestCase):
     def test_without_a_secret_key_a_literal_password_is_stored_as_given(self):
         os.environ.pop('QUERYAPIGATE_SECRET_KEY')
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'secret', 'active': True}},
             headers=self.admin_headers)
         self.assertEqual(self.stored()['a']['password'], 'secret')
 
@@ -189,31 +190,31 @@ class FailureModeTests(AppTestCase):
 class AuditLogTests(AppTestCase):
     def test_the_plaintext_password_never_appears_in_the_audit_log(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'super-secret-value', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'super-secret-value', 'active': True}},
             headers=self.admin_headers)
-        audit = client.get('/audit_log', headers=self.admin_headers).get_json()['entries']
+        audit = client.get('/api/v1/audit', headers=self.admin_headers).get_json()['items']
         self.assertNotIn('super-secret-value', json.dumps(audit))
 
     def test_the_ciphertext_never_appears_in_the_audit_log_either(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'super-secret-value', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'super-secret-value', 'active': True}},
             headers=self.admin_headers)
         stored_password = self.stored()['a']['password']
-        audit = client.get('/audit_log', headers=self.admin_headers).get_json()['entries']
+        audit = client.get('/api/v1/audit', headers=self.admin_headers).get_json()['items']
         self.assertNotIn(stored_password, json.dumps(audit))
         self.assertEqual(audit[0]['changes']['password'], config.PASSWORD_MASK)
 
     def test_changing_an_encrypted_password_is_reported_only_as_changed(self):
         client = create_app().test_client()
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'first-secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'first-secret', 'active': True}},
             headers=self.admin_headers)
-        client.patch('/connections', json={'connections': {'a': {
-            'db': 'sqlite', 'database': self.db_path, 'password': 'second-secret', 'active': True}}},
+        put_connections(client, {'a': {
+            'db': 'sqlite', 'database': self.db_path, 'password': 'second-secret', 'active': True}},
             headers=self.admin_headers)
-        audit = client.get('/audit_log', headers=self.admin_headers).get_json()['entries']
+        audit = client.get('/api/v1/audit', headers=self.admin_headers).get_json()['items']
         self.assertEqual(audit[0]['changes'], {'password': 'changed'})
 
 

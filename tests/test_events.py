@@ -14,7 +14,7 @@ from unittest import mock
 
 from queryapigate import app as app_module
 from queryapigate import create_app
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class EventsTests(unittest.TestCase):
@@ -38,14 +38,14 @@ class EventsTests(unittest.TestCase):
         self.app = create_app()
         self.client = self.app.test_client()
         self.admin_headers = {'X-API-Key': 'admin-key'}
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'author': 'a', 'description': 'd', 'sql_query': 'SELECT * FROM t', 'filename': 'q1',
             'connection_name': 'a'}, headers=self.admin_headers)
 
     def create_scoped_key(self, **fields):
-        res = self.client.post('/api_keys', json={'name': 'scoped', 'connections': [], **fields},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': [], **fields},
                                headers=self.admin_headers)
-        return res.get_json()['key']
+        return res.get_json()['secret']
 
     def broadcaster(self):
         return self.app.extensions['queryapigate_broadcaster']

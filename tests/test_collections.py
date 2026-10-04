@@ -13,7 +13,7 @@ from unittest import mock
 
 from queryapigate import apikeys, collection_admin, create_app, db, store
 from queryapigate.errors import ApiError
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -43,26 +43,34 @@ class AppTestCase(unittest.TestCase):
                 'connection_name': connection}
         if collection is not store._UNSET:
             body['collection'] = collection
-        res = self.client.patch('/save_sql_to_file', json=body, headers=self.admin)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = save_query(self.client, body, headers=self.admin)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         return res.get_json()
 
     def move(self, name, collection):
-        return self.client.put(f'/saved_sql/{name}/collection', json={'collection': collection}, headers=self.admin)
+        return self.client.patch(f'/api/v1/queries/{name}', json={'collection': collection}, headers=self.admin)
 
     def make_key(self, name, **fields):
-        res = self.client.post('/api_keys', json={'name': name, **fields}, headers=self.admin)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return {'X-API-Key': res.get_json()['key']}
+        res = self.client.post('/api/v1/api-keys', json={'name': name, **fields}, headers=self.admin)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return {'X-API-Key': res.get_json()['secret']}
+
+    def keys(self):
+        return {k['name']: k for k in self.client.get('/api/v1/api-keys', headers=self.admin).get_json()['items']}
+
+    def roles(self):
+        return {r['name']: r for r in self.client.get('/api/v1/roles', headers=self.admin).get_json()['items']}
 
     def call(self, name, headers):
         return self.client.get(f'/q/{name}', headers=headers).status_code
 
     def collections(self):
-        return self.client.get('/collections', headers=self.admin).get_json()
+        """/api/v1/collections, keyed by name: {'collections': {name: {queries, keys, roles}}, 'uncollected'}."""
+        listing = self.client.get('/api/v1/collections', headers=self.admin).get_json()
+        return {'collections': {c.pop('name'): c for c in listing['items']}, 'uncollected': listing['uncollected']}
 
     def audit(self):
-        return self.client.get('/audit_log', headers=self.admin).get_json()['entries']
+        return self.client.get('/api/v1/audit', headers=self.admin).get_json()['items']
 
     def query_file(self, name):
         return store.load_versions(name)
@@ -98,8 +106,9 @@ class StorageTests(AppTestCase):
         self.assertNotIn('collection', self.query_file('q1'))
 
     def test_a_bad_collection_saves_nothing(self):
-        res = self.client.patch('/save_sql_to_file', headers=self.admin, json={
-            'filename': 'q1', 'author': 'me', 'description': 'd', 'sql_query': 'SELECT 1', 'collection': 'Bad Name'})
+        res = save_query(self.client, {
+            'filename': 'q1', 'author': 'me', 'description': 'd', 'sql_query': 'SELECT 1', 'collection': 'Bad Name'},
+            headers=self.admin)
         self.assertEqual(res.status_code, 400)
         self.assertFalse(store.saved_query_exists('q1'))
 
@@ -113,13 +122,13 @@ class StorageTests(AppTestCase):
 
     def test_deleting_the_query_removes_its_membership(self):
         self.save('q1', collection='reporting')
-        self.client.delete('/saved_sql/q1', headers=self.admin)
+        self.client.delete('/api/v1/queries/q1', headers=self.admin)
         self.assertEqual(self.collections()['collections'], {})
 
     def test_deleting_one_version_keeps_the_collection(self):
         self.save('q1', collection='reporting')
         self.save('q1')
-        self.client.delete('/saved_sql/q1?version=2', headers=self.admin)
+        self.client.delete('/api/v1/queries/q1/versions/2', headers=self.admin)
         self.assertEqual(self.collections()['collections']['reporting']['queries'], ['q1'])
 
     def test_a_hand_edited_invalid_value_reads_as_no_collection(self):
@@ -131,32 +140,33 @@ class StorageTests(AppTestCase):
         self.assertEqual(self.collections()['collections'], {})
         self.assertEqual(self.collections()['uncollected'], ['q1'])
 
-    def test_list_files_reports_the_collection(self):
+    def test_the_query_list_reports_the_collection(self):
         self.save('q1', collection='reporting')
         self.save('q2')
-        files = {f['filename']: f['collection'] for f in
-                 self.client.get('/list_files', headers=self.admin).get_json()['files']}
-        self.assertEqual(files, {'q1': 'reporting', 'q2': None})
+        listed = {q['name']: q['collection'] for q in
+                  self.client.get('/api/v1/queries', headers=self.admin).get_json()['items']}
+        self.assertEqual(listed, {'q1': 'reporting', 'q2': None})
 
 
 class MoveEndpointTests(AppTestCase):
     def test_move_in_and_out(self):
         self.save('q1')
-        res = self.move('q1', 'reporting').get_json()
-        self.assertEqual((res['from'], res['to']), (None, 'reporting'))
-        res = self.move('q1', None).get_json()
-        self.assertEqual((res['from'], res['to']), ('reporting', None))
+        self.assertEqual(self.move('q1', 'reporting').get_json()['collection'], 'reporting')
+        self.assertEqual(self.audit()[0]['changes']['collection'], {'from': None, 'to': 'reporting'})
+        self.assertIsNone(self.move('q1', None).get_json()['collection'])
+        self.assertEqual(self.audit()[0]['changes']['collection'], {'from': 'reporting', 'to': None})
         self.assertNotIn('collection', self.query_file('q1'))
 
     def test_only_admin_can_move(self):
         self.save('q1')
         scoped = self.make_key('k', connections=['a'])
-        res = self.client.put('/saved_sql/q1/collection', json={'collection': 'x'}, headers=scoped)
+        res = self.client.patch('/api/v1/queries/q1', json={'collection': 'x'}, headers=scoped)
         self.assertEqual(res.status_code, 403)
 
     def test_bad_requests(self):
         self.save('q1')
-        self.assertEqual(self.client.put('/saved_sql/q1/collection', json={}, headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.patch('/api/v1/queries/q1', json={'colection': 'x'},
+                                           headers=self.admin).status_code, 400)
         self.assertEqual(self.move('q1', 'Bad Name').status_code, 400)
         self.assertEqual(self.move('q1', '').status_code, 400)
         self.assertEqual(self.move('nope', 'x').status_code, 404)
@@ -166,8 +176,7 @@ class MoveEndpointTests(AppTestCase):
         self.save('q2', collection='reporting')
         self.make_key('reader', collections=['reporting'])
         self.make_key('ops-reader', collections=['ops'])
-        res = self.move('q2', 'ops').get_json()
-        self.assertEqual(res['access']['keys'], {'gain': ['ops-reader'], 'lose': ['reader']})
+        self.assertEqual(self.move('q2', 'ops').status_code, 200)
         entry = self.audit()[0]
         self.assertEqual(entry['action'], 'move_query')
         self.assertEqual(entry['target'], 'q2')
@@ -179,8 +188,9 @@ class MoveEndpointTests(AppTestCase):
         self.save('q1', collection='one')
         self.save('q2', collection='two')
         self.make_key('both', collections=['one', 'two'])
-        res = self.move('q1', 'two').get_json()
-        self.assertEqual(res['access']['keys'], {'gain': [], 'lose': []})
+        self.assertEqual(self.move('q1', 'two').status_code, 200)
+        changes = self.audit()[0]['changes']
+        self.assertEqual((changes['keys_gaining_access'], changes['keys_losing_access']), ([], []))
 
     def test_a_no_op_move_is_not_audited(self):
         self.save('q1', collection='reporting')
@@ -235,7 +245,7 @@ class GrantTests(AppTestCase):
         self.assertEqual([self.call(n, key) for n in ('rep1', 'rep2', 'other', 'loose')], [200, 200, 200, 200])
 
     def test_unknown_collection_is_rejected_and_lists_the_real_ones(self):
-        res = self.client.post('/api_keys', json={'name': 'k', 'collections': ['reportng']}, headers=self.admin)
+        res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'collections': ['reportng']}, headers=self.admin)
         self.assertEqual(res.status_code, 400)
         message = res.get_json()['error']
         self.assertIn('reportng', message)
@@ -243,9 +253,9 @@ class GrantTests(AppTestCase):
 
     def test_malformed_grants_are_rejected(self):
         for value in ('*', 'reporting', ['Reporting'], ['reporting', 'reporting'], [1], {'a': 1}):
-            res = self.client.post('/api_keys', json={'name': 'k', 'collections': value}, headers=self.admin)
+            res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'collections': value}, headers=self.admin)
             self.assertEqual(res.status_code, 400, value)
-        self.assertNotIn('k', self.client.get('/api_keys', headers=self.admin).get_json()['keys'])
+        self.assertNotIn('k', self.keys())
 
     def test_an_empty_collection_grant_is_inert_not_a_wildcard(self):
         key = self.make_key('none', connections=[], collections=[])
@@ -255,13 +265,13 @@ class GrantTests(AppTestCase):
         self.make_key('k', connections=[], collections=['reporting'])
         self.move('rep1', 'ops')
         self.move('rep2', 'ops')  # 'reporting' is now empty: the grant is inert but still recorded
-        res = self.client.patch('/api_keys/k', json={'collections': ['reporting']}, headers=self.admin)
+        res = self.client.patch('/api/v1/api-keys/k', json={'collections': ['reporting']}, headers=self.admin)
         self.assertEqual(res.status_code, 200)  # re-saving an already-held, now-empty name is fine
-        res = self.client.patch('/api_keys/k', json={'collections': ['reporting', 'nope']}, headers=self.admin)
+        res = self.client.patch('/api/v1/api-keys/k', json={'collections': ['reporting', 'nope']}, headers=self.admin)
         self.assertEqual(res.status_code, 400)
-        res = self.client.patch('/api_keys/k', json={'collections': ['ops']}, headers=self.admin)
+        res = self.client.patch('/api/v1/api-keys/k', json={'collections': ['ops']}, headers=self.admin)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(self.client.get('/api_keys', headers=self.admin).get_json()['keys']['k']['collections'],
+        self.assertEqual(self.keys()['k']['collections'],
                          ['ops'])
 
     def test_a_key_stored_before_the_field_existed_still_works(self):
@@ -272,9 +282,9 @@ class GrantTests(AppTestCase):
                 VALUES ('old', ?, 1, NULL, '2026-01-01 00:00:00', ?)
             """, (apikeys._hash(secret), json.dumps({'connections': ['a'], 'allow_writes': False, 'queries': []})))
         self.assertEqual(self.call('rep1', {'X-API-Key': secret}), 200)  # via its connection grant, unchanged
-        listed = self.client.get('/api_keys', headers=self.admin).get_json()['keys']['old']
+        listed = self.keys()['old']
         self.assertEqual(listed['collections'], [])
-        res = self.client.patch('/api_keys/old', json={'active': True}, headers=self.admin)
+        res = self.client.patch('/api/v1/api-keys/old', json={'active': True}, headers=self.admin)
         self.assertEqual(res.status_code, 200)
         self.assertEqual([e for e in self.audit() if e['action'] == 'update_key'], [])  # no phantom diff
 
@@ -285,45 +295,46 @@ class RoleTests(AppTestCase):
         self.save('rep1', collection='reporting')
 
     def test_a_role_carries_collections_and_a_key_copies_them(self):
-        res = self.client.post('/roles', json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
+        res = self.client.post('/api/v1/roles',
+                               json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
                                headers=self.admin)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         key = self.make_key('k', role='partner')
         self.assertEqual(self.call('rep1', key), 200)
-        listed = self.client.get('/api_keys', headers=self.admin).get_json()['keys']['k']
+        listed = self.keys()['k']
         self.assertEqual(listed['collections'], ['reporting'])
         self.assertEqual(listed['created_from_role'], 'partner')
 
     def test_role_validation_matches_key_validation(self):
-        res = self.client.post('/roles', json={'name': 'r', 'collections': ['nope']}, headers=self.admin)
+        res = self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['nope']}, headers=self.admin)
         self.assertEqual(res.status_code, 400)
-        res = self.client.post('/roles', json={'name': 'r', 'collections': ['Bad']}, headers=self.admin)
+        res = self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['Bad']}, headers=self.admin)
         self.assertEqual(res.status_code, 400)
 
     def test_a_role_and_explicit_collections_cannot_be_combined(self):
-        self.client.post('/roles', json={'name': 'partner', 'collections': ['reporting']}, headers=self.admin)
-        res = self.client.post('/api_keys', json={'name': 'k', 'role': 'partner', 'collections': ['reporting']},
+        self.client.post('/api/v1/roles', json={'name': 'partner', 'collections': ['reporting']}, headers=self.admin)
+        res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'role': 'partner', 'collections': ['reporting']},
                                headers=self.admin)
         self.assertEqual(res.status_code, 400)
 
     def test_editing_the_role_afterward_does_not_change_an_existing_key(self):
-        self.client.post('/roles', json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
+        self.client.post('/api/v1/roles', json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
                          headers=self.admin)
         key = self.make_key('k', role='partner')
-        self.client.patch('/roles/partner', json={'collections': []}, headers=self.admin)
+        self.client.patch('/api/v1/roles/partner', json={'collections': []}, headers=self.admin)
         self.assertEqual(self.call('rep1', key), 200)
 
     def test_a_key_can_still_be_made_from_a_role_whose_collection_has_since_emptied(self):
-        self.client.post('/roles', json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
+        self.client.post('/api/v1/roles', json={'name': 'partner', 'connections': [], 'collections': ['reporting']},
                          headers=self.admin)
         self.move('rep1', None)
         self.make_key('k', role='partner')  # must not fail on the role's now-empty collection
 
     def test_update_role_collections(self):
-        self.client.post('/roles', json={'name': 'partner'}, headers=self.admin)
-        res = self.client.patch('/roles/partner', json={'collections': ['reporting']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'name': 'partner'}, headers=self.admin)
+        res = self.client.patch('/api/v1/roles/partner', json={'collections': ['reporting']}, headers=self.admin)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(self.client.get('/roles', headers=self.admin).get_json()['roles']['partner']['collections'],
+        self.assertEqual(self.roles()['partner']['collections'],
                          ['reporting'])
 
 
@@ -412,7 +423,7 @@ class DescribeTests(AppTestCase):
         self.save('q2', collection='reporting')
         self.save('q3')
         self.make_key('k', collections=['reporting'])
-        self.client.post('/roles', json={'name': 'r', 'collections': ['reporting']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['reporting']}, headers=self.admin)
         data = self.collections()
         self.assertEqual(data['collections'], {'reporting': {'queries': ['q1', 'q2'], 'keys': ['k'], 'roles': ['r']}})
         self.assertEqual(data['uncollected'], ['q3'])
@@ -425,7 +436,7 @@ class DescribeTests(AppTestCase):
 
     def test_admin_only(self):
         scoped = self.make_key('k', connections=['a'])
-        self.assertEqual(self.client.get('/collections', headers=scoped).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/collections', headers=scoped).status_code, 403)
 
 
 class RenameTests(AppTestCase):
@@ -435,15 +446,15 @@ class RenameTests(AppTestCase):
         self.save('q2', collection='old')
         self.save('q3', collection='keep')
         self.key = self.make_key('k', connections=[], collections=['old'])
-        self.client.post('/roles', json={'name': 'r', 'collections': ['old']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['old']}, headers=self.admin)
 
     def rename(self, old, new, **extra):
-        return self.client.patch(f'/collections/{old}', json={'name': new, **extra}, headers=self.admin)
+        return self.client.patch(f'/api/v1/collections/{old}', json={'name': new, **extra}, headers=self.admin)
 
     def test_rename_moves_queries_and_every_grant(self):
         res = self.rename('old', 'new')
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        self.assertEqual(res.get_json()['queries'], ['q1', 'q2'])
+        self.assertEqual(res.get_json()['moved']['queries'], ['q1', 'q2'])
         data = self.collections()['collections']
         self.assertEqual(sorted(data), ['keep', 'new'])
         self.assertEqual(data['new'], {'queries': ['q1', 'q2'], 'keys': ['k'], 'roles': ['r']})
@@ -458,7 +469,7 @@ class RenameTests(AppTestCase):
 
     def test_an_existing_target_needs_merge(self):
         res = self.rename('old', 'keep')
-        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.status_code, 409)
         self.assertIn('merge', res.get_json()['error'])
         self.assertEqual(self.collections()['collections']['old']['queries'], ['q1', 'q2'])  # nothing changed
         self.assertEqual(self.rename('old', 'keep', merge=True).status_code, 200)
@@ -469,7 +480,7 @@ class RenameTests(AppTestCase):
         self.assertEqual(self.rename('old', 'old').status_code, 400)
         self.assertEqual(self.rename('old', 'Bad Name').status_code, 400)
         self.assertEqual(self.rename('old', 'x', merge='yes').status_code, 400)
-        self.assertEqual(self.client.patch('/collections/old', json={}, headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.patch('/api/v1/collections/old', json={}, headers=self.admin).status_code, 400)
 
     def test_a_collection_only_a_grant_still_names_can_be_renamed(self):
         self.move('q1', None)
@@ -479,7 +490,7 @@ class RenameTests(AppTestCase):
 
     def test_admin_only(self):
         scoped = self.make_key('s', connections=['a'])
-        res = self.client.patch('/collections/old', json={'name': 'x'}, headers=scoped)
+        res = self.client.patch('/api/v1/collections/old', json={'name': 'x'}, headers=scoped)
         self.assertEqual(res.status_code, 403)
 
     def _reach(self):

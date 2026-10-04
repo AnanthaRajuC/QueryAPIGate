@@ -9,7 +9,7 @@ from unittest import mock
 
 from queryapigate import cache, config, create_app
 from queryapigate.rediscache import RedisResponseCache
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class ResponseCacheTests(unittest.TestCase):
@@ -350,9 +350,19 @@ class AppTestCase(unittest.TestCase):
                 'connection_name': 'lite', **extra}
         if cache_ttl is not None:
             body['cache_ttl'] = cache_ttl
-        res = self.client.patch('/save_sql_to_file', json=body)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = save_query(self.client, body)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         return res
+
+    def set_ttl(self, body, version=1, client=None, headers=None):
+        """Change one version's cache_ttl in place (PATCH /api/v1/queries/q/versions/{version})."""
+        return (client or self.client).patch(f'/api/v1/queries/q/versions/{version}', json=body, headers=headers)
+
+    def versions(self):
+        return self.client.get('/api/v1/queries/q').get_json()['versions']
+
+    def entries(self, client=None, headers=None):
+        return (client or self.client).get('/api/v1/cache/entries', headers=headers).get_json()['items']
 
 
 class CacheHeaderTests(AppTestCase):
@@ -442,9 +452,9 @@ class CacheEntriesEndpointTests(AppTestCase):
     def test_lists_a_live_entry_with_its_metadata(self):
         self.save(cache_ttl=60)
         self.client.get('/q/q?id=1')  # a miss, so one entry now exists
-        res = self.client.get('/cache/entries')
+        res = self.client.get('/api/v1/cache/entries')
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        entries = res.get_json()['entries']
+        entries = res.get_json()['items']
         self.assertEqual(len(entries), 1)
         e = entries[0]
         self.assertEqual(e['meta']['name'], 'q')
@@ -456,66 +466,63 @@ class CacheEntriesEndpointTests(AppTestCase):
         self.assertGreater(e['ttl_remaining_s'], 0)
 
     def test_empty_when_nothing_is_cached(self):
-        res = self.client.get('/cache/entries')
-        self.assertEqual(res.get_json()['entries'], [])
+        self.assertEqual(self.entries(), [])
 
     def test_entry_body_is_served_with_its_real_content_type(self):
         self.save(cache_ttl=60)
         live = self.client.get('/q/q?id=1')
-        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
-        res = self.client.get(f'/cache/entries/{key}')
+        key = self.entries()[0]['key']
+        res = self.client.get(f'/api/v1/cache/entries/{key}')
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.content_type, live.content_type)
         self.assertEqual(res.get_data(), live.get_data())
 
     def test_entry_body_404s_for_an_unknown_key(self):
-        res = self.client.get('/cache/entries/does-not-exist')
+        res = self.client.get('/api/v1/cache/entries/does-not-exist')
         self.assertEqual(res.status_code, 404)
 
     def test_delete_one_entry_removes_it(self):
         self.save(cache_ttl=60)
         self.client.get('/q/q?id=1')
-        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
-        res = self.client.delete(f'/cache/entries/{key}')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(self.client.get('/cache/entries').get_json()['entries'], [])
+        key = self.entries()[0]['key']
+        res = self.client.delete(f'/api/v1/cache/entries/{key}')
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(self.entries(), [])
         # a deleted entry is a clean miss, not an error, on the next real call
         self.assertEqual(self.client.get('/q/q?id=1').headers['X-Cache'], 'MISS')
 
     def test_delete_one_is_a_noop_for_an_unknown_key(self):
-        res = self.client.delete('/cache/entries/does-not-exist')
-        self.assertEqual(res.status_code, 200)
+        res = self.client.delete('/api/v1/cache/entries/does-not-exist')
+        self.assertEqual(res.status_code, 204)
 
     def test_clear_removes_every_entry(self):
         self.save(filename='q1', sql='SELECT * FROM t WHERE id = :id', cache_ttl=60)
         self.save(filename='q2', sql='SELECT * FROM t WHERE id = :id', cache_ttl=60)
         self.client.get('/q/q1?id=1')
         self.client.get('/q/q2?id=1')
-        self.assertEqual(len(self.client.get('/cache/entries').get_json()['entries']), 2)
-        res = self.client.delete('/cache/entries')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(self.client.get('/cache/entries').get_json()['entries'], [])
+        self.assertEqual(len(self.entries()), 2)
+        res = self.client.delete('/api/v1/cache/entries')
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(self.entries(), [])
 
     def test_every_cache_route_is_admin_only(self):
         self.save(cache_ttl=60)
         self.client.get('/q/q?id=1')
-        key = self.client.get('/cache/entries').get_json()['entries'][0]['key']
+        key = self.entries()[0]['key']
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         client = create_app().test_client()
-        scoped = client.post('/api_keys', json={'name': 'scoped', 'connections': []},
-                             headers={'X-API-Key': 'admin-key'}).get_json()['key']
+        scoped = client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []},
+                             headers={'X-API-Key': 'admin-key'}).get_json()['secret']
         headers = {'X-API-Key': scoped}
-        self.assertEqual(client.get('/cache/entries', headers=headers).status_code, 403)
-        self.assertEqual(client.get(f'/cache/entries/{key}', headers=headers).status_code, 403)
-        self.assertEqual(client.delete(f'/cache/entries/{key}', headers=headers).status_code, 403)
-        self.assertEqual(client.delete('/cache/entries', headers=headers).status_code, 403)
+        self.assertEqual(client.get('/api/v1/cache/entries', headers=headers).status_code, 403)
+        self.assertEqual(client.get(f'/api/v1/cache/entries/{key}', headers=headers).status_code, 403)
+        self.assertEqual(client.delete(f'/api/v1/cache/entries/{key}', headers=headers).status_code, 403)
+        self.assertEqual(client.delete('/api/v1/cache/entries', headers=headers).status_code, 403)
 
 
 class ExecutionHistoryInteractionTests(AppTestCase):
     def history_count(self):
-        files = self.client.get('/list_files').get_json()['files']
-        matching = [f for f in files if f['filename'] == 'q']
-        return len(matching[0]['versions'][0].get('execution_history', []))
+        return len(self.client.get('/api/v1/queries/q/history').get_json()['items'])
 
     def test_a_cache_hit_is_not_recorded_in_execution_history(self):
         self.save(cache_ttl=60)
@@ -554,14 +561,14 @@ class WriteSafetyTests(AppTestCase):
 
 class CacheTtlValidationTests(AppTestCase):
     def test_negative_is_rejected(self):
-        res = self.client.patch('/save_sql_to_file', json={
+        res = save_query(self.client, {
             'author': 'a', 'description': 'd', 'filename': 'q', 'connection_name': 'lite',
             'sql_query': 'SELECT * FROM t WHERE id = :id', 'cache_ttl': -1})
         self.assertEqual(res.status_code, 400)
 
     def test_non_integer_is_rejected(self):
         for bad in ('60', 1.5, True):
-            res = self.client.patch('/save_sql_to_file', json={
+            res = save_query(self.client, {
                 'author': 'a', 'description': 'd', 'filename': 'q', 'connection_name': 'lite',
                 'sql_query': 'SELECT * FROM t WHERE id = :id', 'cache_ttl': bad})
             self.assertEqual(res.status_code, 400, bad)
@@ -573,25 +580,21 @@ class CacheTtlValidationTests(AppTestCase):
 
 
 class SetCacheTtlEndpointTests(AppTestCase):
-    """PUT /saved_sql/<name>/cache_ttl - editing a version's cache_ttl in place, without a new version."""
+    """PATCH /api/v1/queries/{name}/versions/{version} - a version's cache_ttl, changed in place."""
 
-    def test_sets_a_ttl_on_the_latest_version_without_a_new_version(self):
+    def test_sets_a_ttl_without_a_new_version(self):
         self.save(cache_ttl=None)
-        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 90})
+        res = self.set_ttl({'cache_ttl': 90})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        body = res.get_json()
-        self.assertEqual(body['version'], 1)
-        self.assertEqual(body['cache_ttl'], 90)
-        files = self.client.get('/list_files').get_json()['files']
-        v = [f for f in files if f['filename'] == 'q'][0]['versions']
-        self.assertEqual(len(v), 1)  # still one version - not a new one
-        self.assertEqual(v[0]['cache_ttl'], 90)
+        versions = res.get_json()['versions']
+        self.assertEqual(len(versions), 1)  # still one version - not a new one
+        self.assertEqual(versions[0]['cache_ttl'], 90)
 
     def test_takes_effect_immediately_on_the_next_run(self):
         self.save(cache_ttl=None)
         first = self.client.get('/q/q?id=1')
         self.assertNotIn('X-Cache', first.headers)
-        self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 60})
+        self.set_ttl({'cache_ttl': 60})
         second = self.client.get('/q/q?id=1')
         self.assertEqual(second.headers['X-Cache'], 'MISS')
         third = self.client.get('/q/q?id=1')
@@ -600,54 +603,40 @@ class SetCacheTtlEndpointTests(AppTestCase):
     def test_zero_clears_it_and_stops_caching(self):
         self.save(cache_ttl=60)
         self.client.get('/q/q?id=1')
-        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 0})
+        res = self.set_ttl({'cache_ttl': 0})
         self.assertEqual(res.status_code, 200)
-        self.assertIsNone(res.get_json()['cache_ttl'])
+        self.assertIsNone(res.get_json()['versions'][0]['cache_ttl'])
         after = self.client.get('/q/q?id=1')
         self.assertNotIn('X-Cache', after.headers)
 
     def test_null_also_clears_it(self):
         self.save(cache_ttl=60)
-        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': None})
+        res = self.set_ttl({'cache_ttl': None})
         self.assertEqual(res.status_code, 200)
-        self.assertIsNone(res.get_json()['cache_ttl'])
+        self.assertIsNone(res.get_json()['versions'][0]['cache_ttl'])
 
     def test_targets_a_specific_older_version(self):
         self.save(cache_ttl=None)
         self.save(cache_ttl=None)  # v2, now the latest
-        res = self.client.put('/saved_sql/q/cache_ttl?version=1', json={'cache_ttl': 45})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.get_json()['version'], 1)
-        files = self.client.get('/list_files').get_json()['files']
-        v = [f for f in files if f['filename'] == 'q'][0]['versions']
-        self.assertEqual(v[0]['cache_ttl'], 45)
-        self.assertIsNone(v[1].get('cache_ttl'))
+        self.assertEqual(self.set_ttl({'cache_ttl': 45}, version=1).status_code, 200)
+        versions = self.versions()
+        self.assertEqual(versions[0]['cache_ttl'], 45)
+        self.assertIsNone(versions[1]['cache_ttl'])
 
-    def test_a_negative_value_is_rejected(self):
+    def test_bad_values_are_rejected(self):
         self.save(cache_ttl=None)
-        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': -1})
-        self.assertEqual(res.status_code, 400)
-
-    def test_a_non_integer_value_is_rejected(self):
-        self.save(cache_ttl=None)
-        res = self.client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': '60'})
-        self.assertEqual(res.status_code, 400)
-
-    def test_missing_cache_ttl_field_is_rejected(self):
-        self.save(cache_ttl=None)
-        res = self.client.put('/saved_sql/q/cache_ttl', json={})
-        self.assertEqual(res.status_code, 400)
+        for body in ({'cache_ttl': -1}, {'cache_ttl': '60'}, {'ttl': 60}):
+            self.assertEqual(self.set_ttl(body).status_code, 400, body)
 
     def test_a_nonexistent_version_is_404(self):
         self.save(cache_ttl=None)
-        res = self.client.put('/saved_sql/q/cache_ttl?version=99', json={'cache_ttl': 30})
-        self.assertEqual(res.status_code, 404)
+        self.assertEqual(self.set_ttl({'cache_ttl': 30}, version=99).status_code, 404)
 
     def test_only_admin_may_edit_it(self):
         self.save(cache_ttl=None)
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         client = create_app().test_client()
-        scoped = client.post('/api_keys', json={'name': 'scoped', 'connections': []},
-                             headers={'X-API-Key': 'admin-key'}).get_json()['key']
-        res = client.put('/saved_sql/q/cache_ttl', json={'cache_ttl': 30}, headers={'X-API-Key': scoped})
+        scoped = client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []},
+                             headers={'X-API-Key': 'admin-key'}).get_json()['secret']
+        res = self.set_ttl({'cache_ttl': 30}, client=client, headers={'X-API-Key': scoped})
         self.assertEqual(res.status_code, 403)

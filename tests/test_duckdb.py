@@ -11,6 +11,7 @@ from unittest import mock
 
 from queryapigate import config, create_app, runners, sqltools
 from queryapigate.errors import ApiError
+from tests.helpers import put_connections
 
 
 class ConfigTests(unittest.TestCase):
@@ -67,9 +68,9 @@ class ConnectionApiTests(unittest.TestCase):
         self.client = create_app().test_client()
 
     def test_a_duckdb_connection_can_be_saved_and_listed(self):
-        res = self.client.patch('/connections', json={'connections': {'local': {
-            'db': 'duckdb', 'database': 'local.duckdb', 'active': True}}})
-        self.assertEqual(res.status_code, 200)
-        listed = self.client.get('/connections').get_json()['connections']['local']
+        res = put_connections(self.client, {'local': {
+            'db': 'duckdb', 'database': 'local.duckdb', 'active': True}})
+        self.assertEqual(res.status_code, 201)
+        listed = self.client.get('/api/v1/connections/local').get_json()
         self.assertEqual(listed['db'], 'duckdb')
         self.assertEqual(listed['database'], 'local.duckdb')

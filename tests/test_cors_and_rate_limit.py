@@ -30,12 +30,12 @@ class AppTestCase(unittest.TestCase):
 
 class CorsTests(AppTestCase):
     def test_off_by_default_no_headers_even_when_an_origin_is_sent(self):
-        res = self.client().get('/connections', headers={'Origin': ORIGIN})
+        res = self.client().get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertNotIn('Access-Control-Allow-Origin', res.headers)
 
     def test_listed_origin_is_echoed_with_vary_and_exposed_pagination_headers(self):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = f'{ORIGIN}, https://other.example.org'
-        res = self.client().get('/connections', headers={'Origin': ORIGIN})
+        res = self.client().get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], ORIGIN)
         self.assertIn('Origin', res.headers['Vary'])
         for name in ('X-Page', 'X-Has-More', 'X-RateLimit-Remaining'):  # a page's JS cannot read them otherwise
@@ -47,18 +47,18 @@ class CorsTests(AppTestCase):
         client = self.client()
         for origin in ('https://evil.example.com', 'http://app.example.com', 'https://app.example.com:8443',
                        'https://app.example.com.evil.com', 'null', ''):
-            res = client.get('/connections', headers={'Origin': origin})
+            res = client.get('/api/v1/connections', headers={'Origin': origin})
             self.assertNotIn('Access-Control-Allow-Origin', res.headers, origin)
-        self.assertNotIn('Access-Control-Allow-Origin', client.get('/connections').headers)  # no Origin at all
+        self.assertNotIn('Access-Control-Allow-Origin', client.get('/api/v1/connections').headers)  # no Origin at all
 
     def test_matching_ignores_case_and_a_trailing_slash(self):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = 'HTTPS://App.Example.com/'
-        res = self.client().get('/connections', headers={'Origin': ORIGIN})
+        res = self.client().get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], ORIGIN)
 
     def test_wildcard(self):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = '*'
-        res = self.client().get('/connections', headers={'Origin': 'https://anything.example'})
+        res = self.client().get('/api/v1/connections', headers={'Origin': 'https://anything.example'})
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], '*')
         self.assertNotIn('Vary', res.headers)
 
@@ -94,15 +94,17 @@ class CorsTests(AppTestCase):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = ORIGIN
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         client = self.client()
-        res = client.get('/connections', headers={'Origin': ORIGIN})
+        res = client.get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertEqual(res.status_code, 401)
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], ORIGIN)  # so the page can read the 401
-        self.assertEqual(client.get('/connections', headers={'Origin': ORIGIN, 'X-API-Key': 'k3y'}).status_code, 200)
+        self.assertEqual(client.get('/api/v1/connections', headers={'Origin': ORIGIN, 'X-API-Key': 'k3y'}).status_code,
+                         200)
 
     def test_a_plain_options_request_is_not_mistaken_for_a_preflight(self):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = ORIGIN
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        self.assertEqual(self.client().options('/connections').status_code, 401)  # no Access-Control-Request-Method
+        self.assertEqual(self.client().options('/api/v1/connections').status_code,
+                         401)  # no Access-Control-Request-Method
 
     def test_wildcard_without_an_api_key_warns_loudly(self):
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = '*'
@@ -126,7 +128,7 @@ class RateLimitTests(AppTestCase):
     def test_off_by_default(self):
         client = self.client()
         for _ in range(20):
-            res = client.get('/connections')
+            res = client.get('/api/v1/connections')
         self.assertEqual(res.status_code, 200)
         self.assertNotIn('X-RateLimit-Limit', res.headers)
 
@@ -135,11 +137,11 @@ class RateLimitTests(AppTestCase):
         client = self.client()
         remaining = []
         for _ in range(3):
-            res = client.get('/connections')
+            res = client.get('/api/v1/connections')
             self.assertEqual((res.status_code, res.headers['X-RateLimit-Limit']), (200, '3'))
             remaining.append(int(res.headers['X-RateLimit-Remaining']))
         self.assertEqual(remaining, [2, 1, 0])
-        res = client.get('/connections')
+        res = client.get('/api/v1/connections')
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.get_json()['error'], 'Rate limit exceeded')
         self.assertTrue(1 <= int(res.headers['Retry-After']) <= 20)
@@ -150,28 +152,28 @@ class RateLimitTests(AppTestCase):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = ORIGIN
         client = self.client()
-        self.assertEqual(client.get('/connections').status_code, 200)
-        self.assertEqual(client.get('/connections').status_code, 429)
+        self.assertEqual(client.get('/api/v1/connections').status_code, 200)
+        self.assertEqual(client.get('/api/v1/connections').status_code, 429)
         for _ in range(5):
             self.assertEqual(client.get('/health').status_code, 200)
-            self.assertEqual(client.options('/connections', headers={
+            self.assertEqual(client.options('/api/v1/connections', headers={
                 'Origin': ORIGIN, 'Access-Control-Request-Method': 'GET'}).status_code, 204)
 
     def test_guessing_the_api_key_is_throttled_because_the_limit_comes_first(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '3/minute'
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         client = self.client()
-        statuses = [client.get('/connections', headers={'X-API-Key': f'guess{i}'}).status_code for i in range(5)]
+        statuses = [client.get('/api/v1/connections', headers={'X-API-Key': f'guess{i}'}).status_code for i in range(5)]
         self.assertEqual(statuses, [401, 401, 401, 429, 429])
         # ...and even the right key is refused while the client is being throttled
-        self.assertEqual(client.get('/connections', headers={'X-API-Key': 'k3y'}).status_code, 429)
+        self.assertEqual(client.get('/api/v1/connections', headers={'X-API-Key': 'k3y'}).status_code, 429)
 
     def test_rejections_are_readable_by_a_browser(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         os.environ['QUERYAPIGATE_CORS_ORIGINS'] = ORIGIN
         client = self.client()
-        client.get('/connections')
-        res = client.get('/connections', headers={'Origin': ORIGIN})
+        client.get('/api/v1/connections')
+        res = client.get('/api/v1/connections', headers={'Origin': ORIGIN})
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.headers['Access-Control-Allow-Origin'], ORIGIN)
         self.assertIn('Retry-After', res.headers['Access-Control-Expose-Headers'])
@@ -179,14 +181,14 @@ class RateLimitTests(AppTestCase):
     def test_clients_are_counted_separately_by_address(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         client = self.client()
-        get = lambda ip: client.get('/connections', environ_base={'REMOTE_ADDR': ip}).status_code  # noqa: E731
+        get = lambda ip: client.get('/api/v1/connections', environ_base={'REMOTE_ADDR': ip}).status_code  # noqa: E731
         self.assertEqual([get('10.0.0.1'), get('10.0.0.1'), get('10.0.0.2')], [200, 429, 200])
 
     def test_forwarded_headers_are_ignored_unless_a_proxy_is_trusted(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         client = self.client()
         # a client cannot dodge the limit by inventing X-Forwarded-For values
-        codes = [client.get('/connections', headers={'X-Forwarded-For': f'203.0.113.{i}'}).status_code
+        codes = [client.get('/api/v1/connections', headers={'X-Forwarded-For': f'203.0.113.{i}'}).status_code
                  for i in range(3)]
         self.assertEqual(codes, [200, 429, 429])
 
@@ -194,7 +196,7 @@ class RateLimitTests(AppTestCase):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         os.environ['QUERYAPIGATE_TRUST_PROXY'] = '1'
         client = self.client()
-        get = lambda ip: client.get('/connections', headers={'X-Forwarded-For': ip},  # noqa: E731
+        get = lambda ip: client.get('/api/v1/connections', headers={'X-Forwarded-For': ip},  # noqa: E731
                                     environ_base={'REMOTE_ADDR': '172.17.0.2'}).status_code  # the proxy itself
         self.assertEqual([get('203.0.113.1'), get('203.0.113.1'), get('203.0.113.2')], [200, 429, 200])
 
@@ -203,7 +205,7 @@ class RateLimitTests(AppTestCase):
         os.environ['QUERYAPIGATE_TRUST_PROXY'] = '1'
         client = self.client()
         # the proxy appends the address it actually saw; anything a client prepended is not trusted
-        get = lambda forged: client.get('/connections',  # noqa: E731
+        get = lambda forged: client.get('/api/v1/connections',  # noqa: E731
                                         headers={'X-Forwarded-For': f'{forged}, 203.0.113.9'},
                                         environ_base={'REMOTE_ADDR': '172.17.0.2'}).status_code
         self.assertEqual([get('1.1.1.1'), get('2.2.2.2'), get('3.3.3.3')], [200, 429, 429])
@@ -243,20 +245,20 @@ class KeyRateLimitTests(AppTestCase):
     def create_key(self, name='scoped', rate_limit=None, **extra):
         os.environ.setdefault('QUERYAPIGATE_API_KEY', 'admin-key')
         client = self.client()
-        res = client.post('/api_keys', json={'name': name, 'connections': [], 'rate_limit': rate_limit, **extra},
+        res = client.post('/api/v1/api-keys', json={'name': name, 'connections': [], 'rate_limit': rate_limit, **extra},
                           headers={'X-API-Key': 'admin-key'})
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return res.get_json()['key'], client
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return res.get_json()['secret'], client
 
     def test_over_the_per_key_limit_gets_429_with_its_own_error_and_headers(self):
         key, client = self.create_key('tight', rate_limit='2/minute')
         headers = {'X-API-Key': key}
         for expected_remaining in (1, 0):
-            res = client.get('/connections', headers=headers)
+            res = client.get('/api/v1/connections', headers=headers)
             self.assertEqual(res.status_code, 403)  # not admin - but still counted, see class docstring
             self.assertEqual(res.headers['X-RateLimit-Key-Limit'], '2')
             self.assertEqual(res.headers['X-RateLimit-Key-Remaining'], str(expected_remaining))
-        res = client.get('/connections', headers=headers)
+        res = client.get('/api/v1/connections', headers=headers)
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.get_json()['error'], 'Rate limit exceeded for this API key')
         self.assertIn('retry_after', res.get_json())
@@ -264,23 +266,23 @@ class KeyRateLimitTests(AppTestCase):
     def test_a_key_with_no_rate_limit_is_never_throttled_by_this_mechanism(self):
         key, client = self.create_key('unlimited')
         headers = {'X-API-Key': key}
-        statuses = [client.get('/connections', headers=headers).status_code for _ in range(20)]
+        statuses = [client.get('/api/v1/connections', headers=headers).status_code for _ in range(20)]
         self.assertTrue(all(s == 403 for s in statuses), statuses)  # never 429 - always the plain admin-only 403
 
     def test_two_keys_with_the_same_limit_have_independent_budgets(self):
         key_a, client = self.create_key('key-a', rate_limit='1/minute')
         key_b, _ = self.create_key('key-b', rate_limit='1/minute')
-        self.assertEqual(client.get('/connections', headers={'X-API-Key': key_a}).status_code, 403)
-        self.assertEqual(client.get('/connections', headers={'X-API-Key': key_a}).status_code, 429)
+        self.assertEqual(client.get('/api/v1/connections', headers={'X-API-Key': key_a}).status_code, 403)
+        self.assertEqual(client.get('/api/v1/connections', headers={'X-API-Key': key_a}).status_code, 429)
         # key_b's own budget is untouched by key_a's use
-        self.assertEqual(client.get('/connections', headers={'X-API-Key': key_b}).status_code, 403)
+        self.assertEqual(client.get('/api/v1/connections', headers={'X-API-Key': key_b}).status_code, 403)
 
     def test_applies_in_addition_to_the_server_wide_limit_not_instead_of_it(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '100/minute'  # generous - should not be what bites
         key, client = self.create_key('tight', rate_limit='1/minute')
         headers = {'X-API-Key': key}
-        self.assertEqual(client.get('/connections', headers=headers).status_code, 403)
-        res = client.get('/connections', headers=headers)
+        self.assertEqual(client.get('/api/v1/connections', headers=headers).status_code, 403)
+        res = client.get('/api/v1/connections', headers=headers)
         self.assertEqual(res.status_code, 429)
         self.assertEqual(res.get_json()['error'], 'Rate limit exceeded for this API key')  # the per-key one
 
@@ -288,14 +290,14 @@ class KeyRateLimitTests(AppTestCase):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         client = self.client()
         headers = {'X-API-Key': 'admin-key'}
-        statuses = [client.get('/connections', headers=headers).status_code for _ in range(20)]
+        statuses = [client.get('/api/v1/connections', headers=headers).status_code for _ in range(20)]
         self.assertTrue(all(s == 200 for s in statuses), statuses)
 
     def test_health_and_metrics_are_exempt_from_the_key_limit_too(self):
         key, client = self.create_key('tight', rate_limit='1/minute')
         headers = {'X-API-Key': key}
-        client.get('/connections', headers=headers)
-        self.assertEqual(client.get('/connections', headers=headers).status_code, 429)
+        client.get('/api/v1/connections', headers=headers)
+        self.assertEqual(client.get('/api/v1/connections', headers=headers).status_code, 429)
         for _ in range(5):
             self.assertEqual(client.get('/health', headers=headers).status_code, 200)
             self.assertEqual(client.get('/metrics', headers=headers).status_code, 200)
@@ -303,7 +305,7 @@ class KeyRateLimitTests(AppTestCase):
     def test_malformed_rate_limit_is_rejected_with_a_message_naming_the_right_field(self):
         os.environ.setdefault('QUERYAPIGATE_API_KEY', 'admin-key')
         client = self.client()
-        res = client.post('/api_keys', json={'name': 'bad', 'rate_limit': 'fast'},
+        res = client.post('/api/v1/api-keys', json={'name': 'bad', 'rate_limit': 'fast'},
                           headers={'X-API-Key': 'admin-key'})
         self.assertEqual(res.status_code, 400)
         self.assertIn('rate_limit must look like', res.get_json()['error'])
@@ -312,10 +314,10 @@ class KeyRateLimitTests(AppTestCase):
     def test_clearing_rate_limit_via_explicit_null_removes_the_limit(self):
         key, client = self.create_key('tight', rate_limit='1/minute')
         headers = {'X-API-Key': key}
-        client.get('/connections', headers=headers)
-        self.assertEqual(client.get('/connections', headers=headers).status_code, 429)
-        client.patch('/api_keys/tight', json={'rate_limit': None}, headers={'X-API-Key': 'admin-key'})
-        self.assertEqual(client.get('/connections', headers=headers).status_code, 403)  # limited no more
+        client.get('/api/v1/connections', headers=headers)
+        self.assertEqual(client.get('/api/v1/connections', headers=headers).status_code, 429)
+        client.patch('/api/v1/api-keys/tight', json={'rate_limit': None}, headers={'X-API-Key': 'admin-key'})
+        self.assertEqual(client.get('/api/v1/connections', headers=headers).status_code, 403)  # limited no more
 
 
 class TokenBucketTests(unittest.TestCase):

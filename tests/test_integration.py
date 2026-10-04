@@ -16,7 +16,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import config, create_app, pool, runners
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 CREATE = {
     'postgres': 'CREATE TABLE queryapigate_it (id INT, name VARCHAR(50), price NUMERIC(8, 2), added TIMESTAMP)',
@@ -185,7 +185,7 @@ class IntegrationBase:
         self.assertEqual(set(results), {200})
 
     def test_saved_query_end_to_end(self):
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'author': 'it', 'description': 'd', 'filename': 'it_query', 'connection_name': 'it',
             'sql_query': 'SELECT name FROM queryapigate_it WHERE id = :id', 'query_parameters': {'id': 'int'}})
         res = self.client.get('/q/it_query?id=5')

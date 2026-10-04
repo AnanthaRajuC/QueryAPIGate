@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from queryapigate import config, create_app, history, jwtauth, mcp_server, metrics, params
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 SECRET = 'a-shared-secret-that-is-long-enough-for-hs256'
 JWT_ENV = ('QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_JWT_JWKS_URL', 'QUERYAPIGATE_JWT_ISSUER',
@@ -66,14 +66,14 @@ class JwtTestCase(unittest.TestCase):
         self.role('mobile', queries=['my_orders'])
 
     def save(self, name, sql, parameters):
-        res = self.client.patch('/save_sql_to_file', headers=self.admin, json={
+        res = save_query(self.client, headers=self.admin, body={
             'author': 'a', 'description': 'd', 'filename': name, 'connection_name': 'lite', 'sql_query': sql,
             'query_parameters': parameters})
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 
     def role(self, name, **grants):
-        res = self.client.post('/roles', headers=self.admin, json={'name': name, 'connections': [], **grants})
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = self.client.post('/api/v1/roles', headers=self.admin, json={'name': name, 'connections': [], **grants})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 
     def items(self, res):
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
@@ -116,7 +116,7 @@ class VerificationTests(JwtTestCase):
 
     def test_the_role_s_grants_apply(self):
         self.assertEqual(self.client.get('/q/all_orders', headers=bearer(token())).status_code, 403)
-        self.assertEqual(self.client.get('/connections', headers=bearer(token())).status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/connections', headers=bearer(token())).status_code, 403)
 
     def test_a_token_mapping_to_no_existing_role_is_refused(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_JWT_ROLE': 'nope'}):
@@ -156,7 +156,7 @@ class VerificationTests(JwtTestCase):
 
     def test_history_names_the_user_and_metrics_do_not(self):
         self.client.get('/q/my_orders', headers=bearer(token(sub='carol')))
-        entries = self.client.get('/history?key=jwt:carol', headers=self.admin).get_json()['entries']
+        entries = self.client.get('/api/v1/history?key=jwt:carol', headers=self.admin).get_json()['items']
         self.assertEqual([e['key_name'] for e in entries], ['jwt:carol'])
         labels = {key[3] for key in metrics._request_counts}
         self.assertIn('jwt', labels)
@@ -189,14 +189,14 @@ class ClaimParameterTests(JwtTestCase):
             self.assertEqual(self.items(self.client.get('/q/by_uid', headers=bearer(token(uid=42)))), ['numbered'])
 
     def test_api_keys_cannot_run_it_but_the_admin_key_can_supply_the_value(self):
-        key = self.client.post('/api_keys', headers=self.admin,
-                               json={'name': 'partner', 'connections': [], 'queries': ['my_orders']}).get_json()['key']
+        key = self.client.post('/api/v1/api-keys', headers=self.admin, json={
+            'name': 'partner', 'connections': [], 'queries': ['my_orders']}).get_json()['secret']
         self.assertEqual(self.client.get('/q/my_orders?user_id=bob', headers={'X-API-Key': key}).status_code, 403)
         self.assertEqual(self.items(self.client.get('/q/my_orders?user_id=bob', headers=self.admin)), ['bananas'])
 
     def test_mcp_callers_with_an_api_key_are_refused_too(self):
-        key = self.client.post('/api_keys', headers=self.admin,
-                               json={'name': 'agent', 'connections': [], 'queries': ['my_orders']}).get_json()['key']
+        key = self.client.post('/api/v1/api-keys', headers=self.admin,
+                               json={'name': 'agent', 'connections': [], 'queries': ['my_orders']}).get_json()['secret']
         from queryapigate import apikeys
         permission = apikeys.authenticate(key)
         result = mcp_server.call_tool_for(self.app, permission, 'my_orders', {'user_id': 'bob'})
@@ -215,7 +215,7 @@ class ClaimParameterTests(JwtTestCase):
     def test_definition_rules(self):
         for spec in ({'from_claim': 'sub', 'default': 'x'}, {'from_claim': 'sub', 'required': False},
                      {'from_claim': ''}, {'from_claim': 7}):
-            res = self.client.patch('/save_sql_to_file', headers=self.admin, json={
+            res = save_query(self.client, headers=self.admin, body={
                 'author': 'a', 'description': 'd', 'filename': 'bad', 'connection_name': 'lite',
                 'sql_query': 'SELECT :p', 'query_parameters': {'p': spec}})
             self.assertEqual(res.status_code, 400, spec)

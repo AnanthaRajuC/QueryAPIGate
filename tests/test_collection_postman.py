@@ -215,7 +215,7 @@ class EndpointTests(PostmanTestCase):
         self.save('q1')
 
     def test_downloads_a_file_for_the_admin(self):
-        res = self.client.get('/collections/reporting/postman', headers=self.admin)
+        res = self.client.get('/api/v1/collections/reporting/postman', headers=self.admin)
         self.assertEqual(res.status_code, 200)
         self.assertIn('attachment; filename="reporting.postman_collection.json"', res.headers['Content-Disposition'])
         document = res.get_json()
@@ -223,15 +223,15 @@ class EndpointTests(PostmanTestCase):
         self.assertEqual({v['key']: v['value'] for v in document['variable']}['baseUrl'], 'http://localhost')
 
     def test_admin_only(self):
-        key = self.client.post('/api_keys', json={'name': 'k', 'connections': ['a']},
-                               headers=self.admin).get_json()['key']
-        self.assertEqual(self.client.get('/collections/reporting/postman', headers={'X-API-Key': key}).status_code,
-                         403)
-        self.assertEqual(self.client.get('/collections/reporting/postman').status_code, 401)
+        key = self.client.post('/api/v1/api-keys', json={'name': 'k', 'connections': ['a']},
+                               headers=self.admin).get_json()['secret']
+        res = self.client.get('/api/v1/collections/reporting/postman', headers={'X-API-Key': key})
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(self.client.get('/api/v1/collections/reporting/postman').status_code, 401)
 
     def test_unknown_and_invalid(self):
-        self.assertEqual(self.client.get('/collections/nope/postman', headers=self.admin).status_code, 404)
-        self.assertEqual(self.client.get('/collections/Bad/postman', headers=self.admin).status_code, 400)
+        self.assertEqual(self.client.get('/api/v1/collections/nope/postman', headers=self.admin).status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/collections/Bad/postman', headers=self.admin).status_code, 400)
 
 
 class CliTests(PostmanTestCase):

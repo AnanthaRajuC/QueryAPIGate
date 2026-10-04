@@ -19,7 +19,7 @@ token's QUERYAPIGATE_JWT_ROLE_CLAIM. A role's grants apply exactly as they do to
 its rate limit (counted per user) and allowed_ips. A token naming no existing role is refused.
 
 **Who the user is**: the QUERYAPIGATE_JWT_USER_CLAIM claim (default `sub`). The caller's name is `jwt:<that value>`
-- in logs, run history and GET /history (`key=jwt:...`), and the live-event filter, so each user's event stream
+- in logs, run history and GET /api/v1/history (`key=jwt:...`), and the live-event filter, so each user's event stream
 carries only their own runs. API key names can't contain `:`, so the two can never collide. The verified claims
 travel with the caller (Permission.claims), which is what lets a saved query take a parameter from the token
 instead of the request (params.py's `from_claim`): `WHERE user_id = :user_id` with `"user_id": {"from_claim":

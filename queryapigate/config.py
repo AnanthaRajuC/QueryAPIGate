@@ -108,9 +108,10 @@ def audit_log_limit():
 
 
 def history_limit():
-    """Runs kept per saved-query version (QUERYAPIGATE_HISTORY_LIMIT), default HISTORY_LIMIT (50) - and, whatever
-    the retention, how many of a version's newest runs list endpoints and the admin UI are given (the full
-    history is paged through GET /history). Validated at startup by check_settings()."""
+    """Runs kept per saved-query version (QUERYAPIGATE_HISTORY_LIMIT), default HISTORY_LIMIT (50), unless a
+    retention period is set - and, whatever the retention, how many of a version's newest runs
+    store.load_versions() carries (the full history is paged through GET /api/v1/history). Validated at startup by
+    check_settings()."""
     raw = os.environ.get('QUERYAPIGATE_HISTORY_LIMIT', '').strip()
     return int(raw) if raw else HISTORY_LIMIT
 
@@ -687,10 +688,10 @@ def describe_settings():
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
         {'id': 'history', 'title': 'Run history',
-         'description': 'What each saved-query run leaves behind in its history, and for how long. Lists and the '
-             'admin UI always show a version\'s newest runs; GET /history pages through everything kept.', 'rows': [
-            row('History limit', 'Runs kept per saved-query version - unless a retention period is set - and how '
-                'many of the newest each list shows.', 'QUERYAPIGATE_HISTORY_LIMIT', f'{history_limit()} runs'),
+         'description': 'What each saved-query run leaves behind in its history, and for how long. GET '
+             '/api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [
+            row('History limit', 'Runs kept per saved-query version, unless a retention period is set.',
+                'QUERYAPIGATE_HISTORY_LIMIT', f'{history_limit()} runs'),
             row('History retention', 'Keep every run for this many days instead of a per-version count. Best '
                 'with a PostgreSQL metadata store.', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS',
                 'per-version limit' if history_retention_days() is None else f'{history_retention_days()} days'),

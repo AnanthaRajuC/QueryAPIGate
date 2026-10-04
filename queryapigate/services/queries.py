@@ -213,8 +213,10 @@ def create(data, caller):
     publish = _publish_flag(data)
     fields, collection = definitions.validate_definition(_legacy_body(data, name, caller))
     _, number = store.save_version(name, fields, collection, publish=publish)
-    store.record_audit(caller, 'save_query', name, {'version': number, 'connection_name': fields.get('connection_name'),
-                                                   'published': publish, 'via': 'api/v1'})
+    changes = {'version': number, 'connection_name': fields.get('connection_name'), 'published': publish}
+    if collection is not definitions.NO_COLLECTION_GIVEN:
+        changes['collection'] = collection  # filing it there grants it to every key on that collection
+    store.record_audit(caller, 'save_query', name, changes)
     return number
 
 
@@ -229,7 +231,7 @@ def add_version(name, data, caller):
     fields, _ = definitions.validate_definition(_legacy_body(data, name, caller))
     _, number = store.save_version(name, fields, publish=publish)
     store.record_audit(caller, 'save_query', name, {'version': number, 'connection_name': fields.get('connection_name'),
-                                                   'published': publish, 'via': 'api/v1'})
+                                                   'published': publish})
     return number
 
 

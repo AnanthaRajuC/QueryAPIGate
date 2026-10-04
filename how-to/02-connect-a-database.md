@@ -21,20 +21,17 @@ click **New connection**, fill in the form, **Test** it, then **Save**.
 dialect):
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "<a name you choose>": { "db": "...", ... }
-  }
-}'
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{"name": "<a name you choose>", "db": "...", ... }'
 ```
 
-`PATCH /connections` both creates and updates - a name that doesn't exist yet is created; an existing one
-is updated. Test any connection's fields (saved or not) before committing to them:
+`POST /api/v1/connections` creates one (a name already taken is a 409); `PATCH /api/v1/connections/<name>` changes
+some of an existing one's fields and keeps the rest. Test any connection's fields (saved or not) before committing
+to them:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/connections/test -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:5000/api/v1/connections/test -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
   -d '{"db": "...", ...}'
-# {"message": "Connected", "elapsed_ms": 12.4}
+# {"elapsed_ms": 12.4}
 ```
 
 **A faster starting point**: `queryapigate init` (run once, in an empty `QUERYAPIGATE_HOME`) seeds an
@@ -47,11 +44,7 @@ curl -X POST http://127.0.0.1:5000/connections/test -H 'X-API-Key: demo-key' -H 
 The simplest case: `database` is a file path (relative paths resolve against `QUERYAPIGATE_HOME`).
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "shop": {"db": "sqlite", "database": "shop.db", "active": true}
-  }
-}'
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{"name": "shop", "db": "sqlite", "database": "shop.db", "active": true}'
 ```
 
 If `shop.db` doesn't exist yet, QueryAPIGate doesn't create it - point this at a real SQLite file, or
@@ -61,13 +54,10 @@ guide: a real `shop.db` with an `orders` table, connected, tested, and queried s
 ## PostgreSQL
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "shop-pg": {
-      "db": "postgres", "host": "localhost", "port": 5432, "database": "shop",
-      "user": "postgres", "password": "${POSTGRES_PASSWORD}", "active": true
-    }
-  }
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "shop-pg",
+  "db": "postgres", "host": "localhost", "port": 5432, "database": "shop",
+  "user": "postgres", "password": "${POSTGRES_PASSWORD}", "active": true
 }'
 ```
 
@@ -81,13 +71,10 @@ guide against a real PostgreSQL 16 container: connect, test, query all worked as
 ## MySQL
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "shop-mysql": {
-      "db": "mysql", "host": "localhost", "port": 3306, "database": "shop",
-      "user": "root", "password": "${MYSQL_PASSWORD}", "active": true
-    }
-  }
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "shop-mysql",
+  "db": "mysql", "host": "localhost", "port": 3306, "database": "shop",
+  "user": "root", "password": "${MYSQL_PASSWORD}", "active": true
 }'
 ```
 
@@ -97,13 +84,10 @@ guide against a real MySQL 8 container: connect, test, query all worked as shown
 ## ClickHouse
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "events-ch": {
-      "db": "clickhouse", "host": "localhost", "port": 9000, "database": "default",
-      "user": "default", "password": "${CLICKHOUSE_PASSWORD}", "active": true
-    }
-  }
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "events-ch",
+  "db": "clickhouse", "host": "localhost", "port": 9000, "database": "default",
+  "user": "default", "password": "${CLICKHOUSE_PASSWORD}", "active": true
 }'
 ```
 
@@ -119,13 +103,10 @@ directly - and needs a JVM (either the `-h2` Docker image variant, or a local Ja
 `pip install "queryapigate[h2]"`).
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "shop-h2": {
-      "db": "h2", "host": "localhost", "database": "test",
-      "user": "SA", "password": "${H2_PASSWORD}", "active": true
-    }
-  }
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "shop-h2",
+  "db": "h2", "host": "localhost", "database": "test",
+  "user": "SA", "password": "${H2_PASSWORD}", "active": true
 }'
 ```
 
@@ -141,14 +122,14 @@ Whichever dialect, the same two checks apply:
 
 ```bash
 # List every connection and its live usage stats
-curl http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key'
+curl http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key'
 
 # Browse its schema - the same introspection the admin UI's schema browser uses
 curl http://127.0.0.1:5000/connections/shop/schema -H 'X-API-Key: demo-key'
 ```
 
 A connection you're not ready to use yet, or want to disable temporarily, doesn't need deleting - set
-`"active": false` instead; `GET /connections` always masks a plain-text password as `********` either way.
+`"active": false` instead; `GET /api/v1/connections/<name>` always masks a plain-text password as `********` either way.
 
 ## Next steps
 

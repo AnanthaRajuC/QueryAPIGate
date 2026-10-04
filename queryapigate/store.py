@@ -70,7 +70,7 @@ def record_audit(actor, action, target, changes=None):
 
 def read_audit_log():
     """Every stored entry, oldest first (the same order the JSON file's list was always in) - app.py's
-    /audit_log route reverses this to present newest first."""
+    /api/v1/audit (services/audit.py) reverses this to present newest first."""
     rows = db.connection().execute('SELECT entry_json FROM audit_log ORDER BY id').fetchall()
     return [json.loads(row['entry_json']) for row in rows]
 
@@ -187,7 +187,7 @@ def _decrypt_password(value):
 
 def resolve_ad_hoc(details):
     """Like get_connection(), but for connection fields given directly rather than a saved, named connection
-    - used only by ``POST /connections/test`` (the New/Edit connection form's "Test connection" button)
+    - used only by ``POST /api/v1/connections/test`` (the New/Edit connection form's "Test connection" button)
     to try fields that may never be saved. Expands ${VAR} references and decrypts an already-encrypted
     password the same way; a literal password already in ``details`` (the common case - a value just typed
     into the form) passes through unchanged."""
@@ -250,7 +250,7 @@ def plaintext_password_connections():
 def encrypt_plaintext_passwords_in_place():
     """Called once at startup when QUERYAPIGATE_SECRET_KEY is set: encrypts any connection password that's still
     a literal, so a connection saved before the key existed benefits immediately rather than waiting for its
-    next PATCH /connections - "don't require a one-time manual migration step" from the start."""
+    next save of it - "don't require a one-time manual migration step" from the start."""
     with db.transaction() as conn:
         rows = conn.execute('SELECT name, details_json FROM connections').fetchall()
         for row in rows:
@@ -289,7 +289,7 @@ def update_connections(connections):
                 # through unchanged) - encrypted here if QUERYAPIGATE_SECRET_KEY is set, stored as given otherwise.
                 details = {**details, 'password': _encrypt_password(details['password'])}
             # created_at/updated_at are server-controlled, never taken from the request (a client echoing back
-            # what GET /connections returned must not be able to fake either one). A connection that already
+            # what GET /api/v1/connections returned must not be able to fake either one). A connection that already
             # existed keeps its created_at (the column is NOT NULL, so any existing row already has a real
             # one - no legacy-data backfill needed here, only in the one-time JSON migration itself).
             created_at = existing_row['created_at'] if existing_row else timestamp
@@ -377,7 +377,7 @@ def load_versions(name, with_history=True):
     exactly this shape unchanged, so this is the one function that needs to bridge SQL to it.
 
     Each version's execution_history holds its newest config.history_limit() runs, oldest first, however many
-    are stored - with a retention period (history.py) a version can keep far more, paged through GET /history
+    are stored - with a retention period (history.py) a version can keep far more, paged through GET /api/v1/history
     instead. Runs this process has queued but not written yet are written first, so a caller always sees its
     own. ``with_history=False`` leaves every execution_history empty instead - for the request path that only
     runs a query (app.run_saved()), which never reads its history but would otherwise load it on every call."""

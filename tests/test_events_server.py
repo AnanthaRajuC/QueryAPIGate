@@ -14,7 +14,7 @@ from unittest import mock
 
 from queryapigate import config, create_app, db, events
 from tests import TEST_DATABASE_URL
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class Stream:
@@ -96,15 +96,15 @@ class EventServerTestCase(unittest.TestCase):
         write_connections({'lite': {'db': 'sqlite', 'database': data, 'active': True}})
         self.client = create_app().test_client()
         self.admin = {'X-API-Key': 'admin'}
-        self.client.patch('/save_sql_to_file', headers=self.admin, json={
+        save_query(self.client, headers=self.admin, body={
             'author': 'a', 'description': 'd', 'filename': 'q', 'connection_name': 'lite', 'sql_query': 'SELECT 1'})
         self.alice = self.key('alice')
         self.bob = self.key('bob')
         self.start_server(**self.server_options)
 
     def key(self, name):
-        return self.client.post('/api_keys', headers=self.admin,
-                                json={'name': name, 'connections': [], 'queries': ['q']}).get_json()['key']
+        return self.client.post('/api/v1/api-keys', headers=self.admin,
+                                json={'name': name, 'connections': [], 'queries': ['q']}).get_json()['secret']
 
     def start_server(self, **options):
         loop = asyncio.new_event_loop()
@@ -243,7 +243,7 @@ class LimitTests(EventServerTestCase):
     def test_a_revoked_key_s_stream_is_closed(self):
         with mock.patch.object(events, '_RECHECK_SECONDS', 0.2), mock.patch.object(events, '_HEARTBEAT_SECONDS', 0.1):
             stream = self.open(self.alice)
-            self.assertEqual(self.client.delete('/api_keys/alice', headers=self.admin).status_code, 200)
+            self.assertEqual(self.client.delete('/api/v1/api-keys/alice', headers=self.admin).status_code, 204)
             self.assertTrue(stream.closed(timeout=5))
 
     def test_a_client_that_hangs_up_frees_its_slot_at_once(self):

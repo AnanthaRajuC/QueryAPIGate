@@ -3,29 +3,28 @@
 Connections live in `queryapigate.db` inside the data folder (`QUERYAPIGATE_HOME`, default: the current directory).
 `queryapigate init` seeds a starter (inactive templates for every supported database).
 Every request reads the current state fresh, so edits take effect without a restart, and connections are
-managed through the [`/connections` API](API.md#connections) (or the admin UI, which is built on it).
+managed through the [`/api/v1/connections` API](API.md#connections) (or the admin UI, which is built on it).
 
 ## Shape
 
-The same shape `GET /connections` returns and `PATCH /connections` accepts - not a literal file anymore,
-but every field means exactly what it always did:
+One connection, as `POST /api/v1/connections` accepts it - not a literal file anymore, but every field means exactly
+what it always did:
 
 ~~~json
 {
-    "connections": {
-        "reporting": {
-            "db": "postgres",
-            "host": "db.internal",
-            "port": 5432,
-            "database": "reports",
-            "user": "readonly",
-            "password": "${REPORTING_PASSWORD}",
-            "active": true
-        },
-        "local-file": {"db": "sqlite", "database": "my-database.db", "active": true}
-    }
+    "name": "reporting",
+    "db": "postgres",
+    "host": "db.internal",
+    "port": 5432,
+    "database": "reports",
+    "user": "readonly",
+    "password": "${REPORTING_PASSWORD}",
+    "active": true
 }
 ~~~
+
+Driver settings beyond these (`sslmode`, `jdbc_url`, `jar`, ...) may be sent alongside them or inside an `options`
+object; `GET /api/v1/connections/{name}` returns them under `options`.
 
 ## Supported types
 
@@ -69,7 +68,7 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 - **Errors.** A connection used by a failed or timed-out request is closed rather than reused.
 - **Health checks.** A connection that sat idle for more than a few seconds is checked before reuse; a dead one is
   replaced transparently.
-- **Changes take effect.** `PATCH`/`DELETE /connections` close all idle pooled connections immediately. If you edit
+- **Changes take effect.** Creating, changing or deleting a connection closes all idle pooled connections immediately. If you edit
   `queryapigate.db` directly (e.g. via `sqlite3`), old connections are dropped as they reach the idle timeout.
 - **Sizing.** The pool bounds *idle* connections, not concurrent ones. Each server process has its own pool, so the
   most idle connections your database sees is roughly `QUERYAPIGATE_POOL_SIZE` x distinct connections x worker processes;
@@ -190,7 +189,7 @@ read-only and read-write connections separately would trip constantly):
 ## Keeping secrets out of the file
 
 Any string value may contain `${VAR}` references, replaced with the environment variable's value when the connection is
-used (a missing variable is reported as an error naming it). `GET /connections` masks plain-text passwords as
+used (a missing variable is reported as an error naming it). `GET /api/v1/connections/{name}` masks plain-text passwords as
 `********` and shows `${VAR}` references as written.
 
 ## Best practice

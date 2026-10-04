@@ -13,7 +13,7 @@ from unittest import mock
 
 from queryapigate import config, db
 from tests import TEST_DATABASE_URL
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 sqlite_only = unittest.skipIf(TEST_DATABASE_URL, 'inspects the SQLite file itself')
 postgres_only = unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
@@ -385,11 +385,11 @@ class MigrateToPostgresTests(unittest.TestCase):
             write_connections({'lite': {'db': 'sqlite', 'database': self.sqlite_path, 'active': True}})
             client, admin = create_app().test_client(), {'X-API-Key': 'admin'}
             for name in ('b_query', 'a_query'):
-                client.patch('/save_sql_to_file', headers=admin, json={
+                save_query(client, headers=admin, body={
                     'author': 'a', 'description': 'd', 'filename': name, 'connection_name': 'lite',
                     'sql_query': 'SELECT name FROM roles ORDER BY name', 'collection': 'reports'})
-            client.post('/api_keys', headers=admin, json={'name': 'partner', 'connections': ['lite']})
-            client.post('/roles', headers=admin, json={'name': 'reader', 'connections': ['lite']})
+            client.post('/api/v1/api-keys', headers=admin, json={'name': 'partner', 'connections': ['lite']})
+            client.post('/api/v1/roles', headers=admin, json={'name': 'reader', 'connections': ['lite']})
             for _ in range(3):
                 client.get('/q/a_query', headers=admin)
             snapshot = self.snapshot()

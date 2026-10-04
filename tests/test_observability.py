@@ -15,7 +15,7 @@ from flask import g
 
 from queryapigate import apikeys, create_app, logging_setup, metrics
 from queryapigate import app as app_module
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -53,7 +53,7 @@ class RequestIdTests(AppTestCase):
 
     def test_a_rejected_request_still_gets_an_id(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        res = self.client.get('/connections')
+        res = self.client.get('/api/v1/connections')
         self.assertEqual(res.status_code, 401)
         self.assertRegex(res.headers['X-Request-Id'], r'^[0-9a-f]{12}$')
 
@@ -83,13 +83,12 @@ class SuppliedRequestIdTests(AppTestCase):
         self.assertEqual(first, second)
 
     def test_it_reaches_a_saved_querys_history(self):
-        self.client.patch('/save_sql_to_file', json={'filename': 'q', 'author': 'a', 'description': 'd',
+        save_query(self.client, {'filename': 'q', 'author': 'a', 'description': 'd',
                                                      'sql_query': 'SELECT * FROM t', 'connection_name': 'lite'})
         res = self.client.get('/q/q', headers={'X-Request-Id': 'caller-trace-9'})
         self.assertEqual(res.status_code, 200)
-        files = self.client.get('/list_files').get_json()['files']
-        history = files[0]['versions'][0]['execution_history']
-        self.assertEqual(history[-1]['request_id'], 'caller-trace-9')
+        history = self.client.get('/api/v1/queries/q/history').get_json()['items']
+        self.assertEqual(history[0]['request_id'], 'caller-trace-9')
 
     def test_it_is_the_id_the_log_filter_stamps_on_log_lines(self):
         # RequestContextFilterTests proves the filter copies g.request_id onto every record; this proves the
@@ -103,12 +102,12 @@ class SuppliedRequestIdTests(AppTestCase):
 
     def test_a_rejected_request_keeps_the_supplied_id(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        res = self.client.get('/connections', headers={'X-Request-Id': 'trace-401'})
+        res = self.client.get('/api/v1/connections', headers={'X-Request-Id': 'trace-401'})
         self.assertEqual((res.status_code, res.headers['X-Request-Id']), (401, 'trace-401'))
 
     def test_it_is_never_an_identity(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        res = self.client.get('/connections', headers={'X-Request-Id': 'k3y'})  # even a key-shaped value
+        res = self.client.get('/api/v1/connections', headers={'X-Request-Id': 'k3y'})  # even a key-shaped value
         self.assertEqual(res.status_code, 401)
 
 
@@ -366,8 +365,8 @@ class MetricsEndpointTests(AppTestCase):
         before = self._rejections()
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         client = create_app().test_client()
-        client.get('/connections')  # consumes the one allowed request
-        client.get('/connections')  # rejected
+        client.get('/api/v1/connections')  # consumes the one allowed request
+        client.get('/api/v1/connections')  # rejected
         self.assertEqual(self._rejections() - before, 1)
 
     def _rejections(self):
@@ -375,7 +374,7 @@ class MetricsEndpointTests(AppTestCase):
         return int(re.search(r'queryapigate_rate_limit_rejections_total (\d+)', body).group(1))
 
     def test_cache_hit_and_miss_are_counted(self):
-        self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'd', 'filename': 'cached',
+        save_query(self.client, {'author': 'a', 'description': 'd', 'filename': 'cached',
                                                       'connection_name': 'lite', 'sql_query': 'SELECT * FROM t',
                                                       'cache_ttl': 60})
         before_hits, before_misses = self._cache_counts()
@@ -446,7 +445,7 @@ class MetricsEndpointTests(AppTestCase):
     def test_connections_list_carries_each_connections_live_usage(self):
         self.run_sql()
         self.run_sql('SELECT this is not sql')
-        conns = self.client.get('/connections').get_json()['connections']
+        conns = {c['name']: c for c in self.client.get('/api/v1/connections').get_json()['items']}
         usage = conns['lite']['usage']
         self.assertGreaterEqual(usage['queries'], 2)
         self.assertGreaterEqual(usage['errors'], 1)
@@ -457,14 +456,15 @@ class MetricsEndpointTests(AppTestCase):
         # across test files (like the generic 'scoped' many other tests use) would leak counts here, so
         # this test asserts against a name unique to it.
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        created = self.client.post('/api_keys', json={'name': 'metrics-usage-key', 'connections': ['lite']},
+        created = self.client.post('/api/v1/api-keys', json={'name': 'metrics-usage-key', 'connections': ['lite']},
                                    headers={'X-API-Key': 'k3y'}).get_json()
-        secret = created['key']
+        secret = created['secret']
         self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'lite'},
                          headers={'X-API-Key': secret})
         self.client.post('/execute_sql', json={'sql': 'SELECT this is not sql', 'connection_name': 'lite'},
                          headers={'X-API-Key': secret})
-        keys = self.client.get('/api_keys', headers={'X-API-Key': 'k3y'}).get_json()['keys']
+        keys = {k['name']: k for k in self.client.get('/api/v1/api-keys', headers={'X-API-Key': 'k3y'})
+                .get_json()['items']}
         self.assertEqual(keys['metrics-usage-key']['usage'], {'queries': 2, 'errors': 1, 'rows': 1})
 
     def test_serialization_metric_is_not_recorded_for_a_streamed_response(self):

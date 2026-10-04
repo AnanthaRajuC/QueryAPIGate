@@ -29,7 +29,7 @@ called `examples`.
 | `queryapigate examples status` | Say whether they are loaded (`Loaded`, `Partly loaded`, or `Not loaded`). |
 | `QUERYAPIGATE_LOAD_EXAMPLES=yes` | Load them at server start - for a container (`docker run -e QUERYAPIGATE_LOAD_EXAMPLES=yes -v qag:/data ...`). Idempotent across restarts. Unset, or `no`, leaves things as they are: it never removes anything - use `unload`. |
 | Admin UI | Saved Queries shows **Load example APIs** when the home is empty, and once loaded an "Example APIs are loaded" bar with **Remove examples**. |
-| `POST` / `DELETE` / `GET /examples` | The same, over [HTTP](API.md#example-apis) (admin only). |
+| `POST` / `DELETE` / `GET /api/v1/examples` | The same, over [HTTP](API.md#example-apis) (admin only). |
 
 Everything installed is **marked `example`** (a top-level `"example": true` on each query file, and on the role, key
 and connection entries), and removal deletes exactly what is marked:
@@ -41,7 +41,7 @@ and connection entries), and removal deletes exactly what is marked:
 - **A real API key is created for every role** (`role: "<name>"`, the same "create key from role" the admin UI
   itself uses) - the server now requires a key for *every* request, not just the example ones, the moment these
   exist. Each key's secret is shown exactly once: printed by `queryapigate examples load`, returned in
-  `POST /examples`'s response, or logged a single time at server startup if you used
+  `POST /api/v1/examples`'s response, or logged a single time at server startup if you used
   `QUERYAPIGATE_LOAD_EXAMPLES` instead - store it then, it is never shown again (the same rule every API key
   already has). Want an *additional*, differently-scoped or differently-named key for a specific team instead of
   the auto-created one? The `curl` examples under each scenario below still show how, from the same role.
@@ -50,7 +50,7 @@ and connection entries), and removal deletes exactly what is marked:
   adds more. The API Keys/Connections "Usage" columns and the Metrics tab are **not** seeded this way: those
   reflect real live traffic only, reset on every restart, and stay at zero until you actually call something.
 - If you granted a key one of the example collections, `unload` tells you, and that grant now reaches nothing (see
-  `GET /collections`).
+  `GET /api/v1/collections`).
 
 ## 1. Reporting API - `examples-reporting`
 
@@ -72,7 +72,7 @@ curl 'http://127.0.0.1:5000/q/example_top_films?category=Nope'      # 400: categ
 Give a team its own key (with `QUERYAPIGATE_API_KEY` set, using the admin key):
 
 ~~~bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
      -d '{"name": "finance-team", "role": "example-reporting"}'          # the secret is shown once
 curl 'http://127.0.0.1:5000/q/example_monthly_revenue' -H 'X-API-Key: <the secret>'
 ~~~
@@ -122,7 +122,7 @@ Role `example-partner`: only the `examples-partner` collection, read-only, `60/m
 | `example_film_search` | Find films by part of a title | `text` required, 2-30 letters and spaces |
 
 ~~~bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
      -d '{"name": "acme-corp", "role": "example-partner", "expires_at": "2026-12-31"}'   # expiry is per key
 curl 'http://127.0.0.1:5000/q/example_film_lookup?film_id=7'                 -H 'X-API-Key: <acme secret>'   # 200
 curl 'http://127.0.0.1:5000/q/example_top_films'                             -H 'X-API-Key: <acme secret>'   # 403
@@ -143,7 +143,7 @@ and reaches every query in **both** `examples-reporting` and `examples-dashboard
 or `examples-partner`.
 
 ~~~bash
-curl -X POST http://127.0.0.1:5000/api_keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: <admin key>' -H 'Content-Type: application/json' \
      -d '{"name": "exec-dashboard", "role": "example-executive"}'
 curl 'http://127.0.0.1:5000/q/example_monthly_revenue'       -H 'X-API-Key: <exec secret>'   # 200 - reporting
 curl 'http://127.0.0.1:5000/q/example_kpi_active_rentals'    -H 'X-API-Key: <exec secret>'   # 200 - dashboard

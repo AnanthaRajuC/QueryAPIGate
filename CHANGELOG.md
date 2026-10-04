@@ -132,24 +132,30 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **`/ui` redirects to `/console`.** The hand-written admin page it served (`queryapigate/ui.py`) is removed; the
   Console has every screen it had, and looks the same.
 
-### Deprecated
-- The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
-  `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,
-  `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow`. They keep working unchanged, and now send a `Deprecation`
-  header with a `Link` to their successor; `/openapi.json` marks them deprecated. `/ui` still uses them.
-- The connection management routes replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`,
-  `POST /connections/test`, `POST /connections/databases` and `DELETE /connections/{name}`, in the same way.
-- The API key and role routes replaced by `/api/v1/api-keys` and `/api/v1/roles`: `GET`/`POST /api_keys`,
-  `PATCH`/`DELETE /api_keys/{name}`, `GET`/`POST /roles` and `PATCH`/`DELETE /roles/{name}`, in the same way.
-- `GET /history` and `GET /audit_log`, replaced by `/api/v1/history` and `/api/v1/audit`, in the same way.
-- `GET /settings`, `GET /settings/mcp_status` and `GET /settings/mcp_tools`, replaced by `/api/v1/settings`,
-  `/api/v1/mcp/status` and `/api/v1/mcp/tools`, in the same way.
-- `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`, replaced by `/api/v1/cache/entries`, in the
-  same way.
-- `GET /collections`, `PATCH /collections/{name}`, `GET /collections/{name}/postman` and `GET`/`POST`/`DELETE
-  /examples`, replaced by `/api/v1/collections` and `/api/v1/examples`, in the same way.
+### Removed
+- **Breaking: the unversioned management routes are gone; use `/api/v1`.** Every one had a Management API successor
+  first, and nothing in QueryAPIGate calls them any more; removing them before 1.0 keeps them out of the 1.x
+  contract. The runtime routes (`/q/<name>`, `/execute_sql`, `/execute_mongo`, `/execute_sql_from_file`, `/catalog`,
+  `/events`, `/metrics`, `/health`, `/openapi.json`) and schema browsing (`/connections/<name>/schema`, `/table_ddl`)
+  are unchanged.
+
+  | Removed | Use instead |
+  |---|---|
+  | `GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow` | `/api/v1/queries` and its versions (a new version is a draft unless saved with `"publish": true`) |
+  | `GET`/`PATCH /connections`, `DELETE /connections/{name}`, `POST /connections/test`, `POST /connections/databases` | `/api/v1/connections` |
+  | `/api_keys`, `/roles` | `/api/v1/api-keys`, `/api/v1/roles` (a new key's secret is `secret`, not `key`) |
+  | `GET /history`, `GET /audit_log` | `/api/v1/history`, `/api/v1/audit` (`items`, not `entries`) |
+  | `GET /settings`, `/settings/mcp_status`, `/settings/mcp_tools` | `/api/v1/settings`, `/api/v1/mcp/status`, `/api/v1/mcp/tools` |
+  | `/cache/entries`, `/collections`, `/examples` | `/api/v1/cache/entries`, `/api/v1/collections`, `/api/v1/examples` |
+
+  See [Removed routes](documentation/API.md#removed-routes). The Postman collection in `documentation/`, the
+  how-to guides and the benchmarks use the new routes.
 
 ### Fixed
+- **Creating a saved query in a collection through `/api/v1` now records the collection in the audit log**, as the
+  old save route did - filing a query there grants it to every key on that collection.
+- **Creating a connection through `/api/v1` now closes idle pooled connections**, as changing or deleting one does,
+  so a name used before (deleted, then re-created) never reuses the old connection's sockets.
 - **`/ui`'s Home showed the five oldest audit entries as "Recent activity"**, oldest first, instead of the five
   newest. It now shows the newest.
 - **The audit log no longer shows `[object Object]`** for a grant like `{"name": "films", "allow_writes": true}`

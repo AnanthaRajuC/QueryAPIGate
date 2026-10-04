@@ -60,7 +60,7 @@ for a different grouping/priority order.
 18. **Restrict a key to specific source IPs** (`allowed_ips`) - IPv4/IPv6, CIDR ranges, what "fails
     closed" means here.
 19. **Give a key an expiry date** - temporary contractor/trial access that revokes itself.
-20. **Read the audit log to answer "who changed this and when"** - `GET /audit_log`, the admin UI's Audit
+20. **Read the audit log to answer "who changed this and when"** - `GET /api/v1/audit`, the admin UI's Audit
     tab, exporting it externally for permanent retention.
 21. **Verify who can reach what, before you find out the hard way** - the Access map, `GET /catalog`, and
     reasoning about a key's *effective* reach across `connections`/`queries`/`collections`.

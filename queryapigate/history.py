@@ -6,7 +6,7 @@ config.history_flush_interval() seconds (or sooner once a batch fills up). A req
 history write, and a busy server makes one write per batch instead of one per run. The trade-offs, all bounded:
 
 - **Delay.** Another process (another worker, another instance) sees a run up to one interval later. This
-  process never does: every read through store.load_versions() or GET /history calls flush() first, so a
+  process never does: every read through store.load_versions() or GET /api/v1/history calls flush() first, so a
   caller always sees its own runs.
 - **Loss on a hard kill.** Whatever is still queued when a process is killed outright (SIGKILL, power loss) is
   gone - at most one interval's worth. A normal shutdown flushes at exit.
@@ -302,7 +302,7 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     """One page of every stored run matching the filters, newest first, as (entries, next_cursor) - next_cursor
     is None on the last page. ``since`` is inclusive and ``until`` exclusive; either takes a date or a time
     (executed_at's own format, in this server's local time). Each entry is the run's own record plus the
-    saved query and version it belongs to. Backs GET /history - the way to look past the newest
+    saved query and version it belongs to. Backs GET /api/v1/history - the way to look past the newest
     history_limit() runs per version that lists show, e.g. across a retention period's worth of runs."""
     if status not in (None, '', 'success', 'error'):
         raise ApiError("status must be 'success' or 'error'")

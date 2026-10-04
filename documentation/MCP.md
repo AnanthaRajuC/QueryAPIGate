@@ -19,7 +19,7 @@ regardless of what the calling key would otherwise be allowed to do over REST.
 Tool listing (`tools/list`) honors the exact same per-key scoping `GET /catalog` does -
 `connections`/`queries`/`collections` grants, `apikeys.can_run_saved()` - so an agent's key never sees or
 calls more than the identical REST key could. A tool's `inputSchema` is generated from the saved query's own
-`query_parameters`, the same JSON Schema translation `/openapi.json` already uses.
+declared parameters, the same JSON Schema translation `/openapi.json` already uses.
 
 Calling a tool (`tools/call`) runs the query through the exact same code path `GET /q/<name>` does: the same
 connection-grant check, parameter validation, `cache_ttl` caching, `execution_history` recording and audit

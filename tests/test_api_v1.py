@@ -175,13 +175,6 @@ class ListTests(V1TestCase):
         res = self.call('get', '/api/v1/queries?status=bogus', '/api/v1/queries', 400)
         self.assertEqual(res.get_json()['code'], 'invalid_filter')
 
-    def test_a_legacy_saved_query_appears_published(self):
-        self.client.patch('/save_sql_to_file', headers=ADMIN, json={
-            'author': 'a', 'description': 'legacy', 'sql_query': 'SELECT 1', 'filename': 'old'})
-        item = self.call('get', '/api/v1/queries', '/api/v1/queries', 200).get_json()['items'][0]
-        self.assertEqual((item['name'], item['published_version'], item['has_draft']), ('old', 1, False))
-
-
 class ErrorTests(V1TestCase):
     def test_errors_carry_a_stable_code_and_the_request_id(self):
         res = self.call('get', '/api/v1/queries/nope', '/api/v1/queries/{name}', 404)
@@ -206,8 +199,8 @@ class ErrorTests(V1TestCase):
         self.assertIn('a', res.get_json()['errors'])
 
     def test_scoped_keys_and_anonymous_callers_are_refused(self):
-        key = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']},
-                               headers=ADMIN).get_json()['key']
+        key = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': ['lite']},
+                               headers=ADMIN).get_json()['secret']
         res = self.call('get', '/api/v1/queries', '/api/v1/queries', 403, headers={'X-API-Key': key})
         self.assertEqual(res.get_json()['code'], 'forbidden')
         res = self.call('get', '/api/v1/queries', '/api/v1/queries', 401, headers={})
@@ -235,10 +228,10 @@ class ConcurrencyTests(V1TestCase):
         self.call('post', '/api/v1/queries/films/publish', '/api/v1/queries/{name}/publish', 200,
                   headers={**ADMIN, 'If-Match': current}, json={'version': 2})
 
-    def test_a_legacy_edit_also_invalidates_the_etag(self):
+    def test_an_edit_made_elsewhere_also_invalidates_the_etag(self):
         etag = self.call('post', '/api/v1/queries', '/api/v1/queries', 201,
                          json={'name': 'films', 'description': 'd', 'sql': 'SELECT 1'}).headers['ETag']
-        self.client.put('/saved_sql/films/collection', headers=ADMIN, json={'collection': 'x'})
+        store.set_collection('films', 'x')  # e.g. a bundle import, or another instance
         self.call('post', '/api/v1/queries/films/unpublish', '/api/v1/queries/{name}/unpublish', 412,
                   headers={**ADMIN, 'If-Match': etag})
 
@@ -651,22 +644,25 @@ class CollectionAndExampleTests(V1TestCase):
 
 
 class DeprecationTests(V1TestCase):
-    def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
-        res = self.client.get('/list_files', headers=ADMIN)
+    def test_the_legacy_management_routes_are_gone(self):
+        for method, path in (('get', '/list_files'), ('patch', '/save_sql_to_file'), ('get', '/connections'),
+                             ('get', '/api_keys'), ('get', '/roles'), ('get', '/audit_log'), ('get', '/history'),
+                             ('get', '/settings'), ('get', '/cache/entries'), ('get', '/collections'),
+                             ('get', '/examples'), ('get', '/query_flow')):
+            res = getattr(self.client, method)(path, headers=ADMIN)
+            self.assertIn(res.status_code, (404, 405), f'{method} {path}')
+        # what stays: the runtime routes, and browsing a schema (a scoped key may, for a connection it is granted)
+        self.assertEqual(self.client.get('/connections/lite/schema', headers=ADMIN).status_code, 200)
+
+    def test_a_deprecated_route_says_so_in_its_headers(self):
+        # none today - the mechanism a 1.x deprecation will use
+        with mock.patch.dict(app_module.DEPRECATED_ENDPOINTS, {'api.catalog': '/api/v1/somewhere'}):
+            res = self.client.get('/catalog', headers=ADMIN)
         self.assertEqual(res.headers['Deprecation'], 'true')
-        self.assertIn('/api/v1/queries', res.headers['Link'])
+        self.assertIn('</api/v1/somewhere>; rel="successor-version"', res.headers['Link'])
         self.assertNotIn('Deprecation', self.client.get('/catalog', headers=ADMIN).headers)
-        self.assertIn('/api/v1/connections', self.client.get('/connections', headers=ADMIN).headers['Link'])
-        self.assertNotIn('Deprecation', self.client.get('/connections/lite/schema', headers=ADMIN).headers)
-        self.assertIn('/api/v1/api-keys', self.client.get('/api_keys', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/roles', self.client.get('/roles', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/audit', self.client.get('/audit_log', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/history', self.client.get('/history', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/settings', self.client.get('/settings', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/cache/entries', self.client.get('/cache/entries', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/collections', self.client.get('/collections', headers=ADMIN).headers['Link'])
-        self.assertIn('/api/v1/examples', self.client.get('/examples', headers=ADMIN).headers['Link'])
-        # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
+
+    def test_the_headers_and_the_spec_name_the_same_operations(self):
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}
         app = create_app()
@@ -675,9 +671,8 @@ class DeprecationTests(V1TestCase):
             for method in rule.methods - {'HEAD', 'OPTIONS'}:
                 path = rule.rule.replace('<', '{').replace('>', '}')
                 by_endpoint.setdefault(rule.endpoint, set()).add((path, method.lower()))
-        from_headers = set().union(*(by_endpoint[e] for e in app_module.DEPRECATED_ENDPOINTS))
+        from_headers = set().union(set(), *(by_endpoint[e] for e in app_module.DEPRECATED_ENDPOINTS))
         self.assertEqual(flagged, from_headers)
-
 
 if __name__ == '__main__':
     unittest.main()

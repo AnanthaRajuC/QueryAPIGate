@@ -387,9 +387,9 @@ class RolesEndToEndTests(ExamplesTestCase):
         self.admin = {'X-API-Key': 'admin-key'}
 
     def key_from(self, role):
-        res = self.client.post('/api_keys', json={'name': f'k-{role}', 'role': role}, headers=self.admin)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return {'X-API-Key': res.get_json()['key']}
+        res = self.client.post('/api/v1/api-keys', json={'name': f'k-{role}', 'role': role}, headers=self.admin)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return {'X-API-Key': res.get_json()['secret']}
 
     def test_a_partner_key_reaches_only_the_partner_queries(self):
         key = self.key_from('example-partner')
@@ -447,44 +447,44 @@ class EndpointTests(ExamplesTestCase):
         self.admin = {'X-API-Key': 'admin-key'}
 
     def test_status_load_and_unload_over_http(self):
-        self.assertFalse(self.client.get('/examples', headers=self.admin).get_json()['loaded'])
-        res = self.client.post('/examples', headers=self.admin)
+        self.assertFalse(self.client.get('/api/v1/examples', headers=self.admin).get_json()['loaded'])
+        res = self.client.post('/api/v1/examples', headers=self.admin)
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        self.assertTrue(res.get_json()['loaded'])
-        self.assertTrue(self.client.get('/examples', headers=self.admin).get_json()['loaded'])
-        res = self.client.delete('/examples', headers=self.admin)
+        self.assertTrue(res.get_json()['status']['loaded'])
+        self.assertTrue(self.client.get('/api/v1/examples', headers=self.admin).get_json()['loaded'])
+        res = self.client.delete('/api/v1/examples', headers=self.admin)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(sorted(res.get_json()['queries']), sorted(examples.QUERY_NAMES))
-        self.assertFalse(self.client.get('/examples', headers=self.admin).get_json()['loaded'])
+        self.assertEqual(sorted(res.get_json()['removed']['queries']), sorted(examples.QUERY_NAMES))
+        self.assertFalse(self.client.get('/api/v1/examples', headers=self.admin).get_json()['loaded'])
 
     def test_a_conflict_is_a_409_and_changes_nothing(self):
         self.save_user_query('example_top_films')
-        res = self.client.post('/examples', headers=self.admin)
+        res = self.client.post('/api/v1/examples', headers=self.admin)
         self.assertEqual(res.status_code, 409)
         self.assertIn('example_top_films', res.get_json()['error'])
         self.assertEqual(self.saved_files(), ['example_top_films.json'])
 
     def test_admin_only(self):
-        self.client.post('/examples', headers=self.admin)
-        key = self.client.post('/api_keys', json={'name': 'k', 'connections': ['examples']},
-                               headers=self.admin).get_json()['key']
+        self.client.post('/api/v1/examples', headers=self.admin)
+        key = self.client.post('/api/v1/api-keys', json={'name': 'k', 'connections': ['examples']},
+                               headers=self.admin).get_json()['secret']
         for method in ('get', 'post', 'delete'):
-            res = getattr(self.client, method)('/examples', headers={'X-API-Key': key})
+            res = getattr(self.client, method)('/api/v1/examples', headers={'X-API-Key': key})
             self.assertEqual(res.status_code, 403, method)
 
     def test_load_and_unload_are_audited_once_each(self):
-        self.client.post('/examples', headers=self.admin)
-        self.client.post('/examples', headers=self.admin)  # a no-op: not audited again
-        self.client.delete('/examples', headers=self.admin)
-        actions = [e['action'] for e in self.client.get('/audit_log', headers=self.admin).get_json()['entries']]
+        self.client.post('/api/v1/examples', headers=self.admin)
+        self.client.post('/api/v1/examples', headers=self.admin)  # a no-op: not audited again
+        self.client.delete('/api/v1/examples', headers=self.admin)
+        actions = [e['action'] for e in self.client.get('/api/v1/audit', headers=self.admin).get_json()['items']]
         self.assertEqual([a for a in actions if 'examples' in a], ['unload_examples', 'load_examples'])
         self.assertNotIn('save_query', actions)  # one summary entry, not one per query
 
-    def test_list_files_flags_examples(self):
+    def test_the_query_list_flags_examples(self):
         self.save_user_query('mine')
-        self.client.post('/examples', headers=self.admin)
-        files = self.client.get('/list_files', headers=self.admin).get_json()['files']
-        flags = {f['filename']: f['example'] for f in files}
+        self.client.post('/api/v1/examples', headers=self.admin)
+        items = self.client.get('/api/v1/queries', headers=self.admin).get_json()['items']
+        flags = {q['name']: q['example'] for q in items}
         self.assertFalse(flags['mine'])
         self.assertTrue(flags['example_top_films'])
 

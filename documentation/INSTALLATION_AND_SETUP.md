@@ -45,7 +45,7 @@ queryapigate.db      connections, saved queries, API keys, roles and the audit l
 ~~~bash
 mkdir my-api && cd my-api
 queryapigate init            # writes queryapigate.db (a template connection per db type, all inactive)
-# edit them: admin UI, or PATCH /connections - set "active": true on the ones you want
+# edit them: admin UI, or PATCH /api/v1/connections/<name> - set "active": true on the ones you want
 queryapigate serve           # http://127.0.0.1:5000
 ~~~
 
@@ -148,7 +148,7 @@ queryapigate serve
   the last few runs' history entries, never corrupt anything or lose a configuration change.
 - To keep every run for a while rather than each version's newest 50 - for tracking down an API problem after the
   fact - set `QUERYAPIGATE_HISTORY_RETENTION_DAYS` (e.g. `30`) and browse it with
-  [`GET /history`](API.md#get-history). On a very busy server, `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps a fraction
+  [`GET /api/v1/history`](API.md#get-apiv1history). On a very busy server, `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps a fraction
   of successful runs while still recording every failure.
 - Legacy pre-SQLite files (`db_connections.json`, `saved_sql/`, `api_keys.json`, ...) are never imported into
   PostgreSQL - migrate them into `queryapigate.db` first by starting once without `QUERYAPIGATE_DATABASE_URL`.

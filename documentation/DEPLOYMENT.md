@@ -108,7 +108,7 @@ PROD_DB_PASSWORD=<your database password>
 
 `QUERYAPIGATE_API_KEY` is the admin key - full access, sent as the `X-API-Key` header. Generate a real one
 (`openssl rand -hex 32`), not a word you'll remember; create scoped keys for anything that only needs to run
-queries (`POST /api_keys`, from the admin UI or the API - see [API.md](API.md#permission-roles-templates)).
+queries (`POST /api/v1/api-keys`, from the admin UI or the API - see [API.md](API.md#permission-roles-templates)).
 
 A connection's own password never goes in `db_connections.json` (or the admin UI's connection form) as
 plain text - reference an environment variable instead, resolved from whatever's in the container's

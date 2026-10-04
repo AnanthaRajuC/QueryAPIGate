@@ -28,7 +28,7 @@ UI uses), so every scenario is immediately usable rather than just described. Th
 this module's own earlier design (a key used to be left for the reader to create by hand, specifically so a
 server with none stayed open) - the moment these keys exist, the server requires a key for *every* request, not
 just the example endpoints. A key's secret is shown exactly once, in ``load()``'s own return value
-(``key_secrets``) - printed by the CLI, returned by ``POST /examples``, or logged a single time at startup for
+(``key_secrets``) - printed by the CLI, returned by ``POST /api/v1/examples``, or logged a single time at startup for
 ``QUERYAPIGATE_LOAD_EXAMPLES`` (the only channel available there, since nothing interactive is watching); it is
 never recoverable afterward, the same rule every API key already has. Weighed against staying open: a demo an
 admin can actually call immediately, with real per-scenario keys to copy into a client, was judged worth losing

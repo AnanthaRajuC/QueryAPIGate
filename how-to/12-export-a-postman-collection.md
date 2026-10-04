@@ -13,7 +13,7 @@ Postman (File → Import).
 ## Over the API
 
 ```bash
-curl http://127.0.0.1:5000/collections/catalog/postman -H 'X-API-Key: demo-key' -o catalog.postman_collection.json
+curl http://127.0.0.1:5000/api/v1/collections/catalog/postman -H 'X-API-Key: demo-key' -o catalog.postman_collection.json
 ```
 
 Admin only - verified: a scoped key gets the same "not authorized to manage the server configuration" error

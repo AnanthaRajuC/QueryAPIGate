@@ -3,7 +3,7 @@
 Base URL when running locally: `http://127.0.0.1:5000`. The same information is available interactively at `/docs`
 and as an OpenAPI document at `/openapi.json`.
 
-If the server has any key configured - `QUERYAPIGATE_API_KEY` or a scoped key created through `/api_keys` - send it
+If the server has any key configured - `QUERYAPIGATE_API_KEY` or a scoped key created through `/api/v1/api-keys` - send it
 with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` are always
 public; `/openapi.json`'s saved-query section still varies with who's asking). See
 [Authentication and permissions](#authentication-and-permissions).
@@ -14,21 +14,10 @@ public; `/openapi.json`'s saved-query section still varies with who's asking). S
 | [`/q/<name>`](#run-a-saved-query) | GET, POST | Run a saved query as an endpoint |
 | [`/execute_sql_from_file`](#run-a-saved-query) | POST | Run a saved query by file path |
 | [`/execute_sql_with_parameters_from_file`](#run-a-saved-query) | POST | Same as above (kept for compatibility) |
-| [`/save_sql_to_file`](#save-a-query) | PATCH | Save a query / add a version |
-| [`/list_files`](#list-saved-queries) | GET | List saved queries |
-| [`/saved_sql/<name>`](#delete-a-saved-query) | DELETE | Delete a saved query or one version |
-| [`/view_file_content`](#view-a-saved-querys-raw-data) | GET | Raw saved-query file |
-| [`/saved_sql/<name>/collection`](#collections) | PUT | Move a saved query into a collection, or out of any |
-| [`/saved_sql/<name>/cache_ttl`](#save-a-query) | PUT | Set or clear one version's cache_ttl in place |
-| [`/collections`](#collections) | GET | Every collection, its queries, and the keys and roles that reach it |
-| [`/collections/<name>`](#collections) | PATCH | Rename a collection, carrying every grant with it |
-| [`/collections/<name>/postman`](#exporting-a-collection-to-postman) | GET | Download a collection as a Postman Collection file |
-| [`/examples`](#example-apis) | GET, POST, DELETE | Status of / load / remove the bundled example APIs |
-| [`/connections`](#connections) | GET, PATCH | List / add / update connections |
-| [`/connections/<name>`](#connections) | DELETE | Delete a connection |
 | [`/connections/<name>/schema`](#connections) | GET | List a connection's tables/views and their columns |
-| [`/api_keys`](#authentication-and-permissions) | GET, POST | List / create scoped API keys |
-| [`/api_keys/<name>`](#authentication-and-permissions) | PATCH, DELETE | Update / revoke a scoped API key |
+| [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
+| [`/events`](#live-events-server-sent-events) | GET | Live saved-query runs (Server-Sent Events) |
+| [`/api/v1/...`](#management-api-v1) | GET, POST, PATCH, DELETE | The Management API: saved queries, connections, API keys, roles, collections, history, audit, settings and more (admin only) |
 | `/health` | GET | `{"status": "ok", "version": "..."}` |
 | [`/metrics`](#observability) | GET | Prometheus text-format metrics |
 
@@ -109,26 +98,30 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?stream=true&format=csv' \
 
 ## Save a query
 
-`PATCH /save_sql_to_file`
+`POST /api/v1/queries` creates a saved query with its first version; `POST /api/v1/queries/{name}/versions` adds the
+next version (see [Management API (v1)](#management-api-v1)):
 
 ~~~json
 {
-    "filename": "film_by_id",
-    "sql_query": "SELECT * FROM film WHERE film_id = :id",
-    "query_parameters": {"id": "int"},
+    "name": "film_by_id",
+    "sql": "SELECT * FROM film WHERE film_id = :id",
+    "parameters": {"id": "int"},
     "connection_name": "examples",
     "author": "anantha",
     "description": "Look up a film",
-    "tags": ["example"]
+    "tags": ["example"],
+    "publish": true
 }
 ~~~
 
-- `filename` may contain letters, digits, spaces, `.`, `_` and `-`. Saving to an existing name creates the next version.
-- `query_parameters` declares the query's parameters and their [rules](#parameter-rules). The definitions are checked when you save (400 with an `errors` map if any is invalid), and every parameter declared must be used in `sql_query`.
+- `name` may contain letters, digits, spaces, `.`, `_` and `-`. A name already taken is a 409; add a version instead.
+- `parameters` declares the query's parameters and their [rules](#parameter-rules). The definitions are checked when you save (400 with an `errors` map if any is invalid), and every parameter declared must be used in `sql`.
 - `connection_name` (optional) is the default connection when a run does not name one.
 - `cache_ttl` (optional, seconds) caches a response - see [Response caching](#response-caching).
-- `collection` (optional) files the query under a [collection](#collections). It belongs to the query, not to a version: omit it to keep the current one, send `null` to remove it.
-- Response: `{"message": "...", "filename": "film_by_id", "uuid": "...", "version": 2}`.
+- `collection` (optional, on create) files the query under a [collection](#collections). It belongs to the query, not to a version: change it later with `PATCH /api/v1/queries/{name}`.
+- `publish` (default false): a new version is a draft until published - see [Drafts and publishing](#drafts-and-publishing).
+- A Mongo query sets `"query_type": "mongo"` and `mongo_collection`, `mongo_filter`, `mongo_projection`, `mongo_sort` instead of `sql`.
+- Response: `201` with the query and its versions, and an `ETag`.
 
 ## Run a saved query
 
@@ -159,12 +152,12 @@ at all: `/q/<name>` answers 404.
   (`?version=3`), to test it before publishing. For any other key, a draft's number answers the same 404 as a
   version that never existed.
 - **Older versions stay runnable** with `?version=`, as before: each was live once.
-- **Saving through `PATCH /save_sql_to_file`, `queryapigate collection import` or `examples load` publishes the
-  new version at once,** which is exactly how those always behaved. Drafts are created through the Management API
-  (`/api/v1`, ADR 0001), which also publishes, unpublishes and rolls back to any earlier version.
+- **A new version is a draft unless saved with `"publish": true`.** The Management API also publishes,
+  unpublishes and rolls back to any earlier version. `queryapigate collection import` and `examples load` publish
+  what they save.
 - **Deleting the published version** falls back to the newest version older than it, never to a draft. With none
   older, the query is left unpublished.
-- `GET /list_files` shows each query's `published_version` (`null` when nothing is published).
+- `GET /api/v1/queries` shows each query's `published_version` (`null` when nothing is published).
 
 Stores created before this (schema 3 and older) are upgraded on first start with every query published at its
 newest version, so nothing a caller sees changes.
@@ -188,8 +181,8 @@ file; every form resolves to the same saved query by name.
 ## Response caching
 
 Opt-in, per saved query: set `cache_ttl` (seconds) when [saving it](#save-a-query), or turn it on/off or retune it
-for an existing version in place with `PUT /saved_sql/<name>/cache_ttl` (admin only, `{"cache_ttl": <seconds>}`,
-`0` or `null` turns it off; `?version=` targets a specific version, defaulting to the latest) - not a new version,
+for an existing version in place with `PATCH /api/v1/queries/<name>/versions/<n>` (admin only,
+`{"cache_ttl": <seconds>}`, `0` or `null` turns it off) - not a new version,
 so it never bumps `execution_history` or the query's version number, the same way moving a query's collection
 doesn't. A cached response is only ever served for that exact name, version, connection, resolved parameter
 values, `format` and page - anything else is a separate entry. It is **never** used for a query whose SQL is a
@@ -247,23 +240,13 @@ Saved SQL may also contain `{name}` placeholders, which are substituted **as tex
 value becomes part of the SQL it must be a number, a boolean, or a string made only of letters, digits, whitespace and
 `. , : @ % + / -`; anything else is rejected. Prefer bound `:name` parameters.
 
-## List saved queries
+## List, change and delete saved queries
 
-`GET /list_files?sort_by=name&sort_order=desc` - `sort_by` is `name` (default) or `modified`, `sort_order` is `asc`
-(default) or `desc`. Returns every query with its versions' metadata (not the SQL text) and its `published_version`.
-
-## Delete a saved query
-
-`DELETE /saved_sql/film_by_id` removes the whole query; `DELETE /saved_sql/film_by_id?version=2` removes one
-version (the query goes with its last version). Deleting the published version publishes the newest older one, if
-any - see [Drafts and publishing](#drafts-and-publishing).
-
-## View a saved query's raw data
-
-`GET /view_file_content?filename=film_by_id` returns `{"content": "<JSON text>"}` - the same shape a saved
-query always looked like as a file (see [Query metadata](QUERY_METADATA_MANAGEMENT.md)), for the admin UI's
-"Show raw file" view. Only an existing saved query's own name/reference can be read (see `filepath` above
-for accepted forms).
+Through the [Management API](#management-api-v1): `GET /api/v1/queries` lists them (filter by `search`,
+`collection`, `connection` or `status`), `GET /api/v1/queries/{name}` shows one with every version and its SQL, and
+`DELETE /api/v1/queries/{name}` (or `.../versions/{n}`, one version - the query goes with its last) removes it.
+Deleting the published version publishes the newest older one, if any - see
+[Drafts and publishing](#drafts-and-publishing).
 
 ## Management API (v1)
 
@@ -384,33 +367,24 @@ Clearing the cache is housekeeping, not a change, so it is not audited.
 | `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
 | `GET /api/v1/mcp/tools` | What `tools/list` returns for an unrestricted caller: each tool's `name`, `description`, `kind` (`ad-hoc` or `saved query`), `params` and `read_only`. Computed in this process, so it works whether or not `queryapigate mcp` is running. |
 
-### Deprecated routes
+### Removed routes
 
-The management routes replaced by an `/api/v1` resource keep working, unchanged. Their responses carry
-`Deprecation: true` and a `Link: <successor>; rel="successor-version"` header, and `/openapi.json` marks them
-deprecated:
-- replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`,
-  `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl` and
-  `GET /query_flow`;
-- replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`, `POST /connections/test`,
-  `POST /connections/databases` and `DELETE /connections/{name}`;
-- replaced by `/api/v1/api-keys`: `GET /api_keys`, `POST /api_keys`, `PATCH /api_keys/{name}` and
-  `DELETE /api_keys/{name}`;
-- replaced by `/api/v1/roles`: `GET /roles`, `POST /roles`, `PATCH /roles/{name}` and `DELETE /roles/{name}`;
-- replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`;
-- replaced by `/api/v1/settings` and `/api/v1/mcp/...`: `GET /settings`, `GET /settings/mcp_status` and
-  `GET /settings/mcp_tools`;
-- replaced by `/api/v1/cache/entries`: `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`;
-- replaced by `/api/v1/collections` and `/api/v1/examples`: `GET /collections`, `PATCH /collections/{name}`,
-  `GET /collections/{name}/postman`, and `GET`/`POST`/`DELETE /examples`.
+Before `/api/v1` existed, QueryAPIGate was managed through unversioned routes. Each was deprecated when its v1
+successor shipped, and all were removed together before 1.0, so they are not part of the 1.x contract:
 
-Nothing in QueryAPIGate calls the deprecated routes any more; they stay until the 1.0 API freeze decides their fate.
+| Removed | Use instead |
+|---|---|
+| `GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow` | `/api/v1/queries` (the flow is `/api/v1/queries/{name}/versions/{n}/flow`) |
+| `GET`/`PATCH /connections`, `DELETE /connections/{name}`, `POST /connections/test`, `POST /connections/databases` | `/api/v1/connections` |
+| `/api_keys`, `/roles` | `/api/v1/api-keys`, `/api/v1/roles` |
+| `GET /history`, `GET /audit_log` | `/api/v1/history`, `/api/v1/audit` |
+| `GET /settings`, `/settings/mcp_status`, `/settings/mcp_tools` | `/api/v1/settings`, `/api/v1/mcp/status`, `/api/v1/mcp/tools` |
+| `/cache/entries` | `/api/v1/cache/entries` |
+| `/collections`, `/examples` | `/api/v1/collections`, `/api/v1/examples` |
 
-(`GET /query_flow`'s successor is `GET /api/v1/queries/{name}/versions/{version}/flow`.)
-
-`GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
-schema of a connection it is granted. Runtime routes
-(`/q/<name>`, `/execute_sql`, `/catalog`, `/events`) and `/metrics` are not deprecated.
+`GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay: a scoped key may browse the schema of
+a connection it is granted. A route deprecated in 1.x will carry `Deprecation: true` and a
+`Link: <successor>; rel="successor-version"` header, and `/openapi.json` will mark it, until 2.0 removes it.
 
 ## Collections
 
@@ -430,25 +404,28 @@ would have refused.
 Anything else - including `Reporting` - is rejected with `400`, never silently case-folded, so two spellings of
 one collection cannot coexist.
 
-**Moving a query.** `PUT /saved_sql/<name>/collection` (admin only) with `{"collection": "reporting"}`, or
+**Moving a query.** `PATCH /api/v1/queries/<name>` (admin only) with `{"collection": "reporting"}`, or
 `{"collection": null}` to take it out of any. A new query can also be created into one with `collection` in
-[`PATCH /save_sql_to_file`](#save-a-query). The response says exactly who is affected:
+[`POST /api/v1/queries`](#save-a-query). The audit log records exactly who is affected - a `move_query` entry with
+the keys that gained and lost access - and the admin UI shows the same before you confirm a move:
 
 ~~~json
-{"message": "'top_rented_films' moved", "filename": "top_rented_films", "from": null, "to": "reporting",
- "access": {"keys": {"gain": ["acme-corp"], "lose": []}, "roles": {"gain": ["partner"], "lose": []}}}
+{"action": "move_query", "target": "top_rented_films",
+ "changes": {"collection": {"from": null, "to": "reporting"}, "keys_gaining_access": ["acme-corp"],
+             "keys_losing_access": []}}
 ~~~
 
-**Listing.** `GET /collections` (admin only) returns every collection with its queries and the keys and roles
+**Listing.** `GET /api/v1/collections` (admin only) returns every collection with its queries and the keys and roles
 granted it, plus the queries in no collection. A collection that only a grant still names (its queries have all
 moved away) is listed with `"queries": []`, so a grant that has gone inert is visible instead of hiding:
 
 ~~~json
-{"collections": {"reporting": {"queries": ["active_rentals", "top_rented_films"], "keys": ["acme-corp"], "roles": ["partner"]}},
+{"items": [{"name": "reporting", "queries": ["active_rentals", "top_rented_films"], "keys": ["acme-corp"],
+            "roles": ["partner"]}],
  "uncollected": ["loose_query"]}
 ~~~
 
-`GET /list_files` and `GET /catalog` also carry each query's `collection`.
+`GET /api/v1/queries` and `GET /catalog` also carry each query's `collection`.
 
 ### Granting access to a collection
 
@@ -468,8 +445,8 @@ It reaches every query **currently** in those collections, on any connection, an
   whose collection has since emptied still works.
 - **The grant is live**, unlike a role, which is copied once. That is the point - nobody maintains a list - and
   its cost, since filing a query into a collection changes what every key granted it can run. So every move is
-  written to the [audit log](#audit-log) with the keys that gained or lost access, the response says the same,
-  and `GET /collections` shows who reaches each collection *before* you move anything.
+  written to the [audit log](#audit-log) with the keys that gained or lost access, and `GET /api/v1/collections`
+  shows who reaches each collection *before* you move anything.
 
 A role's `collections` are copied onto a key at creation like every other role field.
 
@@ -478,16 +455,16 @@ is honoured (or not) identically by all three - a test compares them across ever
 
 ### Renaming a collection
 
-`PATCH /collections/<name>` (admin only) with `{"name": "new-name"}` renames it, carrying every key and role grant
+`PATCH /api/v1/collections/<name>` (admin only) with `{"name": "new-name"}` renames it, carrying every key and role grant
 with it. It is ordered so that no key loses reach at any moment: grants are widened to hold both names, the
 queries are re-filed, and only then is the old name dropped. If the process dies part-way, access is never
 narrower than intended and running the same rename again completes it - which is why an already-existing target
-requires `"merge": true` (a half-finished rename looks exactly like one). The response lists the queries, keys and
-roles changed; the audit log records a `rename_collection` entry.
+requires `"merge": true` (409 `collection_exists` otherwise - a half-finished rename looks exactly like one). The
+response lists the queries, keys and roles changed; the audit log records a `rename_collection` entry.
 
 ### Exporting a collection to Postman
 
-`GET /collections/<name>/postman` (admin only) downloads the collection as a **Postman Collection v2.1** file,
+`GET /api/v1/collections/<name>/postman` (admin only) downloads the collection as a **Postman Collection v2.1** file,
 ready for Postman's *Import*; the CLI does the same with `queryapigate collection export <name> --format postman
 [--base-url https://api.example.com] [--out file]`, and the admin UI has a **Postman** button on each collection's
 header. Each query becomes a folder-free list of `GET {{baseUrl}}/q/<name>` requests:
@@ -536,22 +513,24 @@ as the admin key - no server needs to be running.
 Four worked scenarios (reporting, dashboard, export, partner) ship with the package and can be loaded into a home
 folder and removed again - see [Example APIs](EXAMPLES.md) for the walkthrough. Over HTTP (admin only):
 
-- `GET /examples` - `{"loaded": true, "partial": false, "connection": "examples", "queries": [...], "roles": [...],
-  "collections": [...]}`. `partial` means an interrupted load: some of it is installed.
-- `POST /examples` - install them. Idempotent; the response lists what was added. `409` and nothing changed if a
-  query, role, connection or file that is *not* an example already holds one of their names.
-- `DELETE /examples` - remove exactly what is marked `example`, and report any keys still granted an example
+- `GET /api/v1/examples` - `{"loaded": true, "partial": false, "connection": "examples", "queries": [...],
+  "roles": [...], "keys": [...], "collections": [...]}`. `partial` means an interrupted load: some of it is installed.
+- `POST /api/v1/examples` - install them. Idempotent; the response lists what was `added`, with the example keys'
+  secrets (`key_secrets`), shown this once. `409 examples_conflict` and nothing changed if a query, role, connection
+  or file that is *not* an example already holds one of their names.
+- `DELETE /api/v1/examples` - remove exactly what is marked `example`, and report any keys still granted an example
   collection (`keys_still_granted`), whose grant now reaches nothing.
 
 The same as `queryapigate examples load|unload|status`, and `QUERYAPIGATE_LOAD_EXAMPLES=yes` loads them at startup
 (a problem there - a name conflict, a read-only home - is a logged warning, never a startup failure; a malformed value
 is rejected). Loading records one `load_examples` audit entry, not one per query; removal records `unload_examples`.
-`GET /list_files` marks each query with `"example": true/false`.
+`GET /api/v1/queries` marks each query with `"example": true/false`.
 
 ## Connections
 
-`GET /connections` lists connections; stored passwords are shown as `********` (values that are `${ENV_VAR}`
-references are shown as written). Each entry also carries a live `usage` object -
+`GET /api/v1/connections` lists connections, and `GET /api/v1/connections/{name}` shows one; stored passwords are
+shown as `********` (values that are `${ENV_VAR}` references are shown as written). Each entry also carries a live
+`usage` object -
 `{"queries": ..., "errors": ..., "rows": ..., "avg_duration_ms": ...}` - aggregated from the same in-process
 counters `/metrics` renders (see [Observability](#observability)), so the admin UI's Connections tab can show
 how much a connection has actually been used without a separate Prometheus query. `avg_duration_ms` is
@@ -559,26 +538,25 @@ how much a connection has actually been used without a separate Prometheus query
 - they are a live view of *this process*, not a durable history (see a saved query's own
 [`execution_history`](#run-a-saved-query) for that).
 
-`PATCH /connections` adds or replaces connections. Sending the `********` mask back for an existing connection keeps
-its stored password.
+`POST /api/v1/connections` adds one; `PATCH /api/v1/connections/{name}` changes some of its fields and keeps the
+rest (`null` removes an optional one). Sending the `********` mask back, or leaving `password` out, keeps the stored
+password. Driver settings (`sslmode`, `jdbc_url`, ...) go in `options`.
 
 ~~~json
 {
-    "connections": {
-        "reporting": {
-            "db": "postgres",
-            "host": "db.internal",
-            "port": 5432,
-            "database": "reports",
-            "user": "readonly",
-            "password": "${REPORTING_PASSWORD}",
-            "active": true
-        }
-    }
+    "name": "reporting",
+    "db": "postgres",
+    "host": "db.internal",
+    "port": 5432,
+    "database": "reports",
+    "user": "readonly",
+    "password": "${REPORTING_PASSWORD}",
+    "active": true
 }
 ~~~
 
-`DELETE /connections/reporting` removes one. See [DATABASE_CONNECTION_CONFIGURATION.md](DATABASE_CONNECTION_CONFIGURATION.md)
+`DELETE /api/v1/connections/reporting` with `{"reason": "..."}` removes one (the reason is required, and kept in the
+audit log). `POST /api/v1/connections/test` tries a connection without saving it. See [DATABASE_CONNECTION_CONFIGURATION.md](DATABASE_CONNECTION_CONFIGURATION.md)
 for the connection fields.
 
 A `${VAR}` password reference is expanded from the environment at connection time and never written to disk as
@@ -599,7 +577,7 @@ the instant a connection is actually opened. Needs the `cryptography` package
 if `QUERYAPIGATE_SECRET_KEY` is set without it. A `${VAR}` reference is untouched either way - it was never a
 secret stored in the file to begin with.
 
-An encrypted password is masked the same as a literal one in `GET /connections` and the audit log
+An encrypted password is masked the same as a literal one in `GET /api/v1/connections/{name}` and the audit log
 (`********`) - the stored ciphertext itself is never returned to a client. Losing or rotating
 `QUERYAPIGATE_SECRET_KEY` fails clearly rather than quietly: a connection whose password can't be decrypted
 returns a `500` naming the problem, and the server logs a startup warning if encrypted passwords exist on
@@ -628,7 +606,7 @@ in which case the list was cut off.
 ## Authentication and permissions
 
 `QUERYAPIGATE_API_KEY`, if set, is a full-access **admin** key - unrestricted, exactly as before this section
-existed. Scoped keys are additive, managed through `/api_keys` (admin only), and can only run queries: a
+existed. Scoped keys are additive, managed through `/api/v1/api-keys` (admin only), and can only run queries: a
 list of connection names they may use (or every connection), and whether they may write at all. A scoped
 key can never do more than the server-wide settings already allow - `allow_writes` on a key can only narrow
 `QUERYAPIGATE_ALLOW_WRITES`, never widen it - and can never manage connections, saved queries or other API keys;
@@ -639,29 +617,28 @@ warning at startup in that state).
 
 A key's secret is never stored - only its SHA-256 hash, in `queryapigate.db` (`QUERYAPIGATE_HOME`). It is generated
 by the server and returned exactly once, when the key is created; there is no way to recover it afterwards,
-only to revoke it (`DELETE /api_keys/<name>`) and create a new one.
+only to revoke it (`DELETE /api/v1/api-keys/<name>`) and create a new one.
 
-`POST /api_keys` creates a key:
+`POST /api/v1/api-keys` creates a key:
 
 ~~~json
 {"name": "reporting", "connections": ["reporting-db"], "allow_writes": false}
 ~~~
 
-~~~json
-{"name": "reporting", "key": "sk_...", "message": "Store this key now - it can't be shown again."}
-~~~
+The `201` response is the key's grants and state plus its `secret` (`sk_...`), shown this once and sent with
+`Cache-Control: no-store`.
 
 `connections` may be omitted (or `"*"`) for every connection, or an empty list to block all of them.
-`GET /api_keys` lists keys (name, connections, allow_writes, active, created_at, `created_from_role` - never
-the hash or secret). Each entry also carries a live `usage` object -
-`{"queries": ..., "errors": ..., "rows": ...}` - the same live, in-process aggregation `GET /connections`
+`GET /api/v1/api-keys` lists keys (name, grants, active, expiry, created_at, `created_from_role`, `last_used_at` -
+never the hash or secret). Each entry also carries a live `usage` object -
+`{"queries": ..., "errors": ..., "rows": ...}` - the same live, in-process aggregation `GET /api/v1/connections`
 carries (see above), giving a key's activity alongside its grants; unlike a connection's, a key's `usage`
 never includes `avg_duration_ms` - the underlying latency histograms aren't split by key, to keep `/metrics`'
 bucketed output from growing with the number of keys (see [Observability](#observability)).
-`PATCH /api_keys/reporting` changes `connections`, `allow_writes` or `active` (`false`
-revokes it immediately) without rotating the secret. `DELETE /api_keys/reporting` removes it outright.
+`PATCH /api/v1/api-keys/reporting` changes any grant, `expires_at` or `active` (`false`
+revokes it immediately) without rotating the secret. `DELETE /api/v1/api-keys/reporting` removes it outright.
 Creating several keys with the same grants repeatedly? See [Permission roles](#permission-roles-templates)
-below for a reusable template - `POST /api_keys` with `"role": "<name>"` instead of these fields.
+below for a reusable template - `POST /api/v1/api-keys` with `"role": "<name>"` instead of these fields.
 
 ### Per-saved-query access (external clients)
 
@@ -721,13 +698,13 @@ without anyone having to remember to come back and revoke it:
 
 Valid through the *end* of that date (23:59:59), not from its start. Checked live on every request, the
 same way `active` already is - there is no background sweep, so nothing to schedule or fail silently. Omit
-it (or leave it unset) for a key that never expires; `PATCH /api_keys/<name>` with `{"expires_at": null}`
+it (or leave it unset) for a key that never expires; `PATCH /api/v1/api-keys/<name>` with `{"expires_at": null}`
 clears an existing expiry without rotating the secret, and `PATCH` without the field at all leaves whatever
 expiry (or lack of one) the key already had untouched.
 
 ### Last used
 
-`GET /api_keys` reports `last_used_at` for a key once it has authenticated at least one request - useful
+`GET /api/v1/api-keys` reports `last_used_at` for a key once it has authenticated at least one request - useful
 for noticing a stale key nobody has called in months (a candidate to revoke) or confirming a newly-issued
 one actually got wired up on the other end. Updated at most once a minute per key regardless of how often
 it's actually used, so a busy key doesn't turn every request into a disk write - read it as "roughly how
@@ -748,7 +725,7 @@ Same `N/period` grammar as `QUERYAPIGATE_RATE_LIMIT` (`second`, `minute`, `hour`
 addition to** the server-wide limit, never instead of it - a key can never use its own quota to exceed the
 ceiling every caller already sits under, and a per-key limit still applies even when
 `QUERYAPIGATE_RATE_LIMIT` is unset entirely, since throttling one specific external caller is a reasonable ask
-on its own. Omitted (or `null`) means no limit of this key's own - `PATCH /api_keys/<name>` with an
+on its own. Omitted (or `null`) means no limit of this key's own - `PATCH /api/v1/api-keys/<name>` with an
 explicit `{"rate_limit": null}` clears an existing one, the same pattern `expires_at` uses.
 
 ### IP allowlisting
@@ -768,7 +745,7 @@ key at all, independent of [per-key rate limiting](#per-key-rate-limiting) above
 much* a caller who is already allowed may do. A request from an address outside the list fails exactly like
 a wrong key (`401`), not a distinct error - a caller learns nothing about *why* a key didn't work. Omitted
 (or `null`) means no restriction - the admin key is never restricted by this at all. `PATCH
-/api_keys/<name>` with an explicit `{"allowed_ips": null}` clears an existing restriction, the same pattern
+/api/v1/api-keys/<name>` with an explicit `{"allowed_ips": null}` clears an existing restriction, the same pattern
 `expires_at` and `rate_limit` use.
 
 ### Write operation granularity
@@ -785,7 +762,7 @@ Only ever narrows write access, never widens it, and never restricts a read-only
 `allow_writes` still can't write regardless of this list. Checked in `sqltools.validate_sql()` against the
 statement's own leading keyword (case-insensitive); a rejected statement gets `403` naming the operations
 the key *is* permitted. Omitted (or `null`) means every write keyword is equally permitted, exactly today's
-behaviour. `PATCH /api_keys/<name>` with an explicit `{"allowed_write_ops": null}` clears an existing
+behaviour. `PATCH /api/v1/api-keys/<name>` with an explicit `{"allowed_write_ops": null}` clears an existing
 restriction, the same pattern `expires_at`/`rate_limit`/`allowed_ips` use.
 
 ### Table access restrictions
@@ -810,14 +787,14 @@ type, never silently left unrestricted.** Table names are matched case-insensiti
 schema-qualified), the same simplification `allowed_write_ops`'s keyword list already makes; a table-valued
 function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully restrict one.
 
-Omitted (or `null`) means no restriction, exactly today's behaviour. `PATCH /api_keys/<name>` with an
+Omitted (or `null`) means no restriction, exactly today's behaviour. `PATCH /api/v1/api-keys/<name>` with an
 explicit `{"allowed_tables": null}` clears an existing restriction, the same pattern the other grant fields
 use.
 
 ### Permission roles (templates)
 
 Creating several keys with the same shape of grants - the same connections, the same curated queries, the
-same rate limit - means repeating that shape by hand each time. A named role, managed through `/roles`
+same rate limit - means repeating that shape by hand each time. A named role, managed through `/api/v1/roles`
 (admin only, stored separately from keys), is a reusable *template* for exactly that: `connections`,
 `allow_writes`, `queries`, `collections`, `rate_limit`, `allowed_ips`, `allowed_write_ops` and
 `allowed_tables`, the same fields a key itself carries (deliberately excluding `expires_at`, which is
@@ -827,7 +804,7 @@ inherently per-key, not something a shared template should dictate).
 {"name": "reporting", "connections": ["reporting-db"], "allow_writes": false, "rate_limit": "200/hour"}
 ~~~
 
-`POST /api_keys` with `"role": "reporting"` instead of specifying grants directly copies that role's fields
+`POST /api/v1/api-keys` with `"role": "reporting"` instead of specifying grants directly copies that role's fields
 onto the new key **once, at creation time**:
 
 ~~~json
@@ -839,19 +816,19 @@ on. `authenticate()` reads only the key's own stored entry on every request; the
 again. **Editing or deleting a role afterward has no effect whatsoever on a key already created from it** -
 there is no blast radius to updating a role once keys already exist from it, and no dangling reference to
 worry about when deleting one. A key still records which role (if any) it was created from, in
-`created_from_role` - purely informational, visible in `GET /api_keys`, never consulted by any permission
+`created_from_role` - purely informational, visible in `GET /api/v1/api-keys`, never consulted by any permission
 check.
 
 `role` cannot be combined with any explicit grant field (`connections`, `allow_writes`, `queries`,
 `collections`, `rate_limit`, `allowed_ips`, `allowed_write_ops` or `allowed_tables`) in the same
-`POST /api_keys` request - that combination is rejected with `400`, naming the conflicting fields. Create the
+`POST /api/v1/api-keys` request - that combination is rejected with `400`, naming the conflicting fields. Create the
 key from the role, then `PATCH` it afterward to customize it away from the template. `expires_at` is the one
 field that *can* still be set alongside `role`, since it's per-key by nature rather than part of the shared
 template.
 
-`GET /roles` lists roles; `PATCH /roles/<name>` updates one (the same explicit-null-to-clear convention as
-`PATCH /api_keys/<name>` for `rate_limit`, `allowed_ips`, `allowed_write_ops` and `allowed_tables`);
-`DELETE /roles/<name>` removes it - again, with zero effect on any key already created from it.
+`GET /api/v1/roles` lists roles; `PATCH /api/v1/roles/<name>` updates one (the same explicit-null-to-clear convention as
+`PATCH /api/v1/api-keys/<name>` for `rate_limit`, `allowed_ips`, `allowed_write_ops` and `allowed_tables`);
+`DELETE /api/v1/roles/<name>` removes it - again, with zero effect on any key already created from it.
 
 ### Signed-in users (JWT)
 
@@ -894,7 +871,7 @@ refused. When JWT is on, the server never runs in [open-access mode](#authentica
 with neither a key nor a token is refused even if no API key is configured.
 
 **Who they are.** The caller's name is `jwt:<user claim>` - in logs, [run history](#run-history) (filter with
-`GET /history?key=jwt:alice`) and [live events](#live-events-server-sent-events), so each user's event stream
+`GET /api/v1/history?key=jwt:alice`) and [live events](#live-events-server-sent-events), so each user's event stream
 carries only their own runs. (`/metrics` counts all signed-in users under one `jwt` label, so a large user base
 can't multiply its series.) A request carrying `X-API-Key` is judged on that key alone.
 
@@ -969,7 +946,7 @@ format](https://prometheus.io/docs/instrumenting/exposition_formats/):
 - `queryapigate_rate_limit_rejections_total` - requests rejected by the rate limiter.
 - `queryapigate_cache_hits_total` / `queryapigate_cache_misses_total` - responses served from, or missed in,
   the `cache_ttl` response cache (in-process by default, Redis-backed when `QUERYAPIGATE_REDIS_URL` is set -
-  see `/settings`). Counted from the same `X-Cache: HIT`/`MISS` header a cacheable response already carries.
+  see `/api/v1/settings`). Counted from the same `X-Cache: HIT`/`MISS` header a cacheable response already carries.
 - `queryapigate_cache_entries` - responses currently held in the response cache.
 
 Metrics are kept in memory for this one process. This is correct for the image this project ships (a
@@ -1078,26 +1055,24 @@ and duration. How that history is written and kept is configurable:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version, and how many of a version's newest runs `/list_files` and the admin UI show. |
+| `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version, unless a retention period is set. |
 | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep **every** run for this many days instead of a per-version count; a sweep every 10 minutes deletes older ones. Best with a [PostgreSQL metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of *successful* runs recorded, e.g. `0.1` for one in ten on a very busy query. Failed runs are always recorded. |
 | `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes. `0` writes each run inside its own request. |
 
 **Batched writes.** A request never waits on its history entry: the run is queued in memory and a background
 thread writes everything queued in one transaction every `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` seconds. Reads in
-the same process always include its own queued runs (they are written first), so `/list_files` right after a run
+the same process always include its own queued runs (they are written first), so a history read right after a run
 shows it; another worker or instance sees it within one interval. A normal shutdown writes what is queued; a
 process killed outright loses at most one interval's worth. If the store can't keep up, at most 10,000 runs are
 queued per process and newer ones are dropped rather than slowing requests - counted in `/metrics` as
 `queryapigate_history_runs_total{outcome="dropped"}`, alongside `recorded`, `sampled_out` and `failed`, with
 `queryapigate_history_pending` for the current queue.
 
-### `GET /history`
+### `GET /api/v1/history`
 
-*Deprecated: use [`GET /api/v1/history`](#history-and-audit), which takes the same filters.*
-
-Pages through every stored run of every saved query, newest first - the way to look beyond the newest runs a
-list shows, for example across a retention period. Admin only (it shows every key's activity).
+Pages through every stored run of every saved query, newest first - across a retention period, for example. Admin
+only (it shows every key's activity). `GET /api/v1/queries/{name}/history` is the same for one query.
 
 | Parameter | Meaning |
 |-----------|---------|
@@ -1106,26 +1081,24 @@ list shows, for example across a retention period. Admin only (it shows every ke
 | `key` | Only runs made with this API key (`admin` for the admin key). |
 | `since`, `until` | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`, in the server's local time; `since` inclusive, `until` exclusive. |
 | `limit` | Runs per page, 1-1000 (default 100). |
-| `cursor` | The previous page's `next`. |
+| `cursor` | The previous page's `next_cursor`. |
 
 ~~~bash
-curl -H 'X-API-Key: admin-key' 'localhost:5000/history?key=partner&status=error&since=2026-10-01'
+curl -H 'X-API-Key: admin-key' 'localhost:5000/api/v1/history?key=partner&status=error&since=2026-10-01'
 ~~~
 
 ~~~json
-{"entries": [{"query": "film_by_id", "version": 3, "executed_at": "2026-10-01 14:02:11", "status": "error",
+{"items": [{"query": "film_by_id", "version": 3, "executed_at": "2026-10-01 14:02:11", "status": "error",
               "error": "An error occurred while executing the SQL query", "key_name": "partner",
               "connection_name": "pg", "request_id": "9f2c41d07a1b"}],
- "next": "WyIyMDI2LTEwLTAxIDE0OjAyOjExIiwgNDgxMl0"}
+ "next_cursor": "WyIyMDI2LTEwLTAxIDE0OjAyOjExIiwgNDgxMl0"}
 ~~~
 
-`next` is `null` on the last page.
+`next_cursor` is `null` on the last page.
 
 ## Audit log
 
-*`GET /audit_log` is deprecated: use [`GET /api/v1/audit`](#history-and-audit).*
-
-`GET /audit_log` (admin only) is a durable record of administrative changes - distinct from
+`GET /api/v1/audit` (admin only) is a durable record of administrative changes - distinct from
 [Observability](#observability) above, which covers live request/query traffic, not configuration changes.
 Every create, update or delete of an API key, role, connection or saved query appends one entry, newest
 first (moving a query between [collections](#collections) is `move_query`, listing the keys that gained or lost
@@ -1133,21 +1106,22 @@ access; renaming one is `rename_collection`):
 
 ~~~json
 {
-  "entries": [
+  "items": [
     {"timestamp": "2026-09-24 10:03:11", "actor": "admin", "action": "update_key", "target": "acme-corp",
      "changes": {"allow_writes": {"from": false, "to": true}}},
     {"timestamp": "2026-09-24 10:01:47", "actor": "admin", "action": "create_connection", "target": "reporting",
      "changes": {"db": "postgres", "host": "db.internal", "password": "********", "active": true}}
-  ]
+  ],
+  "total": 2, "actions": ["create_connection", "update_key"], "retention": 500
 }
 ~~~
 
 An update's `changes` is a diff of only the fields that actually changed (`{"field": {"from": ..., "to":
 ...}}`); a create or delete records a full snapshot of the entry instead, since there's no prior or
 remaining state to diff against. A connection's `password` is never included as a value in either form -
-masked as `********` in a snapshot (the same mask `GET /connections` already uses) and reported only as the
-literal string `"changed"` in a diff, so the audit log itself never becomes a second place a real password
-leaks from. An API key's entry never includes its secret or hash, the same fields `GET /api_keys` already
+masked as `********` in a snapshot (the same mask `GET /api/v1/connections/{name}` already uses) and reported only
+as the literal string `"changed"` in a diff, so the audit log itself never becomes a second place a real password
+leaks from. An API key's entry never includes its secret or hash, the same fields `GET /api/v1/api-keys` already
 omits. Capped at 500 most recent entries by default; older ones roll off, the same way a saved query's
 `execution_history` is capped per version. Set `QUERYAPIGATE_AUDIT_LOG_LIMIT` to raise or lower that cap for a
 busier server or a longer compliance-driven retention window - validated at startup, so a malformed value

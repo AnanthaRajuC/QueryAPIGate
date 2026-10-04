@@ -1,9 +1,11 @@
 # Query metadata
 
 Each saved query lives in `queryapigate.db`, with one entry per version (`"1"`, `"2"`, ...) - the same shape
-it always was as a `saved_sql/*.json` file (`GET /view_file_content` still hands you exactly this, for the
-admin UI's "Show raw file" view). Saving under an existing name adds the next version; the latest version
-runs unless one is requested.
+it always was as a `saved_sql/*.json` file, and the shape a [bundle](API.md#exporting-and-importing-a-collection)
+carries. Adding a version never changes an earlier one; the published version is what callers run unless they ask
+for another (see [Drafts and publishing](API.md#drafts-and-publishing)). The Management API presents the same fields
+with a few renamed (`sql` for `sql_query`, `parameters` for `query_parameters`) - see
+[Save a query](API.md#save-a-query).
 
 | Field | Type | Purpose | Example |
 |-------|------|---------|---------|

@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import apikeys, bundle, create_app, db, history, mcp_server, store
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 
@@ -25,8 +25,8 @@ class PublishingTestCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
         self.client = create_app().test_client()
-        res = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']}, headers=ADMIN)
-        self.scoped = {'X-API-Key': res.get_json()['key']}
+        res = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': ['lite']}, headers=ADMIN)
+        self.scoped = {'X-API-Key': res.get_json()['secret']}
 
     def save(self, value, publish=True, name='q'):
         """A version whose single result row is `value`, so a response shows which version ran."""
@@ -42,10 +42,10 @@ class PublishingTestCase(unittest.TestCase):
 
 class DraftTests(PublishingTestCase):
     def test_the_legacy_save_route_still_publishes_what_it_saves(self):
-        res = self.client.patch('/save_sql_to_file', headers=ADMIN, json={
+        res = save_query(self.client, headers=ADMIN, body={
             'author': 'a', 'description': 'd', 'sql_query': 'SELECT 7 AS v', 'filename': 'q',
             'connection_name': 'lite'})
-        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.status_code, 201)
         self.assertEqual(self.served(self.scoped), 7)
         self.assertEqual(store.read_published(store.load_versions('q')), 1)
 
@@ -122,10 +122,9 @@ class DiscoveryTests(PublishingTestCase):
         self.save(1)
         self.save(2, publish=False)
         self.save(1, name='never', publish=False)
-        files = {f['filename']: f for f in self.client.get('/list_files', headers=ADMIN).get_json()['files']}
-        self.assertEqual(files['q']['published_version'], 1)
-        self.assertEqual([v['version'] for v in files['q']['versions']], [1, 2])
-        self.assertIsNone(files['never']['published_version'])
+        listed = {q['name']: q for q in self.client.get('/api/v1/queries', headers=ADMIN).get_json()['items']}
+        self.assertEqual((listed['q']['published_version'], listed['q']['latest_version']), (1, 2))
+        self.assertIsNone(listed['never']['published_version'])
         self.assertEqual(sorted(name for name, *_ in store.latest_versions()), ['never', 'q'])
         self.assertEqual([name for name, *_ in store.live_versions()], ['q'])
 

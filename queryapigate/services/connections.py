@@ -103,6 +103,7 @@ def create(data, actor):
     store.update_connections({name: fields})
     after = store.read_connections()[name]
     store.record_audit(actor, 'create_connection', name, _masked(name, after))
+    pool.close_pooled_connections()  # a name used before (deleted, then re-created) must not reuse its old sockets
     return name
 
 

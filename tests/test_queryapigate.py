@@ -17,7 +17,7 @@ from queryapigate import config, create_app, db, engine, metrics, pool, runners,
 from queryapigate.errors import ApiError
 from queryapigate.formats import ResultSetDTO
 from tests import TEST_DATABASE_URL
-from tests.helpers import write_connections
+from tests.helpers import put_connections, save_query, write_connections
 
 
 class ApiTestCase(unittest.TestCase):
@@ -54,9 +54,20 @@ class ApiTestCase(unittest.TestCase):
     def run_sql(self, sql, query='', **body):
         return self.client.post(f'/execute_sql{query}', json={'sql': sql, 'connection_name': 'lite', **body})
 
-    def save(self, filename='q', sql='SELECT * FROM actor ORDER BY actor_id', **extra):
-        return self.client.patch('/save_sql_to_file', json={
-            'author': 'a', 'description': 'd', 'sql_query': sql, 'filename': filename, **extra})
+    def save(self, filename='q', sql='SELECT * FROM actor ORDER BY actor_id', headers=None, **extra):
+        """Save (or add a published version to) a saved query through /api/v1 - 201 when saved."""
+        return save_query(self.client, {'author': 'a', 'description': 'd', 'sql_query': sql, 'filename': filename,
+                                        **extra}, headers=headers)
+
+    def names(self, **filters):
+        return [q['name'] for q in self.client.get('/api/v1/queries', query_string=filters).get_json()['items']]
+
+    def connections(self, headers=None):
+        """Every connection's detail, by name, as /api/v1 shows it (passwords masked)."""
+        out = {}
+        for item in self.client.get('/api/v1/connections', headers=headers).get_json()['items']:
+            out[item['name']] = self.client.get(f"/api/v1/connections/{item['name']}", headers=headers).get_json()
+        return out
 
 
 class ExecuteSqlTests(ApiTestCase):
@@ -172,33 +183,26 @@ class ReadOnlyTests(ApiTestCase):
 
 
 class SavedQueryTests(ApiTestCase):
-    def test_list_files_on_a_fresh_install_is_an_empty_list_not_an_error(self):
-        # saved_dir does not exist yet in a brand-new QUERYAPIGATE_HOME (nothing has ever been saved) -
-        # a list endpoint should answer with an empty list, not a 404.
-        self.assertFalse(os.path.isdir(self.saved_dir))
-        res = self.client.get('/list_files')
-        self.assertEqual((res.status_code, res.get_json()), (200, {'files': []}))
+    def test_the_query_list_on_a_fresh_install_is_an_empty_list_not_an_error(self):
+        res = self.client.get('/api/v1/queries')
+        self.assertEqual((res.status_code, res.get_json()), (200, {'items': []}))
 
     def test_save_versions_and_list(self):
         first = self.save('my query')
-        self.assertEqual(first.status_code, 200)
-        self.assertTrue(first.get_json()['uuid'])
+        self.assertEqual(first.status_code, 201)
+        self.assertTrue(first.get_json()['versions'][0]['uuid'])
         self.save('my query', sql='SELECT 2', tags=['x'])
         self.save('another')
 
         saved = store.load_versions('my query')
         self.assertEqual(sorted(store.version_numbers(saved)), [1, 2])
-        self.assertEqual(store.read_published(saved), 2)  # the legacy save route publishes what it saves
+        self.assertEqual(store.read_published(saved), 2)
         self.assertEqual(saved['2']['version'], 2)
         self.assertEqual(saved['2']['tags'], ['x'])
 
-        files = self.client.get('/list_files').get_json()['files']
-        self.assertEqual([f['filename'] for f in files], ['another', 'my query'])
-        self.assertEqual([v['version'] for v in files[1]['versions']], [1, 2])
-
-        files = self.client.get('/list_files?sort_by=name&sort_order=desc').get_json()['files']
-        self.assertEqual([f['filename'] for f in files], ['my query', 'another'])
-        self.assertEqual(self.client.get('/list_files?sort_by=size').status_code, 400)
+        self.assertEqual(self.names(), ['another', 'my query'])
+        detail = self.client.get('/api/v1/queries/my query').get_json()
+        self.assertEqual([v['version'] for v in detail['versions']], [1, 2])
 
     def test_malformed_json_body_is_rejected_not_ignored(self):
         self.save('q', sql='SELECT * FROM actor WHERE actor_id = :id', connection_name='lite',
@@ -219,7 +223,7 @@ class SavedQueryTests(ApiTestCase):
         self.assertEqual(store.load_versions('q', with_history=False)['1']['execution_history'], [])
 
     def test_save_validation(self):
-        self.assertEqual(self.client.patch('/save_sql_to_file', json={'author': 'a'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/queries', json={'author': 'a'}).status_code, 400)
         for name in ('../evil', 'a/b', '.hidden', ''):
             self.assertEqual(self.save(name).status_code, 400, name)
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, 'evil.json')))
@@ -253,23 +257,15 @@ class SavedQueryTests(ApiTestCase):
         self.save('q')
         outside = (self.db_path, '../db_connections.json', '/etc/passwd', 'saved_sql/../db_connections.json')
         for path in outside:
-            res = self.client.get('/view_file_content', query_string={'filename': path})
-            self.assertIn(res.status_code, (403, 404), path)
-            self.assertNotIn('password', res.get_data(as_text=True))
             res = self.client.post('/execute_sql_from_file',
                                    json={'filepath': path, 'connection_name': 'lite'})
             self.assertIn(res.status_code, (403, 404), path)
-
-        ok = self.client.get('/view_file_content', query_string={'filename': 'q'})
-        self.assertEqual(ok.status_code, 200)
-        self.assertIn('SELECT', ok.get_json()['content'])
-        self.assertEqual(self.client.get('/view_file_content').status_code, 400)
-        self.assertEqual(self.client.get('/view_file_content?filename=nope').status_code, 404)
+            self.assertNotIn('password', res.get_data(as_text=True))
 
     def test_query_flow_extracts_tables_and_joins(self):
         self.save('q', sql='SELECT a.name FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id',
                   connection_name='lite')
-        res = self.client.get('/query_flow', query_string={'filename': 'q'})
+        res = self.client.get('/api/v1/queries/q/versions/1/flow')
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertEqual(data['tables'], ['actor', 'film_actor'])
@@ -280,12 +276,12 @@ class SavedQueryTests(ApiTestCase):
         self.assertTrue(data['formatted'])
 
     def test_query_flow_on_a_mongo_saved_query_is_gracefully_unavailable(self):
-        self.client.patch('/connections', json={'connections': {
-            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
-        self.client.patch('/save_sql_to_file', json={
+        put_connections(self.client, {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}})
+        save_query(self.client, {
             'filename': 'm', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'users', 'mongo_filter': {}, 'connection_name': 'mg'})
-        res = self.client.get('/query_flow', query_string={'filename': 'm'})
+        res = self.client.get('/api/v1/queries/m/versions/1/flow')
         self.assertEqual(res.status_code, 200)
         data = res.get_json()
         self.assertEqual(data, {'tables': [], 'joins': [], 'formatted': None,
@@ -295,54 +291,50 @@ class SavedQueryTests(ApiTestCase):
         self.save('q')
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         self.addCleanup(os.environ.pop, 'QUERYAPIGATE_API_KEY', None)
-        res = self.client.get('/query_flow', query_string={'filename': 'q'})
+        res = self.client.get('/api/v1/queries/q/versions/1/flow')
         self.assertEqual(res.status_code, 401)
-        ok = self.client.get('/query_flow', query_string={'filename': 'q'}, headers={'X-API-Key': 'k3y'})
+        ok = self.client.get('/api/v1/queries/q/versions/1/flow', headers={'X-API-Key': 'k3y'})
         self.assertEqual(ok.status_code, 200)
 
 
 class ConnectionTests(ApiTestCase):
     def test_get_masks_passwords(self):
-        conns = self.client.get('/connections').get_json()['connections']
+        conns = self.connections()
         self.assertEqual(conns['pg']['password'], config.PASSWORD_MASK)
         self.assertNotIn('secret', json.dumps(conns))
 
     def test_patch_keeps_masked_password_and_validates(self):
-        conns = self.client.get('/connections').get_json()['connections']
-        conns['pg']['host'] = 'new-host'
-        conns['fresh'] = {'db': 'sqlite', 'database': 'x.db', 'active': True}
-        self.assertEqual(self.client.patch('/connections', json={'connections': conns}).status_code, 200)
+        self.assertEqual(self.client.patch('/api/v1/connections/pg', json={
+            'host': 'new-host', 'password': config.PASSWORD_MASK}).status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/connections', json={
+            'name': 'fresh', 'db': 'sqlite', 'database': 'x.db'}).status_code, 201)
 
         stored = store.read_connections()
         self.assertEqual(stored['pg']['password'], 'secret')
         self.assertEqual(stored['pg']['host'], 'new-host')
         self.assertIn('fresh', stored)
 
-        for bad in ({}, {'connections': {}}, {'connections': {'x': {'db': 'oracle'}}},
-                    {'connections': {'x': 'nope'}}):
-            self.assertEqual(self.client.patch('/connections', json=bad).status_code, 400, bad)
+        for bad in ({}, {'name': 'x'}, {'name': 'x', 'db': 'oracle'}, {'name': '../x', 'db': 'sqlite'}):
+            self.assertEqual(self.client.post('/api/v1/connections', json=bad).status_code, 400, bad)
 
     def test_create_and_update_set_created_and_updated_at(self):
-        fresh = {'db': 'sqlite', 'database': 'x.db', 'active': True}
-        res = self.client.patch('/connections', json={'connections': {'fresh': fresh}})
-        self.assertEqual(res.status_code, 200)
-        first = self.client.get('/connections').get_json()['connections']['fresh']
+        res = self.client.post('/api/v1/connections', json={'name': 'fresh', 'db': 'sqlite', 'database': 'x.db'})
+        self.assertEqual(res.status_code, 201)
+        first = res.get_json()
         self.assertTrue(first['created_at'])
         self.assertEqual(first['created_at'], first['updated_at'])
 
-        fresh = {'db': 'sqlite', 'database': 'y.db', 'active': True}
-        res = self.client.patch('/connections', json={'connections': {'fresh': fresh}})
+        res = self.client.patch('/api/v1/connections/fresh', json={'database': 'y.db'})
         self.assertEqual(res.status_code, 200)
-        second = self.client.get('/connections').get_json()['connections']['fresh']
+        second = res.get_json()
         self.assertEqual(second['created_at'], first['created_at'])  # unchanged by an update
         self.assertGreaterEqual(second['updated_at'], first['updated_at'])
 
     def test_a_client_cannot_fake_created_at(self):
-        res = self.client.patch('/connections', json={'connections': {'fresh': {
-            'db': 'sqlite', 'database': 'x.db', 'active': True, 'created_at': '2000-01-01 00:00:00'}}})
-        self.assertEqual(res.status_code, 200)
-        stored = self.client.get('/connections').get_json()['connections']['fresh']
-        self.assertNotEqual(stored['created_at'], '2000-01-01 00:00:00')
+        res = self.client.post('/api/v1/connections', json={
+            'name': 'fresh', 'db': 'sqlite', 'database': 'x.db', 'created_at': '2000-01-01 00:00:00'})
+        self.assertEqual(res.status_code, 201)
+        self.assertNotEqual(res.get_json()['created_at'], '2000-01-01 00:00:00')
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'pre-SQLite files are deliberately never imported into Postgres')
@@ -369,13 +361,13 @@ class LegacyConnectionsImportTests(unittest.TestCase):
     def test_a_legacy_file_is_imported_on_first_boot(self):
         self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
         client = create_app().test_client()
-        conns = client.get('/connections').get_json()['connections']
+        conns = {c['name']: c for c in client.get('/api/v1/connections').get_json()['items']}
         self.assertIn('a', conns)
         self.assertTrue(conns['a']['active'])
 
     def test_a_missing_legacy_file_is_a_no_op_not_an_error(self):
         client = create_app().test_client()  # no db_connections.json at all
-        self.assertEqual(client.get('/connections').get_json()['connections'], {})
+        self.assertEqual(client.get('/api/v1/connections').get_json()['items'], [])
 
     def test_import_only_happens_once_a_later_edit_to_the_json_file_is_never_picked_up(self):
         self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True}})
@@ -383,15 +375,14 @@ class LegacyConnectionsImportTests(unittest.TestCase):
         self.write_legacy_json({'a': {'db': 'sqlite', 'database': 'x.db', 'active': True},
                                 'b': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
         client = create_app().test_client()  # second boot: connections table is no longer empty
-        conns = client.get('/connections').get_json()['connections']
+        conns = [c['name'] for c in client.get('/api/v1/connections').get_json()['items']]
         self.assertNotIn('b', conns)
 
     def test_a_connection_created_through_the_api_also_blocks_a_later_import(self):
         client = create_app().test_client()  # boots with no legacy file - table starts empty
-        client.patch('/connections', json={'connections': {'made': {
-            'db': 'sqlite', 'database': 'x.db', 'active': True}}})
+        client.post('/api/v1/connections', json={'name': 'made', 'db': 'sqlite', 'database': 'x.db'})
         self.write_legacy_json({'from_json': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
-        conns = create_app().test_client().get('/connections').get_json()['connections']
+        conns = [c['name'] for c in create_app().test_client().get('/api/v1/connections').get_json()['items']]
         self.assertIn('made', conns)
         self.assertNotIn('from_json', conns)
 
@@ -445,9 +436,11 @@ class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
         self.write_legacy_files()
         client = create_app().test_client()
         headers = {'X-API-Key': 'admin-key'}
-        self.assertIn('legacy-key', client.get('/api_keys', headers=headers).get_json()['keys'])
-        self.assertIn('legacy-role', client.get('/roles', headers=headers).get_json()['roles'])
-        entries = client.get('/audit_log', headers=headers).get_json()['entries']
+        self.assertIn('legacy-key', [k['name'] for k in client.get('/api/v1/api-keys', headers=headers)
+                                     .get_json()['items']])
+        self.assertIn('legacy-role', [r['name'] for r in client.get('/api/v1/roles', headers=headers)
+                                      .get_json()['items']])
+        entries = client.get('/api/v1/audit', headers=headers).get_json()['items']
         self.assertEqual([e['target'] for e in entries], ['legacy-key'])
         for filename in ('api_keys.json', 'roles.json', 'audit_log.json'):
             self.assertTrue(os.path.exists(os.path.join(self.home, filename)))
@@ -455,9 +448,9 @@ class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
     def test_missing_legacy_files_are_a_no_op_not_an_error(self):
         client = create_app().test_client()
         headers = {'X-API-Key': 'admin-key'}
-        self.assertEqual(client.get('/api_keys', headers=headers).get_json()['keys'], {})
-        self.assertEqual(client.get('/roles', headers=headers).get_json()['roles'], {})
-        self.assertEqual(client.get('/audit_log', headers=headers).get_json()['entries'], [])
+        self.assertEqual(client.get('/api/v1/api-keys', headers=headers).get_json()['items'], [])
+        self.assertEqual(client.get('/api/v1/roles', headers=headers).get_json()['items'], [])
+        self.assertEqual(client.get('/api/v1/audit', headers=headers).get_json()['items'], [])
 
     def test_import_only_happens_once(self):
         self.write_legacy_files()
@@ -468,21 +461,22 @@ class LegacyKeysRolesAndAuditLogImportTests(unittest.TestCase):
                                 'second-key': {'hash': 'b' * 64, 'connections': [], 'allow_writes': False,
                                               'queries': [], 'active': True, 'created_at': 'now'}}}, f)
         client = create_app().test_client()  # second boot: api_keys table is no longer empty
-        self.assertNotIn('second-key', client.get('/api_keys', headers={'X-API-Key': 'admin-key'}).get_json()['keys'])
+        listed = client.get('/api/v1/api-keys', headers={'X-API-Key': 'admin-key'}).get_json()['items']
+        self.assertNotIn('second-key', [k['name'] for k in listed])
 
 
 class TestConnectionTests(ApiTestCase):
     def test_succeeds_against_a_real_connection(self):
-        res = self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})
+        res = self.client.post('/api/v1/connections/test', json={'db': 'sqlite', 'database': self.db_path})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertIn('elapsed_ms', res.get_json())
 
     def test_nothing_is_saved(self):
-        self.client.post('/connections/test', json={'db': 'sqlite', 'database': self.db_path})
-        self.assertNotIn('test', self.client.get('/connections').get_json()['connections'])
+        self.client.post('/api/v1/connections/test', json={'db': 'sqlite', 'database': self.db_path})
+        self.assertEqual(set(store.read_connections()), {'lite', 'off', 'pg'})
 
     def test_unreachable_host_is_502_with_the_password_redacted(self):
-        res = self.client.post('/connections/test', json={
+        res = self.client.post('/api/v1/connections/test', json={
             'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd'})
         self.assertEqual(res.status_code, 502)
         self.assertNotIn('secret', res.get_data(as_text=True))
@@ -492,23 +486,23 @@ class TestConnectionTests(ApiTestCase):
         # for a password the admin never retyped, must try the real one, not the literal mask string.
         body = {'name': 'pg', 'db': 'postgres', 'host': 'h', 'user': 'u',
                 'password': config.PASSWORD_MASK, 'database': 'd'}
-        res = self.client.post('/connections/test', json=body)
+        res = self.client.post('/api/v1/connections/test', json=body)
         self.assertEqual(res.status_code, 502)  # 'h' is unreachable; the point is it never 400s on the mask itself
         self.assertNotIn('secret', res.get_data(as_text=True))
 
     def test_unsupported_db_type_is_400(self):
-        self.assertEqual(self.client.post('/connections/test', json={'db': 'oracle'}).status_code, 400)
-        self.assertEqual(self.client.post('/connections/test', json={}).status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/connections/test', json={'db': 'oracle'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/connections/test', json={}).status_code, 400)
 
     def test_requires_the_admin_key(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
         body = {'db': 'sqlite', 'database': self.db_path}
-        self.assertEqual(self.client.post('/connections/test', json=body).status_code, 401)
+        self.assertEqual(self.client.post('/api/v1/connections/test', json=body).status_code, 401)
         admin = {'X-API-Key': 'admin-key'}
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=admin)
-        key = scoped.get_json()['key']
-        res = self.client.post('/connections/test', json=body, headers={'X-API-Key': key})
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=admin)
+        key = scoped.get_json()['secret']
+        res = self.client.post('/api/v1/connections/test', json=body, headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)
 
 
@@ -520,7 +514,7 @@ class ListDatabasesTests(ApiTestCase):
         conn = mock.MagicMock()
         conn.cursor.return_value = cursor
         with mock.patch('mysql.connector.connect', return_value=conn):
-            res = self.client.post('/connections/databases',
+            res = self.client.post('/api/v1/connections/databases',
                                    json={'db': 'mysql', 'host': 'h', 'user': 'u', 'password': 'p'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(res.get_json()['databases'], ['orders', 'billing'])
@@ -532,7 +526,7 @@ class ListDatabasesTests(ApiTestCase):
         conn = mock.MagicMock()
         conn.cursor.return_value.__enter__.return_value = cursor
         with mock.patch('psycopg2.connect', return_value=conn) as connect:
-            res = self.client.post('/connections/databases', json={'db': 'postgres', 'host': 'h', 'user': 'u'})
+            res = self.client.post('/api/v1/connections/databases', json={'db': 'postgres', 'host': 'h', 'user': 'u'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(connect.call_args.kwargs['dbname'], 'postgres')
         self.assertEqual(res.get_json()['databases'], ['warehouse'])
@@ -544,18 +538,18 @@ class ListDatabasesTests(ApiTestCase):
         conn = mock.MagicMock()
         conn.cursor.return_value.__enter__.return_value = cursor
         with mock.patch('psycopg2.connect', return_value=conn) as connect:
-            res = self.client.post('/connections/databases', json={'name': 'pg'})
+            res = self.client.post('/api/v1/connections/databases', json={'name': 'pg'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(connect.call_args.kwargs['dbname'], 'd')  # 'pg' is already configured with database 'd'
         self.assertEqual(res.get_json()['databases'], ['d'])
 
     def test_unsupported_dialect_is_a_clear_error_not_a_guess(self):
-        res = self.client.post('/connections/databases', json={'db': 'sqlite', 'database': self.db_path})
+        res = self.client.post('/api/v1/connections/databases', json={'db': 'sqlite', 'database': self.db_path})
         self.assertEqual(res.status_code, 400)
         self.assertIn('sqlite', res.get_json()['error'])
 
     def test_password_is_never_leaked_on_failure(self):
-        res = self.client.post('/connections/databases',
+        res = self.client.post('/api/v1/connections/databases',
                                json={'db': 'postgres', 'host': 'h', 'user': 'u', 'password': 'secret'})
         self.assertEqual(res.status_code, 502)
         self.assertNotIn('secret', res.get_data(as_text=True))
@@ -563,7 +557,7 @@ class ListDatabasesTests(ApiTestCase):
     def test_requires_the_admin_key(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
-        self.assertEqual(self.client.post('/connections/databases', json={'name': 'pg'}).status_code, 401)
+        self.assertEqual(self.client.post('/api/v1/connections/databases', json={'name': 'pg'}).status_code, 401)
 
 
 class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
@@ -582,8 +576,8 @@ class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
         admin = {'X-API-Key': 'admin-key'}
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
-        key = scoped.get_json()['key']
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
+        key = scoped.get_json()['secret']
         res = self.client.post('/execute_sql', json={
             'sql': 'SELECT 1', 'connection_name': 'lite', 'database': 'other.db'}, headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)
@@ -592,8 +586,8 @@ class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
         admin = {'X-API-Key': 'admin-key'}
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
-        key = scoped.get_json()['key']
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': ['lite']}, headers=admin)
+        key = scoped.get_json()['secret']
         self.assertEqual(self.client.get('/connections/lite/schema?database=other.db',
                                          headers={'X-API-Key': key}).status_code, 403)
         # The admin key clears the permission check; 'lite' is sqlite, which doesn't support switching
@@ -654,9 +648,7 @@ class SchemaTests(ApiTestCase):
     def test_database_with_no_tables_is_an_empty_list_not_an_error(self):
         empty_path = os.path.join(self.tmp.name, 'empty.db')
         sqlite3.connect(empty_path).close()
-        conns = self.client.get('/connections').get_json()['connections']
-        conns['empty'] = {'db': 'sqlite', 'database': empty_path, 'active': True}
-        self.client.patch('/connections', json={'connections': conns})
+        put_connections(self.client, {'empty': {'db': 'sqlite', 'database': empty_path, 'active': True}})
         self.assertEqual(self.client.get('/connections/empty/schema').get_json(), {'tables': [], 'truncated': False})
 
     def test_truncates_when_more_columns_exist_than_the_cap(self):
@@ -713,9 +705,7 @@ class DuckDBSchemaTests(ApiTestCase):
         con.execute('CREATE TABLE film (id INTEGER PRIMARY KEY, studio_id INTEGER '
                     'REFERENCES studio(id), title VARCHAR)')
         con.close()
-        conns = self.client.get('/connections').get_json()['connections']
-        conns['dk'] = {'db': 'duckdb', 'database': self.duckdb_path, 'active': True}
-        self.client.patch('/connections', json={'connections': conns})
+        put_connections(self.client, {'dk': {'db': 'duckdb', 'database': self.duckdb_path, 'active': True}})
 
     def test_primary_and_foreign_keys_are_marked(self):
         body = self.client.get('/connections/dk/schema').get_json()
@@ -746,12 +736,13 @@ class DuckDBSchemaTests(ApiTestCase):
 
 class ApiKeyTests(ApiTestCase):
     def test_api_key_is_enforced_only_when_configured(self):
-        self.assertEqual(self.client.get('/connections').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/connections').status_code, 200)
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        self.assertEqual(self.client.get('/connections').status_code, 401)
-        self.assertEqual(self.client.get('/connections', headers={'X-API-Key': 'wrong'}).status_code, 401)
-        self.assertEqual(self.client.get('/connections', headers={'X-API-Key': 'k3y'}).status_code, 200)
-        self.assertEqual(self.client.get('/connections', headers={'X-API-Key': 'k\u00e9y'}).status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/connections').status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/connections', headers={'X-API-Key': 'wrong'}).status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/connections', headers={'X-API-Key': 'k3y'}).status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/connections', headers={'X-API-Key': 'k\u00e9y'}).status_code,
+                         401)
 
 
 class DriverWiringTests(unittest.TestCase):
@@ -1131,7 +1122,7 @@ class ParameterRuleApiTests(ApiTestCase):
         return self.save(filename, sql=RULES_SQL, query_parameters=RULES, connection_name='lite', **extra)
 
     def test_rules_are_validated_when_a_query_is_saved(self):
-        self.assertEqual(self.save_rules().status_code, 200)
+        self.assertEqual(self.save_rules().status_code, 201)
         res = self.save('bad', sql='SELECT :a', query_parameters={'a': {'type': 'int', 'min': 5, 'max': 1},
                                                                    'b': {'colour': 'red'}})
         self.assertEqual(res.status_code, 400)
@@ -1143,7 +1134,7 @@ class ParameterRuleApiTests(ApiTestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn('idd', res.get_json()['error'])
         # {name} text placeholders count as use
-        self.assertEqual(self.save('legacy', sql="SELECT '{id}'", query_parameters={'id': 'int'}).status_code, 200)
+        self.assertEqual(self.save('legacy', sql="SELECT '{id}'", query_parameters={'id': 'int'}).status_code, 201)
 
     def test_defaults_and_optional_parameters_apply(self):
         self.save_rules()
@@ -1276,7 +1267,7 @@ class SavedQueryOpenApiTests(ApiTestCase):
 
     def test_no_saved_queries_yet(self):
         for name in ('rules', 'plain', 'my query'):
-            self.client.delete(f'/saved_sql/{name}')
+            self.client.delete(f'/api/v1/queries/{name}')
         spec = self.spec()
         self.assertEqual([p for p in spec['paths'] if p.startswith('/q/') and p != '/q/{name}'], [])
 
@@ -1290,7 +1281,7 @@ class SavedQueryOpenApiTests(ApiTestCase):
         validate(self.spec())                                     # anonymous view of a keyed server
         validate(self.spec(**{'X-API-Key': 'k3y'}))
         for name in ('rules', 'plain', 'my query'):
-            self.client.delete(f'/saved_sql/{name}', headers={'X-API-Key': 'k3y'})
+            self.client.delete(f'/api/v1/queries/{name}', headers={'X-API-Key': 'k3y'})
         validate(self.spec())                                     # nothing saved yet
 
     def test_docs_page_lets_you_supply_an_api_key(self):
@@ -1490,38 +1481,39 @@ class NamedQueryTests(ApiTestCase):
     def test_delete_versions_and_files(self):
         self.save('x')
         self.save('x')
-        self.assertEqual(self.client.delete('/saved_sql/x?version=2').status_code, 200)
-        self.assertEqual(self.client.delete('/saved_sql/x?version=2').status_code, 404)
-        files = self.client.get('/list_files').get_json()['files']
-        self.assertEqual([v['version'] for v in files[0]['versions']], [1])
-        self.assertEqual(self.client.delete('/saved_sql/x?version=1').status_code, 200)  # last version -> file gone
-        self.assertFalse(os.path.exists(os.path.join(self.saved_dir, 'x.json')))
-        self.assertEqual(self.client.delete('/saved_sql/x').status_code, 404)
-        self.assertEqual(self.client.delete('/saved_sql/..%2Fdb_connections').status_code, 404)
+        self.assertEqual(self.client.delete('/api/v1/queries/x/versions/2').status_code, 200)
+        self.assertEqual(self.client.delete('/api/v1/queries/x/versions/2').status_code, 404)
+        versions = self.client.get('/api/v1/queries/x').get_json()['versions']
+        self.assertEqual([v['version'] for v in versions], [1])
+        self.assertEqual(self.client.delete('/api/v1/queries/x/versions/1').status_code, 204)  # the last: query gone
+        self.assertFalse(store.saved_query_exists('x'))
+        self.assertEqual(self.client.delete('/api/v1/queries/x').status_code, 404)
+        self.assertEqual(self.client.delete('/api/v1/queries/..%2Fdb_connections').status_code, 404)
 
     def test_changing_or_deleting_a_connection_closes_its_pooled_connections(self):
-        with mock.patch('queryapigate.app.pool.close_pooled_connections') as close:
-            self.client.patch('/connections', json={'connections': {
-                'new': {'db': 'sqlite', 'database': 'x.db', 'active': True}}})
+        self.client.post('/api/v1/connections', json={'name': 'new', 'db': 'sqlite', 'database': 'x.db'})
+        with mock.patch('queryapigate.pool.close_pooled_connections') as close:
+            self.client.patch('/api/v1/connections/new', json={'database': 'y.db'})
             self.assertEqual(close.call_count, 1)
-            self.client.delete('/connections/new', json={'reason': 'cleanup'})
+            self.client.delete('/api/v1/connections/new', json={'reason': 'cleanup'})
             self.assertEqual(close.call_count, 2)
-            self.client.patch('/connections', json={'connections': {'bad': {'db': 'oracle'}}})  # rejected: no change
+            self.client.patch('/api/v1/connections/lite', json={'db': 'oracle'})  # rejected: no change
             self.assertEqual(close.call_count, 2)
 
     def test_delete_connection(self):
-        self.assertEqual(self.client.delete('/connections/off', json={'reason': 'no longer used'}).status_code, 200)
-        self.assertNotIn('off', self.client.get('/connections').get_json()['connections'])
-        self.assertEqual(self.client.delete('/connections/off', json={'reason': 'again'}).status_code, 404)
+        self.assertEqual(self.client.delete('/api/v1/connections/off', json={'reason': 'no longer used'}).status_code,
+                         204)
+        self.assertNotIn('off', store.read_connections())
+        self.assertEqual(self.client.delete('/api/v1/connections/off', json={'reason': 'again'}).status_code, 404)
 
     def test_delete_connection_requires_a_reason(self):
         for body in (None, {}, {'reason': ''}, {'reason': '   '}):
             kwargs = {'json': body} if body is not None else {}
-            self.assertEqual(self.client.delete('/connections/off', **kwargs).status_code, 400, body)
-        self.assertIn('off', self.client.get('/connections').get_json()['connections'])  # never deleted
+            self.assertEqual(self.client.delete('/api/v1/connections/off', **kwargs).status_code, 400, body)
+        self.assertIn('off', store.read_connections())  # never deleted
 
     def test_missing_connection_is_404_even_without_a_reason(self):
-        self.assertEqual(self.client.delete('/connections/nope').status_code, 404)
+        self.assertEqual(self.client.delete('/api/v1/connections/nope').status_code, 404)
 
 
 class PaginationAndFormatTests(ApiTestCase):
@@ -1674,7 +1666,7 @@ class ConnectionSecretsTests(ApiTestCase):
     def test_env_var_references_are_expanded_for_use_and_left_visible_in_listing(self):
         write_connections({'env': {'db': 'sqlite', 'database': '${IT_DB_PATH}', 'password': '${IT_PW}',
                                    'active': True}})
-        conns = self.client.get('/connections').get_json()['connections']
+        conns = self.connections()
         self.assertEqual(conns['env']['password'], '${IT_PW}')
         res = self.client.post('/execute_sql', json={'sql': 'SELECT 1 AS one', 'connection_name': 'env'})
         self.assertEqual(res.status_code, 500)  # variable not set
@@ -1725,7 +1717,7 @@ class ServiceEndpointTests(ApiTestCase):
         spec = self.client.get('/openapi.json').get_json()
         self.assertEqual(spec['openapi'], '3.0.3')
         self.assertIn('/q/{name}', spec['paths'])
-        self.assertEqual(self.client.get('/connections').status_code, 401)
+        self.assertEqual(self.client.get('/api/v1/connections').status_code, 401)
 
     def test_root_redirects_to_docs_even_with_an_api_key(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
@@ -1773,14 +1765,14 @@ class MongoConnectionTests(ApiTestCase):
 
     def test_connection_test_pings_the_server(self):
         with mock.patch('pymongo.MongoClient', return_value=_mongo_client()):
-            res = self.client.post('/connections/test', json={
+            res = self.client.post('/api/v1/connections/test', json={
                 'db': 'mongo', 'host': 'h', 'user': 'u', 'password': 'p', 'database': 'd'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertIn('elapsed_ms', res.get_json())
 
     def test_connection_test_failure_redacts_the_password(self):
         with mock.patch('pymongo.MongoClient', side_effect=Exception('auth failed for secret')):
-            res = self.client.post('/connections/test', json={
+            res = self.client.post('/api/v1/connections/test', json={
                 'db': 'mongo', 'host': 'h', 'user': 'u', 'password': 'secret', 'database': 'd'})
         self.assertEqual(res.status_code, 502)
         self.assertNotIn('secret', res.get_data(as_text=True))
@@ -1788,14 +1780,14 @@ class MongoConnectionTests(ApiTestCase):
     def test_list_databases(self):
         client = _mongo_client(database_names=['orders', 'billing'])
         with mock.patch('pymongo.MongoClient', return_value=client):
-            res = self.client.post('/connections/databases',
+            res = self.client.post('/api/v1/connections/databases',
                                    json={'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(res.get_json()['databases'], ['orders', 'billing'])
 
     def test_schema_lists_collections_not_columns(self):
-        self.client.patch('/connections', json={'connections': {
-            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
+        put_connections(self.client, {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}})
         client = _mongo_client(collection_names=['orders', 'users'])
         with mock.patch('pymongo.MongoClient', return_value=client):
             res = self.client.get('/connections/mg/schema')
@@ -1808,8 +1800,8 @@ class MongoConnectionTests(ApiTestCase):
 class MongoQueryTests(ApiTestCase):
     def setUp(self):
         super().setUp()
-        self.client.patch('/connections', json={'connections': {
-            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}})
+        put_connections(self.client, {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}})
 
     def test_ad_hoc_find(self):
         docs = [{'_id': 1, 'name': 'a'}, {'_id': 2, 'name': 'b'}]
@@ -1840,11 +1832,11 @@ class MongoQueryTests(ApiTestCase):
         self.assertEqual(res.status_code, 400)
 
     def test_saved_mongo_query_runs_through_q_name(self):
-        saved = self.client.patch('/save_sql_to_file', json={
+        saved = save_query(self.client, {
             'filename': 'active_users', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'users', 'mongo_filter': {'active': ':active'},
             'query_parameters': {'active': 'bool'}, 'connection_name': 'mg'})
-        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        self.assertEqual(saved.status_code, 201, saved.get_data(as_text=True))
         with mock.patch('pymongo.MongoClient', return_value=_mongo_client(docs=[{'_id': 1}])) as ctor:
             res = self.client.get('/q/active_users?active=true')
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
@@ -1852,7 +1844,7 @@ class MongoQueryTests(ApiTestCase):
         self.assertTrue(ctor.called)  # actually reached the driver, not short-circuited before execution
 
     def test_saved_mongo_query_substitutes_the_placeholder_into_the_real_filter(self):
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'filename': 'by_status', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'orders', 'mongo_filter': {'status': ':status'}, 'connection_name': 'mg'})
         coll = mock.MagicMock()
@@ -1870,25 +1862,25 @@ class MongoQueryTests(ApiTestCase):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
         admin = {'X-API-Key': 'admin-key'}
-        self.client.patch('/connections', json={'connections': {
-            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}}, headers=admin)
-        self.client.patch('/save_sql_to_file', json={
+        put_connections(self.client, {
+            'mg': {'db': 'mongo', 'host': 'h', 'user': 'u', 'database': 'd', 'active': True}}, headers=admin)
+        save_query(self.client, {
             'filename': 'orders', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'orders', 'mongo_filter': {}, 'connection_name': 'mg'}, headers=admin)
-        scoped = self.client.post('/api_keys', json={'name': 'scoped', 'connections': []}, headers=admin)
-        key = scoped.get_json()['key']
+        scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=admin)
+        key = scoped.get_json()['secret']
         res = self.client.get('/q/orders', headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)
 
     def test_streaming_is_not_supported_yet(self):
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'filename': 'orders2', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'orders', 'mongo_filter': {}, 'connection_name': 'mg'})
         res = self.client.get('/q/orders2?stream=true')
         self.assertEqual(res.status_code, 400)
 
     def test_openapi_and_catalog_list_a_saved_mongo_query(self):
-        self.client.patch('/save_sql_to_file', json={
+        save_query(self.client, {
             'filename': 'orders3', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
             'mongo_collection': 'orders', 'mongo_filter': {'status': ':status'},
             'query_parameters': {'status': 'string'}, 'connection_name': 'mg'})

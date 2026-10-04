@@ -9,11 +9,12 @@ on faith.
 At save time:
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "hit_count", "sql_query": "SELECT COUNT(*) AS n FROM hits WHERE path = :path",
-  "query_parameters": {"path": {"type": "str", "default": "/x"}},
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "hit_count", "sql": "SELECT COUNT(*) AS n FROM hits WHERE path = :path",
+  "parameters": {"path": {"type": "str", "default": "/x"}},
   "connection_name": "shop", "author": "you", "description": "Hit count by path",
-  "cache_ttl": 30
+  "cache_ttl": 30,
+  "publish": true
 }'
 ```
 
@@ -21,11 +22,13 @@ curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H
 caching **in place** - not a new version, doesn't touch `execution_history` or the version number:
 
 ```bash
-curl -X PUT http://127.0.0.1:5000/saved_sql/hit_count/cache_ttl -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
-  -d '{"cache_ttl": 5}'
-curl -X PUT http://127.0.0.1:5000/saved_sql/hit_count/cache_ttl -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
-  -d '{"cache_ttl": 0}'   # 0 or null turns it off
+curl -X PATCH http://127.0.0.1:5000/api/v1/queries/hit_count/versions/1 -H 'X-API-Key: demo-key' \
+  -H 'Content-Type: application/json' -d '{"cache_ttl": 5}'
+curl -X PATCH http://127.0.0.1:5000/api/v1/queries/hit_count/versions/1 -H 'X-API-Key: demo-key' \
+  -H 'Content-Type: application/json' -d '{"cache_ttl": 0}'   # 0 or null turns it off
 ```
+
+(`1` is the version - each version has its own `cache_ttl`; the one callers get is the published one.)
 
 ## Proof it's actually skipping the database, not just labeling the response
 
@@ -100,11 +103,11 @@ couldn't already see by running the query itself, so there's no per-key isolatio
 ## Browsing and clearing the cache
 
 ```bash
-curl http://127.0.0.1:5000/cache/entries -H 'X-API-Key: demo-key'
-# {"entries": [{"key": "...", "meta": {"name": "hit_count", "version": 1, ...}, "size_bytes": 10, "ttl_remaining_s": 25.7}]}
+curl http://127.0.0.1:5000/api/v1/cache/entries -H 'X-API-Key: demo-key'
+# {"items": [{"key": "...", "meta": {"name": "hit_count", "version": 1, ...}, "size_bytes": 10, "ttl_remaining_s": 25.7}]}
 
-curl -X DELETE http://127.0.0.1:5000/cache/entries/<key> -H 'X-API-Key: demo-key'  # evict one early
-curl -X DELETE http://127.0.0.1:5000/cache/entries -H 'X-API-Key: demo-key'        # clear everything
+curl -X DELETE http://127.0.0.1:5000/api/v1/cache/entries/<key> -H 'X-API-Key: demo-key'  # evict one early
+curl -X DELETE http://127.0.0.1:5000/api/v1/cache/entries -H 'X-API-Key: demo-key'        # clear everything
 ```
 
 The admin UI's **Caching** tab (under **Data**) shows the same thing - every live entry, what's cached in

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from queryapigate import apikeys, create_app, db, engine
-from tests.helpers import write_connections
+from tests.helpers import save_query, write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -42,45 +42,49 @@ class AppTestCase(unittest.TestCase):
 
     def create_key(self, name='scoped', connections=None, allow_writes=False, queries=None, expires_at=None,
                    allowed_ips=None, allowed_write_ops=None, allowed_tables=None):
-        res = self.client.post('/api_keys', json={'name': name, 'connections': connections,
+        res = self.client.post('/api/v1/api-keys', json={'name': name, 'connections': connections,
                                                    'allow_writes': allow_writes, 'queries': queries,
                                                    'expires_at': expires_at, 'allowed_ips': allowed_ips,
                                                    'allowed_write_ops': allowed_write_ops,
                                                    'allowed_tables': allowed_tables},
                                headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        return res.get_json()['key']
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return res.get_json()['secret']
 
     def save_query(self, filename, connection_name='a', sql='SELECT * FROM t'):
-        res = self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'd', 'filename': filename,
-                                                            'sql_query': sql, 'connection_name': connection_name},
-                                headers=self.admin_headers)
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        res = save_query(self.client, {'author': 'a', 'description': 'd', 'filename': filename, 'sql_query': sql,
+                                       'connection_name': connection_name}, headers=self.admin_headers)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+
+    def keys(self):
+        """Every API key, by name, as GET /api/v1/api-keys lists them."""
+        items = self.client.get('/api/v1/api-keys', headers=self.admin_headers).get_json()['items']
+        return {k['name']: k for k in items}
 
 
 class ApiKeyCrudTests(AppTestCase):
     def test_create_list_delete(self):
         key = self.create_key('reporting', connections=['a'], allow_writes=False)
         self.assertTrue(key.startswith('sk_'))
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']
+        listed = self.keys()
         self.assertIn('reporting', listed)
         self.assertNotIn('hash', listed['reporting'])
         self.assertEqual(listed['reporting']['connections'], ['a'])
-        self.assertEqual(self.client.delete('/api_keys/reporting', headers=self.admin_headers).status_code, 200)
-        self.assertNotIn('reporting', self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys'])
+        self.assertEqual(self.client.delete('/api/v1/api-keys/reporting', headers=self.admin_headers).status_code, 204)
+        self.assertNotIn('reporting', self.keys())
 
     def test_duplicate_name_is_rejected(self):
         self.create_key('dup')
-        self.assertEqual(self.client.post('/api_keys', json={'name': 'dup'}, headers=self.admin_headers)
-                         .status_code, 400)
+        self.assertEqual(self.client.post('/api/v1/api-keys', json={'name': 'dup'}, headers=self.admin_headers)
+                         .status_code, 409)
 
     def test_invalid_name_is_rejected(self):
         for name in ('bad/name!', '', None):
-            res = self.client.post('/api_keys', json={'name': name}, headers=self.admin_headers)
+            res = self.client.post('/api/v1/api-keys', json={'name': name}, headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, name)
 
     def test_malformed_connections_is_rejected(self):
-        res = self.client.post('/api_keys', json={'name': 'x', 'connections': 'a'}, headers=self.admin_headers)
+        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'connections': 'a'}, headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_empty_connections_list_blocks_every_connection(self):
@@ -101,11 +105,12 @@ class ApiKeyCrudTests(AppTestCase):
         scoped = self.create_key('scoped', connections=['a'])
         headers = {'X-API-Key': scoped}
         cases = [
-            ('get', '/api_keys', {}), ('post', '/api_keys', {'json': {'name': 'x'}}),
-            ('delete', '/api_keys/scoped', {}), ('patch', '/api_keys/scoped', {'json': {'active': False}}),
-            ('get', '/connections', {}), ('patch', '/connections', {'json': {'connections': {}}}),
-            ('delete', '/connections/a', {}), ('get', '/list_files', {}),
-            ('patch', '/save_sql_to_file', {'json': {}}),
+            ('get', '/api/v1/api-keys', {}), ('post', '/api/v1/api-keys', {'json': {'name': 'x'}}),
+            ('delete', '/api/v1/api-keys/scoped', {}),
+            ('patch', '/api/v1/api-keys/scoped', {'json': {'active': False}}),
+            ('get', '/api/v1/connections', {}), ('post', '/api/v1/connections', {'json': {}}),
+            ('delete', '/api/v1/connections/a', {'json': {'reason': 'x'}}), ('get', '/api/v1/queries', {}),
+            ('post', '/api/v1/queries', {'json': {}}),
         ]
         for method, path, kwargs in cases:
             res = getattr(self.client, method)(path, headers=headers, **kwargs)
@@ -119,7 +124,7 @@ class AuthenticateLookupTests(AppTestCase):
         for name in ('k0', 'k7', 'k19'):
             self.assertEqual(apikeys.authenticate(keys[name]).name, name)
         self.assertIsNone(apikeys.authenticate('sk_not-a-real-key'))
-        self.client.patch('/api_keys/k7', json={'active': False}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/k7', json={'active': False}, headers=self.admin_headers)
         self.assertIsNone(apikeys.authenticate(keys['k7']))  # an inactive key still fails like a wrong one
 
 
@@ -169,9 +174,7 @@ class ConnectionScopingTests(AppTestCase):
         self.assertEqual(res.status_code, 200)
 
     def test_saved_query_execution_is_scoped_too(self):
-        self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'd', 'filename': 'q',
-                                                      'sql_query': 'SELECT * FROM t', 'connection_name': 'b'},
-                          headers=self.admin_headers)
+        self.save_query('q', connection_name='b')
         key = self.create_key('reporting', connections=['a'])
         self.assertEqual(self.client.get('/q/q', headers={'X-API-Key': key}).status_code, 403)
         self.assertEqual(self.client.get('/q/q', headers=self.admin_headers).status_code, 200)
@@ -227,7 +230,7 @@ class QueryScopingTests(AppTestCase):
         self.assertEqual(res.status_code, 403)  # connection 'b' itself is still not granted
 
     def test_malformed_queries_is_rejected(self):
-        res = self.client.post('/api_keys', json={'name': 'x', 'queries': 'not-a-list-or-wildcard'},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': 'not-a-list-or-wildcard'},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
@@ -316,37 +319,37 @@ class PerQueryWriteCurationTests(AppTestCase):
     def test_patch_can_add_write_curation_to_an_existing_read_only_grant(self):
         self.save_query('submit_order', connection_name='a', sql='INSERT INTO t VALUES (2)')
         key = self.create_key('partner', connections=[], queries=['submit_order'])
-        self.client.patch('/api_keys/partner', json={'queries': [{'name': 'submit_order', 'allow_writes': True}]},
-                          headers=self.admin_headers)
+        grant = [{'name': 'submit_order', 'allow_writes': True}]
+        self.client.patch('/api/v1/api-keys/partner', json={'queries': grant}, headers=self.admin_headers)
         res = self.client.get('/q/submit_order', headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 200)
 
     def test_patch_can_remove_write_curation_reverting_to_read_only(self):
         self.save_query('submit_order', connection_name='a', sql='INSERT INTO t VALUES (2)')
         key = self.create_key('partner', connections=[], queries=[{'name': 'submit_order', 'allow_writes': True}])
-        self.client.patch('/api_keys/partner', json={'queries': ['submit_order']}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/partner', json={'queries': ['submit_order']}, headers=self.admin_headers)
         res = self.client.get('/q/submit_order', headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)
 
     def test_a_duplicate_query_name_is_rejected(self):
-        res = self.client.post('/api_keys', json={'name': 'x', 'queries': ['a', {'name': 'a'}]},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': ['a', {'name': 'a'}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_an_entry_missing_a_name_is_rejected(self):
-        res = self.client.post('/api_keys', json={'name': 'x', 'queries': [{'allow_writes': True}]},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': [{'allow_writes': True}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_an_entry_with_unexpected_fields_is_rejected(self):
-        res = self.client.post('/api_keys', json={'name': 'x', 'queries': [{'name': 'a', 'extra': 1}]},
+        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': [{'name': 'a', 'extra': 1}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_the_listing_shows_the_object_form_only_for_write_curated_entries(self):
         self.create_key('partner', connections=[],
                         queries=['read_one', {'name': 'write_one', 'allow_writes': True}])
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['partner']
+        listed = self.keys()['partner']
         self.assertEqual(listed['queries'], ['read_one', {'name': 'write_one', 'allow_writes': True}])
 
     def test_the_admin_key_can_write_through_any_query_regardless_of_curation(self):
@@ -396,17 +399,18 @@ class KeyExpiryTests(AppTestCase):
 
     def test_malformed_expiry_is_rejected(self):
         for bad in ('not-a-date', '2026/10/15', '2026-13-40', 15):
-            res = self.client.post('/api_keys', json={'name': 'x', 'expires_at': bad}, headers=self.admin_headers)
+            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'expires_at': bad},
+                                   headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
     def test_expires_at_appears_in_the_listing(self):
         self.create_key('reporting', connections=['a'], expires_at=self.tomorrow())
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['reporting']
+        listed = self.keys()['reporting']
         self.assertEqual(listed['expires_at'], self.tomorrow())
 
     def test_clearing_expiry_via_explicit_null_un_expires_a_key(self):
         key = self.create_key('was-expired', connections=['a'], expires_at=self.yesterday())
-        self.assertEqual(self.client.patch('/api_keys/was-expired', json={'expires_at': None},
+        self.assertEqual(self.client.patch('/api/v1/api-keys/was-expired', json={'expires_at': None},
                                            headers=self.admin_headers).status_code, 200)
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                headers={'X-API-Key': key})
@@ -414,14 +418,15 @@ class KeyExpiryTests(AppTestCase):
 
     def test_patch_without_expires_at_leaves_it_unchanged(self):
         self.create_key('reporting', connections=['a'], expires_at=self.tomorrow())
-        self.client.patch('/api_keys/reporting', json={'allow_writes': True}, headers=self.admin_headers)
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['reporting']
+        self.client.patch('/api/v1/api-keys/reporting', json={'allow_writes': True}, headers=self.admin_headers)
+        listed = self.keys()['reporting']
         self.assertEqual(listed['expires_at'], self.tomorrow())
         self.assertTrue(listed['allow_writes'])
 
     def test_patch_can_set_an_expiry_on_a_key_that_had_none(self):
         key = self.create_key('reporting', connections=['a'])
-        self.client.patch('/api_keys/reporting', json={'expires_at': self.yesterday()}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/reporting', json={'expires_at': self.yesterday()},
+                          headers=self.admin_headers)
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 401)
@@ -432,11 +437,11 @@ class LastUsedTests(AppTestCase):
     to once per apikeys._USE_RECORD_INTERVAL, so a busy key doesn't turn every request into a disk write."""
 
     def listed(self, name='reporting'):
-        return self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys'][name]
+        return self.keys()[name]
 
     def test_a_never_used_key_has_no_last_used_at(self):
         self.create_key('reporting', connections=['a'])
-        self.assertNotIn('last_used_at', self.listed())
+        self.assertIsNone(self.listed()['last_used_at'])
 
     def test_first_use_records_last_used_at(self):
         key = self.create_key('reporting', connections=['a'])
@@ -494,8 +499,8 @@ class LastUsedTests(AppTestCase):
     def test_the_admin_key_has_no_stored_entry_to_record_use_against(self):
         # QUERYAPIGATE_API_KEY is an env var, not a stored key - there is nothing in api_keys.json to write to,
         # and authenticate()'s admin-key branch never calls _record_use() at all.
-        self.client.get('/connections', headers=self.admin_headers)
-        self.assertEqual(self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys'], {})
+        self.client.get('/api/v1/connections', headers=self.admin_headers)
+        self.assertEqual(self.keys(), {})
 
 
 class IpAllowlistTests(AppTestCase):
@@ -534,33 +539,35 @@ class IpAllowlistTests(AppTestCase):
 
     def test_malformed_allowed_ips_is_rejected(self):
         for bad in ('203.0.113.5', 123, ['not-an-ip'], ['203.0.113.5/99']):
-            res = self.client.post('/api_keys', json={'name': 'x', 'allowed_ips': bad}, headers=self.admin_headers)
+            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_ips': bad},
+                                   headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
     def test_allowed_ips_appears_in_the_listing(self):
         self.create_key('pinned', connections=['a'], allowed_ips=['203.0.113.5', '10.0.0.0/8'])
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['pinned']
+        listed = self.keys()['pinned']
         self.assertEqual(listed['allowed_ips'], ['10.0.0.0/8', '203.0.113.5'])
 
     def test_clearing_via_explicit_null_removes_the_restriction(self):
         key = self.create_key('pinned', connections=['a'], allowed_ips=['203.0.113.5'])
-        self.assertEqual(self.client.patch('/api_keys/pinned', json={'allowed_ips': None},
+        self.assertEqual(self.client.patch('/api/v1/api-keys/pinned', json={'allowed_ips': None},
                                            headers=self.admin_headers).status_code, 200)
         self.assertEqual(self.run_as(key, '198.51.100.9').status_code, 200)
 
     def test_patch_without_allowed_ips_leaves_it_unchanged(self):
         key = self.create_key('pinned', connections=['a'], allowed_ips=['203.0.113.5'])
-        self.client.patch('/api_keys/pinned', json={'allow_writes': True}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/pinned', json={'allow_writes': True}, headers=self.admin_headers)
         self.assertEqual(self.run_as(key, '203.0.113.6').status_code, 401)
 
     def test_patch_can_add_a_restriction_to_a_key_that_had_none(self):
         key = self.create_key('pinned', connections=['a'])
-        self.client.patch('/api_keys/pinned', json={'allowed_ips': ['203.0.113.5']}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/pinned', json={'allowed_ips': ['203.0.113.5']}, headers=self.admin_headers)
         self.assertEqual(self.run_as(key, '198.51.100.9').status_code, 401)
 
     def test_the_admin_key_is_never_restricted_by_a_scoped_keys_allowed_ips(self):
         self.create_key('pinned', connections=['a'], allowed_ips=['203.0.113.5'])
-        res = self.client.get('/connections', headers=self.admin_headers, environ_overrides={'REMOTE_ADDR': '9.9.9.9'})
+        res = self.client.get('/api/v1/connections', headers=self.admin_headers,
+                              environ_overrides={'REMOTE_ADDR': '9.9.9.9'})
         self.assertEqual(res.status_code, 200)
 
 
@@ -608,24 +615,24 @@ class AllowedWriteOpsTests(AppTestCase):
 
     def test_malformed_allowed_write_ops_is_rejected(self):
         for bad in ('insert', 123, [1, 2], ['']):
-            res = self.client.post('/api_keys', json={'name': 'x', 'allowed_write_ops': bad},
+            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_write_ops': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
     def test_allowed_write_ops_appears_in_the_listing(self):
         self.create_key('writer', connections=['a'], allow_writes=True, allowed_write_ops=['update', 'insert'])
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['writer']
+        listed = self.keys()['writer']
         self.assertEqual(listed['allowed_write_ops'], ['insert', 'update'])
 
     def test_clearing_via_explicit_null_removes_the_restriction(self):
         key = self.create_key('writer', connections=['a'], allow_writes=True, allowed_write_ops=['insert'])
-        self.assertEqual(self.client.patch('/api_keys/writer', json={'allowed_write_ops': None},
+        self.assertEqual(self.client.patch('/api/v1/api-keys/writer', json={'allowed_write_ops': None},
                                            headers=self.admin_headers).status_code, 200)
         self.assertEqual(self.run_as(key, 'DELETE FROM t').status_code, 200)
 
     def test_patch_without_allowed_write_ops_leaves_it_unchanged(self):
         key = self.create_key('writer', connections=['a'], allow_writes=True, allowed_write_ops=['insert'])
-        self.client.patch('/api_keys/writer', json={'active': True}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/writer', json={'active': True}, headers=self.admin_headers)
         self.assertEqual(self.run_as(key, 'DELETE FROM t').status_code, 403)
 
     def test_the_admin_key_is_never_restricted_by_this(self):
@@ -680,24 +687,24 @@ class AllowedTablesTests(AppTestCase):
 
     def test_malformed_allowed_tables_is_rejected(self):
         for bad in ('t', 123, [1, 2], ['']):
-            res = self.client.post('/api_keys', json={'name': 'x', 'allowed_tables': bad},
+            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_tables': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
     def test_allowed_tables_appears_in_the_listing(self):
         self.create_key('reader', connections=['a'], allowed_tables=['b_table', 'a_table'])
-        listed = self.client.get('/api_keys', headers=self.admin_headers).get_json()['keys']['reader']
+        listed = self.keys()['reader']
         self.assertEqual(listed['allowed_tables'], ['a_table', 'b_table'])
 
     def test_clearing_via_explicit_null_removes_the_restriction(self):
         key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
-        self.assertEqual(self.client.patch('/api_keys/reader', json={'allowed_tables': None},
+        self.assertEqual(self.client.patch('/api/v1/api-keys/reader', json={'allowed_tables': None},
                                            headers=self.admin_headers).status_code, 200)
         self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 200)
 
     def test_patch_without_allowed_tables_leaves_it_unchanged(self):
         key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
-        self.client.patch('/api_keys/reader', json={'active': True}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/reader', json={'active': True}, headers=self.admin_headers)
         self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 403)
 
     def test_the_admin_key_is_never_restricted_by_this(self):
@@ -712,10 +719,10 @@ class AllowedTablesTests(AppTestCase):
         self.assertIn('h2', res.get_json()['error'])
 
     def test_a_role_copies_allowed_tables_onto_a_key_created_from_it(self):
-        self.client.post('/roles', json={'name': 'reader-role', 'connections': ['a'], 'allowed_tables': ['t']},
+        self.client.post('/api/v1/roles', json={'name': 'reader-role', 'connections': ['a'], 'allowed_tables': ['t']},
                          headers=self.admin_headers)
-        secret = self.client.post('/api_keys', json={'name': 'from-role', 'role': 'reader-role'},
-                                  headers=self.admin_headers).get_json()['key']
+        secret = self.client.post('/api/v1/api-keys', json={'name': 'from-role', 'role': 'reader-role'},
+                                  headers=self.admin_headers).get_json()['secret']
         self.assertEqual(self.run_as(secret, 'SELECT * FROM secret').status_code, 403)
         self.assertEqual(self.run_as(secret, 'SELECT * FROM t').status_code, 200)
 
@@ -745,7 +752,7 @@ class WritePermissionTests(AppTestCase):
 
 class AdminKeyBackwardCompatTests(AppTestCase):
     def test_admin_key_keeps_full_access(self):
-        self.assertEqual(self.client.get('/connections', headers=self.admin_headers).status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/connections', headers=self.admin_headers).status_code, 200)
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 200)
@@ -754,7 +761,8 @@ class AdminKeyBackwardCompatTests(AppTestCase):
 class UpdateKeyTests(AppTestCase):
     def test_patch_updates_permissions_without_changing_the_secret(self):
         key = self.create_key('reporting', connections=['a'], allow_writes=False)
-        res = self.client.patch('/api_keys/reporting', json={'connections': ['a', 'b']}, headers=self.admin_headers)
+        res = self.client.patch('/api/v1/api-keys/reporting', json={'connections': ['a', 'b']},
+                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 200)
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'b'},
                                headers={'X-API-Key': key})
@@ -762,13 +770,13 @@ class UpdateKeyTests(AppTestCase):
 
     def test_deactivating_a_key_blocks_it_immediately(self):
         key = self.create_key('reporting', connections=['a'])
-        self.client.patch('/api_keys/reporting', json={'active': False}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/reporting', json={'active': False}, headers=self.admin_headers)
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                                headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 401)
 
     def test_update_of_an_unknown_key_is_404(self):
-        res = self.client.patch('/api_keys/nope', json={'active': False}, headers=self.admin_headers)
+        res = self.client.patch('/api/v1/api-keys/nope', json={'active': False}, headers=self.admin_headers)
         self.assertEqual(res.status_code, 404)
 
 
@@ -786,21 +794,21 @@ class OpenServerBootstrapTests(unittest.TestCase):
 
     def test_a_fully_open_server_stays_admin_with_no_key_at_all(self):
         client = create_app().test_client()
-        self.assertEqual(client.get('/connections').status_code, 200)
+        self.assertEqual(client.get('/api/v1/connections').status_code, 200)
 
     def test_can_bootstrap_a_scoped_key_from_the_open_state(self):
         client = create_app().test_client()
-        self.assertEqual(client.post('/api_keys', json={'name': 'first', 'connections': ['a']}).status_code, 200)
+        self.assertEqual(client.post('/api/v1/api-keys', json={'name': 'first', 'connections': ['a']}).status_code, 201)
 
     def test_bootstrapping_a_key_immediately_requires_auth_for_everyone(self):
         client = create_app().test_client()
-        client.post('/api_keys', json={'name': 'first', 'connections': ['a']})
-        self.assertEqual(client.get('/connections').status_code, 401)
+        client.post('/api/v1/api-keys', json={'name': 'first', 'connections': ['a']})
+        self.assertEqual(client.get('/api/v1/connections').status_code, 401)
 
     def test_without_an_admin_key_the_scoped_key_itself_cannot_manage_the_server(self):
         client = create_app().test_client()
-        key = client.post('/api_keys', json={'name': 'first', 'connections': ['a']}).get_json()['key']
-        res = client.get('/connections', headers={'X-API-Key': key})
+        key = client.post('/api/v1/api-keys', json={'name': 'first', 'connections': ['a']}).get_json()['secret']
+        res = client.get('/api/v1/connections', headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)  # locked out - only QUERYAPIGATE_API_KEY can manage the server
 
 
@@ -902,9 +910,9 @@ class CatalogTests(AppTestCase):
 
     def test_admin_sees_every_query_with_its_governance_facts(self):
         self.save_query('report', connection_name='a', sql='SELECT * FROM t')
-        self.client.patch('/save_sql_to_file', json={'author': 'a', 'description': 'd', 'filename': 'report',
-                                                      'sql_query': 'SELECT * FROM t', 'connection_name': 'a',
-                                                      'cache_ttl': 60}, headers=self.admin_headers)
+        save_query(self.client, {'author': 'a', 'description': 'd', 'filename': 'report',
+                                 'sql_query': 'SELECT * FROM t',
+                                 'connection_name': 'a', 'cache_ttl': 60}, headers=self.admin_headers)
         entries = {e['name']: e for e in self.client.get('/catalog', headers=self.admin_headers)
                   .get_json()['queries']}
         self.assertEqual(entries['report']['connection_name'], 'a')
@@ -946,7 +954,7 @@ class CatalogTests(AppTestCase):
     def test_caller_reflects_the_calling_keys_own_terms(self):
         key = self.create_key('scoped', connections=['a'], allow_writes=True, allowed_write_ops=['insert'],
                               allowed_tables=['orders'])
-        self.client.patch('/api_keys/scoped', json={'rate_limit': '50/minute'}, headers=self.admin_headers)
+        self.client.patch('/api/v1/api-keys/scoped', json={'rate_limit': '50/minute'}, headers=self.admin_headers)
         caller = self.client.get('/catalog', headers={'X-API-Key': key}).get_json()['caller']
         self.assertEqual(caller['name'], 'scoped')
         self.assertFalse(caller['admin'])

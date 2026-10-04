@@ -135,7 +135,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
 
 def test_connection(details):
     """Try to actually connect to and query ``details`` - a connection's fields as an admin is about to save
-    them, not yet written anywhere. Used by ``POST /connections/test`` so a typo'd host or a firewalled port
+    them, not yet written anywhere. Used by ``POST /api/v1/connections/test`` so a typo'd host or a firewalled port
     is found out before saving, not on the query that comes after. Always read-only, regardless of
     QUERYAPIGATE_ALLOW_WRITES: a connectivity probe has no business writing anything. Bypasses execute_sql
     entirely - no metrics, no audit entry, no named connection to look up - this is a one-off, not a served

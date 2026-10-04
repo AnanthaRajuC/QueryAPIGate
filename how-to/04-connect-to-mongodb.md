@@ -10,13 +10,10 @@ is a partial feature with hidden gaps.
 ## Step 1: Add the connection
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "connections": {
-    "shop-mongo": {
-      "db": "mongo", "host": "localhost", "port": 27017, "database": "shop",
-      "user": "${MONGO_USER}", "password": "${MONGO_PASSWORD}", "active": true
-    }
-  }
+curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "shop-mongo",
+  "db": "mongo", "host": "localhost", "port": 27017, "database": "shop",
+  "user": "${MONGO_USER}", "password": "${MONGO_PASSWORD}", "active": true
 }'
 ```
 
@@ -27,9 +24,9 @@ runs against per call; unlike the SQL dialects, it isn't part of the driver's ow
 Test and browse it the same way as any other connection:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/connections/test -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
+curl -X POST http://127.0.0.1:5000/api/v1/connections/test -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
   -d '{"db": "mongo", "host": "localhost", "port": 27017, "database": "shop"}'
-# {"message": "Connected", "elapsed_ms": 12.6}
+# {"elapsed_ms": 12.6}
 
 curl http://127.0.0.1:5000/connections/shop-mongo/schema -H 'X-API-Key: demo-key'
 # {"tables": [{"name": "orders", "type": "collection", "columns": []}], "truncated": false}
@@ -79,24 +76,25 @@ curl -X POST http://127.0.0.1:5000/execute_mongo -H 'X-API-Key: demo-key' -H 'Co
 
 ## Step 3: Save it as a REST endpoint
 
-Same idea as a SQL saved query - `PATCH /save_sql_to_file`, just with `query_type: "mongo"` and
-`mongo_*`-prefixed fields instead of `sql_query`:
+Same idea as a SQL saved query - `POST /api/v1/queries`, just with `query_type: "mongo"` and
+`mongo_*`-prefixed fields instead of `sql`:
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/save_sql_to_file -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
-  "filename": "orders_by_status",
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "orders_by_status",
   "query_type": "mongo",
   "mongo_collection": "orders",
   "mongo_filter": {"status": ":status"},
   "mongo_projection": {"customer": 1, "total": 1, "_id": 0},
   "mongo_sort": {"total": -1},
-  "query_parameters": {"status": {"type": "str", "enum": ["paid", "pending"], "description": "Order status"}},
+  "parameters": {"status": {"type": "str", "enum": ["paid", "pending"], "description": "Order status"}},
   "connection_name": "shop-mongo",
-  "author": "you", "description": "Orders filtered by status"
+  "author": "you", "description": "Orders filtered by status",
+  "publish": true
 }'
 ```
 
-`query_parameters` works exactly the same as for a SQL saved query - see
+`parameters` works exactly the same as for a SQL saved query - see
 [Use bound parameters safely](06-use-bound-parameters-safely.md) for every available rule. Call it:
 
 ```bash

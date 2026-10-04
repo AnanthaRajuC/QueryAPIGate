@@ -861,7 +861,7 @@ def mongo_find(details, collection_name, filter_doc, projection, sort, limit, of
 
 
 def mongo_ping(details, pool=None):
-    """A connectivity probe - POST /connections/test's mongo case (see engine.test_connection)."""
+    """A connectivity probe - POST /api/v1/connections/test's mongo case (see engine.test_connection)."""
     _with_mongo_session(details, pool, True, lambda session: session.conn.admin.command('ping'))
 
 
