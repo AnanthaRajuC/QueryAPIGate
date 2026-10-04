@@ -38,6 +38,7 @@ by accident.
 | ~~#67 Deprecation policy~~ (shipped) | How long a 1.x deprecation lives before 2.0 removes it |
 | ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
+| #84 Admin identity, Phase 1 | Named administrators, admin roles and audit by person change the management API's permission model and the audit record - cheap now, breaking after |
 
 **Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, a Helm chart
 (plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
@@ -52,8 +53,9 @@ tables (federation considered and deferred, see #83).
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
 3. **0.15:** #70 decided - several instances supported - and delivered by #55-#58; #75 files through DuckDB; what
    0.14 deprecated, removed. (Released as 0.15.0 on 2026-10-04.)
-4. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-5. **1.0.0.**
+4. **#84 Phase 1**, admin identity - the last contract change before the freeze.
+5. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+6. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2644,6 +2646,55 @@ Nessie, Glue) is a bigger step - credentials and a network service - and worth s
 databases in one query. Powerful, but each attached database brings its own credentials and a new way to reach data
 through one connection, and it overlaps with Trino (#76), which is built for exactly this. Revisit after #76, if
 asked for.
+
+## 84. Admin identity: named administrators, admin roles, SSO for the Console
+
+**Status: open.** Phase 1 is a 1.0 milestone item; Phase 2 can follow in rc1 or just after.
+
+**Impact:** administering QueryAPIGate means holding one shared key, `QUERYAPIGATE_API_KEY`. Nobody can be given less
+than everything, nobody signs in as themselves, and the audit log records every change as "admin" - so it can't say
+*who*. Any team larger than one hits this first, and it's the first thing an enterprise buyer asks about. Data callers
+(scoped API keys, JWT-signed app users) are not affected: this is about the people who run QueryAPIGate.
+
+**Target:**
+- Named administrators, each signing in as themselves - in the Console, through the company's SSO.
+- Fixed admin roles (custom roles can come later, additively):
+
+  | Role | Can |
+  |---|---|
+  | Owner | everything, including administrators and settings |
+  | Admin | connections, keys, roles, queries, collections, cache |
+  | Developer | saved queries and collections, SQL on connections; no keys, no connection credentials |
+  | Auditor | read only: audit log, history, alerts, instances, access map |
+
+- The audit log records the person and how they authenticated (`alice@corp.com via sso`, `ci-deploy via token`,
+  `break-glass key`).
+- Automation through named admin tokens (CI, Terraform, scripts) - each with a role and an expiry, audited by name.
+- `QUERYAPIGATE_API_KEY` stays as a break-glass account: every use logged and alerted, and it can be turned off once
+  named administrators exist.
+
+**Phase 1 - named admins and roles (before 1.0; about 1-1.5 weeks):**
+- An administrators table (name/email, role, active, created, last seen) - an additive store change (schema 7).
+- Personal admin tokens: issued per person, stored as hashes like API keys, shown once, with an expiry.
+- The role-to-permission table applied to every `/api/v1` operation, with a test that every operation has an entry
+  (as the OpenAPI staleness test does for the spec).
+- Audit entries carry actor and method; the break-glass key's use raises an alert.
+- Console: a Users screen, "signed in as ...", screens and actions hidden or disabled by role.
+- This is where the 1.0 contract changes - the management API's permission model and the audit record shape - so it
+  belongs before the freeze.
+
+**Phase 2 - SSO for the Console (about 1 week):**
+- OpenID Connect (Okta, Microsoft Entra, Google Workspace, Keycloak, Auth0): authorization code flow with PKCE,
+  server-side.
+- A session cookie (HttpOnly, Secure, SameSite) with CSRF protection for cookie-authenticated management calls - new
+  attack surface, to be built and tested as such.
+- Group claims mapped to admin roles (`qag-admins` -> Admin); accounts created on first sign-in.
+- Reuses jwtauth.py's token verification; the interactive flow is new.
+
+**Decided against, for now:** local passwords (reset flows, email, MFA and lockout are what an identity provider
+already does better - tokens and SSO cover it, the break-glass key covers teams without one) and SAML (OIDC covers
+the identity providers in use today). **Later, if asked for:** SCIM provisioning, SAML, custom admin roles, approval
+steps for risky changes (enabling writes, deleting a connection).
 
 **Status:** #1-#11, #12, #13, #14, #15-#18, #19, #20, #21, #22, #23, #24, #25, #26, #27, #28, #29, #30, #31,
 #32, #33 and #34 are shipped; #21 is shipped in full (three of three gaps), with `allowed_tables` covering
