@@ -68,3 +68,38 @@
   background: var(--accent-soft);
   color: var(--ink);
 }
+
+/* The header's light/dark switch, dressed as the sidebar toggle at the other end of the bar. */
+#theme-toggle {
+  flex: none;
+  margin-left: auto; /* stays in the right corner when the search box is hidden on narrow screens */
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+#theme-toggle:hover {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+#theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+#theme-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

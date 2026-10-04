@@ -41,6 +41,28 @@ describe('Console shell - the classic frame', () => {
     expect(await screen.findByText('v9.9.9')).toBeInTheDocument();
   });
 
+  it('switches between light and dark from the top right corner, as the Theme preference', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    const toLight = () => screen.getByRole('button', { name: 'Switch to light mode' });
+    await userEvent.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+    expect(JSON.parse(localStorage.getItem('queryapigate-ui-prefs') ?? '{}').theme).toBe('Dark');
+    await userEvent.click(toLight());
+    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument();
+  });
+
+  it('starts from the operating system when the theme follows it', () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
+  });
+
   it('shows the breadcrumb for the current screen', () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');

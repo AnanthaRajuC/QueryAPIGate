@@ -16,6 +16,10 @@ export default defineConfig({
   build: {
     outDir: '../queryapigate/console_dist',
     emptyOutDir: true,
+    // Browsers with light-dark() built in. For older ones the CSS minifier rewrites it into variables switched by a
+    // prefers-color-scheme media query, which ignores the page's own color-scheme - so the Theme preference and the
+    // header's light/dark switch would do nothing, the page always following the operating system.
+    cssTarget: ['chrome123', 'edge123', 'firefox120', 'safari17.5'],
   },
   server: {
     // During development, everything that isn't the Console itself is the API: forward it to a running

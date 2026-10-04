@@ -136,6 +136,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   Saved-query runs now record `transport` too. See [Ad-hoc runs](documentation/API.md#ad-hoc-runs).
 - **`queryapigate export` runs are recorded in run history**, by `key_name` `cli`. The CLI stays outside grants
   and rate limits: it is a local operator with the store's files already in reach.
+- **A light/dark switch in the Console's top right corner.** It sets the same Theme preference as Settings ›
+  Interface (which is where to go back to following the operating system), and is remembered in this browser.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and
@@ -210,6 +212,9 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 
   **Behaviour change:** a client that relied on the page size overriding a saved query's `LIMIT` now gets the
   query's own limit. Raise or remove the `LIMIT` in the query to get the old result.
+- **The Console's Theme preference took no effect:** the built stylesheet followed the operating system's light or
+  dark setting whatever was chosen. The build now keeps the stylesheet's `light-dark()` colours as written, for
+  browsers from 2024 on (Chrome and Edge 123, Firefox 120, Safari 17.5).
 - **A store first created by 0.10 no longer breaks run history after upgrading.** 0.10 created an
   `execution_history` table in an early shape it never wrote to (its runs still lived in `saved_sql/*.json`), and
   no later release replaced it, so recording or reading runs failed with `no such column: entry_json`. Startup now

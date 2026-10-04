@@ -53,6 +53,22 @@ test('dark theme and compact density apply at once and survive a reload', async 
   await page.evaluate(() => localStorage.removeItem('queryapigate-ui-prefs'));
 });
 
+test('the top right switch turns the page dark and back, in its actual colours', async ({ page }) => {
+  // Colours, not just color-scheme: a CSS build that turns light-dark() into a prefers-color-scheme media query
+  // keeps color-scheme correct while the page stays the operating system's colours.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await open(page, '/', 'Home');
+  const body = page.locator('body');
+  await expect(body).toHaveCSS('background-color', 'rgb(245, 245, 243)');
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await expect(body).toHaveCSS('background-color', 'rgb(19, 20, 22)');
+  await page.reload();
+  await expect(body).toHaveCSS('background-color', 'rgb(19, 20, 22)');
+  await page.getByRole('button', { name: 'Switch to light mode' }).click();
+  await expect(body).toHaveCSS('background-color', 'rgb(245, 245, 243)');
+  await page.evaluate(() => localStorage.removeItem('queryapigate-ui-prefs'));
+});
+
 test('/ui, where the admin UI used to be, opens the Console', async ({ page }) => {
   await page.goto('/ui');
   await expect(page).toHaveURL(/\/console\/$/);

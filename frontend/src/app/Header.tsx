@@ -4,9 +4,11 @@ import { useLocation, useNavigate } from 'react-router';
 import { onRateLimit, type RateLimit } from '@/api/client';
 
 import { useAllQueries, useApiKeys, useConnections, useRoles } from './data';
+import { setPref, useIsDark } from './prefs';
 import { activeItem } from './Sidebar';
 
-// ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K) and the rate-limit chip.
+// ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K), the rate-limit chip and the
+// light/dark switch.
 
 const COLLAPSE_KEY = 'queryapigate-ui-side-collapsed';
 
@@ -92,9 +94,37 @@ export function Header() {
         >
           {rate ? `rate ${rate.remaining}/${rate.limit}` : ''}
         </span>
+        <ThemeToggle />
       </header>
       {paletteOpen && <Palette onClose={() => setPaletteOpen(false)} />}
     </>
+  );
+}
+
+/** Flips between light and dark from whatever is showing - the same preference as Settings > Interface > Theme,
+ *  which is where to go back to following the operating system. */
+function ThemeToggle() {
+  const dark = useIsDark();
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  return (
+    <button
+      type="button"
+      id="theme-toggle"
+      title={label}
+      aria-label={label}
+      onClick={() => setPref('theme', dark ? 'Light' : 'Dark')}
+    >
+      {dark ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
   );
 }
 

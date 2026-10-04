@@ -71,3 +71,23 @@ export function usePrefs() {
     document.body.classList.toggle('compact', prefs.density === 'Compact');
   }, [prefs.theme, prefs.density]);
 }
+
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
+function systemIsDark() {
+  return typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
+}
+
+function subscribeSystem(listener: () => void) {
+  if (typeof window.matchMedia !== 'function') return () => {};
+  const query = window.matchMedia(DARK_QUERY);
+  query.addEventListener('change', listener);
+  return () => query.removeEventListener('change', listener);
+}
+
+/** Whether the page is showing dark right now: the theme preference, or the operating system's when it is System. */
+export function useIsDark(): boolean {
+  const { theme } = usePrefValues();
+  const system = useSyncExternalStore(subscribeSystem, systemIsDark);
+  return theme === 'Dark' || (theme !== 'Light' && system);
+}
