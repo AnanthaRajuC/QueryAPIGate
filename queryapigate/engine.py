@@ -58,10 +58,12 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
         raise
     except ImportError as error:
         log.exception('Missing database driver')
-        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error)) from error
+        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         log.exception('Query on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error)) from error
+        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error),
+                       code='query_failed') from error
     finally:
         metrics.dec_active_query()
         elapsed = time.monotonic() - started
@@ -94,7 +96,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     """
     details = store.get_connection(connection_name)
     if details['db'] != 'mongo':
-        raise ApiError(f"'{connection_name}' is not a mongo connection")
+        raise ApiError(f"'{connection_name}' is not a mongo connection", code='wrong_connection_type')
     filter_doc = mongotools.validate_filter(filter_doc or {})
     if params:
         filter_doc = mongotools.fill_placeholders(filter_doc, params)
@@ -112,10 +114,12 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
         raise
     except ImportError as error:
         log.exception('Missing database driver')
-        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         log.exception('Find on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the find query', 500, detail=str(error)) from error
+        raise ApiError('An error occurred while executing the find query', 500, detail=str(error),
+                       code='query_failed') from error
     finally:
         metrics.dec_active_query()
         elapsed = time.monotonic() - started
@@ -142,7 +146,7 @@ def test_connection(details):
     request, but it does share the normal connection pool, so a passing test can leave behind a warm
     connection the first real query then reuses."""
     if details.get('db') not in RUNNERS and details.get('db') != 'mongo':
-        raise ApiError(f"'db' must be one of: {', '.join((*RUNNERS, 'mongo'))}")
+        raise ApiError(f"'db' must be one of: {', '.join((*RUNNERS, 'mongo'))}", code='unsupported_database')
     started = time.monotonic()
     try:
         if details['db'] == 'mongo':
@@ -150,10 +154,11 @@ def test_connection(details):
         else:
             RUNNERS[details['db']](details, 'SELECT 1', None, 1, 0, True, config.CONNECT_TIMEOUT, get_pool())
     except ImportError as error:
-        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error)) from error
+        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         detail = _redact_password(str(error), details.get('password'))
-        raise ApiError('Could not connect', 502, detail=detail) from error
+        raise ApiError('Could not connect', 502, detail=detail, code='connection_failed') from error
     return {'elapsed_ms': round((time.monotonic() - started) * 1000, 1)}
 
 
@@ -190,21 +195,23 @@ def list_databases(details):
         try:
             return mongo_list_databases(details, get_pool())
         except ImportError as error:
-            raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+            raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error),
+                           code='driver_missing') from error
         except Exception as error:
             detail = _redact_password(str(error), details.get('password'))
-            raise ApiError('Could not list databases', 502, detail=detail) from error
+            raise ApiError('Could not list databases', 502, detail=detail, code='connection_failed') from error
     query = LIST_DATABASES_QUERIES.get(dialect)
     if not query:
-        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections")
+        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections", code='unsupported_operation')
     probe = details if details.get('database') else {**details, 'database': _LIST_DATABASES_BOOTSTRAP.get(dialect, '')}
     try:
         _columns, rows = RUNNERS[dialect](probe, query, None, 1000, 0, True, config.CONNECT_TIMEOUT, get_pool())
     except ImportError as error:
-        raise ApiError(f"The driver for '{dialect}' is not installed", 500, detail=str(error)) from error
+        raise ApiError(f"The driver for '{dialect}' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         detail = _redact_password(str(error), details.get('password'))
-        raise ApiError('Could not list databases', 502, detail=detail) from error
+        raise ApiError('Could not list databases', 502, detail=detail, code='connection_failed') from error
     return [row[0] for row in rows]
 
 
@@ -214,10 +221,11 @@ def list_collections(details):
     try:
         return mongo_list_collections(details, get_pool())
     except ImportError as error:
-        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error)) from error
+        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         detail = _redact_password(str(error), details.get('password'))
-        raise ApiError('Could not list collections', 502, detail=detail) from error
+        raise ApiError('Could not list collections', 502, detail=detail, code='connection_failed') from error
 
 
 def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None):
@@ -249,10 +257,12 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
         raise
     except ImportError as error:
         log.exception('Missing database driver')
-        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error)) from error
+        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
     except Exception as error:
         log.exception('Streaming query on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error)) from error
+        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error),
+                       code='query_failed') from error
     finally:
         # On success, the query stays active until _drain() below finishes consuming it - the decrement
         # (and the row/stream-status metrics) move there with it, not here.

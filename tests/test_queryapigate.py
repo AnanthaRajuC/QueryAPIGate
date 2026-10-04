@@ -209,7 +209,8 @@ class SavedQueryTests(ApiTestCase):
                   query_parameters={'id': {'type': 'int', 'default': 1}})
         # Ignoring it would quietly run with every parameter at its default
         res = self.client.post('/q/q', data='{"params": {"id": 5', content_type='application/json')
-        self.assertEqual((res.status_code, res.get_json()), (400, {'error': 'Request body is not valid JSON'}))
+        self.assertEqual((res.status_code, res.get_json()['error'], res.get_json()['code']),
+                         (400, 'Request body is not valid JSON', 'invalid_body'))
         # An absent body is still fine - the body is optional on this endpoint
         res = self.client.post('/q/q', content_type='application/json')
         self.assertEqual((res.status_code, res.get_json()[0]['actor_id']), (200, 1))

@@ -27,17 +27,19 @@ def extract_tables(sql, dialect):
     this dialect or this specific query. A failure here must reject the query, never degrade quietly the
     way sqlflow.py's own extraction does for its visualization - see the module docstring."""
     if dialect not in _DIALECT_MAP:
-        raise ApiError(f"Table access restrictions aren't supported for '{dialect}' connections yet", 403)
+        raise ApiError(f"Table access restrictions aren't supported for '{dialect}' connections yet", 403,
+                       code='table_check_unsupported')
     try:
         import sqlglot
         from sqlglot import exp
     except ImportError:
         raise ApiError('Table access restrictions need the "sqlglot" package - '
-                       'run `pip install "queryapigate[flow]"`', 500) from None
+                       'run `pip install "queryapigate[flow]"`', 500, code='table_check_unavailable') from None
     sqlglot_dialect = _DIALECT_MAP[dialect]
     try:
         parsed = sqlglot.parse_one(sqltools.substitute_placeholders(sql, dialect), read=sqlglot_dialect)
     except Exception:
-        raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403) from None
+        raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
+                       code='table_check_failed') from None
     cte_names = {cte.alias_or_name for cte in parsed.find_all(exp.CTE)}
     return {t.name.lower() for t in parsed.find_all(exp.Table) if t.name and t.name not in cte_names}

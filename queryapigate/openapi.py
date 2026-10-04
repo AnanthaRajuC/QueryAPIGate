@@ -112,7 +112,7 @@ def build_spec(version, saved_queries=None, jwt=None):
                                                    'description': "A signed-in user's token (see jwtauth.py)"}}
                                    if jwt else {})},
             'responses': {'Error': {'description': 'Error', 'content': {'application/json': {'schema': {
-                'type': 'object', 'properties': {'error': {'type': 'string'}, 'detail': {'type': 'string'}}}}}}},
+                '$ref': '#/components/schemas/V1Error'}}}}},  # one error shape everywhere (errors.py)
         },
         'security': [{}, {'ApiKey': []}, *([{'BearerAuth': []}] if jwt else [])],
         'paths': {

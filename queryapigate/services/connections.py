@@ -156,8 +156,7 @@ def _probe_details(data):
 def _unreachable(error):
     """A probe that could not reach the database (502): the same error, with a stable code for the Management API."""
     if error.status == 502:
-        extra = {k: v for k, v in error.extra.items() if k != 'code'}
-        return ApiError(error.message, 502, code='connection_failed', **extra)
+        return ApiError(error.message, 502, code='connection_failed', **error.extra)
     return error
 
 

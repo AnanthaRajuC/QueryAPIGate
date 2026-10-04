@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format follows
 **Covered by the version number** - won't change without it being called out here as a breaking change:
 REST API endpoints and response shapes, CLI commands and flags, environment variables, the on-disk storage
 format (a newer version can always read a database an older version wrote), the API-key/role grant fields,
-the saved-query definition format, and the MCP tool contract. **Not covered** - can change in any release,
+the saved-query definition format, the MCP tool contract, and error `code`s (an existing one is never renamed or
+repurposed; new ones may be added). **Not covered** - can change in any release,
 including a patch: the admin UI's internal markup/JS structure, exact error-message or log-line wording,
 and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
 `__version__` are public Python API).
@@ -136,6 +137,13 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **`queryapigate export` runs are recorded in run history**, by `key_name` `cli`. The CLI stays outside grants
   and rate limits: it is a local operator with the store's files already in reach.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
+- **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
+  `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and
+  the `request_id`, beside the existing `error` and extras. MCP tool errors carry `error` and `code` in
+  `structuredContent`. Failed runs keep their `code` in run history. Every code is listed in
+  [Errors](documentation/API.md#errors) and covered by the compatibility promise; a test fails if a code is raised
+  but undocumented, or documented but never raised. Additive for the runtime routes: `error`, `detail`, `errors`
+  and the HTTP statuses are unchanged.
 - **The upgrade guarantee is tested** (BACKLOG #65): stores built by released 0.7.1, 0.8.0, 0.9.0, 0.10.0, 0.11.0
   and 0.12.0 through their own APIs (`tests/fixtures/stores/`) are started under the current code on every CI run,
   which must read back their connections, queries and versions, run history, keys and roles, and run the query.
@@ -152,6 +160,10 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   REST, MCP and `queryapigate events` share one implementation (`queryapigate/governance.py`). **Behaviour change:**
   an agent that called faster than its key's `rate_limit` now gets a rate-limit error. See
   [Governance](documentation/MCP.md#governance-the-same-rules-as-rest).
+- **More specific `/api/v1` error codes.** Some errors that had only their status's code now have their own:
+  `admin_only` (was `forbidden`), `invalid_body` for an invalid query definition and `invalid_filter` for a bad
+  history/audit filter (both were `invalid_request`), `connection_not_found`, `version_not_found` and others.
+  Creating an API key, role or collection whose name is taken is always `409`.
 - **The metadata store moves to schema 5:** `execution_history.query_name` and `version` may be NULL, for ad-hoc
   runs. On SQLite the table is rebuilt on first start, keeping every run and its id (live events' resume ids).
 - **Startup refuses a store it can't safely run on**, with a message naming the problem and what to do, instead of

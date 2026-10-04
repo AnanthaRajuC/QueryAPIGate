@@ -99,7 +99,9 @@ class VerificationTests(JwtTestCase):
         }
         for label, value in cases.items():
             res = self.client.get('/q/my_orders', headers=bearer(value))
-            self.assertEqual((res.status_code, res.get_json()), (401, {'error': 'Unauthorized'}), label)
+            body = res.get_json()
+            self.assertEqual((res.status_code, body['error'], body['code']), (401, 'Unauthorized', 'unauthorized'),
+                             label)
         self.assertEqual(self.client.get('/q/my_orders', headers={'Authorization': 'Basic abc'}).status_code, 401)
 
     def test_clock_skew_within_the_leeway_is_tolerated(self):

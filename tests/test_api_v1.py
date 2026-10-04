@@ -190,7 +190,7 @@ class ErrorTests(V1TestCase):
 
     def test_invalid_definitions_and_unknown_fields_are_refused(self):
         res = self.call('post', '/api/v1/queries', '/api/v1/queries', 400, json={'name': 'x', 'description': 'd'})
-        self.assertEqual(res.get_json()['code'], 'invalid_request')
+        self.assertEqual(res.get_json()['code'], 'invalid_body')
         res = self.call('post', '/api/v1/queries', '/api/v1/queries', 400,
                         json={'name': 'x', 'description': 'd', 'sql': 'SELECT 1', 'filename': 'x'})
         self.assertEqual(res.get_json()['code'], 'unknown_field')
@@ -202,7 +202,7 @@ class ErrorTests(V1TestCase):
         key = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': ['lite']},
                                headers=ADMIN).get_json()['secret']
         res = self.call('get', '/api/v1/queries', '/api/v1/queries', 403, headers={'X-API-Key': key})
-        self.assertEqual(res.get_json()['code'], 'forbidden')
+        self.assertEqual(res.get_json()['code'], 'admin_only')
         res = self.call('get', '/api/v1/queries', '/api/v1/queries', 401, headers={})
         self.assertEqual(res.get_json()['code'], 'unauthorized')
 
@@ -211,9 +211,10 @@ class ErrorTests(V1TestCase):
         self.assertEqual(body['code'], 'not_found')
         self.assertIn('request_id', body)
 
-    def test_legacy_routes_keep_their_error_shape(self):
+    def test_runtime_routes_answer_in_the_same_error_shape(self):
         body = self.client.get('/connections/nope/schema', headers=ADMIN).get_json()
-        self.assertNotIn('code', body)
+        self.assertEqual(body['code'], 'connection_not_found')
+        self.assertIn('request_id', body)
 
 
 class ConcurrencyTests(V1TestCase):
@@ -489,7 +490,7 @@ class HistoryAndAuditTests(V1TestCase):
         only = self.call('get', '/api/v1/history?query=titles', '/api/v1/history', 200).get_json()['items']
         self.assertEqual([e['query'] for e in only], ['titles'])
         res = self.call('get', '/api/v1/history?status=maybe', '/api/v1/history', 400)
-        self.assertEqual(res.get_json()['code'], 'invalid_request')
+        self.assertEqual(res.get_json()['code'], 'invalid_filter')
 
     def test_audit_newest_first_with_filters(self):
         self.create('films')

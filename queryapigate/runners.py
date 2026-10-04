@@ -27,7 +27,7 @@ log = logging.getLogger('queryapigate')
 
 def _timed_out(timeout):
     return ApiError(f'The query exceeded the time limit of {timeout:g} seconds and was cancelled', 504,
-                    timeout=timeout)
+                    timeout=timeout, code='query_timeout')
 
 
 def _millis(timeout):
@@ -49,11 +49,11 @@ def _resolve_db_file(details, label):
     (DuckDB) a fresh, empty database file at the wrong location."""
     path = details.get('database')
     if not path:
-        raise ApiError('Database file path not provided')
+        raise ApiError('Database file path not provided', code='connection_misconfigured')
     if not os.path.isabs(path):
         path = os.path.join(config.home(), path)
     if not os.path.isfile(path):
-        raise ApiError(f'{label} database file not found', 404)
+        raise ApiError(f'{label} database file not found', 404, code='database_file_not_found')
     return path
 
 
@@ -622,7 +622,8 @@ class _JDBC(_Driver):
         _attach_thread_as_daemon()
         jar, driver_class, url = details.get('jar'), details.get('driver_class'), details.get('jdbc_url')
         if not (jar and driver_class and url):
-            raise ApiError("A 'jdbc' connection needs 'jar', 'driver_class' and 'jdbc_url'", 500)
+            raise ApiError("A 'jdbc' connection needs 'jar', 'driver_class' and 'jdbc_url'", 500,
+                           code='connection_misconfigured')
         conn = jaydebeapi.connect(driver_class, url, [details.get('user'), details.get('password')],
                                   _jvm_classpath())
         if read_only:
@@ -823,7 +824,7 @@ _mongo_driver = _Mongo()
 def _mongo_database(details, client):
     name = details.get('database')
     if not name:
-        raise ApiError('Connection has no database configured')
+        raise ApiError('Connection has no database configured', code='connection_misconfigured')
     return client[name]
 
 

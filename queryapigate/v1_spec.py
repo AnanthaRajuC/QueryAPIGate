@@ -41,11 +41,14 @@ SCHEMAS = {
         'properties': {
             'error': {'type': 'string', 'description': 'Human-readable; wording may change between releases.'},
             'code': {'type': 'string', 'description': 'Stable and machine-readable, e.g. query_not_found, '
-                                                      'query_exists, precondition_failed, unknown_field.'},
+                                                      'param_invalid, table_not_allowed, rate_limited - every code '
+                                                      'is listed in API.md under Errors.'},
             'request_id': {'type': 'string', 'description': 'Matches the X-Request-Id header and the server log.'},
             'errors': {'type': 'object', 'additionalProperties': {'type': 'string'},
                        'description': 'Per-parameter problems, when the parameter rules were invalid.'},
             'detail': {'type': 'string', 'description': "The database driver's own message, where there is one."},
+            'retry_after': {'type': 'integer', 'description': 'Seconds to wait, when rate_limited.'},
+            'timeout': {'type': 'number', 'description': 'The time limit that was exceeded, when query_timeout.'},
         },
     },
     'ParameterRule': {
@@ -182,6 +185,7 @@ SCHEMAS = {
             'connection_name': {'type': 'string'}, 'key_name': {'type': 'string', 'nullable': True},
             'request_id': {'type': 'string', 'nullable': True}, 'rows': {'type': 'integer', 'nullable': True},
             'duration_ms': {'type': 'number', 'nullable': True}, 'error': {'type': 'string', 'nullable': True},
+            'code': {'type': 'string', 'description': "A failed run's error code (API.md, Errors), from 0.13 on."},
         },
     },
     'HistoryPage': {

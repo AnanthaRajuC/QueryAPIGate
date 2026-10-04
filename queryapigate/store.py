@@ -127,7 +127,8 @@ def _expand_env(value):
     def replace(match):
         name = match.group(1)
         if name not in os.environ:
-            raise ApiError(f"Environment variable '{name}' referenced by the connection is not set", 500)
+            raise ApiError(f"Environment variable '{name}' referenced by the connection is not set", 500,
+                           code='connection_misconfigured')
         return os.environ[name]
 
     return _ENV_REF_RE.sub(replace, value)
@@ -176,13 +177,13 @@ def _decrypt_password(value):
     fernet = _get_fernet()
     if fernet is None:
         raise ApiError("This connection's password is encrypted but QUERYAPIGATE_SECRET_KEY is not set - it "
-                       'cannot be decrypted', 500)
+                       'cannot be decrypted', 500, code='secret_key_required')
     from cryptography.fernet import InvalidToken
     try:
         return fernet.decrypt(value[len(_ENC_PREFIX):].encode('ascii')).decode('utf-8')
     except InvalidToken:
         raise ApiError("This connection's password could not be decrypted - QUERYAPIGATE_SECRET_KEY may have "
-                       'been rotated since it was encrypted', 500) from None
+                       'been rotated since it was encrypted', 500, code='password_undecryptable') from None
 
 
 def resolve_ad_hoc(details):
@@ -201,17 +202,17 @@ def resolve_ad_hoc(details):
 def get_connection(connection_name):
     """Return the usable (active, env-expanded, password-decrypted) details of a named connection."""
     if not isinstance(connection_name, str) or not connection_name:
-        raise ApiError('Connection name is missing')
+        raise ApiError('Connection name is missing', code='connection_required')
     row = db.connection().execute(
         'SELECT db, active, created_at, updated_at, details_json FROM connections WHERE name = ?',
         (connection_name,)).fetchone()
     if not row:
-        raise ApiError(f"Connection '{connection_name}' not found", 404)
+        raise ApiError(f"Connection '{connection_name}' not found", 404, code='connection_not_found')
     if not row['active']:
         raise ApiError(f"The connection '{connection_name}' is currently not active. "
-                       "To use it, it must be set to active.", 403)
+                       "To use it, it must be set to active.", 403, code='connection_inactive')
     if row['db'] not in config.SUPPORTED_DB_TYPES:
-        raise ApiError('Unsupported database type')
+        raise ApiError('Unsupported database type', code='unsupported_database')
     details = _connection_row_to_dict(row)
     resolved = {key: _expand_env(value) for key, value in details.items()}
     if 'password' in resolved:
@@ -310,7 +311,7 @@ def delete_connection(name):
     with db.transaction() as conn:
         cur = conn.execute('DELETE FROM connections WHERE name = ?', (name,))
         if cur.rowcount == 0:
-            raise ApiError(f"Connection '{name}' not found", 404)
+            raise ApiError(f"Connection '{name}' not found", 404, code='connection_not_found')
 
 
 # --------------------------------------------------------------------------------------
@@ -322,7 +323,7 @@ def saved_path_for_name(filename):
     once saved queries live in SQLite - kept as the one shared name-shape validator (bundle.py also calls
     this purely for its validation side effect) so a name is held to the same rule everywhere."""
     if not isinstance(filename, str) or not _FILENAME_RE.match(filename) or filename.startswith('.'):
-        raise ApiError("Filename may only contain letters, digits, spaces, '.', '_' and '-'")
+        raise ApiError("Filename may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     return filename
 
 
@@ -359,7 +360,7 @@ def resolve_saved_file(ref):
     if '/' in candidate or not _FILENAME_RE.match(candidate) or candidate.startswith('.'):
         raise ApiError('Only .json files inside the saved_sql folder can be accessed', 403)
     if db.connection().execute('SELECT 1 FROM saved_queries WHERE name = ?', (candidate,)).fetchone() is None:
-        raise ApiError('File not found', 404)
+        raise ApiError(f"Saved query '{candidate}' not found", 404, code='query_not_found')
     return candidate
 
 
@@ -386,7 +387,7 @@ def load_versions(name, with_history=True):
     row = db.connection().execute(
         'SELECT collection, example, published_version FROM saved_queries WHERE name = ?', (name,)).fetchone()
     if row is None:
-        raise ApiError('File not found', 404)
+        raise ApiError(f"Saved query '{name}' not found", 404, code='query_not_found')
     content = {}
     if row['collection'] is not None:
         content['collection'] = row['collection']
@@ -453,10 +454,10 @@ def select_version(content, version=None, default='published'):
         else:
             version = read_published(content)
             if version is None:
-                raise ApiError('This query has no published version', 404)
+                raise ApiError('This query has no published version', 404, code='not_published')
     data = content.get(str(version))
     if not isinstance(data, dict):
-        raise ApiError(f'Version {version} not found', 404)
+        raise ApiError(f'Version {version} not found', 404, code='version_not_found')
     return int(version), data
 
 
@@ -465,7 +466,7 @@ def validate_collection_name(name):
     importing a bundle all go through here, so they cannot disagree about what a valid name is."""
     if not isinstance(name, str) or not _COLLECTION_RE.match(name):
         raise ApiError("A collection name must be 1-63 characters: lowercase letters, digits, '.', '_' and '-', "
-                       'starting with a letter or digit')
+                       'starting with a letter or digit', code='invalid_name')
     return name
 
 
@@ -537,7 +538,7 @@ def publish_version(ref, version):
         row = conn.execute('SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
                            (name, version)).fetchone()
         if row is None:
-            raise ApiError(f'Version {version} not found', 404)
+            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         previous = conn.execute('SELECT published_version FROM saved_queries WHERE name = ?',
                                 (name,)).fetchone()['published_version']
         conn.execute('UPDATE saved_queries SET published_version = ? WHERE name = ?', (version, name))
@@ -584,7 +585,7 @@ def set_cache_ttl(ref, version, ttl):
                 'SELECT version, fields_json FROM saved_query_versions WHERE query_name = ? AND version = ?',
                 (name, version)).fetchone()
         if row is None:
-            raise ApiError(f'Version {version} not found', 404)
+            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         fields = json.loads(row['fields_json'])
         if ttl:
             fields['cache_ttl'] = ttl
@@ -663,7 +664,7 @@ def delete_saved(ref, version=None):
             'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
             (name, version)).fetchone()
         if row is None:
-            raise ApiError(f'Version {version} not found', 404)
+            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         conn.execute('DELETE FROM saved_query_versions WHERE query_name = ? AND version = ?', (name, version))
         remaining = conn.execute(
             'SELECT 1 FROM saved_query_versions WHERE query_name = ? LIMIT 1', (name,)).fetchone()

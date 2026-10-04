@@ -161,7 +161,8 @@ def _export(args):
         try:
             columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
         except ApiError as error:
-            store.record_execution(path, version, {**entry, 'status': 'error', 'error': error.message})
+            store.record_execution(path, version,
+                                   {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
             raise
         row_count = 0
 

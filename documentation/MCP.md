@@ -100,7 +100,10 @@ Every tool call passes through the same checks a REST request does, in the same 
 3. **The caller's own `rate_limit` grant** (a key's, or a signed-in user's role's).
 4. **Grants** - connections, queries, collections, `allowed_tables`, IP allowlists - then the tool itself.
 
-A call refused by a rate limit gets a tool error saying so and when to retry. Every call is counted in `/metrics`'
+A refused call is a tool error (`isError: true`) whose text says why, and whose `structuredContent` carries the
+same `{"error", "code"}` a REST error body does - `rate_limited` (with `retry_after`), `unauthorized`,
+`table_not_allowed`, `read_only`, `param_invalid` and the rest listed under [Errors](API.md#errors) - so an agent
+can branch on the code instead of parsing the message. Every call is counted in `/metrics`'
 request counters and latency histograms with method `MCP` and endpoint `mcp.saved_query`, `mcp.execute_sql` or
 `mcp.list_tables`, so agent traffic can be told apart from REST's. Saved-query and ad-hoc runs are recorded in
 run history (and live events) with `"transport": "mcp"`.

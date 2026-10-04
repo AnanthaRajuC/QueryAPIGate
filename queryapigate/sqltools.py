@@ -97,26 +97,26 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     no such narrowing.
     """
     if not isinstance(sql, str) or not sql.strip():
-        raise ApiError('SQL query is missing')
+        raise ApiError('SQL query is missing', code='sql_required')
     sql = re.sub(r'[\s;]+$', '', sql.strip())
     if ';' in _literals_re(dialect).sub(' ', sql):
-        raise ApiError('Only a single SQL statement can be executed at a time')
+        raise ApiError('Only a single SQL statement can be executed at a time', code='multiple_statements')
     if not (config.allow_writes() if allow_writes is None else allow_writes):
         if first_keyword(sql, dialect) not in READ_ONLY_STATEMENTS or '/*!' in sql:
             raise ApiError('Only read-only statements (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN) are allowed. '
-                           'Set QUERYAPIGATE_ALLOW_WRITES=1 to lift this restriction.', 403)
+                           'Set QUERYAPIGATE_ALLOW_WRITES=1 to lift this restriction.', 403, code='read_only')
     elif allowed_write_ops is not None:
         keyword = first_keyword(sql, dialect)
         if keyword not in READ_ONLY_STATEMENTS and keyword not in allowed_write_ops:
             raise ApiError(f"This API key may only perform these write operations: "
-                           f"{', '.join(sorted(allowed_write_ops))}.", 403)
+                           f"{', '.join(sorted(allowed_write_ops))}.", 403, code='write_op_not_allowed')
     if allowed_tables is not None:
         from . import tableguard  # deferred: keeps this module's own import surface as light as today
         found = tableguard.extract_tables(sql, dialect)                          # unless this is actually used
         forbidden = found - allowed_tables
         if forbidden:
             raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed_tables))}. "
-                           f"Forbidden: {', '.join(sorted(forbidden))}.", 403)
+                           f"Forbidden: {', '.join(sorted(forbidden))}.", 403, code='table_not_allowed')
     return sql
 
 
@@ -138,7 +138,7 @@ def _window_value(token, params, clause):
     value = (params or {}).get(name)
     if isinstance(value, bool) or not (isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit())) \
             or int(value) < 0:
-        raise ApiError(f'{clause} :{name} must be a non-negative whole number')
+        raise ApiError(f'{clause} :{name} must be a non-negative whole number', code='param_invalid')
     return int(value)
 
 
@@ -186,7 +186,7 @@ def _check_value(name, value):
         return
     if isinstance(value, (int, float)) and math.isfinite(value):
         return
-    raise ApiError(f"Parameter '{name}' must be a string, finite number, boolean or null")
+    raise ApiError(f"Parameter '{name}' must be a string, finite number, boolean or null", code='param_invalid')
 
 
 def fill_placeholders(sql, values):
@@ -204,18 +204,18 @@ def fill_placeholders(sql, values):
             text = 'TRUE' if value else 'FALSE'
         elif isinstance(value, (int, float)):
             if not math.isfinite(value):
-                raise ApiError(f"Placeholder '{key}' must be a finite number")
+                raise ApiError(f"Placeholder '{key}' must be a finite number", code='param_invalid')
             text = str(value)
         elif isinstance(value, str) and _SAFE_TEXT_RE.match(value) and '--' not in value:
             text = value
         else:
             raise ApiError(f"Placeholder '{key}' is substituted into the SQL text, so it must be a number, "
                            "boolean or a string containing only letters, digits, whitespace and . , : @ % + / - "
-                           f"(use a bound :{key} parameter for arbitrary text)")
+                           f"(use a bound :{key} parameter for arbitrary text)", code='param_invalid')
         sql = sql.replace(token, text)
     missing = sorted(set(_BRACE_RE.findall(sql)))
     if missing:
-        raise ApiError(f"No value provided for placeholder(s): {', '.join(missing)}")
+        raise ApiError(f"No value provided for placeholder(s): {', '.join(missing)}", code='param_required')
     return sql
 
 
@@ -253,7 +253,7 @@ def bind_parameters(sql, params, style, dialect=None):
     names = [m.group('name') for m in matches]
     missing = sorted(set(names) - set(params))
     if missing:
-        raise ApiError(f"No value provided for parameter(s): {', '.join(missing)}")
+        raise ApiError(f"No value provided for parameter(s): {', '.join(missing)}", code='param_required')
     for name in set(names):
         _check_value(name, params[name])
 

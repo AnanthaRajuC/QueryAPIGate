@@ -43,14 +43,14 @@ def rename_collection(old, new, merge=False):
     store.validate_collection_name(old)
     store.validate_collection_name(new)
     if old == new:
-        raise ApiError('The new name is the same as the current one')
+        raise ApiError('The new name is the same as the current one', code='invalid_body')
     members = store.collection_members()
     grants = apikeys.collection_grants()
     if old not in members and old not in grants:
-        raise ApiError(f"Collection '{old}' not found", 404)
+        raise ApiError(f"Collection '{old}' not found", 404, code='collection_not_found')
     if (new in members or new in grants) and not merge:
         raise ApiError(f"Collection '{new}' already exists. Pass merge=true to merge '{old}' into it - the same "
-                       'call also finishes a rename that was interrupted part-way.')
+                       'call also finishes a rename that was interrupted part-way.', 409, code='collection_exists')
     with store.lock:
         apikeys.rewrite_collection_grants(old, new, drop_old=False)
         moved = store.move_collection(old, new)

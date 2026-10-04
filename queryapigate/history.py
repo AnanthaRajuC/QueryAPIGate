@@ -308,11 +308,11 @@ def _time_bound(value, label):
         return None
     value = value.replace('T', ' ')
     if not _DATE_RE.match(value):
-        raise ApiError(f"{label} must be a date (YYYY-MM-DD) or a time (YYYY-MM-DD HH:MM:SS)")
+        raise ApiError(f"{label} must be a date (YYYY-MM-DD) or a time (YYYY-MM-DD HH:MM:SS)", code='invalid_filter')
     try:
         datetime.strptime(value, TIME_FORMAT if ' ' in value else '%Y-%m-%d')
     except ValueError:
-        raise ApiError(f'{label} is not a real date or time') from None
+        raise ApiError(f'{label} is not a real date or time', code='invalid_filter') from None
     return value
 
 
@@ -327,7 +327,7 @@ def _decode_cursor(cursor):
             return executed_at, rowid
     except (ValueError, TypeError):
         pass
-    raise ApiError('cursor is not one this server returned')
+    raise ApiError('cursor is not one this server returned', code='invalid_filter')
 
 
 def search(query=None, version=None, status=None, key=None, since=None, until=None, limit=100, cursor=None,
@@ -338,11 +338,11 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     saved query and version it belongs to. Backs GET /api/v1/history - the way to look past the newest
     history_limit() runs per version that lists show, e.g. across a retention period's worth of runs."""
     if status not in (None, '', 'success', 'error'):
-        raise ApiError("status must be 'success' or 'error'")
+        raise ApiError("status must be 'success' or 'error'", code='invalid_filter')
     if kind not in (None, '', 'saved', 'adhoc'):
-        raise ApiError("kind must be 'saved' or 'adhoc'")
+        raise ApiError("kind must be 'saved' or 'adhoc'", code='invalid_filter')
     if not 1 <= limit <= MAX_PAGE:
-        raise ApiError(f'limit must be between 1 and {MAX_PAGE}')
+        raise ApiError(f'limit must be between 1 and {MAX_PAGE}', code='invalid_filter')
     since, until = _time_bound(since, 'since'), _time_bound(until, 'until')
     clauses, params = [], []
     for column, value in (('query_name', query), ('version', version), ('status', status), ('key_name', key)):

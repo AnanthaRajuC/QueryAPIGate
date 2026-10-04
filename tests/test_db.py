@@ -374,8 +374,13 @@ class MigrateToPostgresTests(unittest.TestCase):
     def snapshot(self):
         from queryapigate import create_app
         client, admin = create_app().test_client(), {'X-API-Key': 'admin'}
-        return {url: client.get(url, headers=admin).get_json()
-                for url in ('/list_files', '/api_keys', '/roles', '/audit_log', '/connections')}
+        snapshot = {}
+        for url in ('/api/v1/queries', '/api/v1/api-keys', '/api/v1/roles', '/api/v1/audit', '/api/v1/connections',
+                    '/api/v1/history'):
+            res = client.get(url, headers=admin)
+            self.assertEqual(res.status_code, 200, url)
+            snapshot[url] = res.get_json()
+        return snapshot
 
     def build_sqlite_store(self):
         from queryapigate import create_app

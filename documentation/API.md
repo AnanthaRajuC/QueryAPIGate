@@ -1086,7 +1086,8 @@ queued per process and newer ones are dropped rather than slowing requests - cou
 too: the questions agents and people ask with no saved query behind them are the ones most worth being able to
 look back on. An ad-hoc entry has `"kind": "adhoc"`, `query` and `version` `null`, and:
 
-- the caller (`key_name`), `transport`, `connection_name`, status, rows, duration and error, as for a saved run;
+- the caller (`key_name`), `transport`, `connection_name`, status, rows, duration, and for a failure its `error`
+  and [`code`](#errors) - as for a saved run;
 - the SQL, as `QUERYAPIGATE_HISTORY_ADHOC_SQL` says;
 - `params`: the names of its bound parameters, **never their values**.
 
@@ -1258,17 +1259,89 @@ use," which needs a resolved caller to mean anything.
 
 ## Errors
 
-Errors are returned as `{"error": "..."}`; failed queries also include `"detail"` with the database's message -
-except a saved query (`/q/<name>`, `/execute_sql_from_file`) called with a scoped key, which gets only the generic
-error, since the database's text can reveal schema details to a caller who didn't write the SQL. That full message
-is always in the server log, under the response's `X-Request-Id`.
+Every error - from `/api/v1`, the runtime routes (`/q/<name>`, `/execute_sql`, `/catalog`, ...), `queryapigate
+events` and MCP tool calls - has the same shape:
 
-| Status | Meaning |
-|--------|---------|
-| 400 | Missing or invalid input (SQL, paging, format, filename, parameters, several statements). Parameter-rule violations add an `errors` map keyed by parameter name. |
-| 401 | Missing or wrong `X-API-Key` (only when a key is configured) |
-| 429 | Rate limit exceeded; wait `Retry-After` seconds |
-| 403 | Inactive connection, write statement while writes are disabled, an invalid saved-query reference, a connection this API key isn't scoped to, or a management action a scoped (non-admin) key can't perform |
-| 404 | Unknown connection, saved query, version or file |
-| 500 | The database rejected the query or could not be reached |
-| 504 | The query exceeded its time limit and was cancelled (the response includes `"timeout"`) |
+~~~json
+{"error": "This API key may only query these tables: film. ...", "code": "table_not_allowed",
+ "request_id": "9f2c41d07a1b"}
+~~~
+
+- **`code`** is stable: branch on it. It is part of the compatibility promise - an existing code is never renamed or
+  given a different meaning, though new ones may be added (treat an unknown code by its HTTP status).
+- **`error`** is for people. Its wording may change in any release.
+- **`request_id`** is also the response's `X-Request-Id` and appears on the server's log lines for the request, so
+  a support conversation can find them. (`queryapigate events` errors have no `request_id`.)
+- Some errors add fields: `errors` (a map of parameter name to problem, for `param_invalid`, `param_required` and
+  invalid query definitions), `retry_after` (seconds, for `rate_limited`, also sent as `Retry-After`), `timeout`
+  (for `query_timeout`) and `detail`.
+- **`detail`** carries the database's own message when a query fails - except for a saved query (`/q/<name>`,
+  `/execute_sql_from_file`) called with a scoped key, which gets only the generic error, since the database's text
+  can reveal schema details to a caller who didn't write the SQL. The full message is always in the server log.
+- **MCP:** a tool error is `isError: true` with the message as text, as before, and `{"error", "code"}` (plus
+  `retry_after` when rate limited) in `structuredContent`.
+
+An error with no more specific code gets the one for its status: `invalid_request` (400), `unauthorized` (401),
+`forbidden` (403), `not_found` (404), `method_not_allowed` (405), `conflict` (409), `precondition_failed` (412),
+`payload_too_large` (413), `unsupported_media_type` (415), `rate_limited` (429), `internal_error` (500),
+`upstream_failed` (502), `unavailable` (503), `query_timeout` (504).
+
+| Code | Status | Meaning |
+|------|--------|---------|
+| `invalid_body` | 400 | The request body isn't valid JSON, isn't an object, or has a field with a wrong value |
+| `unknown_field` | 400 | The body has a field this route doesn't take |
+| `invalid_name` | 400 | A query, key, role, collection or connection name with characters it can't have |
+| `invalid_paging` | 400 | `page`/`page_size` not positive, or `page_size` over `QUERYAPIGATE_MAX_PAGE_SIZE` |
+| `invalid_format` | 400 | An unsupported `format` |
+| `invalid_timeout` | 400 | `timeout` isn't a positive number of seconds |
+| `invalid_stream` | 400 | `stream=true` with a format it can't stream, or with `page`/`page_size` |
+| `invalid_filter` | 400 | A bad history/audit filter (`status`, `kind`, `since`, `until`, `limit`, `cursor`) or Mongo filter |
+| `invalid_bundle` | 400 | A collection bundle that isn't one, or is malformed |
+| `sql_required` | 400 | No SQL given |
+| `connection_required` | 400 | No connection named, and the saved query has none |
+| `collection_required` | 400 | No collection named |
+| `table_required` | 400 | `/table_ddl` without `table` |
+| `multiple_statements` | 400 | More than one SQL statement |
+| `param_required` | 400 | A required parameter (or placeholder) has no value; `errors` names each |
+| `param_invalid` | 400 | A parameter's value breaks its rules; `errors` says how |
+| `param_from_claim` | 400 | The call sent a parameter the query takes from the caller's sign-in token |
+| `reason_required` | 400 | Deleting a connection without a `reason` |
+| `stream_unsupported` | 400 | Streaming a Mongo query |
+| `unsupported_database` | 400 | A database type QueryAPIGate doesn't support |
+| `unsupported_operation` | 400 | The operation isn't available for this database type (listing databases, schema, DDL) |
+| `wrong_connection_type` | 400 | A Mongo call on a SQL connection |
+| `unauthorized` | 401 | Missing or wrong `X-API-Key` or bearer token |
+| `admin_only` | 403 | Only the admin key may do this (manage the server, query or browse another database) |
+| `connection_forbidden` | 403 | This key may not use this connection |
+| `connection_inactive` | 403 | The connection is switched off |
+| `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |
+| `write_op_not_allowed` | 403 | A write this key's `allowed_write_ops` doesn't include |
+| `table_not_allowed` | 403 | A table outside this key's `allowed_tables` |
+| `table_check_unsupported` | 403 | `allowed_tables` can't be enforced on this database type, so the query is refused |
+| `table_check_failed` | 403 | The SQL couldn't be analysed to enforce `allowed_tables`, so it is refused |
+| `mongo_operator_forbidden` | 403 | A Mongo operator that runs server-side JavaScript |
+| `sign_in_required` | 403 | The query takes values from a sign-in token; call it with one |
+| `claim_missing` | 403 | The sign-in token lacks a claim the query needs |
+| `forbidden` | 403 | Any other refusal |
+| `query_not_found` | 404 | No such saved query |
+| `version_not_found` | 404 | No such version - or a draft, to a key that can't see drafts |
+| `not_published` | 404 | The query has no published version |
+| `connection_not_found` | 404 | No such connection |
+| `key_not_found`, `role_not_found` | 404 | No such API key or role |
+| `collection_not_found` | 404 | No such collection (or it is empty) |
+| `cache_entry_not_found` | 404 | No such cached response |
+| `table_not_found` | 404 | No such table on the connection |
+| `database_file_not_found` | 404 | A SQLite/DuckDB connection's file doesn't exist |
+| `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
+| `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
+| `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |
+| `rate_limited` | 429 | Over `QUERYAPIGATE_RATE_LIMIT` or the key's own `rate_limit`; retry after `retry_after` seconds |
+| `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
+| `driver_missing` | 500 | The database driver isn't installed on the server |
+| `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |
+| `secret_key_required`, `password_undecryptable` | 500 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset or has changed |
+| `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |
+| `internal_error` | 500 | Anything unexpected; the log has the traceback under `request_id` |
+| `connection_failed` | 502 | The database couldn't be reached |
+| `too_many_streams` | 503 | Every live-event stream slot is taken; retry shortly |
+| `query_timeout` | 504 | The query ran past its time limit and was cancelled |

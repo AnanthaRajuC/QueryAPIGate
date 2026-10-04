@@ -65,8 +65,9 @@ class DraftTests(PublishingTestCase):
         res = self.client.get('/q/q?version=2', headers=self.scoped)
         self.assertEqual(res.status_code, 404)
         # Indistinguishable from a version that was never created, so drafts can't be discovered
-        self.assertEqual(res.get_json(), self.client.get('/q/q?version=99', headers=self.scoped).get_json()
-                         | {'error': 'Version 2 not found'})
+        never = self.client.get('/q/q?version=99', headers=self.scoped).get_json()
+        self.assertEqual(res.get_json() | {'request_id': '-'},
+                         never | {'error': 'Version 2 not found', 'request_id': '-'})
 
     def test_older_versions_stay_runnable_by_number_as_before(self):
         self.save(1)

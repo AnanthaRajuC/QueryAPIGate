@@ -35,7 +35,7 @@ def export_bundle(collection):
                 entry[field] = data[field]
         queries.append(entry)
     if not queries:
-        raise ApiError(f"Collection '{collection}' not found or empty", 404)
+        raise ApiError(f"Collection '{collection}' not found or empty", 404, code='collection_not_found')
     return {'format': FORMAT, 'format_version': FORMAT_VERSION, 'collection': collection, 'exported_at': store.now(),
             'queries': queries}
 
@@ -43,31 +43,31 @@ def export_bundle(collection):
 def _parse(bundle, collection_override):
     """Validate a decoded bundle; return (collection, [(name, fields)])."""
     if not isinstance(bundle, dict) or bundle.get('format') != FORMAT:
-        raise ApiError(f"Not a QueryAPIGate collection bundle (expected format '{FORMAT}')")
+        raise ApiError(f"Not a QueryAPIGate collection bundle (expected format '{FORMAT}')", code='invalid_bundle')
     if bundle.get('format_version') != FORMAT_VERSION:
         raise ApiError(f"Unsupported bundle format_version {bundle.get('format_version')!r} "
-                       f'(this version reads {FORMAT_VERSION})')
+                       f'(this version reads {FORMAT_VERSION})', code='invalid_bundle')
     collection = collection_override or bundle.get('collection')
     store.validate_collection_name(collection)
     entries = bundle.get('queries')
     if not isinstance(entries, list) or not entries:
-        raise ApiError('The bundle has no queries')
+        raise ApiError('The bundle has no queries', code='invalid_bundle')
     parsed, seen = [], set()
     for position, entry in enumerate(entries, 1):
         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str):
-            raise ApiError(f'Query #{position} has no name')
+            raise ApiError(f'Query #{position} has no name', code='invalid_bundle')
         name = entry['name']
         try:
             extra = sorted(set(entry) - ENTRY_FIELDS)
             if extra:
-                raise ApiError(f"unexpected field(s): {', '.join(extra)}")
+                raise ApiError(f"unexpected field(s): {', '.join(extra)}", code='invalid_bundle')
             store.saved_path_for_name(name)
             if name in seen:
-                raise ApiError('listed more than once in the bundle')
+                raise ApiError('listed more than once in the bundle', code='invalid_bundle')
             fields, _ = definitions.validate_definition({**{k: v for k, v in entry.items() if k != 'name'},
                                                          'filename': name})
         except ApiError as error:
-            raise ApiError(f"Query '{name}': {error.message}", error.status) from None
+            raise ApiError(f"Query '{name}': {error.message}", error.status, code=error.code) from None
         seen.add(name)
         parsed.append((name, fields))
     return collection, parsed

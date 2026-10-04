@@ -58,7 +58,7 @@ def fill_placeholders(filter_doc, values):
     """
     missing = sorted(set(placeholder_names(filter_doc)) - set(values))
     if missing:
-        raise ApiError(f"No value provided for placeholder(s): {', '.join(missing)}")
+        raise ApiError(f"No value provided for placeholder(s): {', '.join(missing)}", code='param_required')
     return _substitute(filter_doc, values)
 
 
@@ -66,7 +66,8 @@ def _check_forbidden(node):
     if isinstance(node, dict):
         for key, value in node.items():
             if key in _FORBIDDEN_OPERATORS:
-                raise ApiError(f"'{key}' is not allowed - it runs arbitrary server-side JavaScript", 403)
+                raise ApiError(f"'{key}' is not allowed - it runs arbitrary server-side JavaScript", 403,
+                               code='mongo_operator_forbidden')
             _check_forbidden(value)
     elif isinstance(node, list):
         for item in node:
@@ -77,6 +78,6 @@ def validate_filter(filter_doc):
     """Check a Mongo filter document is well-shaped and free of the JS-execution operators - the find-only
     equivalent of sqltools.validate_sql()'s single-statement/read-only checks."""
     if not isinstance(filter_doc, dict):
-        raise ApiError('filter must be a JSON object')
+        raise ApiError('filter must be a JSON object', code='invalid_filter')
     _check_forbidden(filter_doc)
     return filter_doc

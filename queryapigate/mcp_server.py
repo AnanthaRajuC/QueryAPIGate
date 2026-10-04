@@ -23,7 +23,7 @@ import time
 import urllib.parse
 
 from . import apikeys, config, definitions, engine, history, metrics, params, schema, sqltools, store
-from .errors import ApiError
+from .errors import ApiError, code_for
 
 # A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
 # hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
@@ -195,15 +195,17 @@ def call_tool_for(flask_app, permission, name, arguments):
         try:
             response = app_module.run_saved(name, {}, arguments)
         except ApiError as error:
-            return _error(error.message, error.status)
+            return _error(error.message, error.status, error.code)
         structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
         return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
 
-def _error(message, status):
-    """A tool error result; `_status` (the HTTP status REST would answer) is for handle_call's metrics and never
-    leaves this module."""
-    return {'isError': True, 'content': [{'type': 'text', 'text': message}], '_status': status}
+def _error(message, status, code=None, **extra):
+    """A tool error result: the message as text, as always, and in structuredContent the same `error` and stable
+    `code` a REST error body carries (errors.py, BACKLOG #69), so an agent can branch on the code. `_status` (the HTTP
+    status REST would answer) is for handle_call's metrics and never leaves this module."""
+    return {'isError': True, 'content': [{'type': 'text', 'text': message}],
+            'structuredContent': {'error': message, 'code': code_for(status, code), **extra}, '_status': status}
 
 
 def _connection_error(permission, connection_name, database):
@@ -212,11 +214,13 @@ def _connection_error(permission, connection_name, database):
     /execute_sql already enforce over REST (require_connection(), and "only the admin key may browse/query a
     different database on this connection"), reused here rather than re-derived."""
     if not connection_name:
-        return _error('connection_name is required', 400)
+        return _error('connection_name is required', 400, 'connection_required')
     if not apikeys.can_use(permission, connection_name):
-        return _error(f"This API key is not permitted to use the connection '{connection_name}'", 403)
+        return _error(f"This API key is not permitted to use the connection '{connection_name}'", 403,
+                      'connection_forbidden')
     if database and not permission.admin:
-        return _error('Only the admin key may browse or query a different database on this connection', 403)
+        return _error('Only the admin key may browse or query a different database on this connection', 403,
+                      'admin_only')
     return None
 
 
@@ -233,7 +237,7 @@ def list_tables_tool(permission, arguments):
     try:
         result = schema.fetch_schema(connection_name, database=database)
     except ApiError as error:
-        return _error(error.message, error.status)
+        return _error(error.message, error.status, error.code)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
 
 
@@ -251,7 +255,7 @@ def execute_sql_tool(permission, arguments):
     if error is not None:
         return error
     if not sql:
-        return _error('sql is required', 400)
+        return _error('sql is required', 400, 'sql_required')
     query_params = arguments.pop('params', None) or {}
     requested_page_size = arguments.pop('page_size', None)
     try:
@@ -269,8 +273,9 @@ def execute_sql_tool(permission, arguments):
                                           allow_writes=False, key_name=permission.name or '-', database=database,
                                           allowed_tables=permission.allowed_tables)
     except ApiError as error:
-        history.record_adhoc({**entry, 'status': 'error', 'error': error.message}, sql, query_params)
-        return _error(error.message, error.status)
+        history.record_adhoc({**entry, 'status': 'error', 'error': error.message, 'code': error.code}, sql,
+                             query_params)
+        return _error(error.message, error.status, error.code)
     history.record_adhoc({**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms},
                          sql, query_params)
     structured = {'rows': [dict(zip(result.columns, row)) for row in result.rows], 'truncated': result.has_more}
@@ -301,14 +306,16 @@ def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
     permission = None
     verdict = governance.check_client_limit(flask_app, client_ip)
     if verdict is not None and not verdict.allowed:
-        result = _error(f'Rate limit exceeded - retry after {verdict.retry_after}s', 429)
+        result = _error(f'Rate limit exceeded - retry after {verdict.retry_after}s', 429,
+                        retry_after=verdict.retry_after)
     else:
         permission = governance.authenticate(api_key, authorization, client_ip)
         verdict = governance.check_key_limit(flask_app, permission)
         if permission is None:
             result = _error('Unauthorized: missing or invalid X-API-Key or bearer token', 401)
         elif verdict is not None and not verdict.allowed:
-            result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429)
+            result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
+                            retry_after=verdict.retry_after)
         else:
             result = dispatch_tool_call(flask_app, permission, name, arguments)
     status = result.pop('_status', 200)

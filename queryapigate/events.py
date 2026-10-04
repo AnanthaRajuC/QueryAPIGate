@@ -33,6 +33,7 @@ from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
 from . import config, cors, db, history
+from .errors import code_for
 from .ratelimit import RateLimiter
 
 try:
@@ -291,7 +292,8 @@ class EventServer:
             await _respond(writer, 429, {'error': 'Rate limit exceeded'}, allow_origin)
             return
         if len(self.clients) >= self.max_connections:
-            await _respond(writer, 503, {'error': 'Too many open event streams - try again shortly'}, allow_origin,
+            await _respond(writer, 503, {'error': 'Too many open event streams - try again shortly',
+                                         'code': 'too_many_streams'}, allow_origin,
                            extra={'Retry-After': '5'})
             return
         secret = (headers.get('x-api-key', ''), headers.get('authorization', ''))
@@ -382,6 +384,8 @@ async def _read_request(reader):
 async def _respond(writer, status, body, allow_origin, preflight=False, extra=None):
     reasons = {200: 'OK', 204: 'No Content', 401: 'Unauthorized', 404: 'Not Found', 405: 'Method Not Allowed',
                429: 'Too Many Requests', 503: 'Service Unavailable'}
+    if body is not None and 'error' in body:  # the same {error, code} every front door answers with (errors.py)
+        body = {'error': body['error'], 'code': code_for(status, body.get('code'))}
     payload = b'' if body is None else json.dumps(body).encode()
     head = [f'HTTP/1.1 {status} {reasons.get(status, "")}', f'Content-Length: {len(payload)}', 'Connection: close']
     if body is not None:

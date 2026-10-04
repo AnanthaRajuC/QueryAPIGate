@@ -93,7 +93,7 @@ def build_collection(collection, base_url=DEFAULT_BASE_URL):
     members = sorted((n, v, d) for n, v, d, c in store.live_versions()
                      if c == collection and isinstance(d.get('sql_query'), str))
     if not members:
-        raise ApiError(f"Collection '{collection}' not found or empty", 404)
+        raise ApiError(f"Collection '{collection}' not found or empty", 404, code='collection_not_found')
     return {
         'info': {'name': collection, 'schema': SCHEMA,
                  'description': f"The '{collection}' collection, exported from QueryAPIGate. A snapshot of the "

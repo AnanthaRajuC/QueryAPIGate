@@ -194,7 +194,8 @@ def _normalize_connections(connections):
     if connections in (None, ALL_CONNECTIONS):
         return ALL_CONNECTIONS
     if not isinstance(connections, list) or not all(isinstance(c, str) for c in connections):
-        raise ApiError(f'connections must be a list of connection names, or "{ALL_CONNECTIONS}" for all')
+        raise ApiError(f'connections must be a list of connection names, or "{ALL_CONNECTIONS}" for all',
+                       code='invalid_body')
     return sorted(set(connections))
 
 
@@ -220,7 +221,7 @@ def _normalize_queries(queries):
     if queries == ALL_QUERIES:
         return ALL_QUERIES
     if not isinstance(queries, list):
-        raise ApiError(f'queries must be a list of saved-query names, or "{ALL_QUERIES}" for all')
+        raise ApiError(f'queries must be a list of saved-query names, or "{ALL_QUERIES}" for all', code='invalid_body')
     seen = set()
     normalized = []
     for entry in queries:
@@ -230,16 +231,17 @@ def _normalize_queries(queries):
             name = entry.get('name')
             if not isinstance(name, str):
                 raise ApiError('Each queries entry must be a saved-query name, or an object like '
-                               '{"name": "...", "allow_writes": true}')
+                               '{"name": "...", "allow_writes": true}', code='invalid_body')
             extra = set(entry) - {'name', 'allow_writes'}
             if extra:
-                raise ApiError(f'Unexpected field(s) in a queries entry: {", ".join(sorted(extra))}')
+                raise ApiError(f'Unexpected field(s) in a queries entry: {", ".join(sorted(extra))}',
+                               code='invalid_body')
             allow_writes = bool(entry.get('allow_writes', False))
         else:
             raise ApiError('Each queries entry must be a saved-query name, or an object like '
-                           '{"name": "...", "allow_writes": true}')
+                           '{"name": "...", "allow_writes": true}', code='invalid_body')
         if name in seen:
-            raise ApiError(f'queries lists "{name}" more than once')
+            raise ApiError(f'queries lists "{name}" more than once', code='invalid_body')
         seen.add(name)
         normalized.append({'name': name, 'allow_writes': True} if allow_writes else name)
     normalized.sort(key=lambda e: e if isinstance(e, str) else e['name'])
@@ -253,12 +255,12 @@ def _normalize_collections(collections):
     if collections is None:
         return []
     if not isinstance(collections, list) or not all(isinstance(c, str) for c in collections):
-        raise ApiError('collections must be a list of collection names')
+        raise ApiError('collections must be a list of collection names', code='invalid_body')
     seen = set()
     for name in collections:
         store.validate_collection_name(name)
         if name in seen:
-            raise ApiError(f'collections lists "{name}" more than once')
+            raise ApiError(f'collections lists "{name}" more than once', code='invalid_body')
         seen.add(name)
     return sorted(seen)
 
@@ -274,7 +276,8 @@ def _require_existing_collections(names, already_granted=()):
     unknown = [name for name in fresh if name not in members]
     if unknown:
         known = ', '.join(sorted(members)) or 'none yet'
-        raise ApiError(f"No such collection: {', '.join(unknown)}. Existing collections: {known}")
+        raise ApiError(f"No such collection: {', '.join(unknown)}. Existing collections: {known}",
+                       code='invalid_body')
 
 
 def _queries_map(queries):
@@ -295,11 +298,11 @@ def _validate_expiry(expires_at):
     if expires_at is None:
         return None
     if not isinstance(expires_at, str) or not _DATE_RE.match(expires_at):
-        raise ApiError('expires_at must be a date in YYYY-MM-DD format, or null for no expiry')
+        raise ApiError('expires_at must be a date in YYYY-MM-DD format, or null for no expiry', code='invalid_body')
     try:
         datetime.strptime(expires_at, '%Y-%m-%d')
     except ValueError:
-        raise ApiError('expires_at must be a valid calendar date') from None
+        raise ApiError('expires_at must be a valid calendar date', code='invalid_body') from None
     return expires_at
 
 
@@ -310,11 +313,11 @@ def _validate_rate_limit(rate_limit):
     if rate_limit is None:
         return None
     if not isinstance(rate_limit, str):
-        raise ApiError("rate_limit must be a string like '100/minute', or null for none")
+        raise ApiError("rate_limit must be a string like '100/minute', or null for none", code='invalid_body')
     try:
         config.parse_rate_limit(rate_limit, label='rate_limit')
     except ValueError as error:
-        raise ApiError(str(error)) from None
+        raise ApiError(str(error), code='invalid_body') from None
     return rate_limit
 
 
@@ -326,12 +329,13 @@ def _validate_allowed_ips(allowed_ips):
     if allowed_ips is None:
         return None
     if not isinstance(allowed_ips, list) or not all(isinstance(v, str) for v in allowed_ips):
-        raise ApiError('allowed_ips must be a list of IP addresses or CIDR ranges, or null for no restriction')
+        raise ApiError('allowed_ips must be a list of IP addresses or CIDR ranges, or null for no restriction',
+                       code='invalid_body')
     for value in allowed_ips:
         try:
             ipaddress.ip_network(value, strict=False)
         except ValueError:
-            raise ApiError(f"'{value}' is not a valid IP address or CIDR range") from None
+            raise ApiError(f"'{value}' is not a valid IP address or CIDR range", code='invalid_body') from None
     return sorted(set(allowed_ips))
 
 
@@ -363,7 +367,7 @@ def _validate_allowed_write_ops(allowed_write_ops):
         return None
     if not isinstance(allowed_write_ops, list) or not all(isinstance(v, str) and v for v in allowed_write_ops):
         raise ApiError('allowed_write_ops must be a list of SQL keywords (e.g. "insert", "update"), or null '
-                       'for no restriction')
+                       'for no restriction', code='invalid_body')
     return sorted({v.lower() for v in allowed_write_ops})
 
 
@@ -377,7 +381,7 @@ def _validate_allowed_tables(allowed_tables):
     if allowed_tables is None:
         return None
     if not isinstance(allowed_tables, list) or not all(isinstance(v, str) and v for v in allowed_tables):
-        raise ApiError('allowed_tables must be a list of table names, or null for no restriction')
+        raise ApiError('allowed_tables must be a list of table names, or null for no restriction', code='invalid_body')
     return sorted({v.lower() for v in allowed_tables})
 
 
@@ -441,7 +445,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None,
                example=False):
     if not isinstance(name, str) or not _NAME_RE.match(name):
-        raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'")
+        raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     if role is None:
         collections = _normalize_collections(collections)
         _require_existing_collections(collections)
@@ -454,7 +458,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                                             ('allowed_tables', allowed_tables)) if value is not None]
         if given:
             raise ApiError(f"Cannot combine 'role' with explicit {', '.join(given)} - create the key from "
-                           "the role, then update it afterward to customize.")
+                           "the role, then update it afterward to customize.", code='invalid_body')
         role_entry = _get_role_or_404(role)
         connections = role_entry['connections']
         allow_writes = role_entry['allow_writes']
@@ -467,7 +471,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
     secret = 'sk_' + secrets.token_urlsafe(32)
     with db.transaction() as conn:
         if conn.execute('SELECT 1 FROM api_keys WHERE name = ?', (name,)).fetchone() is not None:
-            raise ApiError(f"An API key named '{name}' already exists")
+            raise ApiError(f"An API key named '{name}' already exists", 409, code='key_exists')
         entry = {
             'hash': _hash(secret),
             'connections': _normalize_connections(connections),
@@ -496,7 +500,7 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
             'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
             (name,)).fetchone()
         if row is None:
-            raise ApiError(f"API key '{name}' not found", 404)
+            raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
         entry = _row_to_entry(row)
         if collections is not None:
             collections = _normalize_collections(collections)
@@ -526,7 +530,7 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
 def delete_key(name):
     with db.transaction() as conn:
         if not conn.execute('DELETE FROM api_keys WHERE name = ?', (name,)).rowcount:
-            raise ApiError(f"API key '{name}' not found", 404)
+            raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
 
 
 # --------------------------------------------------------------------------------------
@@ -557,7 +561,7 @@ def _get_role_or_404(name):
     row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE name = ?',
                                   (name,)).fetchone()
     if row is None:
-        raise ApiError(f"Role '{name}' not found", 404)
+        raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
     return _row_to_role(row)
 
 
@@ -568,12 +572,12 @@ def list_roles():
 def create_role(name, connections=None, allow_writes=False, queries=None, rate_limit=None, allowed_ips=None,
                 allowed_write_ops=None, collections=None, example=False, allowed_tables=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
-        raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'")
+        raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     collections = _normalize_collections(collections)
     _require_existing_collections(collections)
     with db.transaction() as conn:
         if conn.execute('SELECT 1 FROM roles WHERE name = ?', (name,)).fetchone() is not None:
-            raise ApiError(f"A role named '{name}' already exists")
+            raise ApiError(f"A role named '{name}' already exists", 409, code='role_exists')
         entry = {
             'connections': _normalize_connections(connections),
             'allow_writes': bool(allow_writes),
@@ -594,7 +598,7 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
     with db.transaction() as conn:
         row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
         if row is None:
-            raise ApiError(f"Role '{name}' not found", 404)
+            raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
         entry = _row_to_role(row)
         if collections is not None:
             collections = _normalize_collections(collections)
@@ -620,7 +624,7 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
 def delete_role(name):
     with db.transaction() as conn:
         if not conn.execute('DELETE FROM roles WHERE name = ?', (name,)).rowcount:
-            raise ApiError(f"Role '{name}' not found", 404)
+            raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
 
 
 def collection_grants():

@@ -140,8 +140,10 @@ class DriverErrorDetailTests(AppTestCase):
             admin = self.client.get('/q/q', headers=self.admin_headers)
             ad_hoc = self.client.post('/execute_sql', json={'sql': 'SELECT 1', 'connection_name': 'a'},
                                       headers={'X-API-Key': key})
-        self.assertEqual((scoped.status_code, scoped.get_json()),
-                         (500, {'error': 'An error occurred while executing the SQL query'}))
+        body = scoped.get_json()
+        self.assertEqual((scoped.status_code, body['error'], body['code']),
+                         (500, 'An error occurred while executing the SQL query', 'query_failed'))
+        self.assertNotIn('detail', body)
         self.assertEqual(admin.get_json()['detail'], 'no such column: internal_secret_col')
         # /execute_sql's caller wrote the SQL, so it still needs the database's reason
         self.assertEqual(ad_hoc.get_json()['detail'], 'no such column: internal_secret_col')

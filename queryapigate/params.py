@@ -210,7 +210,7 @@ def _parse_strict(spec):
 def parse_definitions(query_parameters):
     """Validate the ``query_parameters`` of a query about to be saved; raises ApiError(400) listing every problem."""
     if not isinstance(query_parameters, dict):
-        raise ApiError('query_parameters must be a JSON object')
+        raise ApiError('query_parameters must be a JSON object', code='invalid_body')
     errors = {}
     for name, spec in query_parameters.items():
         if not _NAME_RE.match(name):
@@ -222,7 +222,7 @@ def parse_definitions(query_parameters):
             errors[name] = str(error)
     if errors:
         raise ApiError('Invalid query_parameters: ' + '; '.join(f'{n} {m}' for n, m in errors.items()), 400,
-                       errors=errors)
+                       errors=errors, code='invalid_body')
 
 
 def read_definition(spec):
@@ -279,8 +279,9 @@ def resolve(declared, supplied, used=None):
         except _Invalid as error:
             errors[name] = str(error)
     if errors:
+        missing_only = set(errors.values()) == {'is required'}
         raise ApiError('Invalid parameters: ' + '; '.join(f'{n} {m}' for n, m in errors.items()), 400,
-                       errors=errors)
+                       code='param_required' if missing_only else 'param_invalid', errors=errors)
     return values
 
 

@@ -133,7 +133,7 @@ def list_databases(connection_name):
     if dialect == 'mongo':
         return engine.list_databases(details)
     if dialect not in engine.LIST_DATABASES_QUERIES:
-        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections")
+        raise ApiError(f"Listing databases isn't supported for '{dialect}' connections", code='unsupported_operation')
     result = engine.execute_sql(engine.LIST_DATABASES_QUERIES[dialect], connection_name, 1000, 0)
     return [row[0] for row in result.rows]
 
@@ -152,9 +152,10 @@ def fetch_schema(connection_name, database=None):
         return {'tables': [{'name': name, 'type': 'collection', 'columns': []}
                            for name in engine.list_collections(details)], 'truncated': False}
     if dialect not in _QUERIES:
-        raise ApiError(f"Schema introspection isn't supported for '{dialect}' connections yet")
+        raise ApiError(f"Schema introspection isn't supported for '{dialect}' connections yet",
+                       code='unsupported_operation')
     if database and dialect not in engine.LIST_DATABASES_QUERIES:
-        raise ApiError(f"Switching databases isn't supported for '{dialect}' connections")
+        raise ApiError(f"Switching databases isn't supported for '{dialect}' connections", code='unsupported_operation')
     result = engine.execute_sql(_QUERIES[dialect], connection_name, ROW_CAP, 0, database=database)
     lower_columns = [str(c).lower() for c in result.columns]
     tables = {}
@@ -223,20 +224,21 @@ def fetch_table_ddl(connection_name, table_name, database=None):
     details = store.get_connection(connection_name)
     dialect = details['db']
     if dialect not in _DDL_DIALECTS:
-        raise ApiError(f"Showing a table's DDL isn't supported for '{dialect}' connections")
+        raise ApiError(f"Showing a table's DDL isn't supported for '{dialect}' connections",
+                       code='unsupported_operation')
     # The one real safety mechanism: only a table this connection's own schema actually has can ever reach
     # a DDL query - table_name is never trusted as a safe SQL identifier just because it arrived on a
     # request.
     tables = fetch_schema(connection_name, database=database)['tables']
     if not any(t['name'] == table_name for t in tables):
-        raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404)
+        raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404, code='table_not_found')
     if dialect == 'sqlite':
         result = engine.execute_sql("SELECT sql FROM sqlite_master WHERE type = :type AND name = :name",
                                     connection_name, 1, 0, params={'type': 'table', 'name': table_name},
                                     database=database)
     else:
         if not _IDENTIFIER_RE.match(table_name):
-            raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404)
+            raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404, code='table_not_found')
         quoted = f'`{table_name}`' if dialect == 'mysql' else table_name
         result = engine.execute_sql(f'SHOW CREATE TABLE {quoted}', connection_name, 1, 0, database=database)
     if not result.rows:

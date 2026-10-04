@@ -37,7 +37,7 @@ from . import (
     store,
 )
 from . import params as param_rules
-from .errors import ApiError
+from .errors import ApiError, code_for
 from .formats import FORMATTERS, STREAM_FORMATTERS, json_default, stream_response
 from .ratelimit import KeyRateLimiters, RateLimiter
 
@@ -58,12 +58,6 @@ SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # 
 # how a 1.x deprecation is announced before 2.0 removes it.
 DEPRECATED_ENDPOINTS: dict[str, str] = {}  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
-_V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
-                     405: 'method_not_allowed', 409: 'conflict', 412: 'precondition_failed', 413: 'payload_too_large',
-                     415: 'unsupported_media_type', 429: 'rate_limited', 500: 'internal_error', 502: 'upstream_failed',
-                     504: 'query_timeout'}
-
-
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
 # entry is therefore plain identifier characters - no whitespace, quotes or control characters to forge a log line
 # with - and short enough not to bloat either. Matched with fullmatch(): `$` would also accept a trailing newline.
@@ -182,7 +176,7 @@ def create_app():
             permission = g.get('permission')
             if permission is None or not permission.admin:
                 extra = {k: v for k, v in extra.items() if k != 'detail'}
-        response = jsonify(error_body(error.message, error.status, extra))
+        response = jsonify(error_body(error.message, error.status, extra, error.code))
         if 'retry_after' in extra:
             response.headers['Retry-After'] = str(extra['retry_after'])
         return response, error.status
@@ -253,15 +247,11 @@ def create_app():
     return app
 
 
-def error_body(message, status, extra=None):
-    """The JSON body of an error response. /api/v1 errors always carry a stable `code` (the raiser's own, or one
-    for the status) and the `request_id` to find the matching log line (BACKLOG #69); the legacy routes keep
-    their existing shape - `error` plus whatever extras the raiser attached."""
-    body = {'error': message, **(extra or {})}
-    if request.path.startswith('/api/v1/'):
-        body.setdefault('code', _V1_DEFAULT_CODES.get(status, 'error'))
-        body['request_id'] = g.get('request_id', '-')
-    return body
+def error_body(message, status, extra=None, code=None):
+    """The JSON body of every error response (errors.py, BACKLOG #69): the message, a stable `code` (the raiser's
+    own, or the one for the status), whatever extras the raiser attached, and the `request_id` that finds the
+    matching log line."""
+    return {'error': message, 'code': code_for(status, code), **(extra or {}), 'request_id': g.get('request_id', '-')}
 
 
 # --------------------------------------------------------------------------------------
@@ -269,7 +259,7 @@ def error_body(message, status, extra=None):
 # --------------------------------------------------------------------------------------
 
 def _too_many(verdict, message):
-    response = jsonify({'error': message, 'retry_after': verdict.retry_after})
+    response = jsonify(error_body(message, 429, {'retry_after': verdict.retry_after}))
     response.status_code = 429
     response.headers['Retry-After'] = str(verdict.retry_after)
     return response
@@ -317,12 +307,13 @@ def require_admin():
     """Only the admin key (QUERYAPIGATE_API_KEY, or no key at all when nothing is configured) manages the
     server's own configuration - connections, saved queries and other API keys."""
     if not g.permission.admin:
-        raise ApiError('This API key is not authorized to manage the server configuration', 403)
+        raise ApiError('This API key is not authorized to manage the server configuration', 403, code='admin_only')
 
 
 def require_connection(connection_name):
     if not apikeys.can_use(g.permission, connection_name):
-        raise ApiError(f"This API key is not permitted to use the connection '{connection_name}'", 403)
+        raise ApiError(f"This API key is not permitted to use the connection '{connection_name}'", 403,
+                       code='connection_forbidden')
 
 
 def caller_key_name():
@@ -339,10 +330,10 @@ def get_json_body(required=True):
         # error, not "no parameters": silently treating it as empty turns a typo into a misleading
         # "<param> is required" (or, worse, a run with every parameter at its default).
         if request.is_json and request.get_data(cache=True).strip():
-            raise ApiError('Request body is not valid JSON')
+            raise ApiError('Request body is not valid JSON', code='invalid_body')
         return {}
     if not isinstance(data, dict):
-        raise ApiError('Request body must be a JSON object')
+        raise ApiError('Request body must be a JSON object', code='invalid_body')
     return data
 
 
@@ -365,16 +356,17 @@ def get_pagination():
     page = 1 if page is None else page
     page_size = 10 if page_size is None else page_size
     if page < 1 or page_size < 1:
-        raise ApiError('page and page_size must be positive')
+        raise ApiError('page and page_size must be positive', code='invalid_paging')
     if page_size > config.max_page_size():
-        raise ApiError(f'page_size must not exceed {config.max_page_size()}')
+        raise ApiError(f'page_size must not exceed {config.max_page_size()}', code='invalid_paging')
     return page_size, (page - 1) * page_size, page
 
 
 def get_output_format(body=None):
     output_format = str(request.args.get('format') or (body or {}).get('format') or 'json').lower()
     if output_format not in FORMATTERS:
-        raise ApiError(f"Unsupported format '{output_format}'. Supported formats: {', '.join(FORMATTERS)}")
+        raise ApiError(f"Unsupported format '{output_format}'. Supported formats: {', '.join(FORMATTERS)}",
+                       code='invalid_format')
     return output_format
 
 
@@ -386,9 +378,9 @@ def get_timeout(body=None):
     try:
         value = float(raw)
     except (TypeError, ValueError):
-        raise ApiError('timeout must be a number of seconds') from None
+        raise ApiError('timeout must be a number of seconds', code='invalid_timeout') from None
     if not math.isfinite(value) or value <= 0:
-        raise ApiError('timeout must be a positive number of seconds')
+        raise ApiError('timeout must be a positive number of seconds', code='invalid_timeout')
     return config.effective_timeout(value)
 
 
@@ -420,9 +412,10 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
     (format, no pagination) and returns the chunked Response, the run recorded in history once the stream
     finishes - in its saved query's, when ``saved`` is (path, version), or as an ad-hoc run."""
     if output_format not in STREAM_FORMATTERS:
-        raise ApiError(f"stream=true only supports these formats: {', '.join(sorted(STREAM_FORMATTERS))}")
+        raise ApiError(f"stream=true only supports these formats: {', '.join(sorted(STREAM_FORMATTERS))}",
+                       code='invalid_stream')
     if request.args.get('page') or request.args.get('page_size'):
-        raise ApiError('stream=true exports the whole result and does not accept page/page_size')
+        raise ApiError('stream=true exports the whole result and does not accept page/page_size', code='invalid_stream')
     key_name = caller_key_name()
     columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
                                       allowed_tables=allowed_tables)
@@ -491,7 +484,7 @@ def _record_stream_history(rows, entry, record):
     except GeneratorExit:
         raise
     except ApiError as error:
-        record({**entry, 'status': 'error', 'error': error.message, 'rows': count})
+        record({**entry, 'status': 'error', 'error': error.message, 'code': error.code, 'rows': count})
         raise
     except Exception as error:
         record({**entry, 'status': 'error', 'error': str(error), 'rows': count})
@@ -508,16 +501,17 @@ def _record_stream_history(rows, entry, record):
 def execute_sql_endpoint():
     data = get_json_body()
     if not data.get('sql'):
-        raise ApiError('SQL query is missing')
+        raise ApiError('SQL query is missing', code='sql_required')
     if not data.get('connection_name'):
-        raise ApiError('Connection name is missing')
+        raise ApiError('Connection name is missing', code='connection_required')
     require_connection(data['connection_name'])
     database = data.get('database')
     if database and not g.permission.admin:
         # Every other scoped-key boundary is per connection, never per database within one - a key granted a
         # connection may run any SQL that connection's own configured database allows, but not redirect that
         # same connection at a sibling database on the same server the admin never listed it for.
-        raise ApiError('Only the admin key may run a query against a different database on this connection', 403)
+        raise ApiError('Only the admin key may run a query against a different database on this connection', 403,
+                       code='admin_only')
     params = get_object(data.get('params'), 'params')
     output_format = get_output_format(data)
     timeout = get_timeout(data)
@@ -536,7 +530,7 @@ def execute_sql_endpoint():
                                           database=database, allowed_tables=g.permission.allowed_tables)
     except ApiError as error:
         _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
-                                    {**entry, 'status': 'error', 'error': error.message})
+                                    {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
                                 {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
@@ -550,9 +544,9 @@ def execute_mongo_endpoint():
     write permission to check."""
     data = get_json_body()
     if not data.get('collection'):
-        raise ApiError('Collection is missing')
+        raise ApiError('Collection is missing', code='collection_required')
     if not data.get('connection_name'):
-        raise ApiError('Connection name is missing')
+        raise ApiError('Connection name is missing', code='connection_required')
     require_connection(data['connection_name'])
     filter_doc = mongotools.validate_filter(get_object(data.get('filter'), 'filter'))
     params = get_object(data.get('params'), 'params')
@@ -568,7 +562,7 @@ def execute_mongo_endpoint():
                                           key_name=caller_key_name())
     except ApiError as error:
         _record_adhoc_and_broadcast(statement, params, data['connection_name'],
-                                    {**entry, 'status': 'error', 'error': error.message})
+                                    {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     _record_adhoc_and_broadcast(statement, params, data['connection_name'],
                                 {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
@@ -628,16 +622,16 @@ def bind_claims(saved, raw):
         if g.permission.admin:
             return raw
         raise ApiError(f"This query takes {', '.join(sorted(bound))} from a signed-in user's token - call it with "
-                       '`Authorization: Bearer <token>`, not an API key', 403)
+                       '`Authorization: Bearer <token>`, not an API key', 403, code='sign_in_required')
     sent = sorted(set(bound) & set(raw))
     if sent:
         raise ApiError(f"{', '.join(sent)} {'comes' if len(sent) == 1 else 'come'} from your sign-in token and "
-                       "can't be set by the request", 400)
+                       "can't be set by the request", 400, code='param_from_claim')
     raw = dict(raw)
     for name, claim_name in bound.items():
         value = jwtauth.claim(claims, claim_name)
         if value is None or isinstance(value, (dict, list)):
-            raise ApiError(f"Your sign-in token has no usable '{claim_name}' claim", 403)
+            raise ApiError(f"Your sign-in token has no usable '{claim_name}' claim", 403, code='claim_missing')
         if declared[name]['type'] in (None, 'string') and isinstance(value, (int, float)) and \
                 not isinstance(value, bool):
             value = str(value)  # a numeric user id, bound to a text column
@@ -656,12 +650,12 @@ def run_saved(ref, body, url_params):
     content = store.load_versions(path, with_history=False)
     requested = get_int(request.args.get('version') or body.get('version'), 'version')
     if requested is not None and store.is_draft(content, requested) and not g.permission.admin:
-        raise ApiError(f'Version {requested} not found', 404)
+        raise ApiError(f'Version {requested} not found', 404, code='version_not_found')
     number, saved = store.select_version(content, requested)
     connection_name = request.args.get('connection_name') or body.get('connection_name') \
         or saved.get('connection_name')
     if not connection_name:
-        raise ApiError('Connection name is missing')
+        raise ApiError('Connection name is missing', code='connection_required')
     query_name = store.query_name(path)
     # A key's `queries` and `collections` grants are additive on top of `connections` (see apikeys.py's module
     # docstring): either can reach this exact saved query without any connection access - but only on the
@@ -723,7 +717,8 @@ def run_saved(ref, body, url_params):
                                           allowed_write_ops=g.permission.allowed_write_ops,
                                           allowed_tables=g.permission.allowed_tables)
     except ApiError as error:
-        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'error', 'error': error.message})
+        _record_and_broadcast(path, number, connection_name,
+                              {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
     _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
@@ -739,7 +734,7 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
     not yet supported for a mongo saved query) and no streaming (?stream=true) in this version - see
     BACKLOG #36. Always read-only, same as the ad-hoc /execute_mongo."""
     if get_stream_flag():
-        raise ApiError('Streaming is not supported for Mongo queries yet', 400)
+        raise ApiError('Streaming is not supported for Mongo queries yet', 400, code='stream_unsupported')
     used = set(mongotools.placeholder_names(saved.get('mongo_filter') or {}))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     filter_doc = mongotools.fill_placeholders(saved.get('mongo_filter') or {}, values)
@@ -751,7 +746,8 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
                                           key_name=caller_key_name())
     except ApiError as error:
-        _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'error', 'error': error.message})
+        _record_and_broadcast(path, number, connection_name,
+                              {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
     _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
@@ -808,7 +804,7 @@ def stream_events():
     with _open_streams_lock:
         if _open_streams >= config.events_max_streams():
             raise ApiError('Too many open event streams on this server - try again shortly, or connect to '
-                           '`queryapigate events` instead', 503, retry_after=5)
+                           '`queryapigate events` instead', 503, retry_after=5, code='too_many_streams')
         _open_streams += 1
     broadcaster = current_app.extensions['queryapigate_broadcaster']
     subscriber = broadcaster.subscribe(key_name=None if g.permission.admin else g.permission.name)
@@ -853,7 +849,7 @@ def connection_schema(name):
     require_connection(name)
     database = request.args.get('database') or None
     if database and not g.permission.admin:
-        raise ApiError('Only the admin key may browse a different database on this connection', 403)
+        raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
     return jsonify(schema.fetch_schema(name, database=database)), 200
 
 
@@ -864,10 +860,10 @@ def connection_table_ddl(name):
     require_connection(name)
     table = request.args.get('table')
     if not table:
-        raise ApiError('table is required')
+        raise ApiError('table is required', code='table_required')
     database = request.args.get('database') or None
     if database and not g.permission.admin:
-        raise ApiError('Only the admin key may browse a different database on this connection', 403)
+        raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
     return jsonify(schema.fetch_table_ddl(name, table, database=database)), 200
 
 

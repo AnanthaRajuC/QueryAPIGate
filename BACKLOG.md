@@ -23,7 +23,7 @@ by accident.
 | ~~#61 One governed core for every front door~~ (shipped) | Applying rate limits to MCP calls, and accepting JWT there, changes MCP behaviour |
 | ~~#62 Ad-hoc SQL runs in history and events~~ (shipped) | Touches the history schema and `GET /history` response shapes |
 | ~~#59 Dedicated event log (*storage decision only*)~~ (decided: [ADR 0002](documentation/adr/0002-event-ids.md)) | Decides where event ids come from; the full event log can ship later |
-| #69 Consistent error format | `detail` just changed in 0.12.0; settle the error shape once |
+| ~~#69 Consistent error format~~ (shipped) | `detail` just changed in 0.12.0; settle the error shape once |
 | #70 Decide 1.0's deployment shape | Single instance + PostgreSQL store, or multi-instance (#55-#57); don't promise it implicitly |
 | ~~#74 Respect a saved query's own `LIMIT`~~ (shipped) | A behaviour change to `/q` and `/execute_sql` results; better made before results are a frozen contract |
 | ~~#72 Management API v1 (`/api/v1`)~~ (shipped; legacy routes removed) | Otherwise 1.x has to carry `/list_files`, `/save_sql_to_file` and the other legacy management routes as its contract |
@@ -44,7 +44,7 @@ if #70 picks single-instance for 1.0, a Helm chart and Kubernetes guidance, OIDC
 JWKS support.
 
 **Suggested sequence:**
-1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (#61, #62, #65 and the #59 decision done; #69 left.)
+1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Done.)
 2. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 3. **1.0.0.**
 
@@ -2109,8 +2109,14 @@ breaking the promise to drop it.
 
 ## 69. A consistent, machine-readable error format
 
-**Status: partly shipped - in place for `/api/v1` (#72), which is now the only management interface; the runtime
-routes and MCP are open.** 1.0 milestone, before the freeze. v1 errors are `{error, code, request_id}`, with a
+**Status: shipped.** Every error - `/api/v1`, the runtime routes, `queryapigate events` and MCP tool errors (in
+`structuredContent`) - is `{error, code, request_id}` plus extras; `queryapigate/errors.py` holds the status
+defaults, API.md's Errors section lists every code, and `tests/test_errors.py` fails on a code raised but not
+documented or documented but not raised. Failed runs keep their `code` in history. RFC 9457
+(`application/problem+json`) was considered and not adopted: v1 already used this shape, and switching would rename
+every field for every client for little gain. The original notes follow.
+
+**Was: partly shipped - in place for `/api/v1` (#72); the runtime routes and MCP were open.** 1.0 milestone, before the freeze. v1 errors are `{error, code, request_id}`, with a
 status-derived `code` whenever a raiser doesn't give its own (`app.error_body()`). What remains: decide whether the
 runtime routes (`/q/<name>`, `/execute_sql`, `/catalog`, ...) adopt it - an additive change, since they keep
 `error` - and mirror `code` in MCP tool errors.

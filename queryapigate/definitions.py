@@ -11,7 +11,7 @@ def as_object(value, label):
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ApiError(f'{label} must be a JSON object')
+        raise ApiError(f'{label} must be a JSON object', code='invalid_body')
     return value
 
 
@@ -19,7 +19,7 @@ def validate_cache_ttl(cache_ttl):
     """The one rule a cache_ttl must follow, however it arrives - saving a new version here, or editing an
     existing version's in place via PATCH /api/v1/queries/<name>/versions/<n> (v1.py)."""
     if cache_ttl is not None and (not isinstance(cache_ttl, int) or isinstance(cache_ttl, bool) or cache_ttl < 0):
-        raise ApiError('cache_ttl must be a non-negative integer number of seconds')
+        raise ApiError('cache_ttl must be a non-negative integer number of seconds', code='invalid_body')
 
 
 def validate_definition(data):
@@ -35,15 +35,15 @@ def validate_definition(data):
     """
     query_type = data.get('query_type', 'sql')
     if query_type not in ('sql', 'mongo'):
-        raise ApiError("query_type must be 'sql' or 'mongo'")
+        raise ApiError("query_type must be 'sql' or 'mongo'", code='invalid_body')
     required = [('author', 'Author'), ('description', 'Description'), ('filename', 'Filename')]
     required.append(('sql_query', 'SQL query') if query_type == 'sql' else ('mongo_collection', 'Mongo collection'))
     for field, label in required:
         if not data.get(field) or not isinstance(data[field], str):
-            raise ApiError(f'{label} is missing')
+            raise ApiError(f'{label} is missing', code='invalid_body')
     tags = data.get('tags', [])
     if not isinstance(tags, (list, str)):
-        raise ApiError('tags must be a string or a list')
+        raise ApiError('tags must be a string or a list', code='invalid_body')
     query_parameters = as_object(data.get('query_parameters'), 'query_parameters')
     param_rules.parse_definitions(query_parameters)
     if query_type == 'mongo':
@@ -55,10 +55,10 @@ def validate_definition(data):
     if unused:
         where = 'the filter' if query_type == 'mongo' else 'sql_query'
         raise ApiError(f"query_parameters declares {', '.join(unused)}, which {where} does not use "
-                       '(write :name in it, or remove the declaration)')
+                       '(write :name in it, or remove the declaration)', code='invalid_body')
     connection_name = data.get('connection_name')
     if connection_name is not None and not isinstance(connection_name, str):
-        raise ApiError('connection_name must be a string')
+        raise ApiError('connection_name must be a string', code='invalid_body')
     cache_ttl = data.get('cache_ttl')
     validate_cache_ttl(cache_ttl)
     collection = NO_COLLECTION_GIVEN
