@@ -112,7 +112,7 @@ describe('Settings', () => {
     expect(document.querySelector('.set-row .dot')).toHaveClass('bad');
   });
 
-  it('Interface preferences apply at once and are shared with /ui', async () => {
+  it('Interface preferences apply at once and are kept in this browser', async () => {
     fakeBackend(routes());
     renderAt('/settings');
     await userEvent.click(screen.getByRole('button', { name: 'Interface' }));

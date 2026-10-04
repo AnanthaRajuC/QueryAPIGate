@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { apiJson } from '@/api/client';
+import { api, unwrap } from '@/api/client';
 import { useAllQueries, useCollections, useConnections } from '@/app/data';
 import { useFeedback } from '@/app/feedback';
 
@@ -11,14 +11,6 @@ import { QueryDetail } from './QueryDetail';
 import { QueryList } from './QueryList';
 
 // The classic "API Repository" screen (ui.py #tab-queries): examples strip, page head, and the split list | detail.
-
-interface ExamplesState {
-  loaded: boolean;
-  partial: boolean;
-  queries: string[];
-  collections: string[];
-  roles: string[];
-}
 
 export function RepositoryPage() {
   const { name } = useParams();
@@ -95,7 +87,7 @@ function ExamplesStrip() {
   const { toast, showError } = useFeedback();
   const examples = useQuery({
     queryKey: ['examples'],
-    queryFn: () => apiJson<ExamplesState>('/examples'),
+    queryFn: async () => unwrap(await api.GET('/api/v1/examples')),
     retry: false,
   });
   const collections = useCollections();
@@ -110,7 +102,7 @@ function ExamplesStrip() {
   };
   const load = async () => {
     try {
-      await apiJson('/examples', { method: 'POST' });
+      unwrap(await api.POST('/api/v1/examples'));
       showError('');
       toast('Example APIs loaded');
       refreshAll();
@@ -126,9 +118,9 @@ function ExamplesStrip() {
     )
       return;
     try {
-      const res = await apiJson<{ keys_still_granted?: string[] }>('/examples', { method: 'DELETE' });
+      const res = unwrap(await api.DELETE('/api/v1/examples'));
       toast('Example APIs removed');
-      if (res.keys_still_granted?.length) {
+      if (res.keys_still_granted.length) {
         showError(
           'These keys were granted an example collection, which no longer exists, so that grant now reaches nothing: ' +
             res.keys_still_granted.join(', '),

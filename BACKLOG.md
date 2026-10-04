@@ -2140,7 +2140,8 @@ store, there's no documented procedure for it. A backup nobody has restored is n
 
 ## 72. Management API v1: a versioned, resource-oriented `/api/v1`
 
-**Status: in progress - every resource the Console needs except collections has shipped.** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
+**Status: shipped for the Console (2026-10-04) - every management route has a `/api/v1` successor. Open: removing the
+deprecated routes (with the 1.0 API freeze).** Decided in [ADR 0001](documentation/adr/0001-console-and-management-api.md). Built one resource at a time,
 driven by the Console's slices (#73). Belongs to the 1.0 milestone.
 
 Shipped:
@@ -2178,8 +2179,13 @@ routes.
 (the Console no longer calls the deprecated `/query_flow`); and `created_at`, `last_used_at`, `cache_ttl` on query
 summaries and `run_count` on a query's versions (one grouped read each).
 
-Remaining: collections and the example APIs - the Console still calls the legacy `/collections` (list, rename,
-Postman export) and `/examples` (the examples strip). Those are what is left of #72 before phase 3.
+**`/api/v1/collections` and `/api/v1/examples` (2026-10-04):** list, rename (409 `collection_exists` without
+`merge`), Postman export; examples status, install, remove. Service in `queryapigate/services/collections.py`. The
+Console now calls no legacy management route.
+
+Every management route has a v1 successor; the legacy ones send `Deprecation` headers and nothing in QueryAPIGate
+calls them. Open: whether and when to remove them, decided with the 1.0 API freeze; and the MCP server, which isn't
+part of `/api/v1`.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2222,7 +2228,8 @@ legacy names.
 
 ## 73. QueryAPIGate Console: a React/TypeScript frontend replacing `/ui`
 
-**Status: phases 1 and 2 shipped - the Console has every classic screen, at visual parity; phases 3-4 open.** Decided in
+**Status: shipped (2026-10-04) - all four phases. The Console is the admin UI; `/ui` redirects to it and `ui.py` is
+removed.** Decided in
 [ADR 0001](documentation/adr/0001-console-and-management-api.md). Additive; ships as experimental (#64) until it
 reaches parity with `/ui`.
 
@@ -2304,8 +2311,15 @@ by side-by-side screenshots of all four screens in light and dark (Help identica
 numbers and TTLs), both drawers, and an end-to-end run (a run elsewhere appears on Home live; table drill-down; View
 in Access map; evicting an entry; reading a doc); Vitest.
 
-Next: phase 3 - `/ui` redirects to `/console`, and the Console leaves experimental. Before that, the collections and
-examples resources (#72), so the Console calls no legacy management route.
+**Phases 3 and 4 shipped together (2026-10-04)** - with no users yet, there was nothing to stage:
+- the collections and examples resources (#72), so the Console calls no legacy management route;
+- an end-to-end suite (`frontend/e2e/`, Playwright): every screen through the sidebar, plus connections, API keys,
+  roles, Designer → draft → publish → call, Home's live updates, Caching, the Access map drill-down, collection
+  rename and the `/ui` redirect - against a real server with the example APIs, failing on any page error or
+  unexpected error response; in CI on every push;
+- `/ui` redirects (301) to `/console/`; `queryapigate/ui.py` (~6,200 lines) is deleted, and its page tests replaced
+  by a redirect test and a guard that the Console renders HTML only through DOMPurify;
+- docs updated: README, API.md (Admin UI), TECHNOLOGY_STACK, CONTRIBUTING (e2e), EXAMPLES, DEPLOYMENT and the how-tos.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

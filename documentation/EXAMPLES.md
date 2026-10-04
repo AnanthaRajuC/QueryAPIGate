@@ -9,7 +9,7 @@ rate-limited surface over a database, instead of a hand-rolled controller.
 pip install queryapigate
 queryapigate examples load          # installs everything below, and prints a real API key per scenario -
                                      # store them now, they cannot be shown again (see below)
-queryapigate serve                  # then open http://127.0.0.1:5000/ui - a key from above is now required
+queryapigate serve                  # then open http://127.0.0.1:5000/console - a key from above is now required
 queryapigate examples unload        # removes exactly what `load` installed - nothing else
 ~~~
 
@@ -155,7 +155,7 @@ Granting a second collection to any role - yours or this one - works the same wa
 
 ## Things to try next
 
-- **Admin UI** (`/ui`): the Saved Queries tab groups these by collection; **Move…** shows which keys would gain or lose
+- **Admin UI** (`/console`): the API Repository groups these by collection; **Move…** shows which keys would gain or lose
   access before anything changes; the Audit Log records every change.
 - **Docs and OpenAPI**: `/docs` lists exactly the queries the key you paste in can run - try it with the partner key.
 - **Schema browser** (Run SQL → Schema → Columns): PK/FK badges throughout - `rental.film_id`/`customer_id`,

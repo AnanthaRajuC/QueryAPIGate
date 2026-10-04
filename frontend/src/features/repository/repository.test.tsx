@@ -207,3 +207,71 @@ describe('API Repository - the New version drawer', () => {
     });
   });
 });
+
+describe('API Repository - collections and the example APIs', () => {
+  it('renames a collection through /api/v1/collections', async () => {
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'PATCH /api/v1/collections/catalog': () => ({
+        name: 'films-v2',
+        moved: { queries: ['films'], keys: ['partner'], roles: [] },
+      }),
+    });
+    renderAt('/queries/films');
+    await userEvent.click(await screen.findByRole('link', { name: 'Rename' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.clear(within(drawer).getByLabelText('New name')); // it starts as the current name
+    await userEvent.type(within(drawer).getByLabelText('New name'), 'films-v2');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({ name: 'films-v2', merge: false });
+    expect(await screen.findByText('Renamed catalog → films-v2')).toBeInTheDocument();
+  });
+
+  it('exports a collection for Postman', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/collections/catalog/postman': () => ({ info: { name: 'catalog' }, item: [] }),
+    });
+    renderAt('/queries/films');
+    await userEvent.click(await screen.findByRole('link', { name: 'Postman' }));
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    expect(calls.some((c) => c.path === '/api/v1/collections/catalog/postman')).toBe(true);
+    click.mockRestore();
+  });
+
+  it('removes the example APIs, warning about grants that now reach nothing', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const status = {
+      loaded: true,
+      partial: false,
+      connection: 'examples',
+      queries: ['films'],
+      roles: ['example-partner'],
+      keys: [],
+      collections: ['catalog'],
+    };
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/examples': () => status,
+      'DELETE /api/v1/examples': () => ({
+        removed: { connection: true, queries: ['films'], roles: ['example-partner'], keys: [] },
+        keys_still_granted: ['partner'],
+        status: { ...status, loaded: false, connection: null, queries: [], roles: [], collections: [] },
+      }),
+    });
+    renderAt('/queries/films');
+    const strip = await waitFor(() => {
+      const el = document.getElementById('examples-strip');
+      if (!el || el.hidden) throw new Error('not shown yet');
+      return el;
+    });
+    expect(strip).toHaveTextContent('Example APIs are loaded: 1 queries in 1 collections, 1 role');
+    await userEvent.click(within(strip).getByRole('button', { name: 'Remove examples' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText('Example APIs removed')).toBeInTheDocument();
+    expect(document.getElementById('error-banner')).toHaveTextContent('partner');
+    vi.restoreAllMocks();
+  });
+});

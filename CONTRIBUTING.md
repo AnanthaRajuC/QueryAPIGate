@@ -121,10 +121,10 @@ followed by `coverage report` shows local coverage; CI uploads it to [Codecov](h
 
 ### Console (frontend)
 
-The QueryAPIGate Console - the new web UI at `/console`, replacing `/ui` one screen at a time - lives in `frontend/`
-(React + TypeScript + Vite; see [ADR 0001](documentation/adr/0001-console-and-management-api.md)). **Backend work
-never needs Node.js:** without a build, `/console` shows a short "not built" page and `/ui` keeps working, and the
-Console's CI only runs when `frontend/` changes.
+The QueryAPIGate Console - the admin UI at `/console` - lives in `frontend/` (React + TypeScript + Vite; see
+[ADR 0001](documentation/adr/0001-console-and-management-api.md)). **Backend work never needs Node.js:** without a
+build, `/console` shows a short "not built" page, and everything it does is plain API (`/docs`). To see the UI from a
+source checkout, build it once (below) or run the Docker image.
 
 To work on it (Node.js 22, see `frontend/.nvmrc`), run the backend as usual, then in a second terminal:
 
@@ -145,7 +145,19 @@ python frontend/scripts/dump_openapi.py
 
 The backend test suite fails while the two disagree, and also checks that every route and method is documented.
 
-`queryapigate/ui.py` (the classic UI) is frozen: bug fixes only, no new screens. New UI work goes into the Console.
+End-to-end tests drive the built Console in Chromium against a real server - a throwaway home with the example APIs
+(`frontend/e2e/`, run in CI on every push):
+
+~~~bash
+cd frontend
+npm run build
+npx playwright install chromium   # once
+npm run e2e                       # set QUERYAPIGATE_BIN=../.venv/bin/queryapigate if it isn't on PATH
+~~~
+
+Many comments in `frontend/src` cite the function of `queryapigate/ui.py` a screen was ported from - the hand-written
+admin page the Console replaced. It was removed after the migration; read it in git history (`git show
+<commit>^:queryapigate/ui.py`, where `<commit>` is the one that deleted it).
 
 ### Docs site
 

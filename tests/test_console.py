@@ -43,7 +43,7 @@ class NotBuiltTests(ConsoleTestCase):
             page = res.get_data(as_text=True)
             self.assertIn("isn't built", page)
             self.assertIn('npm run build', page)
-            self.assertIn('href="/ui"', page)
+            self.assertIn('href="/docs"', page)
 
 
 class BuiltTests(ConsoleTestCase):

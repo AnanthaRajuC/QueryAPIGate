@@ -3,3 +3,5 @@ node_modules/
 src/api/schema.d.ts
 *.tsbuildinfo
 coverage/
+test-results/
+playwright-report/

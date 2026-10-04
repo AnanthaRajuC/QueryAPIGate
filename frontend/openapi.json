@@ -298,6 +298,98 @@
         ],
         "type": "object"
       },
+      "CollectionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "keys": {
+                  "description": "API keys whose collections grant names it.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "queries": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "roles": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "name",
+                "queries",
+                "keys",
+                "roles"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "uncollected": {
+            "description": "Queries in no collection.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "uncollected"
+        ],
+        "type": "object"
+      },
+      "CollectionRenamed": {
+        "properties": {
+          "moved": {
+            "properties": {
+              "keys": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "queries": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "roles": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "queries",
+              "keys",
+              "roles"
+            ],
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "moved"
+        ],
+        "type": "object"
+      },
       "Connection": {
         "properties": {
           "active": {
@@ -564,6 +656,160 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "ExamplesLoaded": {
+        "properties": {
+          "added": {
+            "properties": {
+              "connection": {
+                "type": "boolean"
+              },
+              "keys": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "queries": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "roles": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "connection",
+              "queries",
+              "roles",
+              "keys"
+            ],
+            "type": "object"
+          },
+          "key_secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The new example keys' secrets - shown this once.",
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExamplesStatus"
+          }
+        },
+        "required": [
+          "added",
+          "key_secrets",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ExamplesRemoved": {
+        "properties": {
+          "keys_still_granted": {
+            "description": "Other keys granted an example collection; that grant is now inert.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "properties": {
+              "connection": {
+                "type": "boolean"
+              },
+              "keys": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "queries": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "roles": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "connection",
+              "queries",
+              "roles",
+              "keys"
+            ],
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExamplesStatus"
+          }
+        },
+        "required": [
+          "removed",
+          "keys_still_granted",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ExamplesStatus": {
+        "properties": {
+          "collections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "connection": {
+            "nullable": true,
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "loaded": {
+            "description": "All of them are installed.",
+            "type": "boolean"
+          },
+          "partial": {
+            "description": "Some are: an interrupted load (POST again completes it).",
+            "type": "boolean"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "loaded",
+          "partial",
+          "connection",
+          "queries",
+          "roles",
+          "keys",
+          "collections"
         ],
         "type": "object"
       },
@@ -2294,6 +2540,238 @@
         ]
       }
     },
+    "/api/v1/collections": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Every collection with its queries and who reaches it, and the queries in none",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "merge": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRenamed"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Rename it (into an existing one only with merge: true); grants follow",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/collections/{name}/postman": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "The collection as a Postman Collection v2.1 file",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
     "/api/v1/connections": {
       "get": {
         "responses": {
@@ -3015,6 +3493,192 @@
           }
         },
         "summary": "A connection's tables and columns",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/examples": {
+      "delete": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExamplesRemoved"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Remove exactly what is marked as an example",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExamplesStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Whether the example APIs are installed",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExamplesLoaded"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Install the example APIs; the response carries the example keys' secrets, shown this once",
         "tags": [
           "Management API v1"
         ]
@@ -5732,6 +6396,7 @@
     },
     "/collections": {
       "get": {
+        "deprecated": true,
         "description": "Also lists a collection that only a grant still names (no queries left), and the queries in no collection, so an inert grant is visible rather than silent.",
         "responses": {
           "200": {
@@ -5767,6 +6432,7 @@
     },
     "/collections/{name}": {
       "patch": {
+        "deprecated": true,
         "description": "Resumable and never narrows access part-way. An existing target needs merge=true - which is also how to finish a rename that was interrupted.",
         "parameters": [
           {
@@ -5834,6 +6500,7 @@
     },
     "/collections/{name}/postman": {
       "get": {
+        "deprecated": true,
         "description": "One GET /q/{name} request per query (latest version) with its parameters filled in from their own rules, authenticating from a {{apiKey}} variable left empty - the file never holds a key. A snapshot: export again after queries change.",
         "parameters": [
           {
@@ -6469,6 +7136,7 @@
     },
     "/examples": {
       "delete": {
+        "deprecated": true,
         "description": "Removes exactly what is marked as an example and nothing else, and lists any keys that were granted an example collection (now inert).",
         "responses": {
           "200": {
@@ -6502,6 +7170,7 @@
         ]
       },
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "loaded, partial, and the example queries, roles and collections present"
@@ -6534,6 +7203,7 @@
         ]
       },
       "post": {
+        "deprecated": true,
         "description": "Four worked scenarios - reporting, dashboard, export, partner - as saved queries in collections, matching roles and a small generated SQLite connection named \"examples\". Everything is marked as an example. Idempotent; 409 and nothing changed if something that is not an example already holds one of their names. No API key is created.",
         "responses": {
           "200": {

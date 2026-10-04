@@ -212,6 +212,13 @@ Until step 3, the Console ships marked experimental, alongside the existing UI.
 - **Third-party content keeps the CSP strict.** Help's markdown renderer and sanitizer are bundled (lazily, into
   Help's own chunk) instead of loaded from a CDN, so `script-src` stays `'self'`.
 
+## Outcome (2026-10-04)
+
+The migration is complete. The Console has every screen `/ui` had, built on `/api/v1`, and was checked screen by
+screen against the classic UI in side-by-side screenshots; `/ui` now redirects to `/console`, and `ui.py` is removed.
+Every management route has a v1 successor, and the legacy routes, deprecated, are called by nothing in QueryAPIGate.
+An end-to-end suite (`frontend/e2e/`) now guards the Console in CI in place of those manual comparisons.
+
 ## Open questions
 
 - Console authentication: keep the admin API key in session storage (as `/ui` does today), or add a proper

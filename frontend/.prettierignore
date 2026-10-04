@@ -4,3 +4,5 @@ openapi.json
 src/api/schema.d.ts
 package-lock.json
 src/styles/classic.css
+test-results
+playwright-report

@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-// The classic UI's interface preferences (Settings > Interface: theme, density and the default result format),
-// stored per browser under the same key, so changing them in either UI changes both.
+// The interface preferences (Settings > Interface: theme, density and the default result format), stored per browser
+// - under the classic UI's key, so preferences set before the Console replaced it carry over.
 const PREFS_KEY = 'queryapigate-ui-prefs';
 
 export interface Prefs {
@@ -51,7 +51,7 @@ export function setPref(key: keyof Prefs, value: string) {
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  window.addEventListener('storage', listener); // a change made in another tab, or in /ui
+  window.addEventListener('storage', listener); // a change made in another tab
   return () => {
     listeners.delete(listener);
     window.removeEventListener('storage', listener);

@@ -38,7 +38,6 @@ from . import (
     sqlflow,
     sqltools,
     store,
-    ui,
 )
 from . import params as param_rules
 from .errors import ApiError
@@ -75,6 +74,8 @@ DEPRECATED_ENDPOINTS = {
     'api.mcp_tools_endpoint': '/api/v1/mcp/tools',
     **dict.fromkeys(('api.cache_entries', 'api.clear_cache_entries', 'api.cache_entry_body',
                      'api.delete_cache_entry'), '/api/v1/cache/entries'),
+    **dict.fromkeys(('api.get_collections', 'api.rename_collection', 'api.collection_postman'), '/api/v1/collections'),
+    **dict.fromkeys(('api.get_examples', 'api.load_examples', 'api.unload_examples'), '/api/v1/examples'),
 }  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
@@ -991,7 +992,7 @@ def stream_events():
 
     The client reads this with fetch()'s streamed response body rather than a plain `new EventSource(...)`:
     EventSource cannot set custom request headers, and this app has no cookie-based auth to fall back on -
-    every other request already authenticates via X-API-Key (see ui.py's apiFetch()). Putting the key in the
+    every other request already authenticates via X-API-Key (see the Console's apiFetch()). Putting the key in the
     URL instead would put a secret in server access logs and browser history, which nothing else in this
     app does. Same wire format either way, just read manually so header-based auth keeps working.
 
@@ -1482,7 +1483,8 @@ def docs():
 
 @bp.route('/ui', methods=['GET'])
 def admin_ui():
-    return Response(ui.UI_HTML, mimetype='text/html')
+    """The admin UI moved to the Console (ADR 0001); old bookmarks land there."""
+    return redirect('/console/', 301)
 
 
 @bp.route('/console', methods=['GET'])

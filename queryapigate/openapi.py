@@ -637,7 +637,10 @@ _DEPRECATED_OPERATIONS = (('/list_files', 'get'), ('/view_file_content', 'get'),
                           ('/roles/{name}', 'patch'), ('/roles/{name}', 'delete'), ('/audit_log', 'get'),
                           ('/history', 'get'), ('/settings', 'get'), ('/settings/mcp_status', 'get'),
                           ('/settings/mcp_tools', 'get'), ('/cache/entries', 'get'), ('/cache/entries', 'delete'),
-                          ('/cache/entries/{key}', 'get'), ('/cache/entries/{key}', 'delete'))
+                          ('/cache/entries/{key}', 'get'), ('/cache/entries/{key}', 'delete'),
+                          ('/collections', 'get'), ('/collections/{name}', 'patch'),
+                          ('/collections/{name}/postman', 'get'), ('/examples', 'get'), ('/examples', 'post'),
+                          ('/examples', 'delete'))
 
 
 DOCS_HTML = """<!doctype html>
@@ -650,7 +653,7 @@ DOCS_HTML = """<!doctype html>
 </style></head>
 <body>
 <div id="key-bar">
-  <a href="ui">Admin UI</a> &middot;
+  <a href="console/">Admin UI</a> &middot;
   API key (only needed if the server sets QUERYAPIGATE_API_KEY; it reveals your saved queries below and is
   sent with "Try it out" requests; kept for this browser tab only):
   <input id="key" type="password" autocomplete="off" placeholder="X-API-Key">

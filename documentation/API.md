@@ -4,7 +4,7 @@ Base URL when running locally: `http://127.0.0.1:5000`. The same information is 
 and as an OpenAPI document at `/openapi.json`.
 
 If the server has any key configured - `QUERYAPIGATE_API_KEY` or a scoped key created through `/api_keys` - send it
-with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/ui`, `/openapi.json` and `/metrics` are always
+with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` are always
 public; `/openapi.json`'s saved-query section still varies with who's asking). See
 [Authentication and permissions](#authentication-and-permissions).
 
@@ -354,6 +354,17 @@ secret.
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target` and `changes`. Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 
+### Collections and the example APIs
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/collections` | Every collection by `name`, with its `queries` and the `keys` and `roles` whose grants reach it; `uncollected` lists the queries in none. File a query under one with `PATCH /api/v1/queries/{name}`. |
+| `PATCH /api/v1/collections/{name}` | Rename it: `{"name": "new"}`. Grants follow, and nobody's access narrows part-way. Into an existing collection only with `"merge": true` (409 `collection_exists` otherwise), which also finishes a rename that was interrupted. |
+| `GET /api/v1/collections/{name}/postman` | The collection as a Postman Collection v2.1 file. It holds no key. |
+| `GET /api/v1/examples` | Whether the [example APIs](EXAMPLES.md) are installed: `loaded`, or `partial` after an interrupted load, and what they are. |
+| `POST /api/v1/examples` | Install them (idempotent; completes an interrupted load). The example keys' secrets are in the response, shown this once. 409 `examples_conflict`, changing nothing, if something that isn't an example holds one of their names. |
+| `DELETE /api/v1/examples` | Remove exactly what is marked as an example. `keys_still_granted` names other keys granted an example collection, whose grant now reaches nothing. |
+
 ### The response cache
 
 | Method and path | What it does |
@@ -389,7 +400,11 @@ deprecated:
 - replaced by `/api/v1/history` and `/api/v1/audit`: `GET /history` and `GET /audit_log`;
 - replaced by `/api/v1/settings` and `/api/v1/mcp/...`: `GET /settings`, `GET /settings/mcp_status` and
   `GET /settings/mcp_tools`;
-- replaced by `/api/v1/cache/entries`: `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`.
+- replaced by `/api/v1/cache/entries`: `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`;
+- replaced by `/api/v1/collections` and `/api/v1/examples`: `GET /collections`, `PATCH /collections/{name}`,
+  `GET /collections/{name}/postman`, and `GET`/`POST`/`DELETE /examples`.
+
+Nothing in QueryAPIGate calls the deprecated routes any more; they stay until the 1.0 API freeze decides their fate.
 
 (`GET /query_flow`'s successor is `GET /api/v1/queries/{name}/versions/{version}/flow`.)
 
@@ -1172,63 +1187,20 @@ Both are off unless the server enables them (`QUERYAPIGATE_RATE_LIMIT`, `QUERYAP
 
 ## Admin UI
 
-`/ui` is a small, self-contained admin page (no build step, no external dependency) for managing
-connections, saved queries and API keys, running ad-hoc SQL, reviewing the audit log, and viewing a live
-snapshot of `/metrics` - a client of the API above, adding no server-side logic of its own. Loading the page
-needs no API key; the requests it makes are gated exactly like any other client, so a scoped (non-admin) key
-sees the same "only the admin key" message on the API Keys and Audit Log tabs as it does on Connections and
-Saved Queries (the Metrics tab is the one exception - `/metrics` is public, so it works with no key at all).
-It shares its API-key storage with `/docs` (the same browser-tab-only `sessionStorage` entry), so entering
-the key on one page covers both.
+The admin UI - the QueryAPIGate Console - is at `/console` ([ADR 0001](adr/0001-console-and-management-api.md)).
+It covers the whole workflow: connections, the API Designer (a SQL editor with completion that knows your tables and
+columns, a schema browser, Explain, parameterize, run and save), the API Repository (versions, drafts and publishing,
+history, curl and CLI snippets, cache, metrics, who can reach each query), API keys and roles, the Access map, caching,
+metrics, the audit log, settings and help.
 
-Both the Connections and API Keys tabs have a "Usage" column showing each row's live activity (queries run,
-failures, and - for a connection - average latency), sourced from the `usage` object both endpoints now
-carry; a row with no activity since the server started reads "No activity yet" rather than showing zeros.
+It is a client of the [Management API](#management-api-v1) and the runtime routes only - it adds no server-side
+logic of its own. Loading the page needs no API key; the requests it makes are gated exactly like any other client's,
+so a scoped (non-admin) key sees "only the admin key" messages wherever it reaches past its grants. It shares its
+API-key storage with `/docs` (the same browser-tab-only `sessionStorage` entry), so entering the key on one page covers
+both. Interface preferences (theme, table density, default result format) are kept in the browser.
 
-The API Keys tab creates, edits and revokes [scoped keys](#authentication-and-permissions): its "All
-connections" checkbox toggles between the `"*"` wildcard and a specific set of connections, and a freshly
-created key's secret is shown once, in place, with a copy button - the same one-time-only reveal the API
-itself enforces, since the page never receives the secret again after that response. Its "Create from" field
-lists any [permission roles](#permission-roles-templates) that exist; picking one dims the grant fields below
-(they'll be copied from the role instead) and creates the key with `{"name": ..., "role": ...}` - only
-`expires_at` stays editable alongside it.
-
-The Roles tab manages roles themselves - the same connections/queries/write-access/rate-limit/allowed-IPs
-form as the API Keys tab, minus `expires_at` and `active`, which don't apply to a template. Its "New key from
-this" button jumps straight to the API Keys tab's "New API key" drawer with that role pre-selected.
-
-The Saved Queries tab groups the list by [collection](#collections) once any exists (collapsible; filtering by a
-collection's name shows its queries), and each group header shows how many keys are granted it, a **Postman**
-download and a Rename button. **New collection** (next to New saved query) asks for a name and the queries to
-file under it - a collection exists only while a query is in it, so it cannot be created empty - and previews
-who gains or loses access first. A query's detail panel has a **Move…** button: it picks an existing collection, a new name, or none, and
-shows - before anything changes - which keys will gain or lose access to the query and which roles will include
-it, in the same terms the audit log records afterward. The New saved query drawer has an optional Collection
-field that previews the same thing; changing an *existing* query's collection goes through Move… only, so there
-is one path that shows the impact. The API Keys and Roles forms have a Collections field, and the tables show a
-key's or role's collection grants as dashed `name/` tags beside its query names.
-
-A saved query's History tab shows `execution_history` with a "Caller" and "Request ID" column alongside the
-existing time/connection/rows/duration/error ones, and a status filter (all/success/failed) plus a search box
-over connection, caller, request ID and error text - useful once a version has accumulated more than a
-handful of runs and you're looking for the failures, or everything one particular key did. Filtering happens
-client-side, over the run history the page already has, so it applies instantly with no extra request.
-
-Any JSON result with at least one numeric column gets a "Chart" toggle next to "Copy as TSV" in the Run SQL
-and saved-query Run tabs: a quick bar chart, off by default, of the columns on screen. It charts the
-*current page only* - up to 50 rows of it - with a visible reminder that it isn't the full result, since a
-chart of page 3 of 50 can look complete without being one. Label and value columns are pickable from
-dropdowns (value defaults to the first all-numeric column, label to the first column that isn't); rendered
-as inline SVG with no charting library, the same no-dependency approach the SQL editor's own syntax
-highlighting already uses.
-
-Both the Run SQL tab and the New saved query drawer have a **Schema** panel next to their SQL editor,
-backed by [`GET /connections/<name>/schema`](#connections): it lists the selected connection's tables,
-expands to show a table's columns (with type and nullability as a tooltip), and clicking a table or column
-inserts its name at the cursor. It updates automatically when the connection changes, and a connection
-whose schema isn't available (a `jdbc` connection, or one the caller isn't permitted to use) shows that
-message in the panel itself rather than the page's error banner, since browsing the schema is optional, not
-the action the user took.
+The Console is built with React and TypeScript and ships prebuilt in the wheel and the Docker image - running it needs
+no Node.js. `/ui`, where an earlier, hand-written admin page used to be, redirects here.
 
 ## Interactive documentation
 

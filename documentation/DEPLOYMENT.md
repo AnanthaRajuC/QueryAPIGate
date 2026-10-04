@@ -157,7 +157,7 @@ retroactively pick up `init`'s template file once it already has - `docker compo
 container. Running `init` first avoids that ordering trap entirely.
 
 `init` writes one template connection per supported database type, all inactive - activate the ones you
-need from the admin UI (`https://api.example.com/ui`) or `PATCH /connections`. Do **not** run
+need from the admin UI (`https://api.example.com/console`) or `PATCH /api/v1/connections/{name}`. Do **not** run
 `queryapigate examples load` against a production instance; it's meant for trying the product, seeds a
 throwaway SQLite database and five example API keys, and is documented as such in
 [EXAMPLES.md](EXAMPLES.md).

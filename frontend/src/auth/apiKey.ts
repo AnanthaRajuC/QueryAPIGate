@@ -1,5 +1,5 @@
-// The API key lives in sessionStorage under the same name /ui and /docs use, so signing in to any of them signs in
-// to all three for this tab. Storage can be unavailable (private windows, blocked site data), so every access is
+// The API key lives in sessionStorage under the same name /docs uses, so signing in to either signs in to both for
+// this tab. Storage can be unavailable (private windows, blocked site data), so every access is
 // guarded and the Console simply behaves as signed out.
 const STORAGE_KEY = 'queryapigate-key';
 

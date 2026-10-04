@@ -57,7 +57,7 @@ setup guide](documentation/INSTALLATION_AND_SETUP.md).
 - **Observable from day one.** Structured logs, request IDs, per-key metrics and a Prometheus `/metrics`
   endpoint - see [Observability](documentation/API.md#observability).
 - **A real admin UI included.** Manage connections, saved queries, API keys and roles, run ad-hoc SQL with a
-  schema browser, and review the audit log - all from `/ui`, with no separate tool to install.
+  schema browser, and review the audit log - all from `/console`, with no separate tool to install.
 
 ## Where to go next
 

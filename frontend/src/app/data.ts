@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { api, apiJson, unwrap, type Schemas } from '@/api/client';
+import { api, unwrap, type Schemas } from '@/api/client';
 
 // Data the shell and several screens share. /api/v1 where it exists; the legacy routes (typed loosely here) for
 // what hasn't got a v1 resource yet - collections.
@@ -61,7 +61,14 @@ export function useRoles() {
 export function useCollections() {
   return useQuery({
     queryKey: ['collections'],
-    queryFn: () => apiJson<CollectionsInfo>('/collections'),
+    queryFn: async (): Promise<CollectionsInfo> => {
+      const listing = unwrap(await api.GET('/api/v1/collections'));
+      // keyed by name, as the screens look collections up
+      return {
+        collections: Object.fromEntries(listing.items.map(({ name, ...entry }) => [name, entry])),
+        uncollected: listing.uncollected,
+      };
+    },
     retry: false,
   });
 }

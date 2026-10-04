@@ -52,21 +52,27 @@ development environment resolved; "Constraint" is what `pyproject.toml` actually
 | Tool | Version | Used for |
 |---|---|---|
 | `unittest` (stdlib) | Python's own standard library | The actual test runner - `python -m unittest discover`, ~750+ tests across `tests/`. Not `pytest` - a deliberate choice to add no test-framework dependency at all. |
-| ruff | 0.16.8 (`>=0.5`) | Linting (`ruff check .`) - see `[tool.ruff]` in `pyproject.toml` for the exact rule set and the one file-specific exception (`ui.py`'s embedded JS is exempted from line-length, since it's not Python prose). |
+| ruff | 0.16.8 (`>=0.5`) | Linting (`ruff check .`) - see `[tool.ruff]` in `pyproject.toml` for the exact rule set. |
 | mypy | 2.3.1 (`>=1.10`) | Static type checking (`mypy queryapigate`) over a gradually-typed codebase - `[tool.mypy]` explains why there's no `python_version` pin (mypy 2.x dropped 3.9 checking, but 3.9 support is still verified for real by CI running the suite on 3.9). |
 | hypothesis | 6.168.0 (`>=6.100`) | Property-based fuzz testing of the SQL guard (`tests/test_sql_guard_fuzz.py`) - generating adversarial SQL text to try to sneak a second statement or a write past `sqltools.validate_sql`. |
 | openapi-spec-validator | 0.9.0 (`>=0.7`) | Validating that `/openapi.json`'s generated document is actually a well-formed OpenAPI spec, not just JSON that looks plausible. |
-| coverage | 7.16.1 (`>=7.4`) | Test coverage measurement - `[tool.coverage.run]` explicitly excludes `ui.py` (a hand-written HTML/JS page inside a Python string, not code coverage can meaningfully measure). |
-| Playwright | 1.63.0 | **Not a project dependency at all** - installed ad hoc in this environment to verify admin-UI changes end-to-end in a real headless browser during development (screenshotting, clicking through real flows) before calling a UI change done. Not referenced anywhere in `pyproject.toml`. |
+| coverage | 7.16.1 (`>=7.4`) | Test coverage measurement (`[tool.coverage.run]`). |
+| Playwright | `@playwright/test` (`frontend/package.json`) | End-to-end tests of the built Console in Chromium against a real server (`frontend/e2e/`), run in CI. A frontend dev dependency only - never part of the Python package. |
 
-### The frontend: deliberately no framework, no build step
+### The frontend: the Console
 
-The entire admin UI (`/ui`) is a single hand-written HTML/CSS/JavaScript page, generated from one Python
-string (`UI_HTML` in `queryapigate/ui.py`, several thousand lines). No React/Vue/Svelte, no bundler
-(Webpack/Vite/esbuild), no npm dependency, no transpilation - plain ES5-style JavaScript (a small `h(tag,
-attrs, ...children)` DOM-builder function stands in for JSX) and hand-written CSS, served as-is. This is a
-deliberate choice, not an oversight: it keeps `pip install queryapigate` self-contained with zero Node.js
-requirement anywhere in the install or deploy path.
+The admin UI (`/console`) is the QueryAPIGate Console, in `frontend/`: React 19 and TypeScript, built with Vite, with
+TanStack Query for server state, React Router, CodeMirror 6 for the SQL editor, and a client generated from the
+backend's own OpenAPI description (`openapi-typescript` and `openapi-fetch`). No component library: the stylesheet is
+the hand-written one the earlier admin page had (`src/styles/classic.css`). Tests: Vitest with Testing Library, and
+Playwright end to end. See [ADR 0001](adr/0001-console-and-management-api.md).
+
+The build is committed to nothing: release builds (the wheel and the Docker image) run `npm run build` and ship the
+result in `queryapigate/console_dist/`, so `pip install queryapigate` still needs no Node.js. A source checkout without
+a build serves a short "not built" page at `/console`.
+
+It replaced a single hand-written HTML/CSS/JavaScript page in a Python string (`queryapigate/ui.py`), which was
+removed once every screen had moved over; `/ui` redirects to `/console`.
 
 ### Packaging and CI (not a runtime dependency, but part of the project)
 
@@ -117,4 +123,4 @@ The `queryapigate` package is a Flask application, split into focused modules ra
 | `config.py` | All environment-variable configuration in one place. |
 | `errors.py` | The single `ApiError` exception every endpoint raises for a client-facing failure. |
 | `cli.py` | The `queryapigate` command (`serve`, `init`, `export`, `examples ...`). |
-| `ui.py` | The entire admin UI - see "The frontend" above. |
+| `console.py` | Serves the prebuilt Console (`console_dist/`) at `/console`, with its Content-Security-Policy. |

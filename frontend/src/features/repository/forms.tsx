@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ApiError, apiJson } from '@/api/client';
+import { ApiError, api, apiJson, unwrap } from '@/api/client';
 import { useAllQueries, useCollections, useConnections, type CollectionsInfo } from '@/app/data';
 import { Field, FormActions, useFeedback } from '@/app/feedback';
 import { SchemaField, useSchema } from '@/components/SchemaBrowser';
@@ -633,11 +633,12 @@ export function RenameCollectionForm({ name }: { name: string }) {
     }
     setBusy(true);
     try {
-      await apiJson(`/collections/${encodeURIComponent(name)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: target, merge }),
-      });
+      unwrap(
+        await api.PATCH('/api/v1/collections/{name}', {
+          params: { path: { name } },
+          body: { name: target, merge },
+        }),
+      );
       showError('');
       closeDrawer();
       toast(`Renamed ${name} → ${target}`);

@@ -272,7 +272,7 @@ def _examples_load(args):
             print('Example API keys (store these now - they cannot be shown again):')
             for name, secret in sorted(added['key_secrets'].items()):
                 print(f'  {name}: {secret}')
-        print('Try:  queryapigate serve   then open /ui, or  curl http://127.0.0.1:5000/q/example_top_films '
+        print('Try:  queryapigate serve   then open /console, or  curl http://127.0.0.1:5000/q/example_top_films '
              "-H 'X-API-Key: <one of the secrets above>'")
         print("Watch it live:  curl -N http://127.0.0.1:5000/events -H 'X-API-Key: <one of the secrets above>' "
              '(then call a query in another terminal to see the event arrive)')

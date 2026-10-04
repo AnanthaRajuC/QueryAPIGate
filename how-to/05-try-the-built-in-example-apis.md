@@ -22,7 +22,7 @@ Example API keys (store these now - they cannot be shown again):
   example-export: sk_...
   example-partner: sk_...
   example-reporting: sk_...
-Try:  queryapigate serve   then open /ui, or  curl http://127.0.0.1:5000/q/example_top_films -H 'X-API-Key: <one of the secrets above>'
+Try:  queryapigate serve   then open /console, or  curl http://127.0.0.1:5000/q/example_top_films -H 'X-API-Key: <one of the secrets above>'
 Watch it live:  curl -N http://127.0.0.1:5000/events -H 'X-API-Key: <one of the secrets above>' (then call a query in another terminal to see the event arrive)
 Remove them again with:  queryapigate examples unload
 ```
@@ -98,7 +98,7 @@ curl 'http://127.0.0.1:5000/q/example_all_rentals?stream=true&format=csv' -H 'X-
 
 ## Step 3: Explore it in the admin UI
 
-Open **<http://127.0.0.1:5000/ui>**. Two things worth noticing right away:
+Open **<http://127.0.0.1:5000/console>**. Two things worth noticing right away:
 
 - **API Repository** shows a banner across the top: *"Example APIs are loaded: 11 queries in 4
   collections, 5 roles and an 'examples' connection. Removing them touches nothing else."* - with a

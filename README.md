@@ -42,7 +42,7 @@ Crimson Garden,Comedy,PG-13,631,2
          alt="QueryAPIGate admin UI: a joined SQL query running against a SQLite connection, with the schema browser expanded and paginated JSON results below" width="820">
   </a>
   <br>
-  <sub>The built-in admin UI at <code>/ui</code> - syntax highlighting, a schema browser and one-click query history, no separate tool to install.</sub>
+  <sub>The built-in admin UI at <code>/console</code> - syntax highlighting, a schema browser and one-click query history, no separate tool to install.</sub>
 </p>
 
 <p align="center">
@@ -319,7 +319,7 @@ filtered to what that key can actually reach, so a query-scoped external key see
 
 ### Administration UI
 
-A built-in UI at `/ui` covers the whole workflow: connection management, a SQL editor with syntax highlighting
+A built-in UI at `/console` covers the whole workflow: connection management, a SQL editor with syntax highlighting
 and schema browsing (click a table/column to insert it), query execution and preview, EXPLAIN, saved-query and
 version management, API key management, an audit log of administrative changes, per-query execution history,
 response inspection with a collapsible JSON tree for non-tabular results, a quick bar chart of any numeric
@@ -493,7 +493,7 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?page_size=3' -H 'X-API-Key: demo
      -d '{"sql": "SELECT film_id, title, rating FROM film WHERE film_id > :min", "params": {"min": 10}, "connection_name": "examples"}'
 ~~~
 
-Open <http://127.0.0.1:5000/docs> for the interactive API reference, or <http://127.0.0.1:5000/ui> for a small
+Open <http://127.0.0.1:5000/docs> for the interactive API reference, or <http://127.0.0.1:5000/console> for the
 admin UI to manage connections and saved queries and run ad-hoc SQL without leaving the browser.
 
 For your own databases, run `queryapigate init` in an empty folder: it creates `queryapigate.db` with an
@@ -536,7 +536,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
 | `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](documentation/INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
-| `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api_keys`), every request except `/health`, `/docs`, `/ui`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
+| `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api_keys`), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
 | `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |
 | `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
@@ -680,7 +680,7 @@ Clean up with `docker compose down -v`.
 | `/api/v1/...` | GET, POST, PATCH, DELETE | The versioned Management API: queries, connections, API keys, roles, history, audit, settings and MCP (admin only). It replaces the management routes above, which keep working but are deprecated - see [Management API (v1)](documentation/API.md#management-api-v1). |
 | `/health`, `/docs`, `/openapi.json` | GET | Liveness, Swagger UI, OpenAPI spec. |
 | `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |
-| `/ui` | GET | A small admin UI: manage connections and saved queries, run ad-hoc SQL. |
+| `/console` | GET | The admin UI (the QueryAPIGate Console). `/ui` redirects here. |
 
 Full details are in [documentation/API.md](documentation/API.md). Saved queries can also be reached as MCP
 tools for an AI agent - see [documentation/MCP.md](documentation/MCP.md).

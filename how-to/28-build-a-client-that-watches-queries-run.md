@@ -102,8 +102,8 @@ the *next* drop - so a flaky connection doesn't end up permanently backed off fr
 ## A browser client - the exact approach the admin UI itself uses
 
 `EventSource` can't set the `X-API-Key` header this endpoint needs, so the client reads the stream with
-`fetch()`'s own streamed response body instead - this is the real, shipped parsing logic from
-`queryapigate/ui.py`, adapted to stand alone:
+`fetch()`'s own streamed response body instead - the same approach the admin UI's Home screen uses
+(`frontend/src/features/home/HomePage.tsx`), adapted to stand alone:
 
 ```javascript
 async function watchEvents(apiKey, onEvent) {

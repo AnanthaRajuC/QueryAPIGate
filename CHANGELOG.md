@@ -22,11 +22,11 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 ## [Unreleased]
 
 ### Added
-- **QueryAPIGate Console (experimental), at `/console`.** The new web UI that will replace `/ui`
+- **QueryAPIGate Console, at `/console` - the admin UI.** It replaces `/ui`
   ([ADR 0001](documentation/adr/0001-console-and-management-api.md)). Built with React + TypeScript in `frontend/`,
   it is a client of the public JSON API only, and looks exactly like `/ui`: the same stylesheet, sidebar, header,
-  search and API key panel (the key is shared with `/ui` and `/docs` in the same browser tab). It has every screen
-  `/ui` has (below); `/ui` itself is unchanged. The wheel and the Docker image
+  search and API key panel (the key is shared with `/docs` in the same browser tab). It has every screen `/ui` had
+  (below). The wheel and the Docker image
   include the built Console, so running it needs no Node.js; a source checkout without a build shows how to build it.
   The Console is served with a strict Content-Security-Policy, and loading its static files doesn't count toward
   `QUERYAPIGATE_RATE_LIMIT`.
@@ -123,6 +123,15 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `GET /query_flow`); and on saved queries, `created_at`, `last_used_at` and `cache_ttl` in summaries and
   `run_count` per version.
 
+- **Management API:** `/api/v1/collections` (list, rename, Postman export) and `/api/v1/examples` (status, install,
+  remove). The Console now calls only the Management API and the runtime routes.
+- **End-to-end tests of the Console** (`frontend/e2e/`, Playwright): every screen and the main flows, in Chromium
+  against a real server, in CI on every push.
+
+### Changed
+- **`/ui` redirects to `/console`.** The hand-written admin page it served (`queryapigate/ui.py`) is removed; the
+  Console has every screen it had, and looks the same.
+
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
   `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,
@@ -137,6 +146,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   `/api/v1/mcp/status` and `/api/v1/mcp/tools`, in the same way.
 - `GET`/`DELETE /cache/entries` and `GET`/`DELETE /cache/entries/{key}`, replaced by `/api/v1/cache/entries`, in the
   same way.
+- `GET /collections`, `PATCH /collections/{name}`, `GET /collections/{name}/postman` and `GET`/`POST`/`DELETE
+  /examples`, replaced by `/api/v1/collections` and `/api/v1/examples`, in the same way.
 
 ### Fixed
 - **`/ui`'s Home showed the five oldest audit entries as "Recent activity"**, oldest first, instead of the five

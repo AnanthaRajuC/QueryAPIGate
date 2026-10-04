@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import duckdb
@@ -1296,46 +1297,26 @@ class SavedQueryOpenApiTests(ApiTestCase):
         page = self.client.get('/docs').get_data(as_text=True)
         self.assertIn('X-API-Key', page)
         self.assertIn('sessionStorage', page)
-        self.assertIn('href="ui"', page)  # links to the admin UI
+        self.assertIn('href="console/"', page)  # links to the admin UI
 
-    def test_admin_ui_is_served_and_public_even_with_an_api_key_set(self):
+    def test_ui_moved_to_the_console(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        res = self.client.get('/ui')
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.mimetype, 'text/html')
-        page = res.get_data(as_text=True)
-        # loading the page itself needs no key; the API calls it makes are still gated as normal
-        for marker in ('id="tabs"', 'id="connections-table"', 'id="queries-table"', 'id="run-form"',
-                      'sessionStorage', 'href="docs"'):
-            self.assertIn(marker, page, marker)
+        res = self.client.get('/ui')  # public, like the Console itself: old bookmarks keep working
+        self.assertEqual(res.status_code, 301)
+        self.assertEqual(res.headers['Location'], '/console/')
 
-    def test_admin_ui_has_a_sidebar_and_a_settings_screen(self):
-        page = self.client.get('/ui').get_data(as_text=True)
-        for marker in ('id="side"', 'id="side-toggle"', 'id="crumbs"', 'data-tab="settings"', 'id="tab-settings"',
-                       'id="settings-body"', "apiJson('settings')", 'queryapigate-ui-prefs',
-                       # the parts of the design that must not silently go missing
-                       'Search queries, connections, keys', 'id="palette"', 'id="key-panel"', 'id="conn-tabs"',
-                       'href="docs"', 'href="openapi.json"', 'Databases this gateway can run saved queries against.',
-                       'Filter by name, description, tag', 'Filter by name, type, host', 'id="export-auditlog"',
-                       'Copy as .env'):
-            self.assertIn(marker, page, marker)
-        # every section a sidebar button points at exists, and every section is reachable from the sidebar
-        import re
-        buttons = set(re.findall(r'data-tab="(\w+)"', page))
-        sections = set(re.findall(r'<section id="tab-(\w+)"', page))
-        self.assertEqual(buttons, sections)
-
-    def test_admin_ui_never_assigns_innerhtml_unsanitized(self):
-        # the DOM-builder helper (h()) is the only place server/query response data is turned into elements
-        # - assigning .innerHTML to that data would bypass it and risk rendering a value as markup. The one
-        # deliberate exception is the Help > Docs browser, which renders fetched markdown (no DOM-API
-        # equivalent for that) - every .innerHTML assignment in the page must be wrapped in
-        # DOMPurify.sanitize(...), never assigned raw.
-        page = self.client.get('/ui').get_data(as_text=True)
-        assignments = re.findall(r'\.innerHTML\s*=\s*([^;\n]+)', page)
-        self.assertTrue(assignments, 'expected to find the sanitized Docs-browser assignment')
-        for rhs in assignments:
-            self.assertTrue(rhs.strip().startswith('DOMPurify.sanitize('), rhs)
+    def test_the_console_never_renders_unsanitized_html(self):
+        # React escapes everything it renders; the only way around that is dangerouslySetInnerHTML (or a raw
+        # .innerHTML assignment). The one deliberate use is Help's docs browser, which renders fetched markdown -
+        # and only after DOMPurify.sanitize().
+        src = Path(__file__).resolve().parent.parent / 'frontend' / 'src'
+        users = {}
+        for path in src.rglob('*.ts*'):
+            text = path.read_text()
+            if 'dangerouslySetInnerHTML' in text or re.search(r'\.innerHTML\s*=', text):
+                users[path.relative_to(src).as_posix()] = text
+        self.assertEqual(sorted(users), ['features/help/HelpPage.tsx'])
+        self.assertIn('DOMPurify.sanitize(', users['features/help/HelpPage.tsx'])
 
 
 class ParameterTests(ApiTestCase):

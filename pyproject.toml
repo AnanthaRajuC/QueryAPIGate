@@ -79,11 +79,6 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
 
-[tool.ruff.lint.per-file-ignores]
-# queryapigate/ui.py is a single Python string holding a hand-written HTML/CSS/JS page (the admin UI at
-# /ui), not Python source to format - line length there reflects the page's own JS style, not ours.
-"queryapigate/ui.py" = ["E501"]
-
 [tool.mypy]
 # Gradual typing: the codebase has no type hints yet, so this catches real static errors (like a subclass
 # assigning the wrong type to a base class's annotated attribute) without demanding annotations everywhere -
@@ -102,4 +97,3 @@ warn_redundant_casts = true
 
 [tool.coverage.run]
 source = ["queryapigate"]
-omit = ["queryapigate/ui.py"]  # a hand-written HTML/JS page in a Python string, not code coverage measures

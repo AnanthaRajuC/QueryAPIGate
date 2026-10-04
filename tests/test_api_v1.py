@@ -592,6 +592,64 @@ class SummaryFlowAndCacheTests(V1TestCase):
         self.assertEqual(after['items'], [])
 
 
+class CollectionAndExampleTests(V1TestCase):
+    C = '/api/v1/collections/{name}'
+
+    def test_list_shows_queries_and_who_reaches_each_collection(self):
+        self.create('films', collection='catalog')
+        self.create('titles', sql='SELECT title FROM film')
+        self.call('post', '/api/v1/api-keys', '/api/v1/api-keys', 201,
+                  json={'name': 'partner', 'connections': [], 'collections': ['catalog']})
+        listing = self.call('get', '/api/v1/collections', '/api/v1/collections', 200).get_json()
+        self.assertEqual(listing['items'], [{'name': 'catalog', 'queries': ['films'], 'keys': ['partner'],
+                                             'roles': []}])
+        self.assertEqual(listing['uncollected'], ['titles'])
+
+    def test_rename_moves_queries_and_grants_and_refuses_a_taken_name(self):
+        self.create('films', collection='catalog')
+        self.create('titles', sql='SELECT title FROM film', collection='other')
+        self.call('post', '/api/v1/api-keys', '/api/v1/api-keys', 201,
+                  json={'name': 'partner', 'connections': [], 'collections': ['catalog']})
+        res = self.call('patch', '/api/v1/collections/catalog', self.C, 409, json={'name': 'other'})
+        self.assertEqual(res.get_json()['code'], 'collection_exists')
+        self.assertEqual(self.call('patch', '/api/v1/collections/nope', self.C, 404,
+                                   json={'name': 'x'}).get_json()['code'], 'collection_not_found')
+        self.assertEqual(self.call('patch', '/api/v1/collections/catalog', self.C, 400,
+                                   json={'name': 'Bad Name'}).get_json()['code'], 'invalid_name')
+        body = self.call('patch', '/api/v1/collections/catalog', self.C, 200, json={'name': 'films-v2'}).get_json()
+        self.assertEqual(body, {'name': 'films-v2', 'moved': {'queries': ['films'], 'keys': ['partner'], 'roles': []}})
+        key = self.call('get', '/api/v1/api-keys/partner', '/api/v1/api-keys/{name}', 200).get_json()
+        self.assertEqual(key['collections'], ['films-v2'])
+        self.assertEqual(store.read_audit_log()[-1]['action'], 'rename_collection')
+        self.call('patch', '/api/v1/collections/films-v2', self.C, 200, json={'name': 'other', 'merge': True})
+        names = [c['name'] for c in self.call('get', '/api/v1/collections', '/api/v1/collections', 200)
+                 .get_json()['items']]
+        self.assertEqual(names, ['other'])
+
+    def test_postman_export(self):
+        self.create('films', collection='catalog', publish=True)
+        res = self.call('get', '/api/v1/collections/catalog/postman', '/api/v1/collections/{name}/postman', 200)
+        self.assertIn('catalog.postman_collection.json', res.headers['Content-Disposition'])
+        self.assertEqual(res.get_json()['info']['name'], 'catalog')
+        self.call('get', '/api/v1/collections/nope/postman', '/api/v1/collections/{name}/postman', 404)
+
+    def test_examples_load_status_and_unload(self):
+        status = self.call('get', '/api/v1/examples', '/api/v1/examples', 200).get_json()
+        self.assertEqual((status['loaded'], status['partial']), (False, False))
+        res = self.call('post', '/api/v1/examples', '/api/v1/examples', 200)
+        loaded = res.get_json()
+        self.assertEqual(res.headers['Cache-Control'], 'no-store')
+        self.assertTrue(loaded['status']['loaded'])
+        self.assertTrue(loaded['added']['queries'])
+        self.assertEqual(sorted(loaded['key_secrets']), loaded['added']['keys'])
+        self.assertNotIn(next(iter(loaded['key_secrets'].values()), 'none'), str(store.read_audit_log()))
+        again = self.call('post', '/api/v1/examples', '/api/v1/examples', 200).get_json()
+        self.assertEqual(again['added']['queries'], [])  # idempotent
+        removed = self.call('delete', '/api/v1/examples', '/api/v1/examples', 200).get_json()
+        self.assertTrue(removed['removed']['connection'])
+        self.assertFalse(removed['status']['loaded'] or removed['status']['partial'])
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
@@ -606,6 +664,8 @@ class DeprecationTests(V1TestCase):
         self.assertIn('/api/v1/history', self.client.get('/history', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/settings', self.client.get('/settings', headers=ADMIN).headers['Link'])
         self.assertIn('/api/v1/cache/entries', self.client.get('/cache/entries', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/collections', self.client.get('/collections', headers=ADMIN).headers['Link'])
+        self.assertIn('/api/v1/examples', self.client.get('/examples', headers=ADMIN).headers['Link'])
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

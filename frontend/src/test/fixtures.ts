@@ -103,11 +103,19 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       items: [apiKey('partner', { connections: [], collections: ['catalog'], rate_limit: '60/minute' })],
     }),
     'GET /api/v1/roles': () => ({ items: [role('analyst', { connections: ['lite'] })] }),
-    'GET /collections': () => ({
-      collections: { catalog: { queries: ['films'], keys: ['partner'], roles: [] } },
+    'GET /api/v1/collections': () => ({
+      items: [{ name: 'catalog', queries: ['films'], keys: ['partner'], roles: [] }],
       uncollected: ['rentals'],
     }),
-    'GET /examples': () => ({ loaded: false, partial: false, queries: [], collections: [], roles: [] }),
+    'GET /api/v1/examples': () => ({
+      loaded: false,
+      partial: false,
+      connection: null,
+      queries: [],
+      roles: [],
+      keys: [],
+      collections: [],
+    }),
     'GET /api/v1/connections/lite/schema': () => ({
       truncated: false,
       tables: [

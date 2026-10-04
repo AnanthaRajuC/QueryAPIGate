@@ -48,15 +48,14 @@ describe('Console shell - the classic frame', () => {
     expect(document.getElementById('crumb-page')).toHaveTextContent('API Repository');
   });
 
-  it('has every screen of the classic sidebar, each one a Console route', async () => {
+  it('every sidebar item is a Console screen', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');
     await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
     expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument();
-    expect(sessionStorage.getItem('queryapigate-ui-tab')).toBeNull();
   });
 
-  it('applies an API key to this tab, in the same storage /ui and /docs use', async () => {
+  it('applies an API key to this tab, in the same storage /docs uses', async () => {
     const { calls } = fakeBackend(baseRoutes());
     renderAt('/queries');
     expect(screen.getByText('No API key')).toBeInTheDocument();

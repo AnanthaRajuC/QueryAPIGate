@@ -17,7 +17,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from . import collection_admin, config, history, schema, sqlflow, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
-from .services import access, audit, connections, mcp, queries
+from .services import access, audit, collections, connections, mcp, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -460,3 +460,51 @@ def delete_cache_entry(key):
     """Evict one entry early."""
     _cache().delete(key)
     return '', 204
+
+
+# --------------------------------------------------------------------------------------
+# Collections and the example APIs
+# --------------------------------------------------------------------------------------
+
+@bp.route('/collections', methods=['GET'])
+def list_collections():
+    """Every collection with its queries and the keys and roles that reach it, and the queries in none. Move a query
+    with PATCH /api/v1/queries/{name}."""
+    return jsonify(collections.listing()), 200
+
+
+@bp.route('/collections/<name>', methods=['PATCH'])
+def rename_collection(name):
+    """Rename it: `{"name": "new"}`; into an existing collection only with `"merge": true`. Grants follow, and
+    nobody's access narrows part-way."""
+    return jsonify(collections.rename(name, get_json_body(), caller_key_name())), 200
+
+
+@bp.route('/collections/<name>/postman', methods=['GET'])
+def collection_postman(name):
+    """The collection as a Postman Collection v2.1 file - its base URL is the one this request came in on; it holds
+    no key."""
+    response = jsonify(collections.postman_export(name, request.host_url))
+    response.headers['Content-Disposition'] = f'attachment; filename="{name}.postman_collection.json"'
+    return response, 200
+
+
+@bp.route('/examples', methods=['GET'])
+def examples_status():
+    """Whether the example APIs are installed: `loaded` (all of them), `partial` (an interrupted load), and what."""
+    return jsonify(collections.examples_status()), 200
+
+
+@bp.route('/examples', methods=['POST'])
+def load_examples():
+    """Install the example APIs. Idempotent; 409 `examples_conflict`, changing nothing, if something that isn't an
+    example holds one of their names. The example keys' secrets are in the response, shown this once."""
+    response = jsonify(collections.load_examples(caller_key_name()))
+    response.headers['Cache-Control'] = 'no-store'
+    return response, 200
+
+
+@bp.route('/examples', methods=['DELETE'])
+def unload_examples():
+    """Remove exactly what is marked as an example - nothing else."""
+    return jsonify(collections.unload_examples(caller_key_name())), 200

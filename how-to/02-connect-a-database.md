@@ -14,7 +14,7 @@ once a `jdbc` connection exists.
 
 ## Two ways to add a connection
 
-**Admin UI**: open **<http://127.0.0.1:5000/ui>**, go to **Connections** (under **Data** in the sidebar),
+**Admin UI**: open **<http://127.0.0.1:5000/console>**, go to **Connections** (under **Data** in the sidebar),
 click **New connection**, fill in the form, **Test** it, then **Save**.
 
 **API directly** (what this guide's examples use, since it's copy-pasteable and identical for every

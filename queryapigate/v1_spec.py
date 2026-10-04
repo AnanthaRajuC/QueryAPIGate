@@ -261,6 +261,69 @@ SCHEMAS = {
                                         'connection': {'type': 'string'}, 'format': {'type': 'string'}}},
             }}}},
     },
+    'CollectionList': {
+        'type': 'object', 'required': ['items', 'uncollected'],
+        'properties': {
+            'items': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['name', 'queries', 'keys', 'roles'],
+                'properties': {
+                    'name': {'type': 'string'},
+                    'queries': {'type': 'array', 'items': {'type': 'string'}},
+                    'keys': {'type': 'array', 'items': {'type': 'string'},
+                             'description': 'API keys whose collections grant names it.'},
+                    'roles': {'type': 'array', 'items': {'type': 'string'}},
+                }}},
+            'uncollected': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Queries in no collection.'},
+        },
+    },
+    'CollectionRenamed': {
+        'type': 'object', 'required': ['name', 'moved'],
+        'properties': {
+            'name': {'type': 'string'},
+            'moved': {'type': 'object', 'required': ['queries', 'keys', 'roles'],
+                      'properties': {'queries': {'type': 'array', 'items': {'type': 'string'}},
+                                     'keys': {'type': 'array', 'items': {'type': 'string'}},
+                                     'roles': {'type': 'array', 'items': {'type': 'string'}}}},
+        },
+    },
+    'ExamplesStatus': {
+        'type': 'object', 'required': ['loaded', 'partial', 'connection', 'queries', 'roles', 'keys', 'collections'],
+        'properties': {
+            'loaded': {'type': 'boolean', 'description': 'All of them are installed.'},
+            'partial': {'type': 'boolean', 'description': 'Some are: an interrupted load (POST again completes it).'},
+            'connection': _NULLABLE_STRING,
+            'queries': {'type': 'array', 'items': {'type': 'string'}},
+            'roles': {'type': 'array', 'items': {'type': 'string'}},
+            'keys': {'type': 'array', 'items': {'type': 'string'}},
+            'collections': {'type': 'array', 'items': {'type': 'string'}},
+        },
+    },
+    'ExamplesLoaded': {
+        'type': 'object', 'required': ['added', 'key_secrets', 'status'],
+        'properties': {
+            'added': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys'],
+                      'properties': {'connection': {'type': 'boolean'},
+                                     'queries': {'type': 'array', 'items': {'type': 'string'}},
+                                     'roles': {'type': 'array', 'items': {'type': 'string'}},
+                                     'keys': {'type': 'array', 'items': {'type': 'string'}}}},
+            'key_secrets': {'type': 'object', 'additionalProperties': {'type': 'string'},
+                            'description': "The new example keys' secrets - shown this once."},
+            'status': _ref('ExamplesStatus'),
+        },
+    },
+    'ExamplesRemoved': {
+        'type': 'object', 'required': ['removed', 'keys_still_granted', 'status'],
+        'properties': {
+            'removed': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys'],
+                        'properties': {'connection': {'type': 'boolean'},
+                                       'queries': {'type': 'array', 'items': {'type': 'string'}},
+                                       'roles': {'type': 'array', 'items': {'type': 'string'}},
+                                       'keys': {'type': 'array', 'items': {'type': 'string'}}}},
+            'keys_still_granted': {'type': 'array', 'items': {'type': 'string'},
+                                   'description': 'Other keys granted an example collection; that grant is now inert.'},
+            'status': _ref('ExamplesStatus'),
+        },
+    },
     'Connection': {
         'type': 'object',
         'required': ['name', 'db', 'active', 'host', 'port', 'database', 'user', 'example', 'created_at', 'updated_at',
@@ -549,6 +612,26 @@ PATHS = {
             parameters=[{'name': 'key', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}]),
         'delete': _op('Evict one entry', {'204': {'description': 'Evicted'}},
                       parameters=[{'name': 'key', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/collections': {
+        'get': _op('Every collection with its queries and who reaches it, and the queries in none',
+                   {'200': _ok(_ref('CollectionList'))}),
+    },
+    '/api/v1/collections/{name}': {
+        'patch': _op('Rename it (into an existing one only with merge: true); grants follow',
+                     {'200': _ok(_ref('CollectionRenamed')), **_CONFLICT}, parameters=[_NAME],
+                     body={'type': 'object', 'required': ['name'],
+                           'properties': {'name': {'type': 'string'}, 'merge': {'type': 'boolean'}}}),
+    },
+    '/api/v1/collections/{name}/postman': {
+        'get': _op('The collection as a Postman Collection v2.1 file',
+                   {'200': _ok({'type': 'object', 'additionalProperties': True})}, parameters=[_NAME]),
+    },
+    '/api/v1/examples': {
+        'get': _op('Whether the example APIs are installed', {'200': _ok(_ref('ExamplesStatus'))}),
+        'post': _op("Install the example APIs; the response carries the example keys' secrets, shown this once",
+                    {'200': _ok(_ref('ExamplesLoaded')), **_CONFLICT}),
+        'delete': _op('Remove exactly what is marked as an example', {'200': _ok(_ref('ExamplesRemoved'))}),
     },
     '/api/v1/settings': {
         'get': _op("The server's effective configuration, by section (read-only)",

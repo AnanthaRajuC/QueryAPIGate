@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
-// The classic UI's sidebar, item for item (ui.py <nav id="tabs">): same groups, names, order and icons - each one now
-// a Console route. `tab` is the classic tab's id, which the shell uses as the screen's section id (#tab-<tab>), so the
+// The sidebar, item for item as the classic UI had it (ui.py <nav id="tabs">): same groups, names, order and icons -
+// each one a Console route. `tab` is the classic tab's id, which the shell uses as the screen's section id (#tab-<tab>), so the
 // classic stylesheet's per-screen rules apply unchanged (ADR 0001).
 
 export interface NavItem {

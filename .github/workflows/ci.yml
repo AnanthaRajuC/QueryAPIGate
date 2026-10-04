@@ -108,6 +108,42 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: python -m unittest discover -s tests -t . -v
 
+  console-e2e:
+    # The built Console driven in Chromium against a real server (frontend/e2e): every screen and the main flows.
+    # Here rather than in frontend.yml because a backend change can break the Console just as well.
+    name: Console end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the Console
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run the end-to-end tests
+        working-directory: frontend
+        run: npm run e2e
+      - name: Keep the report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+
   build:
     name: Build package
     runs-on: ubuntu-latest

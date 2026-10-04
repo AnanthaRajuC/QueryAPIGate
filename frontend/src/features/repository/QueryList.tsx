@@ -253,7 +253,7 @@ function CollectionHeader({ name }: { name: string }) {
   const known = info.data?.collections[name];
   const reach = known ? known.keys.length : 0;
   const postman = async () => {
-    const res = await apiFetch(`/collections/${encodeURIComponent(name)}/postman`);
+    const res = await apiFetch(`/api/v1/collections/${encodeURIComponent(name)}/postman`);
     if (!res.ok) {
       showError(`Couldn't export ${name}: HTTP ${res.status}`);
       return;

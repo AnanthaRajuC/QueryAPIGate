@@ -32,7 +32,7 @@ Leave that terminal running. Open a second terminal (or your browser) for everyt
 
 ## Step 2: Open the admin UI and go to API Designer
 
-Open **<http://127.0.0.1:5000/ui>**. The first time, it asks for an API key - enter `demo-key`.
+Open **<http://127.0.0.1:5000/console>**. The first time, it asks for an API key - enter `demo-key`.
 
 In the left sidebar, under **API**, click **API Designer**. This is the "write and run SQL, then save it as
 an endpoint" screen - distinct from **API Repository**, which lists endpoints you've already saved.

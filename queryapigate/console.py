@@ -1,11 +1,12 @@
-"""Serves the QueryAPIGate Console - the React/TypeScript frontend in frontend/ (ADR 0001, BACKLOG #73) - at /console.
+"""Serves the QueryAPIGate Console - the admin UI, the React/TypeScript frontend in frontend/ (ADR 0001, BACKLOG #73) -
+at /console. (/ui, the earlier admin page it replaced, redirects here.)
 
 The Console is a static single-page app: `npm run build` in frontend/ writes it to queryapigate/console_dist/, which
 release builds (the wheel and the Docker image) include, so users never need Node.js. A source checkout that hasn't
 built it gets a short "not built" page instead of an error - backend work never requires Node either.
 
-Like /ui, the page itself is public and holds no data: everything it shows comes from the JSON API, called with the
-API key the user enters (kept in sessionStorage under the same name /ui and /docs use).
+The page itself is public and holds no data: everything it shows comes from the JSON API, called with the API key the
+user enters (kept in sessionStorage under the same name /docs uses).
 """
 from pathlib import Path
 
@@ -15,7 +16,7 @@ DIST = Path(__file__).parent / 'console_dist'
 
 # No inline scripts and no third-party scripts: everything is bundled. 'unsafe-inline' for styles only (CodeMirror
 # injects its own, and a few classic components size themselves with style attributes); the one third-party origin
-# is img.shields.io, for the sidebar's GitHub-stars badge - an image, as on /ui.
+# origins are for images (the sidebar's GitHub-stars badge, Help's docs) and for reading the docs from GitHub.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
        # any https image: Help > Docs renders the project's markdown, badges and screenshots included
        "img-src 'self' data: https:; "
@@ -36,7 +37,7 @@ NOT_BUILT_HTML = """<!doctype html>
 <p>This is a source checkout without the Console's compiled assets. Release builds (<code>pip install
 queryapigate</code> and the Docker image) include them.</p>
 <p>To build it: <code>cd frontend &amp;&amp; npm ci &amp;&amp; npm run build</code>, then reload this page.</p>
-<p>The classic admin UI is still available at <a href="/ui">/ui</a>.</p>
+<p>Everything the Console does goes through the API, which works without it: see <a href="/docs">/docs</a>.</p>
 </body></html>"""
 
 
