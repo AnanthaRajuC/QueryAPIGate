@@ -4,12 +4,12 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, apiJson } from '@/api/client';
 import { useAllQueries, useCollections, useConnections, type CollectionsInfo } from '@/app/data';
-import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
+import { Field, FormActions, useFeedback } from '@/app/feedback';
+import { SchemaField, useSchema } from '@/components/SchemaBrowser';
 import { SqlEditor, type SqlEditorHandle } from '@/components/SqlEditor';
 import { sqlParams } from '@/lib/sql';
 
 import {
-  useConnectionSchema,
   useQueryActions,
   useSaveQuery,
   type Query,
@@ -78,7 +78,7 @@ export function QueryForm({ base }: { base?: { query: Query; version: QueryVersi
 
   const dialect = connections.data?.find((c) => c.name === connection)?.db;
   const isMongo = dialect === 'mongo';
-  const schema = useConnectionSchema(connection || undefined);
+  const schema = useSchema(connection || undefined);
   const completion = useMemo(
     () => Object.fromEntries((schema.data?.tables ?? []).map((t) => [t.name, t.columns.map((c) => c.name)])),
     [schema.data],
@@ -244,7 +244,16 @@ export function QueryForm({ base }: { base?: { query: Query; version: QueryVersi
           ))}
         </div>
       </div>
-      <SchemaField connection={connection} editor={editor} isMongo={isMongo} />
+      <SchemaField
+        connection={connection}
+        dialect={dialect}
+        editor={editor}
+        isMongo={isMongo}
+        onPreview={(table) => {
+          closeDrawer();
+          navigate('/designer', { state: { preview: { connection, table } } });
+        }}
+      />
       <Field id="q-description" label="Description">
         <input
           id="q-description"
@@ -321,163 +330,9 @@ export function QueryForm({ base }: { base?: { query: Query; version: QueryVersi
   );
 }
 
-/** Tables, then a table's columns; click a column to insert it, ⧉ to start from a SELECT (ui.py schemaBrowser). */
-function SchemaField({
-  connection,
-  editor,
-  isMongo,
-}: {
-  connection: string;
-  editor: React.RefObject<SqlEditorHandle | null>;
-  isMongo: boolean;
-}) {
-  const schema = useConnectionSchema(connection || undefined);
-  const [table, setTable] = useState<string | null>(null);
-  const [view, setView] = useState<'tables' | 'columns'>('tables');
-  const tables = schema.data?.tables ?? [];
-  const active = tables.find((t) => t.name === table);
-
-  let content: React.ReactNode;
-  if (!connection) content = <div className="hint">Pick a connection to browse its schema.</div>;
-  else if (schema.isPending) content = <Loading text="Loading schema…" />;
-  else if (schema.isError) content = <div className="hint">{schema.error.message}</div>;
-  else if (!tables.length) content = <div className="hint">No tables found.</div>;
-  else {
-    content = (
-      <>
-        <div className="minitabs">
-          <button
-            type="button"
-            className={view === 'tables' ? 'minitab active' : 'minitab'}
-            onClick={() => setView('tables')}
-          >
-            Tables
-          </button>
-          <button
-            type="button"
-            className={view === 'columns' ? 'minitab active' : 'minitab'}
-            disabled={!table}
-            onClick={() => table && setView('columns')}
-          >
-            {'Columns' + (table ? ' · ' + table : '')}
-          </button>
-        </div>
-        <div className="schema-content">
-          {view === 'columns' && active ? (
-            active.columns.length ? (
-              active.columns.map((c) => {
-                let title = `${c.type ?? ''}${c.nullable ? ' · nullable' : ' · not null'}`;
-                if (c.primary_key) title += ' · primary key';
-                const fk = c.foreign_key as { table: string; column: string } | null | undefined;
-                if (fk) title += ` · FK → ${fk.table}.${fk.column}`;
-                return (
-                  <button
-                    key={c.name}
-                    type="button"
-                    className="schema-col"
-                    title={title}
-                    onClick={() => editor.current?.insert(c.name)}
-                  >
-                    <span>{c.name}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className="dim">{c.type}</span>
-                      {c.primary_key ? <span className="tag key-pk">PK</span> : null}
-                      {fk ? <span className="tag key-fk">{`FK → ${fk.table}.${fk.column}`}</span> : null}
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="hint">No columns to show.</div>
-            )
-          ) : (
-            tables.map((t) => (
-              <div className="schema-row" key={t.name}>
-                <button
-                  type="button"
-                  className="schema-table"
-                  title={'Columns of ' + t.name}
-                  onClick={() => {
-                    setTable(t.name);
-                    setView('columns');
-                  }}
-                >
-                  <span className="name">{t.name}</span>
-                  <span className="tag">{t.type}</span>
-                </button>
-                <button
-                  type="button"
-                  className="schema-select"
-                  title={'Copy a starter query for ' + t.name + ' into the editor'}
-                  aria-label={'Copy a starter query for ' + t.name}
-                  onClick={() =>
-                    editor.current?.replace(
-                      isMongo
-                        ? JSON.stringify({ collection: t.name, filter: {}, sort: { _id: 1 } }, null, 2)
-                        : buildSqlSelect(t),
-                    )
-                  }
-                >
-                  ⧉
-                </button>
-              </div>
-            ))
-          )}
-          {schema.data?.truncated && <div className="hint">Showing the first 5000 columns.</div>}
-        </div>
-      </>
-    );
-  }
-  return (
-    <Field
-      label="Schema"
-      extra={
-        <button type="button" className="btn ghost sm" title="Refresh" onClick={() => void schema.refetch()}>
-          ↻
-        </button>
-      }
-    >
-      <div className="schema-browser">{content}</div>
-    </Field>
-  );
-}
-
-type SchemaTable = {
-  name: string;
-  schema?: string | null;
-  columns: { name: string; foreign_key?: unknown }[];
-};
-
-function pickAlias(name: string, used: Record<string, string>) {
-  const lower = name.toLowerCase();
-  for (const candidate of [lower.charAt(0), lower.slice(0, 2), lower]) if (!used[candidate]) return candidate;
-  return `${lower}_${Object.keys(used).length}`;
-}
-
-/** A starter SELECT: every column by name, a JOIN per foreign key, ordered, LIMIT 100 (ui.py buildSqlSelect). */
-function buildSqlSelect(table: SchemaTable) {
-  const fkCols = table.columns.filter((c) => c.foreign_key);
-  const used: Record<string, string> = {};
-  const mainAlias = fkCols.length ? pickAlias(table.name, used) : null;
-  if (mainAlias) used[mainAlias] = table.name;
-  const joins = fkCols.map((c) => {
-    const fk = c.foreign_key as { table: string; column: string };
-    const alias = pickAlias(fk.table, used);
-    used[alias] = fk.table;
-    return `JOIN ${fk.table} ${alias} ON ${mainAlias}.${c.name} = ${alias}.${fk.column}`;
-  });
-  const prefix = mainAlias ? mainAlias + '.' : '';
-  const cols = table.columns.length ? table.columns.map((c) => '  ' + prefix + c.name).join(',\n') : '  *';
-  const target = (table.schema ? table.schema + '.' : '') + table.name + (mainAlias ? ' ' + mainAlias : '');
-  let sql = 'SELECT\n' + cols + '\nFROM ' + target;
-  if (joins.length) sql += '\n' + joins.join('\n');
-  if (table.columns.length) sql += '\nORDER BY ' + prefix + table.columns[0]!.name;
-  return sql + '\nLIMIT 100';
-}
-
 // ---- Who gains or loses access when queries change collection (ui.py impactNodeMany) ----
 
-function Impact({
+export function Impact({
   moves,
   info,
 }: {

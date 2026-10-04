@@ -277,6 +277,8 @@ PATHS = {
         'get': _op('List connections (name, type, active)', {'200': _ok(_ref('ConnectionList'))}),
     },
     '/api/v1/connections/{name}/schema': {
-        'get': _op("A connection's tables and columns", {'200': _ok(_ref('Schema'))}, parameters=[_NAME]),
+        'get': _op("A connection's tables and columns", {'200': _ok(_ref('Schema'))}, parameters=[
+            _NAME, {'name': 'database', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                    'description': "Another database on the same server than the connection's own."}]),
     },
 }

@@ -39,10 +39,13 @@ const highlight = HighlightStyle.define([
   { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--syn-cmt)', fontStyle: 'italic' },
 ]);
 
-/** Lets the schema browser insert a name at the cursor, or replace the whole query with a starter one. */
+/** Lets the schema browser insert a name at the cursor, or replace the whole query with a starter one, and the
+ * API Designer read the selection a double-click made and rewrite a range ("Parameterize"). */
 export interface SqlEditorHandle {
   insert: (text: string) => void;
   replace: (text: string) => void;
+  selection: () => { from: number; to: number; doc: string };
+  replaceRange: (from: number, to: number, text: string) => void;
 }
 
 export interface SqlEditorProps {
@@ -54,6 +57,11 @@ export interface SqlEditorProps {
   schema?: Record<string, string[]>;
   label?: string;
   placeholder?: string;
+  /** false for the API Designer's plain .editor (no border of its own, it sits inside the runner panel). */
+  boxed?: boolean;
+  /** Ctrl/Cmd+Enter. */
+  onRun?: () => void;
+  onDoubleClick?: (event: MouseEvent) => void;
 }
 
 function language(dialect: string | null | undefined, schema: Record<string, string[]> | undefined) {
@@ -69,14 +77,21 @@ export function SqlEditor({
   schema,
   label,
   placeholder,
+  boxed = true,
+  onRun,
+  onDoubleClick,
 }: SqlEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const [languageSlot] = useState(() => new Compartment());
   const onChangeRef = useRef(onChange);
+  const onRunRef = useRef(onRun);
+  const onDoubleClickRef = useRef(onDoubleClick);
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
+    onRunRef.current = onRun;
+    onDoubleClickRef.current = onDoubleClick;
+  }, [onChange, onRun, onDoubleClick]);
   useImperativeHandle(handle, () => ({
     insert(text: string) {
       const editor = view.current;
@@ -89,6 +104,18 @@ export function SqlEditor({
       const editor = view.current;
       if (!editor) return;
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } });
+      editor.focus();
+    },
+    selection() {
+      const editor = view.current;
+      if (!editor) return { from: 0, to: 0, doc: '' };
+      const { from, to } = editor.state.selection.main;
+      return { from, to, doc: editor.state.doc.toString() };
+    },
+    replaceRange(from: number, to: number, text: string) {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
       editor.focus();
     },
   }));
@@ -109,12 +136,27 @@ export function SqlEditor({
           bracketMatching(),
           closeBrackets(),
           keymap.of([
+            {
+              key: 'Mod-Enter',
+              run: () => {
+                if (!onRunRef.current) return false;
+                onRunRef.current();
+                return true;
+              },
+            },
             ...closeBracketsKeymap,
             ...defaultKeymap,
             ...historyKeymap,
             ...completionKeymap,
             indentWithTab,
           ]),
+          EditorView.domEventHandlers({
+            dblclick: (event) => {
+              // Runs after CodeMirror has selected the double-clicked word.
+              setTimeout(() => onDoubleClickRef.current?.(event), 0);
+              return false;
+            },
+          }),
           autocompletion({ activateOnTyping: true }),
           languageSlot.of(language(dialect, schema)),
           syntaxHighlighting(highlight),
@@ -150,5 +192,7 @@ export function SqlEditor({
     }
   }, [value]);
 
-  return <div ref={host} className="editor boxed cm-host" data-testid="sql-editor" />;
+  return (
+    <div ref={host} className={boxed ? 'editor boxed cm-host' : 'editor cm-host'} data-testid="sql-editor" />
+  );
 }

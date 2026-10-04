@@ -6,16 +6,19 @@
   display: contents;
 }
 
-/* CodeMirror, dressed as the classic editor (.editor.boxed): same font, gutter, padding, border and focus ring. */
-.editor.cm-host {
+/* CodeMirror, dressed as the classic editors: .editor.boxed (the drawer form) and the plain .editor of the API
+   Designer's runner (150px, resizable). Same font, gutter, padding, border and focus ring. */
+.editor.boxed.cm-host {
   height: auto;
   min-height: 0;
   resize: vertical;
   overflow: auto;
 }
+.editor.boxed.cm-host .cm-editor {
+  min-height: 168px;
+}
 .editor.cm-host .cm-editor {
   height: 100%;
-  min-height: 168px;
   background: var(--surface);
   font: 13px/1.6 var(--mono);
 }
@@ -38,8 +41,12 @@
   border-right: 1px solid var(--line);
   color: var(--ink-3);
 }
-.editor.cm-host .cm-gutterElement {
+.editor.cm-host .cm-lineNumbers {
+  width: 42px;
+}
+.editor.cm-host .cm-lineNumbers .cm-gutterElement {
   padding: 0 8px 0 0;
+  text-align: right;
 }
 .editor.cm-host .cm-activeLine,
 .editor.cm-host .cm-activeLineGutter {

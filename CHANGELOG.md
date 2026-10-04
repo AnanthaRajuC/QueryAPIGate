@@ -63,6 +63,19 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   Every other sidebar item opens the classic UI on that tab. The API Repository loads on first visit, so the shell
   stays light.
 
+- **The Console's API Designer** (`/console/designer`), rebuilt at visual parity with the classic one. It has:
+  - the Type → Host → Connection → Database picker, with the connection's live usage;
+  - the SQL editor (CodeMirror, with completion that knows the dialect, tables and columns), run with Ctrl+Enter;
+  - Explain, and double-click a `column = literal` to Parameterize it;
+  - the sidebar's Recent Queries (shared with `/ui` in the same tab), Settings (bound parameters, page, page size,
+    timeout) and Schema, behind the draggable splitter;
+  - the schema browser's starter query, preview, `CREATE TABLE` and "used by" drawers;
+  - the quick-stats strip, the results panel (with Copy as curl and Chart), and Save as New API (with Save as draft).
+
+  The API Repository drawer's schema browser regains its 👁 "preview in API Designer". The Designer keeps its query
+  while you visit other screens, as the classic tab always did. `GET /api/v1/connections/{name}/schema` gains
+  `?database=` for the Database picker.
+
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
   `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,

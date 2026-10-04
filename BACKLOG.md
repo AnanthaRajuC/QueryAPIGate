@@ -2230,11 +2230,19 @@ It was checked by side-by-side screenshots of every tab and drawer in light and 
 headless Chrome (create a draft, publish, add a second draft while v1 keeps serving), and Vitest. The rule for every
 later slice is in ADR 0001 ("Visual parity").
 
-Known gaps, still classic-only:
-- the schema browser's 👁 "preview in API Designer" (it opens the classic API Designer pre-filled);
-- the access map's own screen ("View in Access map" opens it in the classic UI).
+**API Designer slice shipped, at visual parity (2026-10-04).** Every classic feature is included:
+- the cascading connection/database picker with live usage;
+- the runner (CodeMirror with Ctrl+Enter), Explain, and double-click Parameterize;
+- Recent Queries (shared sessionStorage), Settings and Schema behind the remembered splitter;
+- the schema browser's ⧉ / 👁 / ⌸ / "used by" badge, with the DDL and wide usage drawers;
+- quick stats, results (Copy as curl, Chart), and inline Save as New API (plus Save as draft).
 
-Next slice: API Designer, then Connections.
+The schema browser is now one shared component, so the API Repository drawer regained 👁. Checked by side-by-side
+screenshots (light and dark) and an end-to-end headless-Chrome run of every feature; covered by Vitest.
+
+Still classic-only: the Access map screen ("View in Access map" opens it in the classic UI).
+
+Next slice: Connections.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

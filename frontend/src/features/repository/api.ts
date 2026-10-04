@@ -165,14 +165,3 @@ export function useValidate() {
       unwrap(await api.POST('/api/v1/queries/validate', { body })),
   });
 }
-
-export function useConnectionSchema(name: string | undefined) {
-  return useQuery({
-    queryKey: ['connections', name, 'schema'],
-    queryFn: async () =>
-      unwrap(await api.GET('/api/v1/connections/{name}/schema', { params: { path: { name: name ?? '' } } })),
-    enabled: Boolean(name),
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
-}

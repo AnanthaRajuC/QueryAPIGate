@@ -284,6 +284,12 @@ class HistoryAndConnectionTests(V1TestCase):
         res = self.call('get', '/api/v1/connections/nope/schema', '/api/v1/connections/{name}/schema', 404)
         self.assertEqual(res.get_json()['code'], 'connection_not_found')
 
+    def test_schema_of_another_database_is_passed_through(self):
+        # SQLite has one database per file, so asking for another is a clear 400, not silently the default one
+        res = self.call('get', '/api/v1/connections/lite/schema?database=other', '/api/v1/connections/{name}/schema',
+                        400)
+        self.assertIn("Switching databases isn't supported", res.get_json()['error'])
+
 
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):

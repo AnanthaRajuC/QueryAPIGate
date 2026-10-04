@@ -315,8 +315,9 @@ curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-K
 
 ### Connections (read side)
 
-`GET /api/v1/connections` lists each connection's `name`, `db` and `active`. `GET /api/v1/connections/{name}/schema`
-returns its tables and columns. The rest of the connection resource arrives with the Console's Connections screen.
+`GET /api/v1/connections` lists each connection's `name`, `db`, `active`, `host`, `port` and `database` (never its
+credentials). `GET /api/v1/connections/{name}/schema` returns its tables and columns; `?database=` reads another
+database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). The rest of the connection resource arrives with the Console's Connections screen.
 
 ### Deprecated routes
 

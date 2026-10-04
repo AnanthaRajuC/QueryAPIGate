@@ -115,19 +115,25 @@ export function Results({
   filename,
   onPage,
   onPageSize,
+  curl,
+  panelProps,
 }: {
   result: ResultData | null;
   running: boolean;
   filename: string;
   onPage: (page: number) => void;
   onPageSize: (size: number) => void;
+  /** An ad-hoc run's equivalent curl command - adds "Copy as curl" (ui.py asCurl). */
+  curl?: string;
+  /** id/className for the panel, where a screen's own CSS targets it (the API Designer's #run-results-panel). */
+  panelProps?: { id?: string; className?: string };
 }) {
   const { toast } = useFeedback();
   const [showHeaders, setShowHeaders] = useState(false);
   const [showChart, setShowChart] = useState(false);
   if (running) {
     return (
-      <div className="panel">
+      <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
         <div className="resbar" />
         <div className="res-body">
           <div className="res-note">
@@ -138,10 +144,18 @@ export function Results({
       </div>
     );
   }
-  if (!result) return null;
+  if (!result) {
+    // A screen with its own results area (the API Designer) shows it empty until the first run, as before.
+    return panelProps ? (
+      <div id={panelProps.id} className={panelProps.className ?? 'panel'}>
+        <div className="resbar" />
+        <div className="res-body" />
+      </div>
+    ) : null;
+  }
   if (result.error) {
     return (
-      <div className="panel">
+      <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
         <div className="resbar" />
         <div className="res-body">
           <div className="res-note err">
@@ -157,7 +171,7 @@ export function Results({
   const offset = (result.page - 1) * result.size;
   const base = `${filename}${result.page > 1 ? '-p' + result.page : ''}`;
   return (
-    <div className="panel">
+    <div id={panelProps?.id} className={panelProps?.className ?? 'panel'}>
       <div className="resbar">
         <span className="stat">
           <span>
@@ -207,6 +221,11 @@ export function Results({
         {rows && (
           <button type="button" className="btn sm ghost" onClick={() => copyText(toTsv(rows), toast)}>
             Copy as TSV
+          </button>
+        )}
+        {curl && (
+          <button type="button" className="btn sm ghost" onClick={() => copyText(curl, toast)}>
+            Copy as curl
           </button>
         )}
         {rows && rows.length > 0 && numericColumns(rows, columnsOf(rows)).length > 0 && (
@@ -304,6 +323,27 @@ function Pager({
       </select>
     </div>
   );
+}
+
+export function widestColumn(rows: Record<string, unknown>[]) {
+  const cols = columnsOf(rows);
+  if (!cols.length || !rows.length) return null;
+  let best: { column: string; maxLen: number } | null = null;
+  for (const c of cols) {
+    let max = 0;
+    for (const r of rows) {
+      const v = r?.[c];
+      const len =
+        v === null || v === undefined
+          ? 0
+          : typeof v === 'object'
+            ? JSON.stringify(v).length
+            : String(v).length;
+      if (len > max) max = len;
+    }
+    if (!best || max > best.maxLen) best = { column: c, maxLen: max };
+  }
+  return best;
 }
 
 export function RowsTable({ rows, offset = 0 }: { rows: Record<string, unknown>[]; offset?: number }) {

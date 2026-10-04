@@ -11,6 +11,8 @@ export interface ErrorDetail {
 interface Drawer {
   title: string;
   kicker?: string;
+  /** The classic 760px drawer (.drawer.wide), for content that needs the room. */
+  wide?: boolean;
   content: ReactNode;
 }
 
@@ -130,7 +132,7 @@ export function DrawerHost() {
     <>
       <div className="backdrop" id="drawer-backdrop" hidden={!drawer} onClick={closeDrawer} />
       <aside
-        className={drawer ? 'drawer open' : 'drawer'}
+        className={['drawer', drawer ? 'open' : '', drawer?.wide ? 'wide' : ''].filter(Boolean).join(' ')}
         id="drawer"
         aria-hidden={drawer ? 'false' : 'true'}
         role="dialog"

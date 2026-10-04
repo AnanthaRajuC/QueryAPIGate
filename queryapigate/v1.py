@@ -200,6 +200,7 @@ def list_connections():
 
 @bp.route('/connections/<name>/schema', methods=['GET'])
 def connection_schema(name):
+    """`?database=` browses another database on the same server (the API Designer's Database picker)."""
     if name not in store.read_connections():
         raise ApiError(f"Connection '{name}' not found", 404, code='connection_not_found')
-    return jsonify(schema.fetch_schema(name)), 200
+    return jsonify(schema.fetch_schema(name, database=request.args.get('database') or None)), 200

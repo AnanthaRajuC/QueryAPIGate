@@ -9,6 +9,10 @@ const RepositoryPage = lazy(() =>
   import('@/features/repository/RepositoryPage').then((m) => ({ default: m.RepositoryPage })),
 );
 
+const DesignerPage = lazy(() =>
+  import('@/features/designer/DesignerPage').then((m) => ({ default: m.DesignerPage })),
+);
+
 export function App() {
   return (
     <Routes>
@@ -21,6 +25,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RepositoryPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="designer"
+          element={
+            <Suspense fallback={<Loading />}>
+              <DesignerPage />
             </Suspense>
           }
         />

@@ -89,6 +89,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         tab: 'run',
         group: 'API',
         label: 'API Designer',
+        path: '/designer',
         icon: svg(
           <>
             <path d="M9 7 4 12l5 5" />

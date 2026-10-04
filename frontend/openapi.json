@@ -719,6 +719,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Another database on the same server than the connection's own.",
+            "in": "query",
+            "name": "database",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
