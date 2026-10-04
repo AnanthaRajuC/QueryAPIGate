@@ -52,6 +52,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code?: string,
     readonly details?: Record<string, string>,
+    /** The database driver's own message, where the server gave one. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -61,7 +63,8 @@ export class ApiError extends Error {
 type Result<T> = { data?: T; error?: unknown; response: Response };
 
 function toError(result: Result<unknown>): ApiError {
-  const body = result.error as { error?: unknown; code?: unknown; errors?: unknown } | undefined;
+  const body = result.error as
+    { error?: unknown; code?: unknown; errors?: unknown; detail?: unknown } | undefined;
   const message =
     typeof body?.error === 'string' ? body.error : `${result.response.status} ${result.response.statusText}`;
   return new ApiError(
@@ -69,6 +72,7 @@ function toError(result: Result<unknown>): ApiError {
     result.response.status,
     typeof body?.code === 'string' ? body.code : undefined,
     body?.errors && typeof body.errors === 'object' ? (body.errors as Record<string, string>) : undefined,
+    typeof body?.detail === 'string' ? body.detail : undefined,
   );
 }
 

@@ -13,6 +13,10 @@ const DesignerPage = lazy(() =>
   import('@/features/designer/DesignerPage').then((m) => ({ default: m.DesignerPage })),
 );
 
+const ConnectionsPage = lazy(() =>
+  import('@/features/connections/ConnectionsPage').then((m) => ({ default: m.ConnectionsPage })),
+);
+
 export function App() {
   return (
     <Routes>
@@ -33,6 +37,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <DesignerPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="connections"
+          element={
+            <Suspense fallback={<Loading />}>
+              <ConnectionsPage />
             </Suspense>
           }
         />

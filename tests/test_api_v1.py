@@ -274,8 +274,9 @@ class HistoryAndConnectionTests(V1TestCase):
 
     def test_connections_and_their_schema(self):
         items = self.call('get', '/api/v1/connections', '/api/v1/connections', 200).get_json()['items']
-        self.assertEqual(items, [{'name': 'lite', 'db': 'sqlite', 'active': True, 'host': None, 'port': None,
-                                  'database': self.db_path}])
+        self.assertEqual([{k: i[k] for k in ('name', 'db', 'active', 'host', 'port', 'database')} for i in items],
+                         [{'name': 'lite', 'db': 'sqlite', 'active': True, 'host': None, 'port': None,
+                           'database': self.db_path}])
         self.assertNotIn('password', str(items))
         tables = self.call('get', '/api/v1/connections/lite/schema', '/api/v1/connections/{name}/schema',
                            200).get_json()['tables']
@@ -291,12 +292,101 @@ class HistoryAndConnectionTests(V1TestCase):
         self.assertIn("Switching databases isn't supported", res.get_json()['error'])
 
 
+class ConnectionTests(V1TestCase):
+    C = '/api/v1/connections/{name}'
+
+    def create(self, name='pg', **fields):
+        body = {'name': name, 'db': 'postgres', 'host': 'db.internal', 'port': 5432, 'user': 'app',
+                'password': 's3cret', 'database': 'shop', 'options': {'sslmode': 'require'}, **fields}
+        return self.call('post', '/api/v1/connections', '/api/v1/connections', 201, json=body)
+
+    def test_create_returns_it_with_the_password_masked(self):
+        res = self.create()
+        body = res.get_json()
+        self.assertEqual((body['name'], body['db'], body['host'], body['user'], body['active']),
+                         ('pg', 'postgres', 'db.internal', 'app', True))
+        self.assertEqual(body['password'], '********')
+        self.assertEqual(body['options'], {'sslmode': 'require'})
+        self.assertNotIn('s3cret', res.get_data(as_text=True))
+        self.assertIn('ETag', res.headers)
+        self.assertEqual(store.read_connections()['pg']['password'], 's3cret')  # stored for real
+        self.assertEqual(store.read_audit_log()[-1]['action'], 'create_connection')
+        self.assertNotIn('s3cret', str(store.read_audit_log()[-1]))
+
+    def test_a_taken_name_and_a_bad_body_are_refused(self):
+        self.create()
+        self.assertEqual(self.call('post', '/api/v1/connections', '/api/v1/connections', 409,
+                                   json={'name': 'pg', 'db': 'sqlite'}).get_json()['code'], 'connection_exists')
+        self.assertEqual(self.call('post', '/api/v1/connections', '/api/v1/connections', 400,
+                                   json={'name': 'x', 'db': 'oracle'}).get_json()['code'], 'invalid_body')
+        self.assertEqual(self.call('post', '/api/v1/connections', '/api/v1/connections', 400,
+                                   json={'name': '../x', 'db': 'sqlite'}).get_json()['code'], 'invalid_name')
+
+    def test_patch_merges_and_keeps_what_it_does_not_mention(self):
+        self.create()
+        res = self.call('patch', '/api/v1/connections/pg', self.C, 200, json={'host': 'db2.internal', 'active': False})
+        body = res.get_json()
+        self.assertEqual((body['host'], body['active'], body['user']), ('db2.internal', False, 'app'))
+        self.assertEqual(body['options'], {'sslmode': 'require'})  # a driver option the form never shows survives
+        stored = store.read_connections()['pg']
+        self.assertEqual(stored['password'], 's3cret')  # left out: kept
+        self.call('patch', '/api/v1/connections/pg', self.C, 200, json={'password': '********'})
+        self.assertEqual(store.read_connections()['pg']['password'], 's3cret')  # the mask: kept
+        self.call('patch', '/api/v1/connections/pg', self.C, 200,
+                  json={'password': 'n3w', 'options': {'sslmode': None}})
+        stored = store.read_connections()['pg']
+        self.assertEqual(stored['password'], 'n3w')
+        self.assertNotIn('sslmode', stored)
+        changes = store.read_audit_log()[-1]['changes']
+        self.assertEqual(changes['password'], 'changed')
+
+    def test_patch_honours_if_match(self):
+        etag = self.create().headers['ETag']
+        self.call('patch', '/api/v1/connections/pg', self.C, 200, headers={**ADMIN, 'If-Match': etag},
+                  json={'user': 'other'})
+        res = self.call('patch', '/api/v1/connections/pg', self.C, 412, headers={**ADMIN, 'If-Match': etag},
+                        json={'user': 'again'})
+        self.assertEqual(res.get_json()['code'], 'precondition_failed')
+
+    def test_delete_needs_a_reason_and_appears_in_deleted(self):
+        self.create()
+        res = self.call('delete', '/api/v1/connections/pg', self.C, 400, json={})
+        self.assertEqual(res.get_json()['code'], 'reason_required')
+        self.call('delete', '/api/v1/connections/pg', self.C, 204, json={'reason': 'moved to the new cluster'})
+        self.assertNotIn('pg', store.read_connections())
+        deleted = self.call('get', '/api/v1/connections/deleted', '/api/v1/connections/deleted',
+                            200).get_json()['items']
+        self.assertEqual((deleted[0]['name'], deleted[0]['reason'], deleted[0]['host']),
+                         ('pg', 'moved to the new cluster', 'db.internal'))
+
+    def test_test_and_databases_probe_without_saving(self):
+        res = self.call('post', '/api/v1/connections/test', '/api/v1/connections/test', 200,
+                        json={'db': 'sqlite', 'database': self.db_path})
+        self.assertIn('elapsed_ms', res.get_json())
+        res = self.call('post', '/api/v1/connections/test', '/api/v1/connections/test', 200, json={'name': 'lite'})
+        self.assertIn('elapsed_ms', res.get_json())
+        res = self.call('post', '/api/v1/connections/test', '/api/v1/connections/test', 502,
+                        json={'db': 'sqlite', 'database': os.path.join(self.tmp.name, 'nope', 'x.db')})
+        self.assertEqual(res.get_json()['code'], 'connection_failed')
+        self.assertEqual(set(store.read_connections()), {'lite'})  # nothing saved
+
+    def test_get_one_and_its_example_flag(self):
+        self.create()
+        body = self.call('get', '/api/v1/connections/pg', self.C, 200).get_json()
+        self.assertFalse(body['example'])
+        self.assertEqual(body['usage']['queries'], 0)
+        res = self.call('get', '/api/v1/connections/nope', self.C, 404)
+        self.assertEqual(res.get_json()['code'], 'connection_not_found')
+
+
 class DeprecationTests(V1TestCase):
     def test_replaced_legacy_routes_say_so_in_headers_and_in_the_spec(self):
         res = self.client.get('/list_files', headers=ADMIN)
         self.assertEqual(res.headers['Deprecation'], 'true')
         self.assertIn('/api/v1/queries', res.headers['Link'])
         self.assertNotIn('Deprecation', self.client.get('/catalog', headers=ADMIN).headers)
+        self.assertIn('/api/v1/connections', self.client.get('/connections', headers=ADMIN).headers['Link'])
+        self.assertNotIn('Deprecation', self.client.get('/connections/lite/schema', headers=ADMIN).headers)
         # The two lists - headers (app.py) and the spec (openapi.py) - name the same operations
         flagged = {(path, method) for path, item in SPEC['paths'].items() for method, op in item.items()
                    if isinstance(op, dict) and op.get('deprecated')}

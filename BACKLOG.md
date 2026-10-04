@@ -2157,8 +2157,11 @@ Shipped:
   - the service layer started in `queryapigate/services/`;
   - the replaced legacy routes send `Deprecation` and `Link` headers and are marked deprecated in the spec.
 
-Remaining resources: API keys, roles, collections, audit, settings and MCP, plus connection writes. Each arrives
-with its Console screen.
+**`/api/v1/connections`, complete (2026-10-04):** CRUD with merge-PATCH (fields it doesn't mention are kept,
+unlike the legacy wholesale replace), deleted list, test, databases; service in `queryapigate/services/connections.py`,
+which the legacy route's audit diff now shares.
+
+Remaining resources: API keys, roles, collections, audit, settings and MCP. Each arrives with its Console screen.
 
 **Decided for `/api/v1/queries` (2026-10-03):**
 - `filename` is dropped from v1; `name` is the identity.
@@ -2242,7 +2245,13 @@ screenshots (light and dark) and an end-to-end headless-Chrome run of every feat
 
 Still classic-only: the Access map screen ("View in Access map" opens it in the classic UI).
 
-Next slice: Connections.
+**Connections slice shipped, at visual parity (2026-10-04):** list with live usage and the four segments, New/Edit
+drawer (reveal, Load databases…, Test connection with the driver's message), type-to-confirm Delete with a reason,
+Query → API Designer. Checked by side-by-side screenshots of the list (light and dark) and the Edit drawer (light),
+and an end-to-end run (create, test, edit to inactive, the `example` flag surviving an edit, Query, delete → Deleted);
+Vitest.
+
+Next slice: API keys and Roles.
 
 **Impact:** `/ui` is the main way people use QueryAPIGate. It's a 6,200-line single page in a Python string,
 with no components, types, tests or build. That's fine for a helper page, and a ceiling for the product the

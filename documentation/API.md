@@ -313,18 +313,36 @@ curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-K
      -H 'Content-Type: application/json' -d '{"version": 1}'
 ~~~
 
-### Connections (read side)
+### Connections
 
-`GET /api/v1/connections` lists each connection's `name`, `db`, `active`, `host`, `port` and `database` (never its
-credentials). `GET /api/v1/connections/{name}/schema` returns its tables and columns; `?database=` reads another
-database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). The rest of the connection resource arrives with the Console's Connections screen.
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/connections` | Every connection's `name`, `db`, `active`, `host`, `port`, `database`, `user`, `example`, timestamps and live `usage` (queries, errors, rows, average latency since the process started). Never credentials. |
+| `POST /api/v1/connections` | Create one: `name`, `db` (required), `host`, `port`, `user`, `password`, `database`, `active` (default true), and `options` for driver settings (`sslmode`, `jdbc_url`, ...). 409 `connection_exists` if the name is taken. |
+| `GET /api/v1/connections/{name}` | One connection, with its `options`. The password is masked as `********` unless it is a `${ENV_VAR}` reference. |
+| `PATCH /api/v1/connections/{name}` | Change some fields; everything not mentioned is kept, driver options included. Send the mask (or leave `password` out) to keep the stored password; `null` removes an optional field. Honours `If-Match`. |
+| `DELETE /api/v1/connections/{name}` | Body `{"reason": "..."}`, required (`reason_required`), and kept in the audit log. Every saved query using it stops working. |
+| `GET /api/v1/connections/deleted` | Deleted connections, newest first, with who deleted them, when and why. |
+| `POST /api/v1/connections/test` | Try to connect with the given fields (an unsaved form), or a saved connection's own by `name`. Nothing is saved. A connection that can't be reached is a 502 `connection_failed` with the driver's message in `detail` (any password in it is redacted). |
+| `POST /api/v1/connections/databases` | The databases on that server, for the same two kinds of body. |
+| `GET /api/v1/connections/{name}/schema` | Its tables and columns; `?database=` reads another database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). |
+
+Every change is audited exactly as the legacy routes audit theirs. A password appears in an audit entry only as
+`"changed"`, never its value.
 
 ### Deprecated routes
 
-The saved-query management routes replaced by `/api/v1/queries` keep working, unchanged. Their responses carry
-`Deprecation: true` and `Link: </api/v1/queries>; rel="successor-version"`, and `/openapi.json` marks them deprecated:
-`GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`,
-`PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl` and `GET /query_flow`. Runtime routes
+The management routes replaced by an `/api/v1` resource keep working, unchanged. Their responses carry
+`Deprecation: true` and a `Link: <successor>; rel="successor-version"` header, and `/openapi.json` marks them
+deprecated:
+- replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`, `PATCH /save_sql_to_file`,
+  `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`, `PUT /saved_sql/{name}/cache_ttl` and
+  `GET /query_flow`;
+- replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`, `POST /connections/test`,
+  `POST /connections/databases` and `DELETE /connections/{name}`.
+
+`GET /connections/{name}/schema` and `GET /connections/{name}/table_ddl` stay as they are: a scoped key may browse the
+schema of a connection it is granted. Runtime routes
 (`/q/<name>`, `/execute_sql`, `/catalog`, `/events`, `/history`) are not deprecated.
 
 ## Collections

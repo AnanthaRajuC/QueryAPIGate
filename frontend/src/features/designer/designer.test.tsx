@@ -33,18 +33,32 @@ vi.mock('@/components/SqlEditor', () => ({
   ),
 }));
 
+const conn = (name: string, db: string, host: string | null, database: string) => ({
+  name,
+  db,
+  active: true,
+  host,
+  port: host ? 5432 : null,
+  database,
+  user: null,
+  example: false,
+  created_at: null,
+  updated_at: null,
+  usage: { queries: 0, errors: 0, rows: 0, avg_duration_ms: null },
+});
+
 const routes = () => ({
   ...baseRoutes(),
   'GET /api/v1/connections': () => ({
     items: [
-      { name: 'lite', db: 'sqlite', active: true, host: null, port: null, database: '/data/films.db' },
-      { name: 'warehouse', db: 'postgres', active: true, host: 'pg.internal', port: 5432, database: 'dw' },
+      {
+        ...conn('lite', 'sqlite', null, '/data/films.db'),
+        usage: { queries: 3, errors: 1, rows: 9, avg_duration_ms: 4.5 },
+      },
+      conn('warehouse', 'postgres', 'pg.internal', 'dw'),
     ],
   }),
-  'GET /connections': () => ({
-    connections: { lite: { usage: { queries: 3, errors: 1, avg_duration_ms: 4.5 } } },
-  }),
-  'POST /connections/databases': () => ({ databases: ['dw', 'staging'] }),
+  'POST /api/v1/connections/databases': () => ({ databases: ['dw', 'staging'] }),
   'POST /execute_sql': () =>
     jsonResponse([{ id: 1, title: 'Alpha' }], 200, {
       'X-Page': '1',

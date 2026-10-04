@@ -76,11 +76,27 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   while you visit other screens, as the classic tab always did. `GET /api/v1/connections/{name}/schema` gains
   `?database=` for the Database picker.
 
+- **Management API: `/api/v1/connections`**, complete:
+  - list (now with user, timestamps and live usage), create, get, change and delete (a reason is required, and
+    kept in the audit log);
+  - the deleted list, test a connection, and list a server's databases.
+
+  `PATCH` merges: fields it doesn't mention are kept, driver options included. (The legacy `PATCH /connections`
+  replaces the whole record, so a form save could drop options and the `example` flag.) Passwords are masked in
+  every response and audited only as "changed"; edits honour `If-Match`. A connection that can't be reached is a 502
+  `connection_failed` with the driver's (redacted) message in `detail`.
+- **The Console's Connections screen** (`/console/connections`), at visual parity with the classic one. It has the
+  All / Active / Inactive / Deleted segments, the filter, the table with live usage, and the New / Edit drawer
+  (password reveal, Load databases…, Test connection). Delete asks for a reason and the name typed back. Query opens
+  the API Designer on that connection.
+
 ### Deprecated
 - The saved-query management routes replaced by `/api/v1/queries`: `GET /list_files`, `GET /view_file_content`,
   `PATCH /save_sql_to_file`, `DELETE /saved_sql/{name}`, `PUT /saved_sql/{name}/collection`,
   `PUT /saved_sql/{name}/cache_ttl`, `GET /query_flow`. They keep working unchanged, and now send a `Deprecation`
   header with a `Link` to their successor; `/openapi.json` marks them deprecated. `/ui` still uses them.
+- The connection management routes replaced by `/api/v1/connections`: `GET /connections`, `PATCH /connections`,
+  `POST /connections/test`, `POST /connections/databases` and `DELETE /connections/{name}`, in the same way.
 
 ### Fixed
 - **A query's own `LIMIT` is respected** (BACKLOG #74). Paging used to replace a trailing `LIMIT`/`OFFSET` with the

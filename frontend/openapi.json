@@ -26,12 +26,219 @@
           "active": {
             "type": "boolean"
           },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
           "database": {
-            "description": "The database name, or the file path for SQLite/DuckDB.",
+            "description": "The database name, or the file path for SQLite/DuckDB/H2.",
             "nullable": true,
             "type": "string"
           },
           "db": {
+            "type": "string"
+          },
+          "example": {
+            "description": "Installed by the example APIs.",
+            "type": "boolean"
+          },
+          "host": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "usage": {
+            "description": "Since this process started.",
+            "properties": {
+              "avg_duration_ms": {
+                "nullable": true,
+                "type": "number"
+              },
+              "errors": {
+                "type": "integer"
+              },
+              "queries": {
+                "type": "integer"
+              },
+              "rows": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "queries",
+              "errors",
+              "rows",
+              "avg_duration_ms"
+            ],
+            "type": "object"
+          },
+          "user": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "db",
+          "active",
+          "host",
+          "port",
+          "database",
+          "user",
+          "example",
+          "created_at",
+          "updated_at",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "ConnectionDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Connection"
+          },
+          {
+            "properties": {
+              "options": {
+                "additionalProperties": true,
+                "description": "Driver options passed through to the connection (sslmode, jdbc_url, ...).",
+                "type": "object"
+              },
+              "password": {
+                "description": "Masked as ******** unless it is a ${ENV_VAR} reference; send the mask back (or leave password out) to keep it.",
+                "nullable": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "password",
+              "options"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ConnectionInput": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "default": true,
+            "type": "boolean"
+          },
+          "database": {
+            "nullable": true,
+            "type": "string"
+          },
+          "db": {
+            "description": "Required on create.",
+            "type": "string"
+          },
+          "host": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "Create only.",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "password": {
+            "nullable": true,
+            "type": "string"
+          },
+          "port": {
+            "nullable": true,
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "user": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ConnectionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Connection"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConnectionTest": {
+        "properties": {
+          "elapsed_ms": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "elapsed_ms"
+        ],
+        "type": "object"
+      },
+      "DatabaseList": {
+        "properties": {
+          "databases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "databases"
+        ],
+        "type": "object"
+      },
+      "DeletedConnection": {
+        "properties": {
+          "database": {
+            "nullable": true,
+            "type": "string"
+          },
+          "db": {
+            "nullable": true,
+            "type": "string"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "deleted_by": {
+            "nullable": true,
             "type": "string"
           },
           "host": {
@@ -51,23 +258,29 @@
                 "type": "string"
               }
             ]
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
           "name",
           "db",
-          "active",
           "host",
           "port",
-          "database"
+          "database",
+          "deleted_at",
+          "deleted_by",
+          "reason"
         ],
         "type": "object"
       },
-      "ConnectionList": {
+      "DeletedConnectionList": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/Connection"
+              "$ref": "#/components/schemas/DeletedConnection"
             },
             "type": "array"
           }
@@ -561,6 +774,10 @@
             "description": "Stable and machine-readable, e.g. query_not_found, query_exists, precondition_failed, unknown_field.",
             "type": "string"
           },
+          "detail": {
+            "description": "The database driver's own message, where there is one.",
+            "type": "string"
+          },
           "error": {
             "description": "Human-readable; wording may change between releases.",
             "type": "string"
@@ -703,7 +920,594 @@
             "description": "Not found"
           }
         },
-        "summary": "List connections (name, type, active)",
+        "summary": "List connections (identity, status and live usage - never credentials)",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDetail"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Create a connection",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/connections/databases": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Couldn't reach the database (code connection_failed)"
+          }
+        },
+        "summary": "The databases on the server the given fields (or a saved connection, by name) point at",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/connections/deleted": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedConnectionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Deleted connections, newest first, with who deleted them and why",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/connections/test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Couldn't reach the database (code connection_failed)"
+          }
+        },
+        "summary": "Try to connect with the given fields, or a saved connection by name (nothing is saved)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/connections/{name}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Delete it (a reason is required, kept in the audit log)",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDetail"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Get a connection (password masked)",
+        "tags": [
+          "Management API v1"
+        ]
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionDetail"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not the admin key"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Change some of its fields; the rest are kept",
         "tags": [
           "Management API v1"
         ]
@@ -2848,6 +3652,7 @@
     },
     "/connections": {
       "get": {
+        "deprecated": true,
         "responses": {
           "200": {
             "description": "Connections"
@@ -2880,6 +3685,7 @@
         ]
       },
       "patch": {
+        "deprecated": true,
         "requestBody": {
           "content": {
             "application/json": {
@@ -2981,6 +3787,7 @@
     },
     "/connections/databases": {
       "post": {
+        "deprecated": true,
         "description": "Give 'name' alone for an already-saved connection - Run SQL's own database picker. Give the connection's own fields, as POST /connections/test does, to probe one that isn't saved yet - the New/Edit connection form's 'Default database' dropdown - or to try changed fields before saving them. Only supported for mysql, postgres and clickhouse connections; sqlite and duckdb are a single file, and h2/jdbc have no one catalogue query that works across every database reachable that way.",
         "requestBody": {
           "content": {
@@ -3060,6 +3867,7 @@
     },
     "/connections/test": {
       "post": {
+        "deprecated": true,
         "description": "The same fields PATCH /connections takes for one connection, but tried immediately rather than saved - so a typo'd host or a firewalled port is found out before it becomes a saved connection. A password equal to the masked placeholder GET /connections returns is resolved to that connection's real stored password first, by 'name' if one is given.",
         "requestBody": {
           "content": {
@@ -3151,6 +3959,7 @@
     },
     "/connections/{name}": {
       "delete": {
+        "deprecated": true,
         "description": "A reason is required - deleting a connection breaks every saved query that used it, so it is not left to guesswork afterward. Recorded in the audit log's 'deleted_reason' field; there is no separate deleted-connections store.",
         "parameters": [
           {

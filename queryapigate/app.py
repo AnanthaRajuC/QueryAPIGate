@@ -59,14 +59,19 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query', 'api.execute_sql_from_file'}  # where run_saved() is reached
-# Legacy saved-query management routes, each replaced by /api/v1/queries (v1.py, BACKLOG #72). They keep working;
-# responses say so (RFC 9745 Deprecation header, plus a Link to the successor) and /openapi.json marks them.
-DEPRECATED_ENDPOINTS = {'api.list_files', 'api.view_file_content', 'api.save_sql_to_file', 'api.delete_saved_query',
-                        'api.move_query', 'api.set_query_cache_ttl', 'api.query_flow'}
+# Legacy management routes replaced by an /api/v1 resource (v1.py, BACKLOG #72). They keep working; responses say so
+# (RFC 9745 Deprecation header, plus a Link to the successor) and /openapi.json marks them.
+DEPRECATED_ENDPOINTS = {
+    **dict.fromkeys(('api.list_files', 'api.view_file_content', 'api.save_sql_to_file', 'api.delete_saved_query',
+                     'api.move_query', 'api.set_query_cache_ttl', 'api.query_flow'), '/api/v1/queries'),
+    **dict.fromkeys(('api.get_connections', 'api.update_connections', 'api.list_databases_route',
+                     'api.test_connection_route', 'api.delete_connection'), '/api/v1/connections'),
+}  # endpoint -> its successor
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 _V1_DEFAULT_CODES = {400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found',
                      405: 'method_not_allowed', 409: 'conflict', 412: 'precondition_failed', 413: 'payload_too_large',
-                     415: 'unsupported_media_type', 429: 'rate_limited', 500: 'internal_error', 504: 'query_timeout'}
+                     415: 'unsupported_media_type', 429: 'rate_limited', 500: 'internal_error', 502: 'upstream_failed',
+                     504: 'query_timeout'}
 
 
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
@@ -234,7 +239,7 @@ def create_app():
         response.headers['X-Request-Id'] = g.get('request_id', '-')
         if request.endpoint in DEPRECATED_ENDPOINTS:
             response.headers['Deprecation'] = 'true'
-            response.headers['Link'] = '</api/v1/queries>; rel="successor-version"'
+            response.headers['Link'] = f'<{DEPRECATED_ENDPOINTS[request.endpoint]}>; rel="successor-version"'
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
         metrics.observe_request(request.method, endpoint, str(response.status_code), elapsed, caller_key_name())
@@ -365,20 +370,9 @@ def _dict_diff(before, after):
 
 
 def _connection_audit_changes(before, after):
-    """Like _dict_diff(), but for a connection's raw (unmasked) stored fields specifically: 'password' is
-    reported only as the literal string 'changed' when it differs, in either direction - never the actual
-    value, before or after masking, since this is what gets persisted to the audit log. Every other field
-    (host, port, user, db, database, active, ...) is not a secret and is shown as given. `before=None`
-    means the connection didn't exist yet - the caller records that as a 'create_connection' snapshot
-    instead of calling this.
-
-    `updated_at` is left out: it is the store's own bookkeeping, not something the caller changed, and it differs
-    whenever two saves fall in different seconds - which made it show up in some diffs and not others."""
-    diff = _dict_diff(before, after)
-    diff.pop('updated_at', None)
-    if 'password' in diff:
-        diff['password'] = 'changed'
-    return diff
+    """A connection's changed fields for the audit log - one implementation, shared with /api/v1/connections."""
+    from .services import connections as connection_service
+    return connection_service.audit_changes(before, after)
 
 
 def get_json_body(required=True):

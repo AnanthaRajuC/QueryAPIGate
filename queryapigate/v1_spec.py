@@ -45,6 +45,7 @@ SCHEMAS = {
             'request_id': {'type': 'string', 'description': 'Matches the X-Request-Id header and the server log.'},
             'errors': {'type': 'object', 'additionalProperties': {'type': 'string'},
                        'description': 'Per-parameter problems, when the parameter rules were invalid.'},
+            'detail': {'type': 'string', 'description': "The database driver's own message, where there is one."},
         },
     },
     'ParameterRule': {
@@ -171,16 +172,74 @@ SCHEMAS = {
                                        'description': 'Pass as ?cursor= for the next page; null on the last.'}},
     },
     'Connection': {
-        'type': 'object', 'required': ['name', 'db', 'active', 'host', 'port', 'database'],
-        'properties': {'name': {'type': 'string'}, 'db': {'type': 'string'}, 'active': {'type': 'boolean'},
-                       'host': _NULLABLE_STRING,
-                       'port': {'oneOf': [{'type': 'integer'}, {'type': 'string'}], 'nullable': True},
-                       'database': {'type': 'string', 'nullable': True,
-                                    'description': 'The database name, or the file path for SQLite/DuckDB.'}},
+        'type': 'object',
+        'required': ['name', 'db', 'active', 'host', 'port', 'database', 'user', 'example', 'created_at', 'updated_at',
+                     'usage'],
+        'properties': {
+            'name': {'type': 'string'}, 'db': {'type': 'string'}, 'active': {'type': 'boolean'},
+            'host': _NULLABLE_STRING,
+            'port': {'oneOf': [{'type': 'integer'}, {'type': 'string'}], 'nullable': True},
+            'database': {'type': 'string', 'nullable': True,
+                         'description': 'The database name, or the file path for SQLite/DuckDB/H2.'},
+            'user': _NULLABLE_STRING,
+            'example': {'type': 'boolean', 'description': 'Installed by the example APIs.'},
+            'created_at': _NULLABLE_STRING, 'updated_at': _NULLABLE_STRING,
+            'usage': {'type': 'object', 'required': ['queries', 'errors', 'rows', 'avg_duration_ms'],
+                      'description': 'Since this process started.',
+                      'properties': {'queries': {'type': 'integer'}, 'errors': {'type': 'integer'},
+                                     'rows': {'type': 'integer'},
+                                     'avg_duration_ms': {'type': 'number', 'nullable': True}}},
+        },
+    },
+    'ConnectionDetail': {
+        'allOf': [_ref('Connection'), {
+            'type': 'object', 'required': ['password', 'options'],
+            'properties': {
+                'password': {'type': 'string', 'nullable': True,
+                             'description': "Masked as ******** unless it is a ${ENV_VAR} reference; send the mask "
+                                            'back (or leave password out) to keep it.'},
+                'options': {'type': 'object', 'additionalProperties': True,
+                            'description': 'Driver options passed through to the connection (sslmode, jdbc_url, ...).'},
+            }}],
+    },
+    'ConnectionInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'},
+            'db': {'type': 'string', 'description': 'Required on create.'},
+            'active': {'type': 'boolean', 'default': True},
+            'host': _NULLABLE_STRING,
+            'port': {'oneOf': [{'type': 'integer'}, {'type': 'string'}], 'nullable': True},
+            'user': _NULLABLE_STRING,
+            'password': {'type': 'string', 'nullable': True},
+            'database': _NULLABLE_STRING,
+            'options': {'type': 'object', 'additionalProperties': True},
+        },
+        'additionalProperties': True,
     },
     'ConnectionList': {
         'type': 'object', 'required': ['items'],
         'properties': {'items': {'type': 'array', 'items': _ref('Connection')}},
+    },
+    'DeletedConnection': {
+        'type': 'object', 'required': ['name', 'db', 'host', 'port', 'database', 'deleted_at', 'deleted_by', 'reason'],
+        'properties': {
+            'name': {'type': 'string'}, 'db': _NULLABLE_STRING, 'host': _NULLABLE_STRING,
+            'port': {'oneOf': [{'type': 'integer'}, {'type': 'string'}], 'nullable': True},
+            'database': _NULLABLE_STRING, 'deleted_at': _NULLABLE_STRING, 'deleted_by': _NULLABLE_STRING,
+            'reason': _NULLABLE_STRING,
+        },
+    },
+    'DeletedConnectionList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('DeletedConnection')}},
+    },
+    'ConnectionTest': {
+        'type': 'object', 'required': ['elapsed_ms'], 'properties': {'elapsed_ms': {'type': 'number'}},
+    },
+    'DatabaseList': {
+        'type': 'object', 'required': ['databases'],
+        'properties': {'databases': {'type': 'array', 'items': {'type': 'string'}}},
     },
     'Schema': {
         'type': 'object', 'required': ['tables', 'truncated'],
@@ -216,6 +275,9 @@ def _op(summary, responses, parameters=(), body=None, description=None):
 
 
 _QUERY = _ok(_ref('Query'), etag=True)
+_CONNECTION = _ok(_ref('ConnectionDetail'), etag=True)
+_UNREACHABLE = {'502': {'description': "Couldn't reach the database (code connection_failed)",
+                        **_json(_ref('V1Error'))}}
 
 PATHS = {
     '/api/v1/queries': {
@@ -274,7 +336,29 @@ PATHS = {
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
     },
     '/api/v1/connections': {
-        'get': _op('List connections (name, type, active)', {'200': _ok(_ref('ConnectionList'))}),
+        'get': _op('List connections (identity, status and live usage - never credentials)',
+                   {'200': _ok(_ref('ConnectionList'))}),
+        'post': _op('Create a connection', {'201': _CONNECTION, **_CONFLICT}, body=_ref('ConnectionInput')),
+    },
+    '/api/v1/connections/deleted': {
+        'get': _op('Deleted connections, newest first, with who deleted them and why',
+                   {'200': _ok(_ref('DeletedConnectionList'))}),
+    },
+    '/api/v1/connections/test': {
+        'post': _op('Try to connect with the given fields, or a saved connection by name (nothing is saved)',
+                    {'200': _ok(_ref('ConnectionTest')), **_UNREACHABLE}, body=_ref('ConnectionInput')),
+    },
+    '/api/v1/connections/databases': {
+        'post': _op("The databases on the server the given fields (or a saved connection, by name) point at",
+                    {'200': _ok(_ref('DatabaseList')), **_UNREACHABLE}, body=_ref('ConnectionInput')),
+    },
+    '/api/v1/connections/{name}': {
+        'get': _op('Get a connection (password masked)', {'200': _CONNECTION}, parameters=[_NAME]),
+        'patch': _op('Change some of its fields; the rest are kept', {'200': _CONNECTION, **_PRECONDITION},
+                     parameters=[_NAME, _IF_MATCH], body=_ref('ConnectionInput')),
+        'delete': _op('Delete it (a reason is required, kept in the audit log)',
+                      {'204': {'description': 'Deleted'}, **_PRECONDITION}, parameters=[_NAME, _IF_MATCH],
+                      body={'type': 'object', 'required': ['reason'], 'properties': {'reason': {'type': 'string'}}}),
     },
     '/api/v1/connections/{name}/schema': {
         'get': _op("A connection's tables and columns", {'200': _ok(_ref('Schema'))}, parameters=[

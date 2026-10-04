@@ -629,7 +629,9 @@ def build_spec(version, saved_queries=None, jwt=None):
 # Kept in step with app.DEPRECATED_ENDPOINTS (the routes that send a Deprecation header) - tested.
 _DEPRECATED_OPERATIONS = (('/list_files', 'get'), ('/view_file_content', 'get'), ('/save_sql_to_file', 'patch'),
                           ('/saved_sql/{name}', 'delete'), ('/saved_sql/{name}/collection', 'put'),
-                          ('/saved_sql/{name}/cache_ttl', 'put'), ('/query_flow', 'get'))
+                          ('/saved_sql/{name}/cache_ttl', 'put'), ('/query_flow', 'get'),
+                          ('/connections', 'get'), ('/connections', 'patch'), ('/connections/databases', 'post'),
+                          ('/connections/test', 'post'), ('/connections/{name}', 'delete'))
 
 
 DOCS_HTML = """<!doctype html>

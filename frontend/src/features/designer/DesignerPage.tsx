@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { apiJson, timedFetch } from '@/api/client';
+import { api, timedFetch, unwrap } from '@/api/client';
 import { getApiKey } from '@/auth/apiKey';
 import { useAllQueries, useCollections, useConnections, type Connection } from '@/app/data';
 import { Field, FormActions, useFeedback } from '@/app/feedback';
@@ -43,9 +43,7 @@ function hostLabel(c: Connection) {
   return c.host ? c.host + (c.port ? ':' + c.port : '') : '(local file)';
 }
 
-type ConnectionDetail = { usage?: { queries?: number; errors?: number; avg_duration_ms?: number | null } };
-
-function usageText(usage: ConnectionDetail['usage']) {
+function usageText(usage: Connection['usage'] | undefined) {
   if (!usage || !usage.queries) return null;
   const parts = [usage.queries + (usage.queries === 1 ? ' query' : ' queries')];
   if (usage.errors) parts.push(usage.errors + ' failed');
@@ -84,11 +82,6 @@ export function DesignerPage() {
   const connections = useConnections();
   const conns = useMemo(() => connections.data ?? [], [connections.data]);
   const byName = useMemo(() => Object.fromEntries(conns.map((c) => [c.name, c])), [conns]);
-  const detail = useQuery({
-    queryKey: ['connections', 'detail'],
-    queryFn: () => apiJson<{ connections: Record<string, ConnectionDetail> }>('/connections'),
-    retry: false,
-  });
 
   const [state, setState] = useState<DesignerState>(loadDesignerState);
   useEffect(() => saveDesignerState(state), [state]);
@@ -114,12 +107,8 @@ export function DesignerPage() {
   const switchable = Boolean(conn && DB_SWITCHABLE_TYPES.includes(conn.db));
   const databases = useQuery({
     queryKey: ['connections', connection, 'databases'],
-    queryFn: () =>
-      apiJson<{ databases: string[] }>('/connections/databases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: connection }),
-      }),
+    queryFn: async () =>
+      unwrap(await api.POST('/api/v1/connections/databases', { body: { name: connection } })),
     enabled: switchable,
     retry: false,
     staleTime: 5 * 60_000,
@@ -253,7 +242,21 @@ export function DesignerPage() {
   }
 
   // A table previewed from a schema browser elsewhere (the drawer's 👁) lands here and runs at once.
-  const preview = (location.state as { preview?: { connection: string; table: string } } | null)?.preview;
+  const navState = location.state as {
+    preview?: { connection: string; table: string };
+    select?: string;
+  } | null;
+  const preview = navState?.preview;
+  // The Connections screen's "Query" button: select that connection, ready to type.
+  const select = navState?.select;
+  const handledSelect = useRef<unknown>(null);
+  useEffect(() => {
+    if (!select || handledSelect.current === location.key || !byName[select]) return;
+    handledSelect.current = location.key;
+    const c = byName[select]!;
+    setState((s) => ({ ...s, type: c.db, host: hostLabel(c), connection: c.name, database: '' }));
+    navigate(location.pathname, { replace: true, state: null });
+  }, [select, location.key, location.pathname, byName, navigate]);
   const handledPreview = useRef<unknown>(null);
   useEffect(() => {
     if (!preview || handledPreview.current === location.key || !byName[preview.connection]) return;
@@ -320,7 +323,7 @@ export function DesignerPage() {
   }
 
   const refs = isMongo ? mongoDocParams(state.sql) : sqlParams(state.sql);
-  const contextUsage = usageText(detail.data?.connections[connection]?.usage);
+  const contextUsage = usageText(conn?.usage);
 
   return (
     <>

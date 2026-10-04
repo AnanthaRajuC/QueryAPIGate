@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request
 from . import collection_admin, history, schema, store
 from .app import caller_key_name, get_int, get_json_body, require_admin
 from .errors import ApiError
-from .services import queries
+from .services import connections, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -190,17 +190,72 @@ def query_history(name):
 
 @bp.route('/connections', methods=['GET'])
 def list_connections():
-    # Only what identifies a connection - never credentials or driver options.
-    items = [{'name': name, 'db': details.get('db'), 'active': bool(details.get('active', True)),
-              'host': details.get('host') or None, 'port': details.get('port') or None,
-              'database': details.get('database') if isinstance(details.get('database'), str) else None}
-             for name, details in sorted(store.read_connections().items())]
-    return jsonify({'items': items}), 200
+    return jsonify({'items': connections.list_items()}), 200
+
+
+@bp.route('/connections', methods=['POST'])
+def create_connection():
+    name = connections.create(get_json_body(), caller_key_name())
+    return _connection_response(name, 201)
+
+
+@bp.route('/connections/deleted', methods=['GET'])
+def deleted_connections():
+    """Deleted connections, newest first, with who deleted them and why - read from the audit log."""
+    return jsonify({'items': connections.deleted()}), 200
+
+
+@bp.route('/connections/test', methods=['POST'])
+def test_connection():
+    """Try to connect with the given fields (or a saved connection's, given only its `name`). Nothing is saved."""
+    return jsonify(connections.test(get_json_body())), 200
+
+
+@bp.route('/connections/databases', methods=['POST'])
+def connection_databases():
+    """Every database on the server the given fields (or a saved connection, by `name`) point at."""
+    return jsonify({'databases': connections.databases(get_json_body())}), 200
+
+
+def _connection_response(name, status=200):
+    details = connections.load(name)
+    response = jsonify(connections.to_detail(name, details))
+    response.headers['ETag'] = connections.etag(details)
+    return response, status
+
+
+def _check_connection_if_match(details):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != connections.etag(details):
+        raise ApiError('This connection changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+@bp.route('/connections/<name>', methods=['GET'])
+def get_connection(name):
+    return _connection_response(name)
+
+
+@bp.route('/connections/<name>', methods=['PATCH'])
+def update_connection(name):
+    """Change some fields; everything not mentioned is kept. The password mask (or leaving `password` out) keeps the
+    stored password; `null` removes an optional field."""
+    _check_connection_if_match(connections.load(name))
+    connections.update(name, get_json_body(), caller_key_name())
+    return _connection_response(name)
+
+
+@bp.route('/connections/<name>', methods=['DELETE'])
+def delete_connection(name):
+    """Every saved query using it stops working, so a `reason` is required; it is kept in the audit log."""
+    _check_connection_if_match(connections.load(name))
+    data = get_json_body(required=False) or {}
+    connections.delete(name, data.get('reason'), caller_key_name())
+    return '', 204
 
 
 @bp.route('/connections/<name>/schema', methods=['GET'])
 def connection_schema(name):
     """`?database=` browses another database on the same server (the API Designer's Database picker)."""
-    if name not in store.read_connections():
-        raise ApiError(f"Connection '{name}' not found", 404, code='connection_not_found')
+    connections.load(name)
     return jsonify(schema.fetch_schema(name, database=request.args.get('database') or None)), 200

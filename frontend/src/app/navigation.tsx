@@ -51,6 +51,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         tab: 'connections',
         group: 'Data',
         label: 'Connections',
+        path: '/connections',
         count: 'connections',
         icon: svg(
           <>
