@@ -178,6 +178,47 @@ class RunTests(AlertTestCase):
         self.assertNotIn('query_errors:past', self.kinds())
 
 
+class UnreachableDatabaseTests(AlertTestCase):
+    """A database that can't be reached is told apart from SQL it rejects, end to end: the run fails with
+    connection_failed (502), and three in a row make the connection's alert."""
+
+    def test_a_refused_connection_is_connection_failed_and_raises_the_alert(self):
+        try:
+            import psycopg2  # noqa: F401
+        except ImportError:
+            self.skipTest('needs psycopg2')
+        res = self.client.post('/api/v1/connections', headers=ADMIN, json={
+            'name': 'down', 'db': 'postgres', 'host': '127.0.0.1', 'port': 1, 'database': 'x', 'user': 'u'})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        for _ in range(3):
+            res = self.client.post('/execute_sql', headers=ADMIN, json={'sql': 'SELECT 1', 'connection_name': 'down'})
+            self.assertEqual((res.status_code, res.get_json()['code']), (502, 'connection_failed'))
+        self.assertEqual(self.kinds()['connection_failing:down']['severity'], 'critical')
+
+    def test_rejected_sql_is_still_query_failed(self):
+        import sqlite3
+        sqlite3.connect(os.path.join(self.tmp.name, 'd.db')).close()
+        res = self.client.post('/execute_sql', headers=ADMIN, json={'sql': 'SELECT nope', 'connection_name': 'lite'})
+        self.assertEqual((res.status_code, res.get_json()['code']), (500, 'query_failed'))
+
+    def test_what_counts_as_unreachable(self):
+        from queryapigate import engine
+
+        class OperationalError(Exception):
+            pass
+
+        self.assertTrue(engine.is_connection_failure(ConnectionRefusedError(111, 'refused')))
+        self.assertTrue(engine.is_connection_failure(OperationalError(
+            2003, "Can't connect to MySQL server on '10.0.0.9' ([Errno 111] Connection refused)")))
+        self.assertTrue(engine.is_connection_failure(OperationalError(
+            'could not translate host name "db.internal" to address: Name or service not known')))
+        wrapped = RuntimeError('query failed')
+        wrapped.__cause__ = TimeoutError('timed out')
+        self.assertTrue(engine.is_connection_failure(wrapped))
+        self.assertFalse(engine.is_connection_failure(OperationalError('no such column: nope')))
+        self.assertFalse(engine.is_connection_failure(OperationalError('relation "films" does not exist')))
+
+
 class OrderAndHealthTests(AlertTestCase):
     def test_most_severe_first_and_history_trouble(self):
         create_key(self.client, headers=ADMIN, name='soon', connections=['lite'],

@@ -644,8 +644,9 @@ class SchemaTests(ApiTestCase):
     def test_inactive_connection_is_403(self):
         self.assertEqual(self.client.get('/connections/off/schema').status_code, 403)
 
-    def test_unreachable_connection_is_500_not_a_crash(self):
-        self.assertEqual(self.client.get('/connections/pg/schema').status_code, 500)
+    def test_unreachable_connection_is_502_connection_failed_not_a_crash(self):
+        res = self.client.get('/connections/pg/schema')
+        self.assertEqual((res.status_code, res.get_json()['code']), (502, 'connection_failed'))
 
     def test_database_with_no_tables_is_an_empty_list_not_an_error(self):
         empty_path = os.path.join(self.tmp.name, 'empty.db')

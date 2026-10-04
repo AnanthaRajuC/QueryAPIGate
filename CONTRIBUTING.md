@@ -155,6 +155,16 @@ npx playwright install chromium   # once
 npm run e2e                       # set QUERYAPIGATE_BIN=../.venv/bin/queryapigate if it isn't on PATH
 ~~~
 
+The README's screenshots (`documentation/screenshots/`) are taken the same way, from a throwaway server seeded with a
+realistic estate (`frontend/scripts/screenshots.mjs`). Retake them all after a visible change, and add a screen there -
+keeping the existing file names, which README.md links to:
+
+~~~bash
+cd frontend
+npm run build
+npm run screenshots               # QUERYAPIGATE_BIN as above; OUT=/some/dir/ to write elsewhere first
+~~~
+
 Many comments in `frontend/src` cite the function of `queryapigate/ui.py` a screen was ported from - the hand-written
 admin page the Console replaced. It was removed after the migration; read it in git history (`git show
 <commit>^:queryapigate/ui.py`, where `<commit>` is the one that deleted it).

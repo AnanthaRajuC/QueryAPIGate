@@ -39,26 +39,26 @@ Crimson Garden,Comedy,PG-13,631,2
 <p align="center">
   <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/run-sql.png">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/run-sql.png"
-         alt="QueryAPIGate admin UI: a joined SQL query running against a SQLite connection, with the schema browser expanded and paginated JSON results below" width="820">
+         alt="The QueryAPIGate Console's API Designer: a joined SQL query with a bound :min_rentals parameter running against the example SQLite connection, the schema browser beside it and paginated results below" width="820">
   </a>
   <br>
-  <sub>The built-in admin UI at <code>/console</code> - syntax highlighting, a schema browser and one-click query history, no separate tool to install.</sub>
+  <sub>The built-in Console at <code>/console</code>: write SQL with completion and a schema browser, run it, then save it as an API - no separate tool to install.</sub>
 </p>
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png"
-         alt="Home tab: at-a-glance stat tiles for connections, the API Repository, API keys, roles, requests and error rate, a system health panel, recent audit activity, quick actions, and recent/slowest API requests" width="820">
+         alt="Home: stat tiles for connections, the API Repository, API keys, roles, requests and error rate, System health listing the current alerts (an expiring key, a key over its rate limit, a failing query), recent audit activity, quick actions, and recent ad-hoc and saved-query requests" width="820">
   </a>
   <br>
-  <sub>Home: an at-a-glance overview - live totals, system health, recent activity and the slowest recent requests.</sub>
+  <sub>Home: live totals, what needs attention, recent activity, and every recent request - saved APIs and ad-hoc SQL alike.</sub>
 </p>
 
 <table>
 <tr>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with a sidebar and All/Active/Inactive tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with active/inactive status and each connection's live usage: queries run, failures and average latency">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with All/Active/Inactive/Deleted tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with their status, each connection's live usage (queries run, failures, average latency), and Query, edit and delete actions">
 </a>
 <br><sub>Manage connections across every supported database, with live usage per connection</sub>
 </td>
@@ -119,6 +119,46 @@ Crimson Garden,Comedy,PG-13,631,2
 <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png" alt="Caching screen: response cache backend, entry count, hit rate, hits and misses, and the list of saved queries with a cache_ttl set">
 </a>
 <br><sub>Caching: live hit rate for the response cache backing every saved query's <code>cache_ttl</code></sub>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="33%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png" alt="Alerts screen with a tab per check - key expiry, unused keys, failing connections, query errors, slow queries, rate limits, open access and run history - listing a critical failing connection and warnings for an expiring key, a key over its rate limit and a failing query, each with what to do and a link to fix it">
+</a>
+<br><sub>Alerts: failing connections, expiring keys, failing or slow queries, rate limits being hit - each with what to do, clearing by itself once fixed</sub>
+</td>
+<td width="33%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png" alt="Access map: every saved query against every API key, showing whether each key reaches it through a named query, a collection or a whole connection, with filters by connection, database and reach">
+</a>
+<br><sub>Access map: which key can call which query, and why - one grid instead of reading every grant</sub>
+</td>
+<td width="33%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png" alt="Settings: the server's effective configuration by section, and this browser's Appearance preferences - theme, font size, time zone, time format, table density and reduced motion">
+</a>
+<br><sub>Settings: the server's effective configuration, read-only, plus per-browser appearance and editor preferences</sub>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/help.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/help.png" alt="Help: the how-to guides browsed inside the Console, with an On this page list of the guide's sections">
+</a>
+<br><sub>Help: the docs and how-to guides for the version you run, inside the Console</sub>
+</td>
+<td width="50%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home-dark.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home-dark.png" alt="Home in the dark theme, with the font size and light/dark switches in the top right corner">
+</a>
+<br><sub>Light or dark, three font sizes - switched from the top right corner</sub>
 </td>
 </tr>
 </table>

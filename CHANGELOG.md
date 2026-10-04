@@ -161,6 +161,8 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
   Dismissing an alert hides it in that browser until it clears. New settings `QUERYAPIGATE_ALERT_ERROR_RATE` and
   `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS`; a query is slow by `QUERYAPIGATE_SLOW_QUERY_THRESHOLD`. See
   [Alerts](documentation/API.md#alerts).
+- **New screenshots** of every Console screen in the README, including Alerts, Access map, Settings, Help and the dark
+  theme - taken by `frontend/scripts/screenshots.mjs` (`npm run screenshots`) from a seeded throwaway server.
 - **`queryapigate mcp` serves its own `GET /metrics` and `GET /health`** beside `/mcp`.
 - **One error format everywhere** (BACKLOG #69). Every error response - the runtime routes (`/q/<name>`,
   `/execute_sql`, `/catalog`, ...) as well as `/api/v1` and `queryapigate events` - now carries a stable `code` and
@@ -240,6 +242,11 @@ discovered. Once a 1.0 ships, that same rule simply moves to major versions, as 
 - **The Console's Theme preference took no effect:** the built stylesheet followed the operating system's light or
   dark setting whatever was chosen. The build now keeps the stylesheet's `light-dark()` colours as written, for
   browsers from 2024 on (Chrome and Edge 123, Firefox 120, Safari 17.5).
+- **A database that can't be reached is reported as such:** a run whose driver couldn't connect (refused,
+  unreachable, unknown host, timed out connecting) now fails with `connection_failed` and HTTP 502, not
+  `query_failed` and 500 - so callers, run history and the "connection failing" alert can tell it from SQL the
+  database rejected. The same for schema browsing.
+- **The Console's light/dark switch no longer shows a focus ring all the time.**
 - **A store first created by 0.10 no longer breaks run history after upgrading.** 0.10 created an
   `execution_history` table in an early shape it never wrote to (its runs still lived in `saved_sql/*.json`), and
   no later release replaced it, so recording or reading runs failed with `no such column: entry_json`. Startup now

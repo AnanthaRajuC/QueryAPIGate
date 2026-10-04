@@ -62,8 +62,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
                        code='driver_missing') from error
     except Exception as error:
         log.exception('Query on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error),
-                       code='query_failed') from error
+        raise _failure(error, 'An error occurred while executing the SQL query', details) from error
     finally:
         metrics.dec_active_query()
         elapsed = time.monotonic() - started
@@ -118,8 +117,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
                        code='driver_missing') from error
     except Exception as error:
         log.exception('Find on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the find query', 500, detail=str(error),
-                       code='query_failed') from error
+        raise _failure(error, 'An error occurred while executing the find query', details) from error
     finally:
         metrics.dec_active_query()
         elapsed = time.monotonic() - started
@@ -135,6 +133,42 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     rows = [[doc.get(col) for col in columns] for doc in result_docs]
     metrics.observe_rows(connection_name, 'mongo', key_name, len(result_docs))
     return ResultSetDTO(rows, columns, has_more=has_more)
+
+
+# How drivers say they could not reach the database at all, as opposed to the database refusing the query. Each
+# driver has its own exception classes, so this goes by what they say; an OSError anywhere in the chain (refused,
+# unreachable, unknown host, timed out) is a connection problem whatever the driver.
+_CONNECTION_MESSAGES = (
+    "can't connect", 'could not connect', 'unable to connect', 'failed to connect', 'connection refused',
+    'connection timed out', 'timeout expired', 'name or service not known', 'nodename nor servname',
+    'could not translate host name', 'unknown mysql server host', 'lost connection to mysql server during query',
+    'server closed the connection unexpectedly', 'no servers found', 'serverselectiontimeouterror',
+    'unable to open database file', 'network is unreachable', 'no route to host',
+)
+
+
+def is_connection_failure(error):
+    """Whether a driver error means the database could not be reached, rather than that it rejected the query."""
+    seen = error
+    for _ in range(8):  # an exception's causes, not just the exception
+        if seen is None:
+            break
+        if isinstance(seen, OSError):
+            return True
+        text = f'{type(seen).__name__} {seen}'.lower()
+        if any(message in text for message in _CONNECTION_MESSAGES):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
+def _failure(error, message, details):
+    """The ApiError for a run that failed in the driver: connection_failed (502) when the database couldn't be
+    reached - so callers, history and alerts (a failing connection) can tell that from bad SQL - else query_failed."""
+    if is_connection_failure(error):
+        return ApiError('Could not connect to the database', 502,
+                        detail=_redact_password(str(error), details.get('password')), code='connection_failed')
+    return ApiError(message, 500, detail=str(error), code='query_failed')
 
 
 def test_connection(details):
@@ -261,8 +295,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
                        code='driver_missing') from error
     except Exception as error:
         log.exception('Streaming query on %s failed', connection_name)
-        raise ApiError('An error occurred while executing the SQL query', 500, detail=str(error),
-                       code='query_failed') from error
+        raise _failure(error, 'An error occurred while executing the SQL query', details) from error
     finally:
         # On success, the query stays active until _drain() below finishes consuming it - the decrement
         # (and the row/stream-status metrics) move there with it, not here.

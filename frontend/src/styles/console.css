@@ -120,18 +120,18 @@
   color: var(--ink-2);
   cursor: pointer;
 }
-#theme-toggle,
+#theme-toggle:hover,
 #alerts-bell:hover {
   background: var(--surface);
   border-color: var(--line);
   color: var(--ink);
 }
-#theme-toggle,
+#theme-toggle:focus-visible,
 #alerts-bell:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-#theme-toggle,
+#theme-toggle svg,
 #alerts-bell svg {
   width: 16px;
   height: 16px;
