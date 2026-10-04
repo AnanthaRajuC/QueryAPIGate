@@ -790,6 +790,9 @@ connections, the dialects QueryAPIGate can actually parse for this - **a table-r
 type, never silently left unrestricted.** Table names are matched case-insensitively and bare (not
 schema-qualified), the same simplification `allowed_write_ops`'s keyword list already makes; a table-valued
 function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully restrict one.
+The key's view of the schema follows the same list: `GET /connections/<name>/schema` and MCP's `list_tables` leave
+other tables out (a foreign key pointing at one shows as `null`), and `table_ddl` answers a forbidden table with the
+same `404` as a table that doesn't exist.
 
 Omitted (or `null`) means no restriction, exactly today's behaviour. `PATCH /api/v1/api-keys/<name>` with an
 explicit `{"allowed_tables": null}` clears an existing restriction, the same pattern the other grant fields

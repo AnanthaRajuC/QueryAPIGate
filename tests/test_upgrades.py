@@ -130,7 +130,7 @@ class PostgresUpgradeTests(StoreChecks):
     kind = '.postgres'
 
     def test_there_is_a_fixture_for_every_release_with_the_postgres_store(self):
-        self.assertLessEqual({'0.12.0', '0.13.0'}, set(fixture_versions('.postgres')))
+        self.assertLessEqual({'0.12.0', '0.13.0', '0.14.0'}, set(fixture_versions('.postgres')))
 
     def test_every_release_store_starts_with_its_data_intact(self):
         self.check_every_release()

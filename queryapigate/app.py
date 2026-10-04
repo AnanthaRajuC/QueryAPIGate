@@ -855,7 +855,7 @@ def connection_schema(name):
     database = request.args.get('database') or None
     if database and not g.permission.admin:
         raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
-    return jsonify(schema.fetch_schema(name, database=database)), 200
+    return jsonify(schema.fetch_schema(name, database=database, allowed_tables=g.permission.allowed_tables)), 200
 
 
 @bp.route('/connections/<name>/table_ddl', methods=['GET'])
@@ -869,7 +869,8 @@ def connection_table_ddl(name):
     database = request.args.get('database') or None
     if database and not g.permission.admin:
         raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
-    return jsonify(schema.fetch_table_ddl(name, table, database=database)), 200
+    return jsonify(schema.fetch_table_ddl(name, table, database=database,
+                                          allowed_tables=g.permission.allowed_tables)), 200
 
 
 # --------------------------------------------------------------------------------------

@@ -54,7 +54,7 @@ Saved queries are checked the same way, every time they run. `orders_by_status` 
 Writes are checked too: if the key also has `allow_writes`, `UPDATE`/`DELETE`/`INSERT` are allowed only on listed
 tables.
 
-## Where it isn't enforced
+## What else it covers, and where it stops
 
 - **Database types:** supported for PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse - the dialects the parser
   handles. On an `h2`, `jdbc` or `mongo` connection a table-restricted key is **refused on every query** (`403`
@@ -63,10 +63,9 @@ tables.
 - **Table names, not schemas:** entries are bare names matched case-insensitively. `orders` allows `orders` in any
   schema the connection can see. If two schemas both have an `orders` table, this can't tell them apart - use a
   database user that sees only one.
-- **Structure stays visible:** `allowed_tables` limits what a statement can read or change, not what the key can
-  *see* of the schema. The schema browser (`GET /connections/shop/schema`), `table_ddl` and MCP's `list_tables` list
-  every table and column on the connection, forbidden ones included - their names and columns, never their rows. If
-  a table's existence is itself sensitive, put it out of the connection's reach with database permissions.
+- **The schema shows only the listed tables.** The schema browser (`GET /connections/shop/schema`) and MCP's
+  `list_tables` leave the others out, and a foreign key pointing at one shows as none. `table_ddl` for a forbidden
+  table answers `404` - *'salaries' is not a table on 'shop'* - exactly as for a table that doesn't exist.
 - **Table-valued functions** (ClickHouse's `numbers(10)`, DuckDB's `read_csv(...)`) touch no named table, so the
   list can't restrict them.
 

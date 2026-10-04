@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import create_app, deprecations
+from tests import TEST_DATABASE_URL
 from tests.helpers import save_query, write_connections
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -77,6 +78,7 @@ class RouteTests(AppTestCase):
             self.assertEqual(again['paths'][path]['post']['description'].count('**Deprecated**'), 1)
 
 
+@unittest.skipIf(TEST_DATABASE_URL, 'the pre-SQLite JSON files are imported into a SQLite store')
 class LegacyImportTests(AppTestCase):
     def test_importing_the_json_files_warns(self):
         with open(os.path.join(self.tmp.name, 'db_connections.json'), 'w') as f:

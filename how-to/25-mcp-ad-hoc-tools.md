@@ -83,10 +83,9 @@ An agent can read the `code` and adjust - ask for different tables, drop the wri
 
 ## Keep in mind
 
-- **`list_tables` shows every table on the connection**, including ones `allowed_tables` forbids - names and columns,
-  never rows. The same is true of the saved-query tools listed from a `connections` grant: `salary_list` appears
-  above but fails with `table_not_allowed` when called. If the agent shouldn't know a table exists, keep it out of
-  the connection's reach with database permissions.
+- **`list_tables` shows only the tables `allowed_tables` permits** - for this key `customers`, `orders` and
+  `products`, not `salaries`. Saved-query tools are listed by the key's grants alone, though: `salary_list` appears
+  above, and fails with `table_not_allowed` when called. Keep a query the agent mustn't see out of its collections.
 - **Results are capped** at `QUERYAPIGATE_MCP_MAX_ROWS` rows (default 200) - see
   [Read structured MCP results properly](26-mcp-structured-results.md) for `truncated` and `page_size`.
 - **Everything is recorded.** Each `execute_sql` call is an ad-hoc run in run history with `"transport": "mcp"`, the

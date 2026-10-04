@@ -77,8 +77,6 @@ with `from_claim` parameters so each user only ever sees their own rows. List th
 These are by design or not yet addressed - plan around them rather than discover them:
 
 - **The admin key has no limits** inside QueryAPIGate. Database grants are the backstop.
-- **`allowed_tables` hides rows, not structure.** A key with a `connections` grant can list every table and column on
-  that connection, forbidden ones included ([guide 16](16-restrict-a-key-to-tables.md)).
 - **Names can be probed.** A saved query a key can't reach answers `403` naming its connection; a missing name answers
   `404`.
 - **The MCP server ignores `QUERYAPIGATE_TRUST_PROXY`**, so behind a proxy it can't tell MCP callers' addresses apart.

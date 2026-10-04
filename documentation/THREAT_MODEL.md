@@ -221,10 +221,6 @@ Being explicit about these is as important as everything above:
 - **Connection metadata (hosts, ports, usernames, database names) is visible to the admin key** -
   `GET /api/v1/connections` is admin-only, and passwords are always masked, but the rest is not treated as
   secret.
-- **`allowed_tables` limits what a statement touches, not what a key can see of the schema.** A key with a
-  `connections` grant can list every table and column on that connection (the schema browser, `table_ddl`,
-  MCP's `list_tables`) - names and structure, never rows of a forbidden table. Hide a table's existence with
-  database permissions.
 - **Names can be probed.** A saved query a key can't reach answers `403` naming its connection; a name that
   doesn't exist answers `404`. Don't put anything sensitive in query or connection names.
 - **`/metrics` is intentionally unauthenticated**, on the assumption that a metrics scraper shouldn't need

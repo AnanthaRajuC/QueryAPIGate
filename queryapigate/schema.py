@@ -138,12 +138,35 @@ def list_databases(connection_name):
     return [row[0] for row in result.rows]
 
 
-def fetch_schema(connection_name, database=None):
+def fetch_schema(connection_name, database=None, allowed_tables=None):
     """Return {'tables': [{'name', 'schema', 'type', 'columns': [{'name', 'type', 'nullable', 'position'}]}],
     'truncated'}. ``schema`` is the catalogue schema/namespace a table lives in (e.g. Postgres's 'public',
     MySQL's own database name, SQLite's fixed 'main') - not present for a mongo collection, which has no
     such concept. ``database`` browses a different database on the same server than the connection's own
-    configured one - Run SQL's database picker; see engine.execute_sql()'s own ``database`` parameter."""
+    configured one - Run SQL's database picker; see engine.execute_sql()'s own ``database`` parameter.
+    ``allowed_tables`` (a key's grant, lower-case names, or None) leaves out every other table - see
+    _only_allowed()."""
+    result = _fetch_schema(connection_name, database)
+    return result if allowed_tables is None else _only_allowed(result, allowed_tables)
+
+
+def _only_allowed(result, allowed_tables):
+    """A table-restricted key sees only its tables: the others aren't listed, and a foreign key pointing at one is
+    shown as none - its name is the thing being kept from the key. Matched as tableguard matches a statement's
+    tables: the bare name, case-insensitively."""
+    allowed = {name.lower() for name in allowed_tables}
+    tables = []
+    for table in result['tables']:
+        if table['name'].lower() not in allowed:
+            continue
+        columns = [{**column, 'foreign_key': None}
+                   if (column.get('foreign_key') or {}).get('table', '').lower() not in allowed
+                   and column.get('foreign_key') else column for column in table['columns']]
+        tables.append({**table, 'columns': columns})
+    return {**result, 'tables': tables}
+
+
+def _fetch_schema(connection_name, database):
     details = store.get_connection(connection_name)
     dialect = details['db']
     if dialect == 'mongo':
@@ -218,9 +241,10 @@ _DDL_DIALECTS = frozenset({'mysql', 'sqlite', 'clickhouse'})
 _IDENTIFIER_RE = re.compile(r'^[A-Za-z_]\w*$')
 
 
-def fetch_table_ddl(connection_name, table_name, database=None):
+def fetch_table_ddl(connection_name, table_name, database=None, allowed_tables=None):
     """Return {'ddl': the real CREATE TABLE text} for `table_name` on `connection_name` - not available for
-    every dialect (see _DDL_DIALECTS)."""
+    every dialect (see _DDL_DIALECTS). A table outside ``allowed_tables`` answers exactly as one that doesn't exist,
+    so a table-restricted key can't learn whether it does."""
     details = store.get_connection(connection_name)
     dialect = details['db']
     if dialect not in _DDL_DIALECTS:
@@ -229,7 +253,7 @@ def fetch_table_ddl(connection_name, table_name, database=None):
     # The one real safety mechanism: only a table this connection's own schema actually has can ever reach
     # a DDL query - table_name is never trusted as a safe SQL identifier just because it arrived on a
     # request.
-    tables = fetch_schema(connection_name, database=database)['tables']
+    tables = fetch_schema(connection_name, database=database, allowed_tables=allowed_tables)['tables']
     if not any(t['name'] == table_name for t in tables):
         raise ApiError(f"'{table_name}' is not a table on '{connection_name}'", 404, code='table_not_found')
     if dialect == 'sqlite':

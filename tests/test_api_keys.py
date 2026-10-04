@@ -714,6 +714,30 @@ class AllowedTablesTests(AppTestCase):
         self.client.patch('/api/v1/api-keys/reader', json={'active': True}, headers=self.admin_headers)
         self.assertEqual(self.run_as(key, 'SELECT * FROM secret').status_code, 403)
 
+    def test_the_schema_shows_only_allowed_tables_and_no_key_into_another(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute('CREATE TABLE child (id INTEGER, secret_id INTEGER REFERENCES secret(id), '
+                     't_id INTEGER REFERENCES t(id))')
+        conn.commit()
+        conn.close()
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t', 'child'])
+        tables = self.client.get('/connections/a/schema', headers={'X-API-Key': key}).get_json()['tables']
+        self.assertEqual(sorted(t['name'] for t in tables), ['child', 't'])
+        child = {c['name']: c['foreign_key'] for c in next(t for t in tables if t['name'] == 'child')['columns']}
+        self.assertIsNone(child['secret_id'])  # naming `secret` would tell the key it exists
+        self.assertEqual(child['t_id'], {'table': 't', 'column': 'id'})
+        admin = self.client.get('/connections/a/schema', headers=self.admin_headers).get_json()['tables']
+        self.assertIn('secret', [t['name'] for t in admin])
+
+    def test_a_forbidden_tables_ddl_answers_like_a_missing_one(self):
+        key = self.create_key('reader', connections=['a'], allowed_tables=['t'])
+        forbidden = self.client.get('/connections/a/table_ddl?table=secret', headers={'X-API-Key': key})
+        missing = self.client.get('/connections/a/table_ddl?table=nope', headers={'X-API-Key': key})
+        self.assertEqual((forbidden.status_code, forbidden.get_json()['code']), (404, 'table_not_found'))
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(self.client.get('/connections/a/table_ddl?table=t', headers={'X-API-Key': key}).status_code,
+                         200)
+
     def test_the_admin_key_is_never_restricted_by_this(self):
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM secret', 'connection_name': 'a'},
                                headers=self.admin_headers)

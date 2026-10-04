@@ -235,7 +235,7 @@ def list_tables_tool(permission, arguments):
     if error is not None:
         return error
     try:
-        result = schema.fetch_schema(connection_name, database=database)
+        result = schema.fetch_schema(connection_name, database=database, allowed_tables=permission.allowed_tables)
     except ApiError as error:
         return _error(error.message, error.status, error.code)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}

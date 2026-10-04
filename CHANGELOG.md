@@ -42,6 +42,24 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-04
+
+The groundwork for 1.0's promise: a deprecation policy and an "experimental" label for what's outside it, a database
+support matrix with tiers, backups you can restore, Python 3.11 or newer - and all 40 how-to guides, whose writing
+found and fixed the access-control and packaging gaps listed under *Fixed*.
+
+### Upgrading from 0.13
+Read these first.
+- **Breaking: Python 3.11 or newer.** On 3.9 or 3.10, pip keeps installing 0.13.0. The Docker image is unaffected.
+- **No store migration**: the store stays at schema 5. Back up first anyway ([how](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/33-back-up-and-restore.md)).
+- **Coming from 0.9 or older?** Start 0.14 once before going further: 0.15.0 may stop importing the pre-SQLite JSON
+  files (*Deprecated*, below).
+- **Callers of `/execute_sql_from_file` or `/execute_sql_with_parameters_from_file`** should move to `/q/{name}`
+  before 0.15.0. Each process logs the first such call with the key that made it.
+- **A key with `"allowed_ips": []` now works from no address** (it used to work from any). Find any with
+  `GET /api/v1/api-keys` and set them to `null`, or to real addresses.
+- **A table-restricted key's schema shows only its tables** - a client that listed the rest no longer sees them.
+
 ### Breaking
 - **Python 3.11 or newer is required** (was 3.9). Python 3.9 reached its end of life in October 2025 and 3.10
   reaches its own this month, so neither is carried into 1.0. pip on 3.9 or 3.10 keeps installing 0.13.0, the last
@@ -84,11 +102,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   /events`, `queryapigate events`), H2, JDBC and MongoDB connections, and alerts (`GET /api/v1/alerts`). Each is
   marked in its docs, with `x-experimental: true` in `/openapi.json`, with a tag in the Console (its Settings rows,
   the database-type picker, the Alerts screen), and with a warning in the log at startup while one is in use.
+
 ### Changed
 - **The one-command demo (`docker compose up`) seeds itself through the Management API** (`demo/seed.sh`) instead of
   copying the pre-SQLite JSON files that 0.14 deprecates.
 
 ### Fixed
+- **A table-restricted key sees only its tables in the schema.** `allowed_tables` refused statements on other
+  tables, but the schema browser and MCP's `list_tables` still listed every table and column on the connection, and
+  `table_ddl` showed any table's `CREATE TABLE`. Now the others are left out (and a foreign key pointing at one shows
+  as none), and `table_ddl` answers a forbidden table with the same `404` as a missing one.
 - **An empty `allowed_ips` list allows no address.** `"allowed_ips": []` on a key or role used to mean "no
   restriction" - failing open, unlike an empty `allowed_tables` or `allowed_write_ops`, which allow nothing. `null`
   is still how to say "any address"; the Console sends `null` for an empty field, as before.
@@ -1533,7 +1556,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.14.0
 [0.13.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.13.0
 [0.12.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.12.0
 [0.11.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.11.0

@@ -358,6 +358,16 @@ class FixedToolsTests(McpTestCase):
         refused = mcp_server.execute_sql_tool(permission, {'connection_name': 'a', 'sql': 'SELECT * FROM other'})
         self.assertTrue(refused['isError'])
 
+    def test_list_tables_shows_a_table_restricted_key_only_its_tables(self):
+        conn = store.get_connection('a')
+        raw = sqlite3.connect(conn['database'])
+        raw.execute('CREATE TABLE other (id INTEGER)')
+        raw.commit()
+        raw.close()
+        permission = apikeys.authenticate(self.create_scoped_key(connections=['a'], allowed_tables=['t']))
+        result = mcp_server.list_tables_tool(permission, {'connection_name': 'a'})
+        self.assertEqual([t['name'] for t in result['structuredContent']['tables']], ['t'])
+
     def test_execute_sql_requires_sql(self):
         result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a'})
         self.assertTrue(result['isError'])
