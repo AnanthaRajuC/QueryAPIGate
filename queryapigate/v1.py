@@ -19,7 +19,7 @@ from flask import Blueprint, Response, current_app, g, jsonify, request
 from . import adminroles, alerts, collection_admin, config, history, instances, schema, sqlflow, store
 from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
-from .services import access, audit, collections, connections, mcp, queries
+from .services import access, administrators, audit, collections, connections, mcp, queries
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -381,6 +381,83 @@ def delete_role(name):
     """Remove the template; keys already created from it keep their grants."""
     _check_entry_if_match(access.load_role(name), 'role')
     access.delete_role(name, caller_key_name())
+    return '', 204
+
+
+# --------------------------------------------------------------------------------------
+# Administrators and their admin tokens (ADR 0003)
+# --------------------------------------------------------------------------------------
+
+def _admin_etag(admin):
+    # what an edit can change - not last_seen_at, which moves whenever they sign in
+    return administrators.etag({k: admin[k] for k in ('name', 'role', 'email', 'active')})
+
+
+def _admin_response(name, status=200):
+    admin = administrators.load(name)
+    response = jsonify(admin)
+    response.headers['ETag'] = _admin_etag(admin)
+    return response, status
+
+
+def _check_admin_if_match(name):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != _admin_etag(administrators.load(name)):
+        raise ApiError('This administrator changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+@bp.route('/administrators', methods=['GET'])
+def list_administrators():
+    return jsonify({'items': administrators.list_admins()}), 200
+
+
+@bp.route('/administrators', methods=['POST'])
+def create_administrator():
+    """A new administrator. It signs in with a token issued next (POST .../tokens), shown once."""
+    return _admin_response(administrators.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/administrators/<name>', methods=['GET'])
+def get_administrator(name):
+    return _admin_response(name)
+
+
+@bp.route('/administrators/<name>', methods=['PATCH'])
+def update_administrator(name):
+    """Change the role, email or `active` (false stops every one of their tokens at once)."""
+    _check_admin_if_match(name)
+    administrators.update(name, get_json_body(), caller_key_name())
+    return _admin_response(name)
+
+
+@bp.route('/administrators/<name>', methods=['DELETE'])
+def delete_administrator(name):
+    """Remove them and every token they hold. Their name stays in the audit log."""
+    _check_admin_if_match(name)
+    administrators.delete(name, caller_key_name())
+    return '', 204
+
+
+@bp.route('/administrators/<name>/tokens', methods=['GET'])
+def list_admin_tokens(name):
+    administrators.require_self_or(g.permission, name, 'admins.read')
+    return jsonify({'items': administrators.list_tokens(name)}), 200
+
+
+@bp.route('/administrators/<name>/tokens', methods=['POST'])
+def issue_admin_token(name):
+    """A new token; the response's `secret` is the only time it is shown. Your own, or - as an owner - anyone's."""
+    administrators.require_self_or(g.permission, name, 'admins.write')
+    response = jsonify(administrators.issue_token(name, get_json_body(required=False), caller_key_name()))
+    response.headers['Cache-Control'] = 'no-store'
+    return response, 201
+
+
+@bp.route('/administrators/<name>/tokens/<token_id>', methods=['DELETE'])
+def revoke_admin_token(name, token_id):
+    administrators.require_self_or(g.permission, name, 'admins.write')
+    administrators.revoke_token(name, token_id, caller_key_name())
     return '', 204
 
 

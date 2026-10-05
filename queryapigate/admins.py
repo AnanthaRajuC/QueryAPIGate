@@ -126,11 +126,10 @@ def create_admin(name, role, email=None, created_by=None):
 
 def _refuse_ownerless(conn):
     """Called inside a change's transaction, after it: refuse when no active owner is left and there is no
-    shared key to fall back on - nobody could then manage administrators."""
+    shared key to fall back on - nobody could then manage administrators. That includes removing the last
+    administrator of all: with no shared key and no scoped keys, the server would then be open to anyone."""
     if config.api_key() is not None:
         return
-    if conn.execute('SELECT 1 FROM administrators LIMIT 1').fetchone() is None:
-        return  # no administrators at all: authentication is back to how it was before any existed
     if conn.execute("SELECT 1 FROM administrators WHERE role = 'owner' AND active = 1 LIMIT 1").fetchone() is None:
         raise ApiError('This would leave no active owner, and QUERYAPIGATE_API_KEY is not set - nobody could manage '
                        'administrators any more. Make someone else an owner first.', 409, code='last_owner')

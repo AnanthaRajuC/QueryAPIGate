@@ -248,8 +248,9 @@ Deleting the published version publishes the newest older one, if any - see
 
 `/api/v1/...` is the versioned interface to QueryAPIGate's own configuration, built one resource at a time
 ([ADR 0001](adr/0001-console-and-management-api.md)). The Console at `/console` uses it, and so can scripts,
-Terraform or GitOps tooling. It is admin-only, like the routes it replaces. Every request and response is described in
-full in `/openapi.json`, under the "Management API v1" tag.
+Terraform or GitOps tooling. Only [administrators](#administrators-and-admin-roles) may call it, each operation as
+their role allows. Every request and response is described in full in `/openapi.json`, under the "Management API v1"
+tag.
 
 **Conventions, the same on every resource:**
 - **Errors** are `{"error": "...", "code": "...", "request_id": "..."}`. Branch on `code`, which is stable (for
@@ -325,6 +326,21 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 
 A name is 1-100 letters, digits, spaces, `.`, `_` or `-` (`invalid_name`). Every change is audited, never with a
 secret.
+
+### Administrators
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/me` | Who you are: `name`, `role`, `via` (`token`, `break-glass`, `open`), your role's `capabilities`, and `data_access` (whether you may run SQL). Any administrator. |
+| `GET /api/v1/administrators` | Every administrator: `name`, `role`, `email`, `active`, `created_at`, `created_by`, `last_seen_at`, `tokens` (how many). Owners only. |
+| `POST /api/v1/administrators` | Create one: `{"name": "alice", "role": "developer", "email": "alice@corp.com"}`. 409 `admin_exists`, or `name_taken` for an API key's name. Owners only. |
+| `GET`, `PATCH`, `DELETE /api/v1/administrators/{name}` | One administrator; change `role`, `email` or `active` (`false` stops all their tokens at once); remove them with their tokens. Honours `If-Match`. 409 `last_owner` when the change would leave no active owner and `QUERYAPIGATE_API_KEY` isn't set. |
+| `GET /api/v1/administrators/{name}/tokens` | Their tokens: `id`, `label`, `created_at`, `expires_at`, `expired`, `last_used_at` - never the secret. |
+| `POST /api/v1/administrators/{name}/tokens` | Issue one: `{"label": "laptop", "expires_at": "2027-01-01"}` (both optional; no `expires_at`, no expiry). The response's `secret` (`qagadm_...`) is the only time it is shown, sent with `Cache-Control: no-store`. |
+| `DELETE /api/v1/administrators/{name}/tokens/{id}` | Revoke one; their other tokens keep working. |
+
+Tokens: every administrator may list, issue and revoke **their own**, whatever their role; anyone else's take an
+owner.
 
 ### History and audit
 
@@ -600,9 +616,51 @@ without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhe
 `truncated` is `true` only if the connection has more than 5000 columns across all its tables and views combined,
 in which case the list was cut off.
 
+## Administrators and admin roles
+
+The people and pipelines that manage QueryAPIGate are **administrators** ([ADR 0003](adr/0003-named-administrators.md)),
+each with a role, signing in with their own **admin tokens** - `qagadm_...`, sent as `X-API-Key` like any key, stored
+only as hashes, each with an optional expiry. An administrator may hold several (a laptop, a CI job) and revoke each
+alone; deactivating the administrator stops them all.
+
+| Role | May |
+|---|---|
+| `owner` | everything, including administrators |
+| `admin` | everything but administrators: connections, API keys and roles, saved queries, cache, examples, settings |
+| `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes |
+| `auditor` | read only: queries, connections, API keys and roles, the audit log, history, alerts, instances, settings. No SQL at all |
+
+Owners, admins and developers run SQL and saved queries on every connection, as `QUERYAPIGATE_API_KEY` does. Each
+`/api/v1` operation needs one capability (`queries.write`, `access.read`, ...; `GET /api/v1/me` lists yours); a role
+without it gets `403 role_forbidden`, naming the `capability`. Any other caller - a scoped key, a signed-in app user -
+gets `403 admin_only`.
+
+**The first owner** is created on the server, with no running server or key needed:
+
+~~~bash
+queryapigate admins create alice --role owner --email alice@corp.com --label laptop
+# Created administrator alice (owner).
+# Admin token tok_3f2a9c1b04de for alice (expires 2027-01-03) - store it now, it cannot be shown again:
+#   qagadm_...
+~~~
+
+`--expires YYYY-MM-DD|never` (default: 90 days). `queryapigate admins token NAME` issues another (for one who lost
+theirs); `queryapigate admins list` lists them. Or create administrators in the Console, or through
+`/api/v1/administrators`, with the shared key.
+
+**`QUERYAPIGATE_API_KEY` is the break-glass key.** It keeps working, as an owner, so nothing breaks on upgrade. Once
+an active owner exists, each use is logged as a warning and recorded in the audit log (`break_glass_used`, at most
+every 10 minutes per process), which raises the `break_glass_used` alert for 24 hours. When everyone signs in with
+their own token, remove it from the environment: **authentication stays required while any administrator exists**,
+and the last active owner can't be demoted, deactivated or removed while the shared key isn't set (`409 last_owner`).
+
+Administrator names and API key names never overlap (`409 name_taken`), so a name in the logs, `/metrics` and run
+history means one caller; `admin` and `cli` are reserved.
+
 ## Authentication and permissions
 
-`QUERYAPIGATE_API_KEY`, if set, is a full-access **admin** key - unrestricted, exactly as before this section
+`QUERYAPIGATE_API_KEY`, if set, is a full-access **admin** key - the break-glass key once named administrators
+exist (above) - unrestricted, exactly as before this section
 existed. Scoped keys are additive, managed through `/api/v1/api-keys` (admin only), and can only run queries: a
 list of connection names they may use (or every connection), and whether they may write at all. A scoped
 key can never do more than the server-wide settings already allow - `allow_writes` on a key can only narrow
@@ -1212,14 +1270,21 @@ access; renaming one is `rename_collection`):
 ~~~json
 {
   "items": [
-    {"timestamp": "2026-09-24 10:03:11", "actor": "admin", "action": "update_key", "target": "acme-corp",
-     "changes": {"allow_writes": {"from": false, "to": true}}},
-    {"timestamp": "2026-09-24 10:01:47", "actor": "admin", "action": "create_connection", "target": "reporting",
+    {"timestamp": "2026-09-24 10:03:11", "actor": "alice", "via": "token", "action": "update_key",
+     "target": "acme-corp", "changes": {"allow_writes": {"from": false, "to": true}}},
+    {"timestamp": "2026-09-24 10:01:47", "actor": "admin", "via": "break-glass", "action": "create_connection",
+     "target": "reporting",
      "changes": {"db": "postgres", "host": "db.internal", "password": "********", "active": true}}
   ],
   "total": 2, "actions": ["create_connection", "update_key"], "retention": 500
 }
 ~~~
+
+`actor` is the administrator's name (`admin` for the shared key); `via` says how they authenticated - `token`
+(their own admin token), `break-glass` (`QUERYAPIGATE_API_KEY`), `open` (no authentication configured), `cli` (a
+command on the server) or `startup`. Entries written before 0.16 have no `via`. Administrators and their tokens are
+audited too: `create_admin`, `update_admin`, `delete_admin`, `issue_admin_token`, `revoke_admin_token` - never a
+token's secret.
 
 An update's `changes` is a diff of only the fields that actually changed (`{"field": {"from": ..., "to":
 ...}}`); a create or delete records a full snapshot of the entry instead, since there's no prior or

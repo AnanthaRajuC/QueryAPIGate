@@ -267,6 +267,59 @@ SCHEMAS = {
             'data_access': {'type': 'boolean', 'description': 'Whether it may run SQL and saved queries.'},
         },
     },
+    'Administrator': {
+        'type': 'object',
+        'required': ['name', 'role', 'email', 'active', 'created_at', 'created_by', 'last_seen_at', 'tokens'],
+        'properties': {
+            'name': {'type': 'string'},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'email': _NULLABLE_STRING, 'active': {'type': 'boolean'}, 'created_at': {'type': 'string'},
+            'created_by': _NULLABLE_STRING,
+            'last_seen_at': {'type': 'string', 'nullable': True,
+                             'description': 'Last signed in with one of their tokens (to the minute).'},
+            'tokens': {'type': 'integer', 'description': 'Tokens they hold, expired ones included.'},
+        },
+    },
+    'AdministratorList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Administrator')}},
+    },
+    'AdministratorInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': "Create only. Not an API key's name; not 'admin' or 'cli'."},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'email': _NULLABLE_STRING,
+            'active': {'type': 'boolean', 'description': 'Update only; false stops all their tokens at once.'},
+        },
+    },
+    'AdminToken': {
+        'type': 'object',
+        'required': ['id', 'admin', 'label', 'created_at', 'expires_at', 'expired', 'last_used_at'],
+        'properties': {
+            'id': {'type': 'string'}, 'admin': {'type': 'string'}, 'label': _NULLABLE_STRING,
+            'created_at': {'type': 'string'},
+            'expires_at': {'type': 'string', 'nullable': True, 'description': 'Valid through the end of this date.'},
+            'expired': {'type': 'boolean'}, 'last_used_at': _NULLABLE_STRING,
+        },
+    },
+    'AdminTokenList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('AdminToken')}},
+    },
+    'AdminTokenCreated': {
+        'allOf': [_ref('AdminToken'), {
+            'type': 'object', 'required': ['secret'],
+            'properties': {'secret': {'type': 'string',
+                                      'description': 'qagadm_... - shown this once; send it as X-API-Key.'}},
+        }],
+    },
+    'AdminTokenInput': {
+        'type': 'object',
+        'properties': {'label': _NULLABLE_STRING,
+                       'expires_at': {'type': 'string', 'nullable': True,
+                                      'description': 'YYYY-MM-DD; null or absent for no expiry.'}},
+    },
     'AuditLog': {
         'type': 'object', 'required': ['items', 'total', 'actions', 'retention'],
         'properties': {
@@ -753,6 +806,30 @@ PATHS = {
                      body=_ref('ApiKeyInput')),
         'delete': _op('Revoke and remove it', {'204': {'description': 'Revoked'}, **_PRECONDITION},
                       parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/administrators': {
+        'get': _op('List administrators (owners only)', {'200': _ok(_ref('AdministratorList'))}),
+        'post': _op('Create an administrator (owners only); issue them a token next',
+                    {'201': _ok(_ref('Administrator'), etag=True), **_CONFLICT}, body=_ref('AdministratorInput')),
+    },
+    '/api/v1/administrators/{name}': {
+        'get': _op('Get an administrator', {'200': _ok(_ref('Administrator'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change their role, email or active (false stops every token of theirs)',
+                     {'200': _ok(_ref('Administrator'), etag=True), **_PRECONDITION, **_CONFLICT},
+                     parameters=[_NAME, _IF_MATCH], body=_ref('AdministratorInput')),
+        'delete': _op('Remove them and their tokens', {'204': {'description': 'Removed'}, **_PRECONDITION,
+                                                       **_CONFLICT}, parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/administrators/{name}/tokens': {
+        'get': _op("List an administrator's tokens - your own, or anyone's as an owner",
+                   {'200': _ok(_ref('AdminTokenList'))}, parameters=[_NAME]),
+        'post': _op('Issue a token - your own, or anyone\'s as an owner; the response carries its secret, shown once',
+                    {'201': _ok(_ref('AdminTokenCreated'))}, parameters=[_NAME], body=_ref('AdminTokenInput')),
+    },
+    '/api/v1/administrators/{name}/tokens/{token_id}': {
+        'delete': _op('Revoke a token - your own, or anyone\'s as an owner', {'204': {'description': 'Revoked'}},
+                      parameters=[_NAME, {'name': 'token_id', 'in': 'path', 'required': True,
+                                          'schema': {'type': 'string'}}]),
     },
     '/api/v1/roles': {
         'get': _op('List roles (grant templates)', {'200': _ok(_ref('RoleList'))}),

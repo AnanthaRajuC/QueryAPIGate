@@ -64,6 +64,11 @@ OPERATIONS = {
     'v1.list_alerts': 'observe', 'v1.list_audit': 'observe', 'v1.search_history': 'observe',
     'v1.list_instances': 'observe', 'v1.mcp_status': 'observe', 'v1.mcp_tools': 'observe',
     'v1.get_settings': 'settings.read',
+    'v1.list_administrators': 'admins.read', 'v1.get_administrator': 'admins.read',
+    'v1.create_administrator': 'admins.write', 'v1.update_administrator': 'admins.write',
+    'v1.delete_administrator': 'admins.write',
+    # your own tokens, whatever your role; someone else's take admins.read/write, checked in the route
+    'v1.list_admin_tokens': 'self', 'v1.issue_admin_token': 'self', 'v1.revoke_admin_token': 'self',
     'v1.me': 'self',
 }
 
