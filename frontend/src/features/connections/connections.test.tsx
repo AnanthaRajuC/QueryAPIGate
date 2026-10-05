@@ -167,6 +167,35 @@ describe('Connections', () => {
     });
   });
 
+  it('creates a Files connection: DuckDB with no database file, a view for each file', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/connections': () => jsonResponse({ ...conn('lake'), password: null, options: {} }, 201),
+    });
+    renderAt('/connections');
+    await userEvent.click(await screen.findByRole('button', { name: 'New connection' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.type(within(drawer).getByLabelText('Name'), 'lake');
+    await userEvent.selectOptions(
+      within(drawer).getByLabelText('Database type'),
+      'Files (Parquet, CSV, JSON)',
+    );
+    expect(within(drawer).getByLabelText('Default database')).not.toBeVisible();
+    expect(within(drawer).getByLabelText(/A view for each file and folder/)).toBeChecked();
+    await userEvent.type(within(drawer).getByLabelText('Allowed paths'), '/data/lake/');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({
+      name: 'lake',
+      db: 'duckdb',
+      password: '',
+      database: ':memory:',
+      active: true,
+      allowed_paths: ['/data/lake/'],
+      auto_views: true,
+    });
+  });
+
   it('edits a connection: the mask keeps the password, an emptied field is removed, If-Match is sent', async () => {
     const { calls } = fakeBackend({
       ...routes(),

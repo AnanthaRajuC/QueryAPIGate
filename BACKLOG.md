@@ -2502,6 +2502,10 @@ local files, a web server and SeaweedFS (S3 API) in `tests/test_duckdb_files.py`
 `QUERYAPIGATE_TEST_S3` is set); GCS and R2 use the same mechanism, untested. Not done: the AWS credential chain
 (instance roles), and a CI job with an S3-compatible service. Guide 41.
 
+Since 0.15: `auto_views: true` - a view per file and per subfolder of each allowed folder or prefix, listed through
+the locked connection (`duckfiles.auto_views`) - and a **Files (Parquet, CSV, JSON)** type in the Console's connection
+form (DuckDB, `:memory:`, automatic views on), so a folder of files becomes a source without knowing it's DuckDB.
+
 Original notes:
 
 **Impact:** a Parquet file in a bucket becomes a governed REST endpoint and MCP tool - keys, grants, rate limits, run

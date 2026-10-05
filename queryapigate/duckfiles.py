@@ -22,6 +22,7 @@ temporary views on each new connection, giving the schema browser and `allowed_t
 """
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -77,8 +78,9 @@ def validate(details):
     storage = details.get('storage')
     if storage is not None and storage not in STORAGE_TYPES:
         raise _invalid(f"storage must be one of: {', '.join(STORAGE_TYPES)}")
-    if 'use_ssl' in details and not isinstance(details['use_ssl'], bool):
-        raise _invalid('use_ssl must be true or false')
+    for flag in ('use_ssl', 'auto_views'):
+        if flag in details and not isinstance(details[flag], bool):
+            raise _invalid(f'{flag} must be true or false')
 
 
 def _resolve_local(path):
@@ -149,7 +151,16 @@ def lock_down(conn, details):
             _configure(conn, details)
             if shared:
                 _fingerprints[database] = _fingerprint(details)
-    for name, sql in (details.get('views') or {}).items():  # temporary views belong to each connection
+    written = details.get('views') or {}
+    automatic = auto_views(conn, details) if details.get('auto_views') else {}
+    for name, sql in automatic.items():  # a file that can't be read loses its view, not the whole connection
+        if name in written:  # a view written by hand wins
+            continue
+        try:
+            conn.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS {sql}')
+        except Exception as error:
+            logging.getLogger('queryapigate').warning('auto_views: skipped %s: %s', name, str(error).splitlines()[0])
+    for name, sql in written.items():  # temporary views belong to each connection
         try:
             conn.execute(f'CREATE OR REPLACE TEMP VIEW "{name}" AS {sql}')
         except ApiError:
@@ -176,3 +187,78 @@ def _configure(conn, details):
     conn.execute('SET autoload_known_extensions = false')
     conn.execute('SET enable_external_access = false')
     conn.execute('SET lock_configuration = true')
+
+
+# ---- automatic views (auto_views: true) ----
+
+# What a file's extension says about how to read it - and the reader for a folder of them.
+_READERS = {'parquet': "read_parquet({}, hive_partitioning = true, union_by_name = true)",
+            'csv': "read_csv({}, union_by_name = true)", 'tsv': "read_csv({}, delim = '\t', union_by_name = true)",
+            'json': "read_json({}, union_by_name = true)", 'ndjson': "read_json({}, union_by_name = true)",
+            'jsonl': "read_json({}, union_by_name = true)"}
+AUTO_VIEW_LIMIT = 10_000  # files listed per folder - enough for any sensible layout, and a bound on a huge bucket
+
+
+def _view_name(stem, taken):
+    name = re.sub(r'[^a-z0-9_]', '_', stem.lower()).strip('_') or 'files'
+    if name[0].isdigit():
+        name = 'v_' + name
+    name = name[:60]
+    candidate, n = name, 2
+    while candidate in taken:
+        candidate, n = f'{name}_{n}', n + 1
+    return candidate
+
+
+def _extension(path):
+    name = path.rsplit('/', 1)[-1].lower()
+    for suffix in ('.gz', '.zst'):  # read_csv/read_json decompress these by themselves
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+    return name.rsplit('.', 1)[-1] if '.' in name else ''
+
+
+def auto_views(conn, details):
+    """A view per file and per subfolder under each allowed folder or prefix, and per allowed file: {name: SQL}.
+
+    - `orders.parquet` directly inside -> `orders`, reading that file;
+    - a subfolder `events/` -> `events`, reading every file of its kind beneath it (`events/**/*.parquet`, with
+      hive-style `key=value/` folders as columns); a subfolder holding two kinds gets one view per kind
+      (`events_csv`, `events_parquet`);
+    - an allowed file (a web address, say) -> a view named after it.
+
+    Listing goes through DuckDB's own glob(), after the connection is locked - so it sees exactly what the connection
+    may read. A file of a kind it doesn't know is left out; one that can't be read is skipped when its view is
+    created."""
+    found = {}
+    for entry in details.get('allowed_paths') or []:
+        if not entry.endswith('/'):
+            kind = _extension(entry)
+            if kind in _READERS:
+                found[_view_name(entry.rsplit('/', 1)[-1].split('.')[0], found)] = _READERS[kind].format(_quote(entry))
+            continue
+        base = _resolve_local(entry) if not entry.startswith(REMOTE_SCHEMES) else entry
+        base = base if base.endswith('/') else base + '/'
+        try:
+            files = [row[0] for row in conn.execute(
+                f'SELECT file FROM glob({_quote(base + "**")}) LIMIT {AUTO_VIEW_LIMIT}').fetchall()]
+        except Exception as error:  # an unreachable bucket: no views from it, and the log says why
+            logging.getLogger('queryapigate').warning('auto_views: could not list %s: %s', entry,
+                                                      str(error).splitlines()[0])
+            continue
+        folders = {}
+        for path in sorted(files):
+            relative = path[len(base):] if path.startswith(base) else path.rsplit('/', 1)[-1]
+            kind = _extension(path)
+            if kind not in _READERS:
+                continue
+            if '/' not in relative:
+                found[_view_name(relative.split('.')[0], found)] = _READERS[kind].format(_quote(path))
+            else:
+                folders.setdefault(relative.split('/', 1)[0], set()).add(kind)
+        for folder, kinds in sorted(folders.items()):
+            for kind in sorted(kinds):
+                stem = folder if len(kinds) == 1 else f'{folder}_{kind}'
+                pattern = f'{base}{folder}/**/*.{kind}'
+                found[_view_name(stem, found)] = _READERS[kind].format(_quote(pattern))
+    return {name: f'SELECT * FROM {reader}' for name, reader in found.items()}

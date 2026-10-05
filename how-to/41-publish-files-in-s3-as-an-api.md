@@ -36,9 +36,13 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 - For an S3-compatible service (MinIO, SeaweedFS, Ceph), add `"endpoint": "minio.internal:9000"` and
   `"url_style": "path"` (and `"use_ssl": false` without TLS). For Google Cloud Storage use `"storage": "gcs"` with HMAC
   keys; for Cloudflare R2, `"storage": "r2"` and `"account_id"`.
-- `views` gives the files a name: `orders`.
+- `views` gives the files a name: `orders`. Or let the connection name them: `"auto_views": true` makes a view of
+  each file and subfolder under each allowed prefix - `s3://sales/2026/orders.parquet` becomes `orders`, a subfolder
+  `returns/` becomes `returns` over every file in it
+  ([the rules](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#duckdb-connections)).
 
-In the Console: **Connections → New connection**, type `duckdb` - a **Files it may read** section appears.
+In the Console: **Connections → New connection**, type **Files (Parquet, CSV, JSON)** - no database to fill in, a
+**Files it may read** section, and automatic views already on.
 
 `POST /api/v1/connections/test` with the same body tries it first: `{"elapsed_ms": 118.6}`. The server needs DuckDB's
 `httpfs` extension; it's in the Docker image, and elsewhere downloaded on first use.

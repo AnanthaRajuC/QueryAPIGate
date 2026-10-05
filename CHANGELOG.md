@@ -49,6 +49,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   types taken from the values - decimals stay exact, dates and timestamps stay typed. The Console's format pickers
   offer it and download the file. On the example APIs' 20,000-row export: 513 KB of Parquet against 2.2 MB of CSV.
   Arrow IPC output is still open: it would need `pyarrow`, a large new dependency.
+- **Automatic views over files** (DuckDB connections, experimental with remote files): `"auto_views": true` makes a
+  view of each file and each subfolder under the connection's allowed folders and bucket prefixes - `orders.parquet`
+  becomes `orders`; a folder of Parquet files, with hive-style `key=value/` partitions, becomes one view over all of
+  them. Views in `views` take precedence; a file that can't be read is skipped with a warning.
+- **A "Files (Parquet, CSV, JSON)" connection type in the Console**: a DuckDB connection with no database file of its
+  own and automatic views on - choose the folders or buckets it may read, and each file is a table to query.
 
 ## [0.15.0] - 2026-10-04
 

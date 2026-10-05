@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import mock
 
 from queryapigate import apikeys, cli, config, create_app, db, definitions, examples, postman, store
@@ -343,7 +343,8 @@ class RunTests(ExamplesTestCase):
 
     def test_the_kpis_are_sensible(self):
         today = self.client.get('/q/example_kpi_rentals_today', headers=self.admin).get_json()[0]
-        self.assertGreater(today['rentals_today'], 0)
+        if datetime.now(timezone.utc).hour >= 1:  # just after midnight UTC, "today" may hold no rentals yet
+            self.assertGreater(today['rentals_today'], 0)
         active = self.client.get('/q/example_kpi_active_rentals', headers=self.admin).get_json()[0]['active_rentals']
         overdue = self.client.get('/q/example_kpi_overdue', headers=self.admin).get_json()[0]['overdue']
         self.assertGreater(active, overdue)

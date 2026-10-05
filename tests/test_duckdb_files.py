@@ -139,12 +139,62 @@ class ValidationTests(FilesTestCase):
                        {'allowed_paths': ['https://data.example.com/public/']},
                        {'allowed_paths': [f'{self.public}/../private/']}, {'allowed_paths': [f'{self.public}/*.csv']},
                        {'views': {'bad name': 'SELECT 1'}}, {'views': ['SELECT 1']}, {'storage': 'ftp'},
-                       {'use_ssl': 'no'}):
+                       {'use_ssl': 'no'}, {'auto_views': 'yes'}):
             with self.subTest(fields=fields):
                 res = self.client.post('/api/v1/connections', headers=ADMIN,
                                        json={'name': 'x', 'db': 'duckdb', 'database': ':memory:', **fields})
                 self.assertEqual(res.status_code, 400, res.get_data(as_text=True))
                 self.assertEqual(res.get_json()['code'], 'invalid_body')
+
+
+class AutoViewTests(FilesTestCase):
+    """auto_views: true - a view per file and per subfolder of each allowed folder, found through the locked
+    connection itself."""
+
+    def setUp(self):
+        super().setUp()
+        lake = self.lake = os.path.join(self.tmp.name, 'lake')
+        for day in (1, 2):
+            os.makedirs(f'{lake}/events/day={day}')
+            duckdb.sql(f"COPY (SELECT {day} * 10 AS id) TO '{lake}/events/day={day}/part.parquet'")
+        os.makedirs(f'{lake}/mixed')
+        duckdb.sql(f"COPY (SELECT 1 AS x) TO '{lake}/mixed/a.csv'")
+        duckdb.sql(f"COPY (SELECT 2 AS x) TO '{lake}/mixed/b.json'")
+        duckdb.sql(f"COPY (SELECT 1 AS id) TO '{lake}/2026 Sales.csv'")
+        with open(f'{lake}/broken.parquet', 'w') as f:
+            f.write('not parquet')
+        with open(f'{lake}/README.txt', 'w') as f:
+            f.write('not data')
+
+    def views(self):
+        tables = self.client.get('/connections/files/schema', headers=ADMIN).get_json()['tables']
+        return sorted(t['name'] for t in tables)
+
+    def test_a_view_per_file_and_per_subfolder(self):
+        self.connect(allowed_paths=[self.lake + '/', self.public + '/products.parquet'], auto_views=True)
+        with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
+            self.assertEqual(self.views(), ['events', 'mixed_csv', 'mixed_json', 'products', 'v_2026_sales'])
+        self.assertTrue(any('auto_views: skipped broken' in line for line in logs.output), logs.output)
+        # a subfolder reads every file beneath it, its key=value folders as columns
+        self.assertEqual(self.run_sql('SELECT id, day FROM events ORDER BY id').get_json(),
+                         [{'id': 10, 'day': 1}, {'id': 20, 'day': 2}])
+        self.assertEqual(self.run_sql('SELECT x FROM mixed_json').get_json(), [{'x': 2}])
+        self.assertEqual(self.run_sql('SELECT COUNT(*) AS n FROM products').get_json(), [{'n': 10}])
+
+    def test_a_view_written_by_hand_wins(self):
+        self.connect(allowed_paths=[self.lake + '/'], auto_views=True, views={'events': 'SELECT 42 AS answer'})
+        self.assertEqual(self.run_sql('SELECT * FROM events').get_json(), [{'answer': 42}])
+
+    def test_off_unless_asked_for(self):
+        self.connect(allowed_paths=[self.lake + '/'])
+        self.assertEqual(self.views(), [])
+
+    def test_a_key_can_be_granted_the_automatic_views(self):
+        self.connect(allowed_paths=[self.lake + '/'], auto_views=True)
+        key = {'X-API-Key': secret_of(create_key(self.client, headers=ADMIN, name='app', connections=['files'],
+                                                 allowed_tables=['events']))}
+        self.assertEqual(self.run_sql('SELECT COUNT(*) AS n FROM events', headers=key).get_json(), [{'n': 2}])
+        self.assert_refused(self.run_sql('SELECT * FROM mixed_csv', headers=key), code='table_not_allowed')
 
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):
@@ -198,6 +248,11 @@ class S3FilesTests(FilesTestCase):
             res = self.run_sql(f"SELECT COUNT(*) AS n FROM read_parquet('s3://{bucket}/queryapigate-test/a/*.parquet')")
             self.assertEqual(res.get_json(), [{'n': 7}])
             self.assert_refused(self.run_sql(f"SELECT * FROM 's3://{bucket}/queryapigate-test/b/y.parquet'"))
+            self.connect(name='lake', allowed_paths=[f's3://{bucket}/queryapigate-test/'], user=key,
+                         password='${TEST_S3_SECRET}', endpoint=endpoint, url_style='path', use_ssl=False,
+                         region='us-east-1', auto_views=True)  # the prefix is listed through the locked connection
+            res = self.run_sql('SELECT (SELECT COUNT(*) FROM a) AS a, (SELECT COUNT(*) FROM b) AS b', connection='lake')
+            self.assertEqual(res.get_json(), [{'a': 7, 'b': 1}])
         detail = self.client.get('/api/v1/connections/files', headers=ADMIN).get_json()
         self.assertEqual(detail['password'], '${TEST_S3_SECRET}')
 

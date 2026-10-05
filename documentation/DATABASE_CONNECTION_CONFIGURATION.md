@@ -248,6 +248,24 @@ Each is created as a temporary view on every new connection. A key restricted wi
 query the view but not call `read_parquet` itself: for a table-restricted key, table functions that read data are
 refused (`table_not_allowed`).
 
+**Automatic views** - `"auto_views": true` - name the files for you: each time a connection opens, every allowed folder
+(or bucket prefix) is listed, through the locked connection itself, and each file and subfolder becomes a view:
+
+| Under `/data/lake/` | View | Reads |
+|---|---|---|
+| `orders.parquet` | `orders` | that file |
+| `events/day=1/part.parquet`, `events/day=2/...` | `events` | `events/**/*.parquet`, with `day` as a column (hive-style `key=value/` folders) |
+| `mixed/a.csv` and `mixed/b.json` | `mixed_csv`, `mixed_json` | one view per kind of file in the folder |
+| `2026 Sales.csv` | `v_2026_sales` | names are lower-cased, other characters become `_`, a leading digit gets `v_` |
+
+An allowed **file** (a web address, say) becomes a view named after it. Recognised: `.parquet`, `.csv`, `.tsv`,
+`.json`, `.ndjson`, `.jsonl` (and `.gz`/`.zst`-compressed CSV and JSON); other files are ignored. A view in `views`
+with the same name wins. A file that can't be read loses its view, with a warning in the log
+(`auto_views: skipped broken: ...`), rather than failing the connection. Listing happens on each new pooled
+connection - cheap for a folder, a list request for a bucket; at most 10,000 files are looked at per allowed folder.
+In the Console, **Files (Parquet, CSV, JSON)** as the type creates exactly this: `database: ":memory:"`,
+`auto_views: true`.
+
 Two things carried over from `h2`/`jdbc`, both for the same underlying reason (DuckDB refuses to open a second
 connection to a file with a different read-only setting than a connection already open on it, which pooling
 read-only and read-write connections separately would trip constantly):

@@ -16,6 +16,8 @@ type ConnectionInput = Schemas['ConnectionInput'];
 
 const DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo'];
 // Outside the compatibility promise (queryapigate/experimental.py) - labelled where an admin picks one.
+/** The Console's name for a DuckDB connection made only of files (database ':memory:', auto_views on). */
+const FILES = 'files';
 const EXPERIMENTAL_DB_TYPES = ['h2', 'jdbc', 'mongo'];
 const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
 
@@ -390,7 +392,12 @@ function ConnectionFormFields({
   const isEdit = Boolean(name);
   const { closeDrawer, showError } = useFeedback();
   const [connName, setConnName] = useState(name ?? '');
-  const [db, setDb] = useState(existing?.db ?? 'mysql');
+  // "Files" is DuckDB with no database of its own - only the files it may read, each one a view (auto_views).
+  const [kind, setKind] = useState(
+    existing?.db === 'duckdb' && existing.database === ':memory:' ? FILES : (existing?.db ?? 'mysql'),
+  );
+  const isFiles = kind === FILES;
+  const db = isFiles ? 'duckdb' : kind;
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(existing?.port != null ? String(existing.port) : '');
   const [user, setUser] = useState(existing?.user ?? '');
@@ -411,6 +418,11 @@ function ConnectionFormFields({
   const [urlStyle, setUrlStyle] = useState((opts.url_style as string | undefined) ?? '');
   const [useSsl, setUseSsl] = useState(opts.use_ssl !== false);
   const [views, setViews] = useState(opts.views ? JSON.stringify(opts.views, null, 2) : '');
+  // Unless chosen, a new connection gets automatic views when it's Files, not when it's a DuckDB database file.
+  const [autoViewsChoice, setAutoViews] = useState<boolean | null>(
+    existing ? opts.auto_views === true : null,
+  );
+  const autoViews = autoViewsChoice ?? isFiles;
   const isDuck = db === 'duckdb';
 
   /** DuckDB's file-access fields; an emptied one as `empty` (undefined to leave out, null to remove on edit). */
@@ -435,6 +447,7 @@ function ConnectionFormFields({
       endpoint: endpoint.trim() || empty,
       url_style: urlStyle || empty,
       use_ssl: useSsl ? empty : false,
+      auto_views: autoViews ? true : empty,
       views: parsedViews,
     };
   };
@@ -445,7 +458,7 @@ function ConnectionFormFields({
     port: port ? Number(port) : undefined,
     user: user || undefined,
     password,
-    database: database || undefined,
+    database: isFiles ? ':memory:' : database || undefined,
     ...(isEdit ? { name } : {}),
     ...duckFields(undefined),
   });
@@ -499,7 +512,7 @@ function ConnectionFormFields({
           port: port ? Number(port) : null,
           user: user || null,
           password,
-          database: database || null,
+          database: isFiles ? ':memory:' : database || null,
           ...duckFields(null),
         };
         unwrap(
@@ -549,12 +562,13 @@ function ConnectionFormFields({
         />
       </Field>
       <Field id="c-db" label="Database type">
-        <select id="c-db" value={db} onChange={(e) => setDb(e.target.value)}>
+        <select id="c-db" value={kind} onChange={(e) => setKind(e.target.value)}>
           {DB_TYPES.map((t) => (
             <option key={t} value={t}>
               {EXPERIMENTAL_DB_TYPES.includes(t) ? `${t} (experimental)` : t}
             </option>
           ))}
+          <option value={FILES}>Files (Parquet, CSV, JSON)</option>
         </select>
       </Field>
       <div className="grid-host" hidden={isDuck}>
@@ -622,40 +636,42 @@ function ConnectionFormFields({
           </div>
         </Field>
       </div>
-      <Field
-        id="c-database"
-        label="Default database"
-        hint={
-          isDuck
-            ? 'A .duckdb file that already exists, or :memory: for a source made only of files.'
-            : 'SQLite, DuckDB and H2 take a file path here instead.'
-        }
-      >
-        <div>
-          {databases ? (
-            <select
-              id="c-database"
-              value={databases.includes(database) ? database : (databases[0] ?? '')}
-              onChange={(e) => setDatabase(e.target.value)}
-            >
-              {databases.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              id="c-database"
-              placeholder="SQLite, DuckDB and H2 take a file path"
-              autoComplete="off"
-              spellCheck={false}
-              value={database}
-              onChange={(e) => setDatabase(e.target.value)}
-            />
-          )}
-        </div>
-      </Field>
+      <div hidden={isFiles}>
+        <Field
+          id="c-database"
+          label="Default database"
+          hint={
+            isDuck
+              ? 'A .duckdb file that already exists, or :memory: for a source made only of files.'
+              : 'SQLite, DuckDB and H2 take a file path here instead.'
+          }
+        >
+          <div>
+            {databases ? (
+              <select
+                id="c-database"
+                value={databases.includes(database) ? database : (databases[0] ?? '')}
+                onChange={(e) => setDatabase(e.target.value)}
+              >
+                {databases.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="c-database"
+                placeholder="SQLite, DuckDB and H2 take a file path"
+                autoComplete="off"
+                spellCheck={false}
+                value={database}
+                onChange={(e) => setDatabase(e.target.value)}
+              />
+            )}
+          </div>
+        </Field>
+      </div>
       <div className="test-row">
         <button
           type="button"
@@ -726,6 +742,18 @@ function ConnectionFormFields({
               </select>
             </Field>
           </div>
+          <label className="switch">
+            <input
+              id="c-auto-views"
+              type="checkbox"
+              checked={autoViews}
+              onChange={(e) => setAutoViews(e.target.checked)}
+            />
+            A view for each file and folder
+            <span className="hint">
+              — orders.parquet becomes orders; a folder of files, one view over all of them
+            </span>
+          </label>
           <label className="switch">
             <input
               id="c-ssl"
