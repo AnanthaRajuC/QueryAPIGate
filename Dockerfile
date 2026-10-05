@@ -1,6 +1,6 @@
 # Stage 1: build the QueryAPIGate Console (frontend/, ADR 0001). Only its static output is carried into the final
 # image, so the image itself contains no Node.js. frontend/openapi.json is committed, so this stage needs no Python.
-FROM node:22-slim AS console
+FROM node:26-slim AS console
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
