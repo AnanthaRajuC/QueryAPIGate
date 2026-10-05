@@ -12,7 +12,7 @@ process - `queryapigate serve`, `queryapigate mcp`, `queryapigate events` - shar
 """
 from dataclasses import dataclass
 
-from . import alerts, apikeys, config, jwtauth, metrics
+from . import admins, alerts, apikeys, config, jwtauth, metrics
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,8 @@ def authenticate(api_key, authorization, client_ip):
     else:
         permission = None
     if permission is not None:
+        if permission.via == 'break-glass':
+            admins.note_break_glass()
         return permission
     return None if apikeys.auth_required() else apikeys.OPEN
 

@@ -26,8 +26,9 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 6  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
-#                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances - see _upgrade()
+SCHEMA_VERSION = 7  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+#                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
+#                    7: administrators and admin_tokens - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -122,6 +123,25 @@ CREATE TABLE IF NOT EXISTS instances (
   started_at REAL NOT NULL,
   last_seen REAL NOT NULL
 );
+-- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
+CREATE TABLE IF NOT EXISTS administrators (
+  name TEXT PRIMARY KEY,
+  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- email, created_by, last_seen_at
+);
+
+-- An administrator's personal admin tokens - only each one's SHA-256 hash, looked up like an API key's.
+CREATE TABLE IF NOT EXISTS admin_tokens (
+  id TEXT PRIMARY KEY,         -- public, shown in lists; never the secret
+  admin_name TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- label, last_used_at
+);
+CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
 """
 
 
@@ -207,6 +227,25 @@ CREATE TABLE IF NOT EXISTS instances (
   started_at DOUBLE PRECISION NOT NULL,
   last_seen DOUBLE PRECISION NOT NULL
 );
+-- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
+CREATE TABLE IF NOT EXISTS administrators (
+  name TEXT COLLATE "C" PRIMARY KEY,
+  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- email, created_by, last_seen_at
+);
+
+-- An administrator's personal admin tokens - only each one's SHA-256 hash, looked up like an API key's.
+CREATE TABLE IF NOT EXISTS admin_tokens (
+  id TEXT COLLATE "C" PRIMARY KEY,         -- public, shown in lists; never the secret
+  admin_name TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- label, last_used_at
+);
+CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -414,7 +453,8 @@ def _upgrade(conn, postgres):
        client resuming with Last-Event-ID still finds its place.
     6: the instances table - new, so CREATE TABLE IF NOT EXISTS makes it; nothing to change in place. Additive, as
        every change within a minor line must be (see DEPLOYMENT.md, Rolling upgrades): a 0.14 process still
-       running against the upgraded store keeps working."""
+       running against the upgraded store keeps working.
+    7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -581,6 +621,8 @@ _MIGRATED_TABLES = (
     ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json'), 'name'),
     ('roles', ('name', 'created_at', 'details_json'), 'name'),
     ('audit_log', ('timestamp', 'entry_json'), 'id'),
+    ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),
+    ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
 )
 
 

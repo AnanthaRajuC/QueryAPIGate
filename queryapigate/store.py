@@ -73,7 +73,20 @@ def _zone_name(local):
 # and with what `changes` shape; this module only persists whatever it's given.
 # --------------------------------------------------------------------------------------
 
-def record_audit(actor, action, target, changes=None):
+def _audit_via(actor):
+    """How the actor authenticated (ADR 0003): 'token', 'break-glass' or 'open' from the request's caller; 'cli' or
+    'startup' for the server's own changes."""
+    if actor in ('cli', 'startup'):
+        return actor
+    try:
+        from flask import g, has_request_context
+    except ImportError:  # pragma: no cover - flask is a core dependency
+        return None
+    permission = g.get('permission') if has_request_context() else None
+    return getattr(permission, 'via', None)
+
+
+def record_audit(actor, action, target, changes=None, via=None):
     """Append one entry (oldest first, capped at config.audit_log_limit() - same per-insert SQL trim
     record_execution() below uses for execution_history) and, when QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE is
     set, also append it to that plain file - a second, never-capped copy for retention beyond the SQLite
@@ -81,7 +94,8 @@ def record_audit(actor, action, target, changes=None):
     write failing should not block the action it's recording, the same trade-off record_execution() already
     makes for query-run history; the two writes are independently fault-tolerant so a problem with one
     (e.g. the export path's directory missing) never suppresses the other."""
-    entry = {'timestamp': now(), 'actor': actor, 'action': action, 'target': target, 'changes': changes}
+    entry = {'timestamp': now(), 'actor': actor, 'via': via or _audit_via(actor), 'action': action, 'target': target,
+             'changes': changes}
     try:
         with db.transaction() as conn:
             conn.execute('INSERT INTO audit_log (timestamp, entry_json) VALUES (?, ?)',

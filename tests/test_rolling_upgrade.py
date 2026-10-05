@@ -91,7 +91,8 @@ class RollingUpgradeTests(unittest.TestCase):
 
     def test_the_previous_release_keeps_serving_while_the_new_one_upgrades_the_store(self):
         old, _ = self.start([OLD_BIN], 'old')
-        self.assertEqual(call(old, 'GET', '/health', key=None)[1]['version'], '0.14.0')
+        released = subprocess.check_output([OLD_BIN, '--version'], text=True).split()[-1]  # e.g. 0.15.0
+        self.assertEqual(call(old, 'GET', '/health', key=None)[1]['version'], released)
         call(old, 'POST', '/api/v1/connections', {'name': 'data', 'db': 'sqlite', 'database': self.data,
                                                   'active': True})
         status, body, _ = call(old, 'POST', '/api/v1/queries', {'name': 'total', 'sql': 'SELECT SUM(n) AS s FROM t',

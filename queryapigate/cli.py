@@ -6,9 +6,22 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from . import __version__, bundle, config, db, examples, experimental, instances, logging_setup, postman, store
+from . import (
+    __version__,
+    adminroles,
+    admins,
+    bundle,
+    config,
+    db,
+    examples,
+    experimental,
+    instances,
+    logging_setup,
+    postman,
+    store,
+)
 from .app import create_app
 from .errors import ApiError
 
@@ -357,6 +370,76 @@ def _examples_status(args):
     return 0
 
 
+DEFAULT_TOKEN_DAYS = 90
+
+
+def _token_expiry(value):
+    """--expires: a date, 'never', or (default) DEFAULT_TOKEN_DAYS from today."""
+    if value == 'never':
+        return None
+    if value is None:
+        return (datetime.now() + timedelta(days=DEFAULT_TOKEN_DAYS)).strftime('%Y-%m-%d')
+    return value
+
+
+def _print_token(token, secret):
+    expiry = f"expires {token['expires_at']}" if token['expires_at'] else 'never expires'
+    print(f"Admin token {token['id']} for {token['admin']} ({expiry}) - store it now, it cannot be shown again:")
+    print(f'  {secret}')
+    print("Use it as the X-API-Key header, or paste it into the Console's key box.")
+
+
+def _admins_command(action):
+    """`queryapigate admins ...` - runs against the store directly, with no server and no key, so the first owner
+    can be created (and a locked-out one given a new token) by whoever runs commands on the server."""
+    def run(args):
+        try:
+            config.check_settings()
+            return action(args)
+        except ApiError as error:
+            print(f'queryapigate admins {args.action}: {error.message}', file=sys.stderr)
+            return 1
+        except (OSError, ValueError) as error:
+            print(f'queryapigate admins {args.action}: {error}', file=sys.stderr)
+            return 2
+    return run
+
+
+@_admins_command
+def _admins_create(args):
+    admin = admins.create_admin(args.name, args.role, email=args.email, created_by='cli')
+    store.record_audit('cli', 'create_admin', admin['name'], {'role': admin['role'], 'email': admin['email']})
+    token, secret = admins.issue_token(admin['name'], label=args.label, expires_at=_token_expiry(args.expires))
+    store.record_audit('cli', 'issue_admin_token', admin['name'], {'token': token['id'], 'label': token['label'],
+                                                                    'expires_at': token['expires_at']})
+    print(f"Created administrator {admin['name']} ({admin['role']}).")
+    _print_token(token, secret)
+    return 0
+
+
+@_admins_command
+def _admins_token(args):
+    token, secret = admins.issue_token(args.name, label=args.label, expires_at=_token_expiry(args.expires))
+    store.record_audit('cli', 'issue_admin_token', args.name, {'token': token['id'], 'label': token['label'],
+                                                               'expires_at': token['expires_at']})
+    _print_token(token, secret)
+    return 0
+
+
+@_admins_command
+def _admins_list(args):
+    found = admins.list_admins()
+    if not found:
+        print('No administrators yet. Create the first owner with:  queryapigate admins create NAME --role owner')
+        return 0
+    for admin in found:
+        state = '' if admin['active'] else '  (inactive)'
+        email = f"  <{admin['email']}>" if admin['email'] else ''
+        seen = admin['last_seen_at'] or 'never'
+        print(f"{admin['name']}  {admin['role']}{email}  last seen {seen}{state}")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='queryapigate', description='Expose SQL databases as a REST API.')
     parser.add_argument('--version', action='version', version=f'queryapigate {__version__}')
@@ -456,8 +539,27 @@ def build_parser():
     examples_status = example_actions.add_parser('status', help='say whether the examples are loaded')
     examples_status.set_defaults(func=_examples_status)
 
+    admins_parser = commands.add_parser('admins', help='create named administrators and issue their admin tokens, '
+                                                       'straight in the store - no server or key needed')
+    admins_parser.set_defaults(func=lambda a: admins_parser.print_help() or 2)
+    admin_actions = admins_parser.add_subparsers(dest='action')
+    admins_create = admin_actions.add_parser('create', help='create an administrator and print its first token')
+    admins_create.add_argument('name')
+    admins_create.add_argument('--role', required=True, choices=adminroles.ROLE_NAMES)
+    admins_create.add_argument('--email')
+    admins_token = admin_actions.add_parser('token', help="issue another token for an administrator (one who lost "
+                                                          'theirs, or a new CI job)')
+    admins_token.add_argument('name')
+    for sub in (admins_create, admins_token):
+        sub.add_argument('--label', help="what the token is for, e.g. 'laptop' or 'ci'")
+        sub.add_argument('--expires', help=f"YYYY-MM-DD, or 'never' (default: {DEFAULT_TOKEN_DAYS} days from today)")
+    admins_list = admin_actions.add_parser('list', help='list administrators')
+    admins_create.set_defaults(func=_admins_create)
+    admins_token.set_defaults(func=_admins_token)
+    admins_list.set_defaults(func=_admins_list)
+
     for sub in (serve, init, export, collection_export, collection_import, examples_load, examples_unload,
-                examples_status):
+                examples_status, admins_create, admins_token, admins_list):
         sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
     return parser

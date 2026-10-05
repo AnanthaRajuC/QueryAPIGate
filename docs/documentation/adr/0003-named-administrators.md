@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0003-named-administrators.md"

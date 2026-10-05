@@ -94,7 +94,7 @@ import time
 from collections import namedtuple
 from datetime import datetime
 
-from . import config, db, store
+from . import admins, config, db, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -106,16 +106,21 @@ _USE_RECORD_INTERVAL = 60.0  # seconds between last_used_at writes for the same 
 _last_recorded_use: dict[str, float] = {}  # key name -> time.monotonic() of the last last_used_at write
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
-                                       'allowed_write_ops', 'collections', 'allowed_tables', 'claims'],
-                        defaults=(frozenset(), None, None))
+                                       'allowed_write_ops', 'collections', 'allowed_tables', 'claims', 'role',
+                                       'via'],
+                        defaults=(frozenset(), None, None, None, None))
 # `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
+# `role`: the administrator role (adminroles.py) - 'owner' for the shared key and an open server, an administrator's
+# own role for an admin token, None for a scoped key or a signed-in app user (they can't manage anything).
+# `via`: how an administrator authenticated - 'break-glass' (QUERYAPIGATE_API_KEY), 'token' or 'open'; it goes into
+# the audit log next to the actor's name.
 
 # The unrestricted caller used when the server has no key configured at all (QUERYAPIGATE_API_KEY unset and no
 # scoped keys stored) - today's "open by design" behaviour, unchanged by this module. Its name is None (there
 # is no key to name), unlike the admin key match below, which is named 'admin' so logs and /metrics can tell
 # "no auth configured" apart from "authenticated as the admin key".
 OPEN = Permission(name=None, admin=True, connections=ALL_CONNECTIONS, allow_writes=True, queries=ALL_QUERIES,
-                  rate_limit=None, allowed_write_ops=None, allowed_tables=None)
+                  rate_limit=None, allowed_write_ops=None, allowed_tables=None, role='owner', via='open')
 
 
 def can_use(permission, connection_name):
@@ -432,8 +437,9 @@ def any_configured():
 
 
 def auth_required():
-    # JWT on means signed-in users only: without this, a server with no API keys would stay open to everyone
-    return config.api_key() is not None or any_configured() or config.jwt_enabled()
+    # JWT on means signed-in users only: without this, a server with no API keys would stay open to everyone. And
+    # once an administrator exists, removing QUERYAPIGATE_API_KEY must not reopen the server (ADR 0003).
+    return config.api_key() is not None or any_configured() or config.jwt_enabled() or admins.any_configured()
 
 
 def list_keys():
@@ -447,6 +453,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                example=False):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
+    admins.refuse_taken_name(name)
     if role is None:
         collections = _normalize_collections(collections)
         _require_existing_collections(collections)
@@ -692,7 +699,10 @@ def authenticate(supplied, client_ip=None):
     expected = config.api_key()
     if expected and hmac.compare_digest(supplied.encode('utf-8', 'replace'), expected.encode('utf-8')):
         return Permission(name='admin', admin=True, connections=ALL_CONNECTIONS, allow_writes=True,
-                          queries=ALL_QUERIES, rate_limit=None, allowed_write_ops=None)
+                          queries=ALL_QUERIES, rate_limit=None, allowed_write_ops=None, role='owner',
+                          via='break-glass')
+    if supplied.startswith(admins.TOKEN_PREFIX):
+        return admins.authenticate(supplied)
     supplied_hash = _hash(supplied)
     # One indexed lookup (api_keys.hash is UNIQUE) instead of loading and scanning every key - a full scan
     # made each request's cost grow linearly with the number of keys. Matching on the hash rather than the

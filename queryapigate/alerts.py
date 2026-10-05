@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import apikeys, config, db, history, instances, metrics, ratelimit
+from . import admins, apikeys, config, db, history, instances, metrics, ratelimit
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -31,6 +31,7 @@ MIN_RUNS_FOR_SPEED = 5
 CONNECTION_STREAK = 3  # a connection's newest runs all failing for a connection reason, this many in a row
 CONNECTION_WINDOW = timedelta(hours=24)
 EXPIRY_WARNING = timedelta(days=7)
+BREAK_GLASS_WINDOW = timedelta(hours=24)  # a use of the shared key this recent, once named owners exist
 RATE_LIMITED_PER_HOUR = 10  # refusals in the last hour before a key or client is called out
 
 # Error codes (errors.py) that mean the connection itself is the problem, not the SQL run on it
@@ -64,16 +65,29 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
+    found = [*_server(now), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
-def _server():
+def _server(now):
     if apikeys.auth_required():
-        return []
+        return _break_glass(now)
     return [_alert('critical', 'open_server', 'server', 'Anyone can use this server',
                    'No API key is configured, so every request - including changing connections and keys - is '
                    'allowed. Set QUERYAPIGATE_API_KEY.', {'type': 'settings', 'name': 'security'})]
+
+
+def _break_glass(now):
+    if not admins.active_owner_exists():
+        return []
+    used = admins.last_break_glass_use((now - BREAK_GLASS_WINDOW).strftime(history.TIME_FORMAT))
+    if used is None:
+        return []
+    return [_alert('warning', 'break_glass_used', 'server', 'The shared admin key was used',
+                   f"QUERYAPIGATE_API_KEY - the break-glass key - was used at {used['timestamp']} "
+                   f"({used.get('target')}), although named owners exist. If nobody meant to, change it; once "
+                   'everyone signs in with their own token, remove it from the environment.',
+                   {'type': 'settings', 'name': 'security'}, used['timestamp'])]
 
 
 def _keys(now):

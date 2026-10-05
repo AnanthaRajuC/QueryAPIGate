@@ -30,6 +30,7 @@ nav:
       - Overview: documentation/adr/README.md
       - 0001 Console and Management API: documentation/adr/0001-console-and-management-api.md
       - 0002 Event ids: documentation/adr/0002-event-ids.md
+      - 0003 Named administrators: documentation/adr/0003-named-administrators.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

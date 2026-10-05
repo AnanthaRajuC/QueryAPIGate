@@ -4,7 +4,9 @@ A versioned, resource-oriented interface to QueryAPIGate's own configuration - b
 by anything else (scripts, Terraform, GitOps, other platforms). Built one resource at a time; the legacy routes
 each one replaces keep working, marked deprecated. Conventions, the same on every resource:
 
-- Admin only (it manages the server's configuration), like the legacy management routes.
+- Administrators only (it manages the server's configuration): each operation is allowed to the roles whose
+  capabilities include it (adminroles.py, ADR 0003) - `403 admin_only` for any other caller, `403 role_forbidden`
+  for an administrator whose role can't.
 - Every error carries a stable machine-readable `code` alongside the human `error` message (BACKLOG #69).
 - A resource that can be edited returns an `ETag`; a change may send `If-Match` and gets 412 if the resource changed
   since it was read, so two admins can't silently overwrite each other's work.
@@ -12,10 +14,10 @@ each one replaces keep working, marked deprecated. Conventions, the same on ever
 
 Routes here translate HTTP to services/ calls and back; the meaning of each operation lives in the service.
 """
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, g, jsonify, request
 
-from . import alerts, collection_admin, config, history, instances, schema, sqlflow, store
-from .app import caller_key_name, get_int, get_json_body, require_admin
+from . import adminroles, alerts, collection_admin, config, history, instances, schema, sqlflow, store
+from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
 from .services import access, audit, collections, connections, mcp, queries
 
@@ -24,7 +26,8 @@ bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
 @bp.before_request
 def admin_only():
-    require_admin()
+    """Administrators only, each operation to the roles whose capabilities include it (adminroles.py)."""
+    adminroles.authorize(g.permission, request.endpoint)
 
 
 def _check_if_match(content):
@@ -39,6 +42,15 @@ def _detail_response(name, status=200):
     response = jsonify(queries.to_detail(name, content))
     response.headers['ETag'] = queries.etag(content)
     return response, status
+
+
+@bp.route('/me', methods=['GET'])
+def me():
+    """Who the caller is: name, role, what that role may do, and how they authenticated."""
+    permission = g.permission
+    return jsonify({'name': permission.name, 'role': permission.role, 'via': permission.via,
+                    'capabilities': adminroles.capabilities(permission.role),
+                    'data_access': permission.role in adminroles.DATA_ROLES}), 200
 
 
 # --------------------------------------------------------------------------------------

@@ -55,6 +55,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   them. Views in `views` take precedence; a file that can't be read is skipped with a warning.
 - **A "Files (Parquet, CSV, JSON)" connection type in the Console**: a DuckDB connection with no database file of its
   own and automatic views on - choose the folders or buckets it may read, and each file is a table to query.
+- **Named administrators with roles** (BACKLOG #84 Phase 1, [ADR 0003](documentation/adr/0003-named-administrators.md),
+  in progress): administrators - people or pipelines - each with a role (`owner`, `admin`, `developer`, `auditor`)
+  and their own admin tokens (`qagadm_...`, sent as `X-API-Key`, stored only as hashes, with an expiry). Every
+  `/api/v1` operation needs a capability its caller's role holds (`403 role_forbidden` otherwise); `GET /api/v1/me`
+  says who the caller is. `queryapigate admins create|token|list` creates the first owner without a server. Audit
+  entries gain `via` (`token`, `break-glass`, `open`, `cli`, `startup`). `QUERYAPIGATE_API_KEY` keeps working as an
+  owner - the break-glass key: once a named owner exists, each use is logged and raises a `break_glass_used` alert.
+  Authentication stays required while any administrator exists, even with `QUERYAPIGATE_API_KEY` unset.
+
+### Upgrading
+- **Schema 7** adds two tables (`administrators`, `admin_tokens`); nothing existing changes. As always, a 0.15 instance
+  still running keeps working against the upgraded store, but can't be restarted on it.
 
 ## [0.15.0] - 2026-10-04
 

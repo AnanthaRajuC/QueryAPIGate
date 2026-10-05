@@ -1386,7 +1386,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `unsupported_operation` | 400 | The operation isn't available for this database type (listing databases, schema, DDL) |
 | `wrong_connection_type` | 400 | A Mongo call on a SQL connection |
 | `unauthorized` | 401 | Missing or wrong `X-API-Key` or bearer token |
-| `admin_only` | 403 | Only the admin key may do this (manage the server, query or browse another database) |
+| `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
+| `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role |
 | `connection_forbidden` | 403 | This key may not use this connection |
 | `connection_inactive` | 403 | The connection is switched off |
 | `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |
@@ -1405,11 +1406,15 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `not_published` | 404 | The query has no published version |
 | `connection_not_found` | 404 | No such connection |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
+| `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
 | `collection_not_found` | 404 | No such collection (or it is empty) |
 | `cache_entry_not_found` | 404 | No such cached response |
 | `table_not_found` | 404 | No such table on the connection |
 | `database_file_not_found` | 404 | A SQLite/DuckDB connection's file doesn't exist |
 | `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
+| `admin_exists` | 409 | An administrator by that name exists |
+| `name_taken` | 409 | An administrator and an API key can't share a name |
+| `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |
 | `rate_limited` | 429 | Over `QUERYAPIGATE_RATE_LIMIT` or the key's own `rate_limit`; retry after `retry_after` seconds |

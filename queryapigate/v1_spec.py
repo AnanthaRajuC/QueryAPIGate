@@ -24,8 +24,8 @@ def _ok(schema, description='OK', etag=False):
 
 
 _ERRORS = {code: {'description': text, **_json(_ref('V1Error'))} for code, text in (
-    ('400', 'Invalid request'), ('401', 'Missing or invalid credentials'), ('403', 'Not the admin key'),
-    ('404', 'Not found'))}
+    ('400', 'Invalid request'), ('401', 'Missing or invalid credentials'),
+    ('403', 'Not an administrator (admin_only), or not one whose role may (role_forbidden)'), ('404', 'Not found'))}
 _CONFLICT = {'409': {'description': 'Already exists', **_json(_ref('V1Error'))}}
 _PRECONDITION = {'412': {'description': 'Changed since read (If-Match)', **_json(_ref('V1Error'))}}
 _IF_MATCH = {'name': 'If-Match', 'in': 'header', 'required': False, 'schema': {'type': 'string'},
@@ -245,9 +245,26 @@ SCHEMAS = {
         'type': 'object', 'required': ['timestamp', 'actor', 'action', 'target', 'changes'],
         'properties': {
             'timestamp': {'type': 'string'}, 'actor': _NULLABLE_STRING, 'action': {'type': 'string'},
+            'via': {'type': 'string', 'nullable': True,
+                    'enum': ['token', 'break-glass', 'open', 'cli', 'startup', None],
+                    'description': "How the actor authenticated: a personal admin token, the shared "
+                                   "QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. "
+                                   'Absent on entries written before 0.16.'},
             'target': _NULLABLE_STRING,
             'changes': {'nullable': True, 'description': 'For a change, each field as {from, to}; for a create or '
                                                          'delete, the whole record. Never a secret.'},
+        },
+    },
+    'Me': {
+        'type': 'object', 'required': ['name', 'role', 'via', 'capabilities', 'data_access'],
+        'properties': {
+            'name': {'type': 'string', 'nullable': True,
+                     'description': "The administrator's name; 'admin' for the shared key, null on an open server."},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'via': {'type': 'string', 'enum': ['token', 'break-glass', 'open']},
+            'capabilities': {'type': 'array', 'items': {'type': 'string'},
+                             'description': 'What the role may do in this API (adminroles.py).'},
+            'data_access': {'type': 'boolean', 'description': 'Whether it may run SQL and saved queries.'},
         },
     },
     'AuditLog': {
@@ -660,6 +677,9 @@ PATHS = {
             {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 100}},
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/me': {
+        'get': _op('Who you are: your name, role and what it may do', {'200': _ok(_ref('Me'))}),
     },
     '/api/v1/alerts': {
         'get': _op('What needs attention now - expiring keys, failing connections, slow or failing queries, '

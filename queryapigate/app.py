@@ -310,13 +310,6 @@ def authenticate_headers(api_key, authorization, client_ip):
     return governance.authenticate(api_key, authorization, client_ip)
 
 
-def require_admin():
-    """Only the admin key (QUERYAPIGATE_API_KEY, or no key at all when nothing is configured) manages the
-    server's own configuration - connections, saved queries and other API keys."""
-    if not g.permission.admin:
-        raise ApiError('This API key is not authorized to manage the server configuration', 403, code='admin_only')
-
-
 def require_connection(connection_name):
     if not apikeys.can_use(g.permission, connection_name):
         raise ApiError(f"This API key is not permitted to use the connection '{connection_name}'", 403,

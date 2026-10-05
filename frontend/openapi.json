@@ -288,6 +288,19 @@
           },
           "timestamp": {
             "type": "string"
+          },
+          "via": {
+            "description": "How the actor authenticated: a personal admin token, the shared QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. Absent on entries written before 0.16.",
+            "enum": [
+              "token",
+              "break-glass",
+              "open",
+              "cli",
+              "startup",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
@@ -1262,6 +1275,51 @@
         ],
         "type": "object"
       },
+      "Me": {
+        "properties": {
+          "capabilities": {
+            "description": "What the role may do in this API (adminroles.py).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "data_access": {
+            "description": "Whether it may run SQL and saved queries.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The administrator's name; 'admin' for the shared key, null on an open server.",
+            "nullable": true,
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "developer",
+              "auditor"
+            ],
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "token",
+              "break-glass",
+              "open"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "via",
+          "capabilities",
+          "data_access"
+        ],
+        "type": "object"
+      },
       "ParameterRule": {
         "properties": {
           "default": {
@@ -2066,7 +2124,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2127,7 +2185,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2203,7 +2261,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2285,7 +2343,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2371,7 +2429,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2466,7 +2524,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2567,7 +2625,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2620,7 +2678,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2678,7 +2736,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2741,7 +2799,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2810,7 +2868,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2870,7 +2928,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -2961,7 +3019,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3042,7 +3100,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3102,7 +3160,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3178,7 +3236,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3258,7 +3316,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3328,7 +3386,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3398,7 +3456,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3498,7 +3556,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3584,7 +3642,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3679,7 +3737,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3768,7 +3826,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3828,7 +3886,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3886,7 +3944,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -3944,7 +4002,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4088,7 +4146,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4148,7 +4206,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4208,7 +4266,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4268,7 +4326,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4282,6 +4340,66 @@
           }
         },
         "summary": "What tools/list returns for an unrestricted caller",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Who you are: your name, role and what it may do",
         "tags": [
           "Management API v1"
         ]
@@ -4364,7 +4482,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4440,7 +4558,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4520,7 +4638,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4592,7 +4710,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4678,7 +4796,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4779,7 +4897,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -4913,7 +5031,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5018,7 +5136,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5115,7 +5233,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5222,7 +5340,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5330,7 +5448,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5416,7 +5534,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5525,7 +5643,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5613,7 +5731,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5673,7 +5791,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5749,7 +5867,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5831,7 +5949,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -5917,7 +6035,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -6012,7 +6130,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
@@ -6082,7 +6200,7 @@
                 }
               }
             },
-            "description": "Not the admin key"
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
           },
           "404": {
             "content": {
