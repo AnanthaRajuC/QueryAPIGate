@@ -11,7 +11,8 @@ decisions.
 ## The four things to keep in mind
 
 1. **QueryAPIGate runs SQL against your databases.** Anything that reaches it with the right key can do whatever that
-   key's grants allow - and the **admin key can do everything**, like a database superuser for every connection.
+   key's grants allow. **Every administrator but an auditor can run any SQL on every connection**, like a database
+   superuser; their role only limits what they can change in QueryAPIGate.
 2. **The SQL read-only check is a careful pattern-based classifier, not a SQL parser.** It's tested by a fuzz suite and
    has had one real gap found and fixed. Treat it as a second lock. **The first lock is the database user**: connect
    with an account that has only the rights the API needs - read-only where it should be.
@@ -31,7 +32,8 @@ decisions.
 
 ### On an internal network
 
-- **Set `QUERYAPIGATE_API_KEY`** to a long random value, and keep it with a few people.
+- **Set `QUERYAPIGATE_API_KEY`** to a long random value - then give each administrator their own token and role,
+  and keep the shared key as a break-glass key ([guide 43](43-give-your-team-their-own-admin-access.md)).
 - **Give everything else a scoped key** - an explicit `connections` list (omitting it means *all*), read-only
   ([guide 13](13-set-up-a-scoped-api-key.md)).
 - **HTTPS** even internally - keys travel in a header on every request
@@ -76,7 +78,8 @@ with `from_claim` parameters so each user only ever sees their own rows. List th
 
 These are by design or not yet addressed - plan around them rather than discover them:
 
-- **The admin key has no limits** inside QueryAPIGate. Database grants are the backstop.
+- **Owners, admins and developers have no data limits** inside QueryAPIGate - roles limit what they can change, not
+  what they can read. Database grants are the backstop.
 - **Names can be probed.** A saved query a key can't reach answers `403` naming its connection; a missing name answers
   `404`.
 - **The MCP server ignores `QUERYAPIGATE_TRUST_PROXY`**, so behind a proxy it can't tell MCP callers' addresses apart.

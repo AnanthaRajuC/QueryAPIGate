@@ -38,7 +38,7 @@ by accident.
 | ~~#67 Deprecation policy~~ (shipped) | How long a 1.x deprecation lives before 2.0 removes it |
 | ~~#68 Supported Python versions~~ (shipped: 3.11+) | Raise the floor from 3.9 (end of life since October 2025) |
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
-| #84 Admin identity, Phase 1 | Named administrators, admin roles and audit by person change the management API's permission model and the audit record - cheap now, breaking after |
+| ~~#84 Admin identity, Phase 1~~ (shipped) | Named administrators, admin roles and audit by person change the management API's permission model and the audit record - cheap now, breaking after |
 
 **Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, a Helm chart
 (plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
@@ -56,7 +56,8 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 2. **0.14:** #64, #66, #67, #68, #71 and the how-to guides. (Released as 0.14.0 on 2026-10-04.)
 3. **0.15:** #70 decided - several instances supported - and delivered by #55-#58; #75 files through DuckDB; what
    0.14 deprecated, removed. (Released as 0.15.0 on 2026-10-04.)
-4. **#84 Phase 1**, admin identity - the last contract change before the freeze.
+4. **0.16: #84 Phase 1**, admin identity - the last contract change before the freeze; with #81 Parquet output and
+   automatic views over files.
 5. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 6. **1.0.0.**
 
@@ -2659,7 +2660,15 @@ asked for.
 
 ## 84. Admin identity: named administrators, admin roles, SSO for the Console
 
-**Status: open.** Phase 1 is a 1.0 milestone item; Phase 2 can follow in rc1 or just after.
+**Status: Phase 1 shipped (for 0.16); Phase 2 open** - it can follow in rc1 or just after.
+[ADR 0003](documentation/adr/0003-named-administrators.md) records the design: administrators (`admins.py`, schema 7)
+with four fixed roles (`adminroles.py` - a capability for every `/api/v1` operation, enforced before any route runs,
+tested for completeness); personal admin tokens (`qagadm_...`, hashed, expiring, several per person, self-service);
+`/api/v1/me` and `/api/v1/administrators`; `queryapigate admins create|token|list`; the shared key as an audited,
+alerted break-glass owner; `via` in audit entries; the Console's Administrators screen and role-aware screens.
+Guide 43. Decided on the way: developers keep SQL on every connection (narrower reach is a scoped key's job);
+auditors get no data access; admins and auditors can read settings; removing the last administrator without the
+shared key is refused, since it could reopen the server.
 
 **Impact:** administering QueryAPIGate means holding one shared key, `QUERYAPIGATE_API_KEY`. Nobody can be given less
 than everything, nobody signs in as themselves, and the audit log records every change as "admin" - so it can't say

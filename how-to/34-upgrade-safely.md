@@ -86,6 +86,10 @@ curl -s https://api.example.com/metrics | grep 'endpoint="api.execute_sql_from_f
 Move those callers before upgrading to the release that removes it. The current list of deprecations is the
 **Deprecated** sections of the changelog.
 
+**Since 0.16**, a `break_glass_used` warning means the shared `QUERYAPIGATE_API_KEY` was used although named owners
+exist - expected while you move people to their own tokens ([guide 43](43-give-your-team-their-own-admin-access.md)),
+worth a look afterwards.
+
 Finally, glance at **Alerts** in the Console for anything the upgrade surfaced - a connection failing because a driver
 went missing, say.
 

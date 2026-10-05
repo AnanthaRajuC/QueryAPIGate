@@ -109,6 +109,9 @@ PROD_DB_PASSWORD=<your database password>
 `QUERYAPIGATE_API_KEY` is the admin key - full access, sent as the `X-API-Key` header. Generate a real one
 (`openssl rand -hex 32`), not a word you'll remember; create scoped keys for anything that only needs to run
 queries (`POST /api/v1/api-keys`, from the admin UI or the API - see [API.md](API.md#permission-roles-templates)).
+Then give each person who manages the server their own admin token and role, and keep the shared key as a
+break-glass key - `docker compose exec queryapigate queryapigate admins create alice --role owner` creates the first
+owner ([API.md](API.md#administrators-and-admin-roles)).
 
 A connection's own password shouldn't be stored as plain text - give it as a reference to an environment
 variable instead (in the Console's connection form, or the API), resolved from the container's environment (i.e.

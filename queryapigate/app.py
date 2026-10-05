@@ -16,6 +16,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.wsgi import ClosingIterator
 
 from . import (
+    admins,
     apikeys,
     broadcast,
     cache,
@@ -141,13 +142,14 @@ def create_app():
     if not apikeys.auth_required():  # the open_server alert's condition (alerts.py)
         log.warning('No API key is configured: every request is allowed, including changing connections and keys. '
                     'Fine on your own machine - set QUERYAPIGATE_API_KEY before anyone else can reach this server.')
-    if config.cors_origins() == '*' and not config.api_key():
+    if config.cors_origins() == '*' and not apikeys.auth_required():
         log.warning('QUERYAPIGATE_CORS_ORIGINS=* without QUERYAPIGATE_API_KEY: any website a user visits can call '
                     'this API from their browser and reach every active connection. Set an API key or list the '
                     'origins.')
-    if apikeys.any_configured() and not config.api_key():
-        log.warning('Scoped API keys exist but QUERYAPIGATE_API_KEY is not set: no key can manage connections, saved '
-                    'queries or other API keys until it is - only a scoped key\'s own allowed connections work.')
+    if apikeys.any_configured() and not config.api_key() and not admins.active_owner_exists():
+        log.warning('Scoped API keys exist but QUERYAPIGATE_API_KEY is not set and there is no active owner: nobody '
+                    'can manage connections, saved queries or keys until there is - set QUERYAPIGATE_API_KEY, or '
+                    'create an owner with `queryapigate admins create NAME --role owner`.')
     if config.secret_key():
         # Encrypt any literal password already on disk immediately, rather than waiting for its next
         # PATCH /api/v1/connections - a connection saved before QUERYAPIGATE_SECRET_KEY existed benefits right away.

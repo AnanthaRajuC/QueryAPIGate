@@ -56,7 +56,7 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **A "Files (Parquet, CSV, JSON)" connection type in the Console**: a DuckDB connection with no database file of its
   own and automatic views on - choose the folders or buckets it may read, and each file is a table to query.
 - **Named administrators with roles** (BACKLOG #84 Phase 1, [ADR 0003](documentation/adr/0003-named-administrators.md),
-  in progress): administrators - people or pipelines - each with a role (`owner`, `admin`, `developer`, `auditor`)
+  [guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md)): administrators - people or pipelines - each with a role (`owner`, `admin`, `developer`, `auditor`)
   and their own admin tokens (`qagadm_...`, sent as `X-API-Key`, stored only as hashes, with an expiry). Every
   `/api/v1` operation needs a capability its caller's role holds (`403 role_forbidden` otherwise); `GET /api/v1/me`
   says who the caller is. `queryapigate admins create|token|list` creates the first owner without a server. Audit
@@ -68,6 +68,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.
 
 ### Upgrading
+- **Nothing to do for administrators**: `QUERYAPIGATE_API_KEY` keeps working as before, as an owner. To give people
+  their own access, follow [guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md). The startup warning
+  about scoped keys without `QUERYAPIGATE_API_KEY` is no longer logged once an active owner exists.
 - **Schema 7** adds two tables (`administrators`, `admin_tokens`); nothing existing changes. As always, a 0.15 instance
   still running keeps working against the upgraded store, but can't be restarted on it.
 

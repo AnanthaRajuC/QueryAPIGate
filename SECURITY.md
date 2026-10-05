@@ -19,6 +19,9 @@ Security fixes are made against the latest released version.
 - Set `QUERYAPIGATE_API_KEY`, and put the service behind TLS (a reverse proxy) - the key is sent in a header. It is a
   full-access admin key; give anyone or anything that only needs to run queries a scoped key instead
   (`POST /api/v1/api-keys`), limited to specific connections and, separately, to read-only access.
+- Give the people (and pipelines) who manage the server their own admin tokens, with the narrowest role that fits -
+  `queryapigate admins create NAME --role owner` for the first - and then keep the shared key sealed as a break-glass
+  key, or remove it ([guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md)).
 - Leave `QUERYAPIGATE_ALLOW_WRITES` unset unless you really need writes, and connect with a database account that only
   has the privileges the API should have. The read-only guard - including the single-statement check it relies on -
   is defence in depth, not a substitute for grants; it is dialect-aware (MySQL/ClickHouse honour backslash escapes

@@ -38,8 +38,9 @@ That answers "who gave this key write access, and when": the admin key, at 18:54
 
 - **An update** shows only what changed, as `{"from": ..., "to": ...}`.
 - **A create or delete** shows the whole entry as it was - so a deleted key's grants are still on record.
-- **`actor`** is `admin` for the admin key and `cli` for command-line operations such as `queryapigate examples load`.
-  Scoped keys can't change anything, so they never appear here.
+- **`actor`** is the administrator's name - `admin` for the shared `QUERYAPIGATE_API_KEY`, `cli` for command-line
+  operations such as `queryapigate examples load`. **`via`** says how they signed in: `token` (their own admin token),
+  `break-glass` (the shared key), `cli`, or `open`. Scoped keys can't change anything, so they never appear here.
 - **`actions`** lists every action present, handy for building a filter.
 
 ## Filters
@@ -104,8 +105,9 @@ recorded in the store.
 
 ## What it can't tell you
 
-- **Which person** used the admin key. There is one admin key; everyone who has it is `admin`. If you need
-  per-person accountability, keep the admin key with very few people and record changes in your own change process.
+- **Which person** used the shared admin key: everyone who has it is `admin`. Give each person their own admin token
+  ([guide 43](43-give-your-team-their-own-admin-access.md)) and the log names them; any later use of the shared key
+  is then flagged as `break_glass_used`.
 - **Changes made outside QueryAPIGate** - editing `queryapigate.db` directly, or restoring a backup.
 
 ## Next steps

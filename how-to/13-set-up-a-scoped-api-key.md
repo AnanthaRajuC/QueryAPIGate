@@ -92,10 +92,11 @@ no grace period, no cache to wait out.
 
 ```bash
 curl http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: <a scoped key, not the admin one>'
-# {"error": "This API key is not authorized to manage the server configuration", "code": "forbidden", ...}
+# {"error": "This API key is not authorized to manage the server configuration", "code": "admin_only", ...}
 ```
 
-Only the admin key (`QUERYAPIGATE_API_KEY`) can create, list, update or delete keys at all - a scoped key,
+Only administrators - the shared `QUERYAPIGATE_API_KEY`, or a named owner or admin
+([guide 43](43-give-your-team-their-own-admin-access.md)) - can create, list, update or delete keys at all - a scoped key,
 however permissive its own `connections`/`allow_writes` grants are, can never manage keys, connections, or
 saved queries. That boundary is absolute, not something any grant field widens.
 

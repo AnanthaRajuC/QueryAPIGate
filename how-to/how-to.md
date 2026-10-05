@@ -54,6 +54,8 @@ guide covers one scenario end to end, and every command and response in it was r
     `QUERYAPIGATE_SECRET_KEY` encryption, and rotating the key.
 23. [**Put QueryAPIGate behind a reverse proxy with real TLS**](23-put-it-behind-a-reverse-proxy.md) - Caddy or nginx,
     verified.
+43. [**Give your team their own admin access**](43-give-your-team-their-own-admin-access.md) - named administrators
+    with roles, their own tokens, and the shared key retired.
 
 ## MCP (AI agent access)
 

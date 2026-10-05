@@ -123,6 +123,16 @@ class WithoutSharedKeyTests(AdminTestCase):
         self.assertEqual(self.client.get('/catalog').status_code, 401)
         self.assertEqual(self.me(token).status_code, 200)
 
+    def test_the_startup_warning_knows_an_owner_can_manage(self):
+        from queryapigate import apikeys
+        apikeys.create_key('app', connections=[])
+        with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
+            create_app()
+        self.assertTrue(any('nobody can manage connections' in line for line in logs.output), logs.output)
+        admins.create_admin('owner1', 'owner')
+        with self.assertNoLogs('queryapigate', level=logging.WARNING):
+            create_app()
+
     def test_the_last_active_owner_cannot_be_lost(self):
         admins.create_admin('owner1', 'owner')
         admins.create_admin('helper', 'admin')

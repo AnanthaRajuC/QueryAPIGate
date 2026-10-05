@@ -285,6 +285,12 @@ const DOCS = [
     path: 'how-to/42-run-several-instances.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-43',
+    title: 'Give your team their own admin access',
+    path: 'how-to/43-give-your-team-their-own-admin-access.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];
