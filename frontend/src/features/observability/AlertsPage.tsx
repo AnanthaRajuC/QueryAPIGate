@@ -118,7 +118,7 @@ export function AlertsPage() {
       <div className="panel">
         <div className="empty">
           <strong>Couldn’t check for alerts</strong>
-          <span>Only the admin key (QUERYAPIGATE_API_KEY) can see alerts.</span>
+          <span>{query.error.message}</span>
           <button type="button" className="btn sm" onClick={() => void query.refetch()}>
             Retry
           </button>

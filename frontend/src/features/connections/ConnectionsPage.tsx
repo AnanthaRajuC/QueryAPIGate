@@ -1,3 +1,4 @@
+import { useCan } from '@/app/data';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
@@ -54,6 +55,7 @@ function useDeleted(enabled: boolean) {
 }
 
 export function ConnectionsPage() {
+  const can = useCan();
   const navigate = useNavigate();
   const { openDrawer } = useFeedback();
   const list = useConnectionList();
@@ -136,7 +138,12 @@ export function ConnectionsPage() {
       <div className="empty">
         <strong>No connections yet</strong>
         <span>Add a MySQL, PostgreSQL, ClickHouse, SQLite or H2 database to start running SQL.</span>
-        <button type="button" className="btn primary" onClick={newConnection}>
+        <button
+          hidden={!can('connections.write')}
+          type="button"
+          className="btn primary"
+          onClick={newConnection}
+        >
           New connection
         </button>
       </div>
@@ -226,6 +233,7 @@ export function ConnectionsPage() {
                   <td>
                     <div className="actions">
                       <button
+                        hidden={!can('data')}
                         type="button"
                         className="btn sm outlined"
                         disabled={!c.active}
@@ -235,6 +243,7 @@ export function ConnectionsPage() {
                         Query
                       </button>
                       <button
+                        hidden={!can('connections.write')}
                         type="button"
                         className="btn ghost sm icon"
                         title={`Edit ${c.name}`}
@@ -250,6 +259,7 @@ export function ConnectionsPage() {
                         <PencilIcon />
                       </button>
                       <button
+                        hidden={!can('connections.write')}
                         type="button"
                         className="btn ghost sm icon danger"
                         title={`Delete ${c.name}`}
@@ -293,7 +303,7 @@ export function ConnectionsPage() {
           id="new-connection"
           type="button"
           className="btn primary"
-          hidden={filter === 'deleted'}
+          hidden={filter === 'deleted' || !can('connections.write')}
           onClick={newConnection}
         >
           New connection

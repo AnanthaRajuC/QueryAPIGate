@@ -49,6 +49,10 @@ const AlertsPage = lazy(() =>
   import('@/features/observability/AlertsPage').then((m) => ({ default: m.AlertsPage })),
 );
 
+const AdministratorsPage = lazy(() =>
+  import('@/features/administrators/AdministratorsPage').then((m) => ({ default: m.AdministratorsPage })),
+);
+
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
@@ -100,6 +104,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RolesPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="administrators"
+          element={
+            <Suspense fallback={<Loading />}>
+              <AdministratorsPage />
             </Suspense>
           }
         />

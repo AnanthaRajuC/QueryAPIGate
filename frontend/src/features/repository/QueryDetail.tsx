@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from '
 import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
-import { useApiKeys, useRoles } from '@/app/data';
+import { useApiKeys, useCan, useRoles } from '@/app/data';
 import { Empty, Loading, useFeedback } from '@/app/feedback';
 
 import {
@@ -209,6 +209,7 @@ function MetaItem({ k, v }: { k: string; v: string | ReactElement }) {
 
 /** Publish / Roll back / Unpublish, New version, Move… and Delete… (a menu, as in the classic view). */
 function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: string | null }) {
+  const can = useCan();
   const navigate = useNavigate();
   const { openDrawer, showError, toast } = useFeedback();
   const actions = useQueryActions(query.name);
@@ -294,6 +295,7 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
   return (
     <>
       <button
+        hidden={!can('queries.write')}
         type="button"
         className="btn md"
         onClick={() =>
@@ -307,6 +309,7 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
         New version
       </button>
       <button
+        hidden={!can('queries.write')}
         type="button"
         className="btn md"
         title={`File this query under a collection (PATCH /api/v1/queries/${query.name})`}
@@ -321,6 +324,7 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
         Move…
       </button>
       <button
+        hidden={!can('queries.write')}
         ref={deleteBtn}
         type="button"
         className="btn md danger"
@@ -331,6 +335,7 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       </button>
       {v.status !== 'published' && (
         <button
+          hidden={!can('queries.write')}
           type="button"
           className={v.status === 'draft' ? 'btn md primary' : 'btn md'}
           disabled={busy}
@@ -342,6 +347,7 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       )}
       {v.status === 'published' && (
         <button
+          hidden={!can('queries.write')}
           type="button"
           className="btn md"
           disabled={busy}

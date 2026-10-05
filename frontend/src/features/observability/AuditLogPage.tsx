@@ -86,7 +86,7 @@ export function AuditLogPage() {
     body = (
       <div className="empty">
         <strong>Couldn’t load the audit log</strong>
-        <span>Only the admin key (QUERYAPIGATE_API_KEY) can view the audit log.</span>
+        <span>{log.error.message}</span>
         <button type="button" className="btn sm" onClick={() => log.refetch()}>
           Retry
         </button>

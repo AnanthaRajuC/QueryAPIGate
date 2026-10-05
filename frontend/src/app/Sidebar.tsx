@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { getApiKey, setApiKey } from '@/auth/apiKey';
 
-import { useAllQueries, useApiKeys, useConnections, useHealth, useRoles } from './data';
+import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 import { useAlertFeed } from './alerts';
 
@@ -38,6 +38,8 @@ export function Sidebar() {
   const active = activeItem(pathname);
   const counts = useCounts();
   const health = useHealth();
+  const can = useCan();
+  const shown = (item: NavItem) => !item.needs || can(item.needs);
 
   const go = (item: NavItem) => navigate(item.path);
   const button = (item: NavItem, extraClass?: string) => (
@@ -77,17 +79,21 @@ export function Sidebar() {
         </span>
       </div>
       <nav id="tabs" role="tablist" aria-label="Sections">
-        {NAV_GROUPS.map((group) => (
-          <div className="nav-group" key={group.label}>
-            <div className="nav-label">{group.label}</div>
-            <div className="nav-rule" />
-            {group.items.map((item) => button(item))}
-          </div>
-        ))}
+        {NAV_GROUPS.map((group) => {
+          const items = group.items.filter(shown);
+          if (!items.length) return null;
+          return (
+            <div className="nav-group" key={group.label}>
+              <div className="nav-label">{group.label}</div>
+              <div className="nav-rule" />
+              {items.map((item) => button(item))}
+            </div>
+          );
+        })}
       </nav>
       <StarCard />
       <div className="side-foot">
-        {FOOT_ITEMS.map((item) => button(item, 'nav'))}
+        {FOOT_ITEMS.filter(shown).map((item) => button(item, 'nav'))}
         <KeyDotNarrow />
         {/* A new tab, so the Console stays open. rel="opener" because target="_blank" is noopener by default, and a
             noopener tab starts with empty sessionStorage: /docs would lose this tab's API key. Same origin, so safe. */}
@@ -112,8 +118,24 @@ function KeyDotNarrow() {
 }
 
 /** The API key for this tab - the same sessionStorage entry /ui and /docs use (ui.py #key-panel). */
+const ROLE_LABEL: Record<string, string> = {
+  owner: 'Owner',
+  admin: 'Admin',
+  developer: 'Developer',
+  auditor: 'Auditor',
+};
+
+/** Who the key in this tab signs in as: an administrator by name, the shared break-glass key, or an open server. */
+function identity(me: ReturnType<typeof useMe>['data'], key: string) {
+  if (!me) return key ? 'API key applied' : 'No API key';
+  if (me.via === 'token') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role}`;
+  if (me.via === 'break-glass') return 'Shared admin key (owner)';
+  return 'No API key needed';
+}
+
 function KeyPanel() {
   const queryClient = useQueryClient();
+  const me = useMe();
   const [key, setKey] = useState(getApiKey);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -126,6 +148,7 @@ function KeyPanel() {
     setKey(value);
     setDraft('');
     setEditing(false);
+    queryClient.removeQueries({ queryKey: ['me'] }); // who this key is - asked afresh before anything else
     queryClient.invalidateQueries();
   }
 
@@ -133,7 +156,7 @@ function KeyPanel() {
     <div id="key-panel">
       <div className="kp-state">
         <span className={`dot ${key ? 'ok' : 'off'}`} id="key-dot" />
-        <span id="key-state">{key ? 'API key applied' : 'No API key'}</span>
+        <span id="key-state">{identity(me.data, key)}</span>
         <span className="scope">this tab</span>
       </div>
       <div className="kp-row" id="key-view" hidden={!showView}>

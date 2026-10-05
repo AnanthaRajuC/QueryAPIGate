@@ -12,6 +12,8 @@ export interface NavItem {
   /** Console route. */
   path: string;
   count?: 'connections' | 'queries' | 'apikeys' | 'roles' | 'alerts';
+  /** The capability (adminroles.py) a role needs for this screen; hidden without it. 'data': may run SQL. */
+  needs?: string;
 }
 
 const svg = (children: ReactNode) => (
@@ -50,6 +52,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'connections',
+        needs: 'connections.read',
         group: 'Data',
         label: 'Connections',
         path: '/connections',
@@ -64,6 +67,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'caching',
+        needs: 'cache.read',
         path: '/caching',
         group: 'Data',
         label: 'Caching',
@@ -76,6 +80,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'queries',
+        needs: 'queries.read',
         group: 'API',
         label: 'API Repository',
         path: '/queries',
@@ -90,6 +95,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'run',
+        needs: 'data',
         group: 'API',
         label: 'API Designer',
         path: '/designer',
@@ -107,6 +113,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'apikeys',
+        needs: 'access.read',
         path: '/api-keys',
         group: 'Access',
         label: 'API keys',
@@ -122,6 +129,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'roles',
+        needs: 'access.read',
         path: '/roles',
         group: 'Access',
         label: 'Roles',
@@ -130,6 +138,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'accessmap',
+        needs: 'access.read',
         path: '/access-map',
         group: 'Access',
         label: 'Access map',
@@ -142,6 +151,21 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
           </>,
         ),
       },
+      {
+        tab: 'administrators',
+        path: '/administrators',
+        group: 'Access',
+        label: 'Administrators',
+        needs: 'self',
+        icon: svg(
+          <>
+            <circle cx="9" cy="8" r="3.5" />
+            <path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5" />
+            <path d="M16 4.5a3.5 3.5 0 0 1 0 7" />
+            <path d="M18 14.8c2 .7 3.2 2.5 3.6 5.2" />
+          </>,
+        ),
+      },
     ],
   },
   {
@@ -149,6 +173,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       {
         tab: 'alerts',
+        needs: 'observe',
         path: '/alerts',
         group: 'Observability',
         label: 'Alerts',
@@ -162,6 +187,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'metrics',
+        needs: 'observe',
         path: '/metrics',
         group: 'Observability',
         label: 'Metrics',
@@ -175,6 +201,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       },
       {
         tab: 'auditlog',
+        needs: 'observe',
         path: '/audit-log',
         group: 'Observability',
         label: 'Audit log',
@@ -193,6 +220,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 export const FOOT_ITEMS: NavItem[] = [
   {
     tab: 'settings',
+    needs: 'settings.read',
     path: '/settings',
     group: 'System',
     label: 'Settings',

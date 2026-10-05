@@ -63,6 +63,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   entries gain `via` (`token`, `break-glass`, `open`, `cli`, `startup`). `QUERYAPIGATE_API_KEY` keeps working as an
   owner - the break-glass key: once a named owner exists, each use is logged and raises a `break_glass_used` alert.
   Authentication stays required while any administrator exists, even with `QUERYAPIGATE_API_KEY` unset.
+  `/api/v1/administrators` manages administrators and tokens (owners; anyone manages their own tokens). In the
+  Console: an **Administrators** screen (owners see everyone; others, their own account and tokens), "Signed in as
+  alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.
 
 ### Upgrading
 - **Schema 7** adds two tables (`administrators`, `admin_tokens`); nothing existing changes. As always, a 0.15 instance

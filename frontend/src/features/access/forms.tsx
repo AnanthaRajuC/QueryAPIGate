@@ -207,12 +207,23 @@ function ApiKeyFormFields({
 }
 
 /** Shown once, right after creation - the secret is never retrievable again after this. */
-function SecretReveal({ secret }: { secret: string }) {
+export function SecretReveal({
+  secret,
+  label = 'Secret key',
+  hint = 'Store this now — it cannot be shown again. To rotate it, revoke this key and create a new one.',
+  onDone,
+}: {
+  secret: string;
+  label?: string;
+  hint?: string;
+  /** What Done does - closes the drawer unless given. */
+  onDone?: () => void;
+}) {
   const { closeDrawer, toast } = useFeedback();
   return (
     <div className="form">
       <div className="field">
-        <label htmlFor="k-secret">Secret key</label>
+        <label htmlFor="k-secret">{label}</label>
         <input
           id="k-secret"
           readOnly
@@ -220,15 +231,13 @@ function SecretReveal({ secret }: { secret: string }) {
           value={secret}
           onClick={(e) => e.currentTarget.select()}
         />
-        <div className="hint">
-          Store this now — it cannot be shown again. To rotate it, revoke this key and create a new one.
-        </div>
+        <div className="hint">{hint}</div>
       </div>
       <div className="form-actions">
         <button type="button" className="btn ghost" onClick={() => copyText(secret, toast)}>
           Copy
         </button>
-        <button type="button" className="btn primary" onClick={closeDrawer}>
+        <button type="button" className="btn primary" onClick={onDone ?? closeDrawer}>
           Done
         </button>
       </div>

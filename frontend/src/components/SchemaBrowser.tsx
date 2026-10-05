@@ -438,7 +438,7 @@ function TableUsage({
         Access
       </p>
       {!reach.keys.length && !reach.roles.length ? (
-        <div className="hint">Only the admin key can run queries touching this table.</div>
+        <div className="hint">Only administrators can run queries touching this table.</div>
       ) : (
         <>
           {reach.keys.length > 0 && (

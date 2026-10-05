@@ -634,7 +634,7 @@ export function AccessTab({ query, v, reach }: { query: Query; v: QueryVersion; 
               <span className="amap-dot conn">W</span> whole connection
             </span>
           ) : null}
-          {!reach.keys.length && <span className="hint">Only the admin key can run it.</span>}
+          {!reach.keys.length && <span className="hint">Only administrators can run it.</span>}
           <button
             type="button"
             className="btn sm ghost"
@@ -791,7 +791,7 @@ function FlowDiagram({
               <AccessPill key={r.name} entry={r} role />
             ))}
             {!keys.length && !roles.length ? (
-              <div className="hint">Only the admin key can run it.</div>
+              <div className="hint">Only administrators can run it.</div>
             ) : omitted > 0 ? (
               <div className="hint">{`+${omitted} more — see above`}</div>
             ) : null}

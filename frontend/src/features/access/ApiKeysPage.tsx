@@ -1,4 +1,4 @@
-import { useApiKeys, useCollections } from '@/app/data';
+import { useApiKeys, useCan, useCollections } from '@/app/data';
 import { Loading } from '@/app/feedback';
 import { AccessCell } from '@/features/repository/reach';
 
@@ -22,6 +22,7 @@ function usageText(usage: { queries: number; errors: number }) {
 }
 
 export function ApiKeysPage() {
+  const can = useCan();
   const keys = useApiKeys();
   const collections = useCollections();
   const drawers = useAccessDrawers();
@@ -36,7 +37,7 @@ export function ApiKeysPage() {
     body = (
       <div className="empty">
         <strong>Couldn’t load API keys</strong>
-        <span>Only the admin key (QUERYAPIGATE_API_KEY) can manage API keys.</span>
+        <span>{keys.error.message}</span>
         <button type="button" className="btn sm" onClick={() => keys.refetch()}>
           Retry
         </button>
@@ -50,7 +51,12 @@ export function ApiKeysPage() {
           QUERYAPIGATE_API_KEY is a full-access admin key. Create a scoped one to limit a caller to specific
           connections, read-only.
         </span>
-        <button type="button" className="btn primary" onClick={() => drawers.newKey()}>
+        <button
+          hidden={!can('access.write')}
+          type="button"
+          className="btn primary"
+          onClick={() => drawers.newKey()}
+        >
           New API key
         </button>
       </div>
@@ -142,6 +148,7 @@ export function ApiKeysPage() {
                   <td>
                     <div className="actions">
                       <button
+                        hidden={!can('access.write')}
                         type="button"
                         className="btn ghost sm icon"
                         title={`Edit ${name}`}
@@ -150,7 +157,12 @@ export function ApiKeysPage() {
                       >
                         <PencilIcon />
                       </button>
-                      <button type="button" className="btn ghost sm danger" onClick={() => void revoke(name)}>
+                      <button
+                        hidden={!can('access.write')}
+                        type="button"
+                        className="btn ghost sm danger"
+                        onClick={() => void revoke(name)}
+                      >
                         Revoke
                       </button>
                     </div>
@@ -175,7 +187,13 @@ export function ApiKeysPage() {
           </span>
         </div>
         <span className="spacer" />
-        <button id="new-apikey" type="button" className="btn primary" onClick={() => drawers.newKey()}>
+        <button
+          hidden={!can('access.write')}
+          id="new-apikey"
+          type="button"
+          className="btn primary"
+          onClick={() => drawers.newKey()}
+        >
           New API key
         </button>
       </div>

@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { api, unwrap } from '@/api/client';
-import { useAllQueries, useCollections, useConnections } from '@/app/data';
+import { useAllQueries, useCan, useCollections, useConnections } from '@/app/data';
 import { useFeedback } from '@/app/feedback';
 
 import { NewCollectionForm, QueryForm } from './forms';
@@ -13,6 +13,7 @@ import { QueryList } from './QueryList';
 // The classic "API Repository" screen (ui.py #tab-queries): examples strip, page head, and the split list | detail.
 
 export function RepositoryPage() {
+  const can = useCan();
   const { name } = useParams();
   const navigate = useNavigate();
   const queries = useAllQueries();
@@ -50,6 +51,7 @@ export function RepositoryPage() {
         </div>
         <span className="spacer" />
         <button
+          hidden={!can('queries.write')}
           id="new-collection"
           type="button"
           className="btn"
@@ -64,6 +66,7 @@ export function RepositoryPage() {
           New collection
         </button>
         <button
+          hidden={!can('queries.write')}
           id="new-query"
           type="button"
           className="btn primary"
@@ -83,6 +86,7 @@ export function RepositoryPage() {
 }
 
 function ExamplesStrip() {
+  const can = useCan();
   const client = useQueryClient();
   const { toast, showError } = useFeedback();
   const examples = useQuery({
@@ -93,7 +97,8 @@ function ExamplesStrip() {
   const collections = useCollections();
   const connections = useConnections();
   const st = examples.data;
-  if (!st || (!st.loaded && !st.partial)) return <div id="examples-strip" className="panel" hidden />;
+  if (!st || (!st.loaded && !st.partial) || !can('examples.write'))
+    return <div id="examples-strip" className="panel" hidden />;
 
   const refreshAll = () => {
     client.invalidateQueries();

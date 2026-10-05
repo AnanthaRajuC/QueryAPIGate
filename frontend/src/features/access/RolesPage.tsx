@@ -1,4 +1,4 @@
-import { useCollections, useRoles } from '@/app/data';
+import { useCan, useCollections, useRoles } from '@/app/data';
 import { Loading } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { AccessCell } from '@/features/repository/reach';
@@ -9,6 +9,7 @@ import { ExampleBadge, queryGrantTags } from './grants';
 // The classic Roles screen (ui.py #tab-roles, renderRoles), on /api/v1/roles.
 
 export function RolesPage() {
+  const can = useCan();
   const roles = useRoles();
   const collections = useCollections();
   const drawers = useAccessDrawers();
@@ -22,7 +23,7 @@ export function RolesPage() {
     body = (
       <div className="empty">
         <strong>Couldn’t load roles</strong>
-        <span>Only the admin key (QUERYAPIGATE_API_KEY) can manage roles.</span>
+        <span>{roles.error.message}</span>
         <button type="button" className="btn sm" onClick={() => roles.refetch()}>
           Retry
         </button>
@@ -36,7 +37,7 @@ export function RolesPage() {
           A role is a reusable template of connections, queries, write access, rate limit and allowed IPs —
           create an API key &quot;from&quot; a role instead of filling in every field by hand each time.
         </span>
-        <button type="button" className="btn primary" onClick={drawers.newRole}>
+        <button hidden={!can('access.write')} type="button" className="btn primary" onClick={drawers.newRole}>
           New role
         </button>
       </div>
@@ -87,10 +88,16 @@ export function RolesPage() {
                   </td>
                   <td>
                     <div className="actions">
-                      <button type="button" className="btn ghost sm" onClick={() => drawers.newKey(name)}>
+                      <button
+                        hidden={!can('access.write')}
+                        type="button"
+                        className="btn ghost sm"
+                        onClick={() => drawers.newKey(name)}
+                      >
                         New key from this
                       </button>
                       <button
+                        hidden={!can('access.write')}
                         type="button"
                         className="btn ghost sm icon"
                         title={`Edit ${name}`}
@@ -100,6 +107,7 @@ export function RolesPage() {
                         <PencilIcon />
                       </button>
                       <button
+                        hidden={!can('access.write')}
                         type="button"
                         className="btn ghost sm icon danger"
                         title={`Delete ${name}`}
@@ -129,7 +137,13 @@ export function RolesPage() {
           </span>
         </div>
         <span className="spacer" />
-        <button id="new-role" type="button" className="btn primary" onClick={drawers.newRole}>
+        <button
+          hidden={!can('access.write')}
+          id="new-role"
+          type="button"
+          className="btn primary"
+          onClick={drawers.newRole}
+        >
           New role
         </button>
       </div>

@@ -31,6 +31,7 @@ describe('Console shell - the classic frame', () => {
       'API keys',
       'Roles',
       'Access map',
+      'Administrators',
       'Alerts',
       'Metrics',
       'Audit log',
@@ -40,6 +41,35 @@ describe('Console shell - the classic frame', () => {
     );
     expect(within(nav).getByRole('tab', { name: /API Repository/ })).toHaveClass('active');
     expect(await screen.findByText('v9.9.9')).toBeInTheDocument();
+  });
+
+  it("shows who is signed in, and hides the screens their role can't use", async () => {
+    const developer = ['connections.read', 'observe', 'queries.read', 'queries.write', 'self'];
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/me': () => ({
+        name: 'alice',
+        role: 'developer',
+        via: 'token',
+        capabilities: developer,
+        data_access: true,
+      }),
+    });
+    renderAt('/queries');
+    expect(await screen.findByText('Signed in as alice · Developer')).toBeInTheDocument();
+    const nav = screen.getByRole('tablist', { name: 'Sections' });
+    const labels = [...nav.querySelectorAll('.nav-text')].map((n) => n.textContent);
+    expect(labels).toEqual([
+      'Home',
+      'Connections',
+      'API Repository',
+      'API Designer',
+      'Administrators',
+      'Alerts',
+      'Metrics',
+      'Audit log',
+    ]);
+    expect(screen.queryByRole('tab', { name: /Settings/ })).toBeNull();
   });
 
   it('switches between light and dark from the top right corner, as the Theme preference', async () => {
