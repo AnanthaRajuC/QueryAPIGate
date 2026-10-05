@@ -113,7 +113,7 @@ curl 'http://127.0.0.1:5000/q/films_by_rating?rating=PG&format=yaml' -H 'X-API-K
 ## What just happened
 
 You wrote one `SELECT` statement and ended up with an endpoint that has: typed/validated parameters,
-pagination (`?page`/`?page_size`), six output formats (json/csv/tsv/xml/yaml/xlsx), a version history (save
+pagination (`?page`/`?page_size`), eight output formats (json/ndjson/csv/tsv/xml/yaml/xlsx/parquet), a version history (save
 it again under the same name and this becomes version 2, with version 1 still callable), and a run history
 visible in **API Repository**'s **History** tab for this query - all without writing a controller, a
 repository layer, or a serializer.

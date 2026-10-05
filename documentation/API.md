@@ -25,7 +25,7 @@ These apply to every endpoint that returns rows.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `format` | `json` | `json`, `ndjson`, `csv`, `tsv`, `xml`, `yaml` or `xlsx`. For the POST endpoints it may also be given in the JSON body. |
+| `format` | `json` | `json`, `ndjson`, `csv`, `tsv`, `xml`, `yaml`, `xlsx` or `parquet`. For the POST endpoints it may also be given in the JSON body. |
 | `page` | `1` | 1-based page number. |
 | `page_size` | `10` | Rows per page, at most `QUERYAPIGATE_MAX_PAGE_SIZE` (default 1000). |
 | `timeout` | server limit | Seconds the query may run before it is cancelled with a 504. It can lower the server limit (`QUERYAPIGATE_QUERY_TIMEOUT`, default 30; `0` disables it) but never raise it. For the POST endpoints it may also be given in the JSON body. |
@@ -68,8 +68,19 @@ curl -X POST 'http://127.0.0.1:5000/execute_sql?stream=true&format=csv' \
      -d '{"sql": "SELECT * FROM film", "connection_name": "examples"}' -o film.csv
 ~~~
 
-- Only `format=csv`, `tsv` or `ndjson` are streamable (400 for `json`/`xml`/`yaml`/`xlsx` - those formats all need
-  the whole document structure in memory to write correctly, so paging still applies to them normally).
+- Only `format=csv`, `tsv`, `ndjson` or `parquet` are streamable (400 for `json`/`xml`/`yaml`/`xlsx` - those formats all
+  need the whole document structure in memory to write correctly, so paging still applies to them normally). Parquet is
+  written to a temporary file by DuckDB first - its footer comes last - and then sent, so its first byte arrives once
+  the query has finished; memory stays within DuckDB's own, which spills to disk.
+
+### Parquet
+
+`?format=parquet` (paged or streamed) and `queryapigate export --format parquet` work on every database type. The rows
+are written by DuckDB - the `duckdb` extra, included in the Docker image; without it the request answers `500
+format_unavailable`. Column types come from the values: integers `BIGINT` (`DECIMAL(38,0)` past 64 bits), floats
+`DOUBLE`, decimals `DECIMAL(38, scale)` - exact, not converted to floats - booleans, `DATE`, `TIMESTAMP`
+(`TIMESTAMPTZ` with a time zone) and `TIME`; anything else, or a mix, `VARCHAR`. A database that returns dates as text
+(SQLite) gives text columns, as its driver does. Content type `application/vnd.apache.parquet`.
 - `page`/`page_size` are rejected together with `stream=true` (400) - the whole point is that there is no page.
 - **Always read-only**, regardless of `QUERYAPIGATE_ALLOW_WRITES` or the calling key's own write permission - a large
   export has no business mutating data. A write statement gets the usual 403 from the SQL guard.
@@ -898,7 +909,7 @@ also carry extra structured fields alongside `message` rather than only inside i
 (`connection`, `dialect`, `limit`, `offset`, `timeout`, `sql_hash`), the streaming-start line (`connection`,
 `dialect`, `sql_hash`), the slow-query warning (`connection`, `dialect`, `duration_ms`), and the per-request
 access log line (`method`, `path`, `status`, `duration_ms`, and `serialization_ms` when the response went
-through the paged JSON/CSV/TSV/XML/YAML/XLSX formatter) - so a log aggregator can filter or aggregate on
+through the paged JSON/CSV/TSV/XML/YAML/XLSX/Parquet formatter) - so a log aggregator can filter or aggregate on
 those directly instead of parsing the message text. `sql_hash` is a full SHA-256 hex digest of the SQL
 text, logged *alongside* the full text (never instead of it) - useful for spotting "did this same query run
 elsewhere/before" without a log aggregator having to store or search the SQL itself.
@@ -1381,6 +1392,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |
 | `write_op_not_allowed` | 403 | A write this key's `allowed_write_ops` doesn't include |
 | `table_not_allowed` | 403 | A table outside this key's `allowed_tables`, or a table function (`read_parquet(...)`) for such a key |
+| `format_unavailable` | 500 | `format=parquet` on a server without DuckDB (`pip install "queryapigate[duckdb]"`) |
 | `path_not_allowed` | 403 | A DuckDB connection was asked to read a file or URL outside its `allowed_paths` |
 | `table_check_unsupported` | 403 | `allowed_tables` can't be enforced on this database type, so the query is refused |
 | `table_check_failed` | 403 | The SQL couldn't be analysed to enforce `allowed_tables`, so it is refused |

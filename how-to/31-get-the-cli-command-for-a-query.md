@@ -22,7 +22,7 @@ How each line is built:
 - **`--param`** - one per parameter a caller supplies. A parameter with a `default` shows that default (`since`
   above); one without shows a placeholder such as `'film_id=<film_id>'`, and the tab reminds you to replace it.
   Parameters filled from a signed-in user's token (`from_claim`) are left out - there's no token on the command line.
-- **`--format csv`** - change it to `tsv` or `ndjson` if you prefer.
+- **`--format csv`** - change it to `tsv`, `ndjson` or `parquet` if you prefer.
 - **`--out`** - `/exports/<name>_{date}.csv`; `{date}` becomes today's date (`YYYY-MM-DD`) when it runs.
 
 The tab is for the **published** version. On a draft or an older version it says so instead - `queryapigate export`

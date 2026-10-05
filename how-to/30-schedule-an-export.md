@@ -20,7 +20,7 @@ QUERYAPIGATE_HOME=/srv/queryapigate queryapigate export example_rentals_since \
   store, so no grant applies.
 - **The published version** of the query runs - drafts never do.
 - **`{name}` and `{date}`** (`YYYY-MM-DD`) in `--out` are filled in; missing directories are created.
-- **`--format`** is `csv` (default), `tsv` or `ndjson`. The rows are streamed to the file, so a large result doesn't
+- **`--format`** is `csv` (default), `tsv`, `ndjson` or `parquet`. The rows are streamed to the file, so a large result doesn't
   need a large amount of memory - see [Export a large result](09-stream-a-large-export.md).
 - **`--param name=value`** (repeatable) supplies parameters, validated by the query's rules as over REST;
   `--connection` overrides the query's connection; `--timeout` overrides `QUERYAPIGATE_QUERY_TIMEOUT`.

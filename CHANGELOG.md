@@ -43,6 +43,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Parquet output** (BACKLOG #81): `?format=parquet` on any query and any database type - paged or streamed - and
+  `queryapigate export --format parquet`. Written by DuckDB (no new dependency; in the Docker image), with column
+  types taken from the values - decimals stay exact, dates and timestamps stay typed. The Console's format pickers
+  offer it and download the file. On the example APIs' 20,000-row export: 513 KB of Parquet against 2.2 MB of CSV.
+  Arrow IPC output is still open: it would need `pyarrow`, a large new dependency.
+
 ## [0.15.0] - 2026-10-04
 
 Several instances become a supported deployment shape - shared rate limits, an instance list, a rolling-upgrade rule

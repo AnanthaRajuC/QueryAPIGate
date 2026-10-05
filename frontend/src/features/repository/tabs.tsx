@@ -183,7 +183,7 @@ export function RunTab({ query, v }: { query: Query; v: QueryVersion }) {
             value={format}
             onChange={(e) => setFormat(e.target.value)}
           >
-            {['json', 'csv', 'tsv', 'xml', 'yaml', 'ndjson', 'xlsx'].map((x) => (
+            {['json', 'csv', 'tsv', 'xml', 'yaml', 'ndjson', 'xlsx', 'parquet'].map((x) => (
               <option key={x} value={x}>
                 {x}
               </option>

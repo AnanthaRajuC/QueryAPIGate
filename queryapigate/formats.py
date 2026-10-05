@@ -1,4 +1,4 @@
-"""Result sets and their output formats (JSON, NDJSON, CSV, TSV, XML, YAML, XLSX)."""
+"""Result sets and their output formats (JSON, NDJSON, CSV, TSV, XML, YAML, XLSX, Parquet)."""
 import csv
 import json
 import re
@@ -11,6 +11,8 @@ import yaml
 from flask import Response, jsonify
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+from . import parquet
 
 
 def json_default(obj):
@@ -79,6 +81,7 @@ class ResultSetDTO:
 
     def __init__(self, rows, columns, has_more=False):
         self.columns = _unique(columns)
+        self.raw_rows = rows  # as the driver returned them - Parquet keeps their types (Decimal, time zones)
         self.rows = [[_cell(v) for v in row] for row in rows]
         self.has_more = has_more
 
@@ -136,6 +139,10 @@ class ResultSetDTO:
             headers={'Content-Disposition': 'attachment;filename=result.xlsx'},
         )
 
+    def to_parquet(self):
+        return Response(parquet.to_bytes(self.columns, self.raw_rows), mimetype=parquet.MIMETYPE,
+                        headers={'Content-Disposition': 'attachment;filename=result.parquet'})
+
 
 FORMATTERS = {
     'json': ResultSetDTO.to_json,
@@ -145,6 +152,7 @@ FORMATTERS = {
     'xml': ResultSetDTO.to_xml,
     'yaml': ResultSetDTO.to_yaml,
     'xlsx': ResultSetDTO.to_xlsx,
+    'parquet': ResultSetDTO.to_parquet,
 }
 
 # --------------------------------------------------------------------------------------
@@ -155,8 +163,9 @@ FORMATTERS = {
 # correctly (a closing root tag, a single top-level list, a zip's central directory), so
 # they stay page-at-a-time via ResultSetDTO/FORMATTERS above.
 
-STREAM_FORMATTERS = frozenset({'csv', 'tsv', 'ndjson'})
-STREAM_MIMETYPES = {'csv': 'text/csv', 'tsv': 'text/tab-separated-values', 'ndjson': 'application/x-ndjson'}
+STREAM_FORMATTERS = frozenset({'csv', 'tsv', 'ndjson', 'parquet'})
+STREAM_MIMETYPES = {'csv': 'text/csv', 'tsv': 'text/tab-separated-values', 'ndjson': 'application/x-ndjson',
+                    'parquet': parquet.MIMETYPE}
 STREAM_DELIMITERS = {'csv': ',', 'tsv': '\t'}
 
 
@@ -183,6 +192,8 @@ def iter_stream_chunks(output_format, columns, rows):
     ``queryapigate export`` CLI command (written straight to a file), so there is exactly one place that knows
     how to turn a row stream into CSV/TSV/NDJSON text."""
     columns = _unique(columns)
+    if output_format == 'parquet':  # bytes, not text: the file is written by DuckDB first (its footer comes last)
+        return parquet.stream(columns, rows)
     if output_format == 'ndjson':
         return _stream_ndjson(columns, rows)
     return _stream_delimited(columns, rows, STREAM_DELIMITERS[output_format])

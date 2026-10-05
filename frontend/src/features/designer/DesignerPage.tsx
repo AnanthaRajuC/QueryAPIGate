@@ -425,7 +425,7 @@ export function DesignerPage() {
               value={state.format}
               onChange={(e) => set({ format: e.target.value })}
             >
-              {['json', 'ndjson', 'csv', 'tsv', 'xml', 'yaml', 'xlsx'].map((f) => (
+              {['json', 'ndjson', 'csv', 'tsv', 'xml', 'yaml', 'xlsx', 'parquet'].map((f) => (
                 <option key={f} value={f}>
                   {f}
                 </option>

@@ -200,9 +200,13 @@ def _export(args):
                 row_count += 1
                 yield row
 
-        with open(tmp_path, 'w', newline='') as f:
-            for chunk in iter_stream_chunks(args.format, columns, counted(rows)):
-                f.write(chunk)
+        if args.format == 'parquet':
+            from . import parquet
+            parquet.write(columns, counted(rows), tmp_path)
+        else:
+            with open(tmp_path, 'w', newline='') as f:
+                for chunk in iter_stream_chunks(args.format, columns, counted(rows)):
+                    f.write(chunk)
         os.replace(tmp_path, out_path)
         # The CLI runs outside the API's grants (a local operator is already trusted), but what it exports is
         # still on the record: run history, with `cli` as the caller.
@@ -399,7 +403,7 @@ def build_parser():
     export = commands.add_parser('export', help='run a saved query and write the full result to a file '
                                                '(for cron/systemd/Kubernetes CronJob, not a scheduler itself)')
     export.add_argument('query', help='saved query name (as used in a GET /q/<name> request)')
-    export.add_argument('--format', choices=('csv', 'tsv', 'ndjson'), default='csv')
+    export.add_argument('--format', choices=('csv', 'tsv', 'ndjson', 'parquet'), default='csv')
     export.add_argument('--connection', help='overrides the saved query\'s own default connection')
     export.add_argument('--out', required=True,
                         help='output path; {date} (YYYY-MM-DD) and {name} are filled in, e.g. '

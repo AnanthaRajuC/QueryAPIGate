@@ -2596,7 +2596,10 @@ parameters, which the response shape has no place for yet.
 
 ## 81. Parquet and Arrow output for any saved query
 
-**Status: open.** The first of three DuckDB-backed additions (#81-#83), chosen by one test: does it help someone
+**Status: Parquet shipped (after 0.15.0); Arrow open.** `queryapigate/parquet.py`: rows to a temporary NDJSON file
+with column types inferred from the values, then DuckDB's `COPY ... (FORMAT parquet)` - no new dependency. Paged,
+`?stream=true` and `queryapigate export --format parquet`; `tests/test_parquet.py`. Arrow IPC would need `pyarrow`
+(DuckDB can't write it alone) - about 100 MB more in the image, so it waits for a real request. The first of three DuckDB-backed additions (#81-#83), chosen by one test: does it help someone
 safely publish or consume data?
 
 **Impact:** data teams, notebooks and pipelines would rather fetch Parquet (or Arrow IPC) than JSON or CSV for large

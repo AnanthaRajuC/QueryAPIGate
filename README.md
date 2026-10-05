@@ -237,7 +237,7 @@ If you already know SQL, you can produce a governed API without building an API 
 **Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse: every feature, tested against a real server in CI, and
 covered by the compatibility promise. **Experimental** - H2, generic JDBC (Oracle, SQL Server, DB2, Snowflake and
 anything else with a driver jar) and MongoDB (`find()` queries): they work, with documented gaps. The same guard,
-pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TSV and Excel - apply to every one.
+pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TSV, Excel and Parquet - apply to every one.
 What each supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming - is in the
 [support matrix](documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 
@@ -316,8 +316,9 @@ with a field-by-field `400` before it reaches the database.
 
 ### Multiple response formats
 
-JSON, NDJSON, XML, YAML, CSV, TSV and XLSX are all available per request (`?format=`), so the same saved query
-serves both application clients and reporting/export use cases.
+JSON, NDJSON, XML, YAML, CSV, TSV, XLSX and Parquet are all available per request (`?format=`), so the same saved
+query serves application clients, reporting and data pipelines - a Parquet export keeps column types and is typically
+a quarter of the CSV's size.
 
 ### Pagination and streaming
 

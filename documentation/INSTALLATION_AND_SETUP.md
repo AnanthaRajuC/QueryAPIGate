@@ -180,7 +180,7 @@ queryapigate export top_rented_films --out '/exports/{name}_{date}.csv'
 ~~~
 
 `{name}` (the saved query's name) and `{date}` (`YYYY-MM-DD`) in `--out` are filled in; the target directory
-is created if missing. `--format` is `csv` (default), `tsv` or `ndjson` - the same formats `?stream=true`
+is created if missing. `--format` is `csv` (default), `tsv`, `ndjson` or `parquet` - the same formats `?stream=true`
 supports, since this calls the same streaming code path internally rather than shelling out to `curl`
 against itself. `--connection` overrides the saved query's own default connection; `--param name=value`
 (repeatable) supplies a required parameter. The result is written to a temporary file in the same directory

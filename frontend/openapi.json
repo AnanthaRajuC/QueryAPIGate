@@ -6450,7 +6450,8 @@
                 "tsv",
                 "xml",
                 "yaml",
-                "xlsx"
+                "xlsx",
+                "parquet"
               ],
               "type": "string"
             }
@@ -6599,7 +6600,8 @@
                 "tsv",
                 "xml",
                 "yaml",
-                "xlsx"
+                "xlsx",
+                "parquet"
               ],
               "type": "string"
             }
@@ -6808,7 +6810,8 @@
                 "tsv",
                 "xml",
                 "yaml",
-                "xlsx"
+                "xlsx",
+                "parquet"
               ],
               "type": "string"
             }
@@ -6943,7 +6946,8 @@
                 "tsv",
                 "xml",
                 "yaml",
-                "xlsx"
+                "xlsx",
+                "parquet"
               ],
               "type": "string"
             }

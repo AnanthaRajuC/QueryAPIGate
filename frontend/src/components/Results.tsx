@@ -17,6 +17,7 @@ const EXT: Record<string, string> = {
   xml: 'xml',
   yaml: 'yaml',
   xlsx: 'xlsx',
+  parquet: 'parquet',
 };
 
 export interface ResultData {
@@ -36,7 +37,7 @@ export interface ResultData {
   error?: string;
 }
 
-/** Read a fetch Response into what <Results> shows; a binary format (xlsx) is downloaded, as in the classic UI. */
+/** Read a fetch Response into what <Results> shows; a binary format (xlsx, parquet) is downloaded, as in the classic UI. */
 export async function readResult(
   response: Response,
   o: { page: number; size: number; format: string; elapsed: number; filename: string },

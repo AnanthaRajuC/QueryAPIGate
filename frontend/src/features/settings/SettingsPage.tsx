@@ -46,7 +46,7 @@ const EDITOR_ROWS: PrefRow[] = [
     'format',
     'Default result format',
     'Pre-selected format in API Designer and when trying a query.',
-    ['json', 'csv', 'ndjson', 'tsv', 'xml', 'yaml', 'xlsx'],
+    ['json', 'csv', 'ndjson', 'tsv', 'xml', 'yaml', 'xlsx', 'parquet'],
   ],
   [
     'pageSize',

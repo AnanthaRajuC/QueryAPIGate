@@ -41,9 +41,11 @@ they come off the cursor, never held all at once.
 
 ## What makes a query eligible
 
-- **Only `csv`, `tsv` and `ndjson`** - verified: `?stream=true&format=json` is rejected outright
-  (`"stream=true only supports these formats: csv, ndjson, tsv"`). There's no way to stream `json`/`xml`/
-  `yaml`/`xlsx` - each needs the whole structure before it can be valid, which defeats the point.
+- **Only `csv`, `tsv`, `ndjson` and `parquet`** - verified: `?stream=true&format=json` is rejected outright
+  (`"stream=true only supports these formats: csv, ndjson, parquet, tsv"`). There's no way to stream `json`/`xml`/
+  `yaml`/`xlsx` - each needs the whole structure before it can be valid, which defeats the point. Parquet is written
+  by DuckDB to a temporary file first and then sent - verified on the example APIs' 20,000-row export: 513 KB of
+  Parquet against 2.2 MB of CSV.
 - **No `page`/`page_size`** - verified: combining them is rejected
   (`"stream=true exports the whole result and does not accept page/page_size"`). Streaming exports the
   *whole* result; pagination and streaming are two different answers to "how much do I get," not
