@@ -103,6 +103,7 @@ class NameTests(AdminTestCase):
 
     def test_reserved_and_bad_names_and_roles(self):
         for name, role, code in (('admin', 'owner', 'invalid_name'), ('cli', 'owner', 'invalid_name'),
+                                 ('startup', 'owner', 'invalid_name'),
                                  ('a/b', 'owner', 'invalid_name'), ('ok', 'superuser', 'invalid_body')):
             with self.subTest(name=name, role=role), self.assertRaises(Exception) as caught:
                 admins.create_admin(name, role)
@@ -156,6 +157,15 @@ class AuditTests(AdminTestCase):
         self.assertEqual(entries[-2:], [('alice', 'token', 'create_connection'),
                                         ('admin', 'break-glass', 'delete_connection')])
 
+    def test_how_they_signed_in_comes_from_the_request_not_the_name(self):
+        with self.client.application.test_request_context():
+            from flask import g
+            g.permission = admins.permission_for({'name': 'cli', 'role': 'owner'}, 'token')
+            store.record_audit('cli', 'something', 'x')
+        self.assertEqual(store.read_audit_log()[-1]['via'], 'token')
+        store.record_audit('cli', 'something', 'x')  # outside a request: the CLI itself
+        self.assertEqual(store.read_audit_log()[-1]['via'], 'cli')
+
 
 class BreakGlassTests(AdminTestCase):
     def alerts(self, headers=ADMIN):
@@ -165,6 +175,11 @@ class BreakGlassTests(AdminTestCase):
         with self.assertNoLogs('queryapigate', level=logging.WARNING):
             self.me(ADMIN)
         self.assertNotIn('break_glass_used', [e['action'] for e in store.read_audit_log()])
+
+    def test_a_change_merely_named_break_glass_used_raises_nothing(self):
+        owner = self.token_for('owner1', 'owner')
+        self.client.post('/api/v1/roles', headers=owner, json={'name': 'break_glass_used', 'connections': []})
+        self.assertNotIn('break_glass_used', self.alerts(owner))
 
     def test_logged_audited_and_alerted_once_an_owner_exists(self):
         owner = self.token_for('owner1', 'owner')

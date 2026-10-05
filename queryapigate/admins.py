@@ -23,7 +23,7 @@ from .adminroles import DATA_ROLES, ROLE_NAMES
 from .errors import ApiError
 
 TOKEN_PREFIX = 'qagadm_'
-RESERVED_NAMES = {'admin', 'cli', '-'}  # the shared key's and the CLI's names in the audit log and run history
+RESERVED_NAMES = {'admin', 'cli', 'startup', '-'}  # the shared key's, the CLI's and start-up's names in the audit log
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+$')
 _UNSET = object()
 _USE_RECORD_INTERVAL = 60.0  # seconds between last_used_at/last_seen_at writes per token, as for API keys
@@ -301,7 +301,8 @@ def note_break_glass():
 
 def last_break_glass_use(since):
     """The newest `break_glass_used` audit entry at or after `since` (a store timestamp), or None."""
+    # The action field itself: a role or query merely *named* break_glass_used must not raise the alert.
     row = db.connection().execute(
-        "SELECT entry_json FROM audit_log WHERE timestamp >= ? AND entry_json LIKE '%\"break_glass_used\"%' "
-        'ORDER BY id DESC LIMIT 1', (since,)).fetchone()
+        'SELECT entry_json FROM audit_log WHERE timestamp >= ? AND entry_json LIKE ? ORDER BY id DESC LIMIT 1',
+        (since, '%"action": "break_glass_used"%')).fetchone()
     return json.loads(row['entry_json']) if row is not None else None

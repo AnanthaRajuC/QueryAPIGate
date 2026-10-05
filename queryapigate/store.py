@@ -74,16 +74,14 @@ def _zone_name(local):
 # --------------------------------------------------------------------------------------
 
 def _audit_via(actor):
-    """How the actor authenticated (ADR 0003): 'token', 'break-glass' or 'open' from the request's caller; 'cli' or
-    'startup' for the server's own changes."""
-    if actor in ('cli', 'startup'):
-        return actor
-    try:
-        from flask import g, has_request_context
-    except ImportError:  # pragma: no cover - flask is a core dependency
-        return None
+    """How the actor authenticated (ADR 0003): 'token', 'break-glass' or 'open' from the request's caller, whoever
+    they are; outside a request, 'cli' or 'startup' for the server's own changes. The request comes first, so an
+    actor's name can never stand in for how they signed in."""
+    from flask import g, has_request_context  # a core dependency; imported here to keep the store Flask-free
     permission = g.get('permission') if has_request_context() else None
-    return getattr(permission, 'via', None)
+    if permission is not None:
+        return permission.via
+    return actor if actor in ('cli', 'startup') else None
 
 
 def record_audit(actor, action, target, changes=None, via=None):
