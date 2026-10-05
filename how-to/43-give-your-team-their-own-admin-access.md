@@ -66,6 +66,10 @@ curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: qagadm_WfBE...
 #      "code": "role_forbidden", "capability": "access.write", "role": "developer", ...}
 ```
 
+Bob can organise queries into collections, but not in a way that gives a key new reach: moving a query into the
+collection a partner's key holds is refused (`role_forbidden`, naming the key) - deciding who can call what is an
+owner's or admin's job. Publishing new versions of the queries partners already call is his.
+
 In the Console, Bob simply doesn't see API keys, Roles, Settings or the buttons that change connections. He does see
 **Administrators**, showing his own account: every administrator issues and revokes **their own** tokens (a second
 laptop, a lost one), whatever their role. Someone else's tokens take an owner.

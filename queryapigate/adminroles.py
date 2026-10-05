@@ -73,6 +73,21 @@ OPERATIONS = {
 }
 
 
+def require_to_widen_access(permission, gained, what):
+    """A change that gives API keys or roles reach they didn't have - moving a query into a collection they're granted,
+    merging collections - is an access decision, so it takes `access.write` (owners and admins), whoever may otherwise
+    make it. `gained` is {'keys': [...], 'roles': [...]}; nothing gained, nothing to check."""
+    if not (gained.get('keys') or gained.get('roles')):
+        return
+    role = getattr(permission, 'role', None)
+    if role is not None and 'access.write' in ROLES[role]:
+        return
+    who = ', '.join([*(f"key '{k}'" for k in gained.get('keys', [])),
+                     *(f"role '{r}'" for r in gained.get('roles', []))])
+    raise ApiError(f'{what} would give {who} access it does not have now - that takes an owner or admin', 403,
+                   code='role_forbidden', capability='access.write', role=role, gaining=gained)
+
+
 def capabilities(role):
     return sorted(ROLES.get(role, ()))
 

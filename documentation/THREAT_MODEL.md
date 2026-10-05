@@ -121,6 +121,10 @@ What this buys, and what it doesn't:
 - **A stolen developer token can't mint keys, change connections or create administrators** - but it can read
   every row on every connection. Roles bound *management* blast radius; for data, the database account behind
   each connection is still the backstop. Give someone a scoped API key instead when they need less data reach.
+- **Who can call what is an owner's or admin's decision.** Moving a query into a collection, or merging collections,
+  in a way that gives an API key or role new reach needs `access.write`, even for a role that may otherwise organise
+  queries. A developer still decides what saved queries *return* - a new version of a query a partner calls, a new
+  query in a partner's collection - which the audit log and drafts make reviewable, not preventable.
 - **The shared key stays an owner** (break-glass). Once an active owner exists, each use is logged, audited
   (`break_glass_used`) and alerted, so a leaked shared key in use shows up; owners can then remove it.
 - **Lock-out and reopen-by-accident are refused**: while any administrator exists, authentication stays required

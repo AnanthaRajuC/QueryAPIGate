@@ -2668,7 +2668,9 @@ tested for completeness); personal admin tokens (`qagadm_...`, hashed, expiring,
 alerted break-glass owner; `via` in audit entries; the Console's Administrators screen and role-aware screens.
 Guide 43. Decided on the way: developers keep SQL on every connection (narrower reach is a scoped key's job);
 auditors get no data access; admins and auditors can read settings; removing the last administrator without the
-shared key is refused, since it could reopen the server.
+shared key is refused, since it could reopen the server. The pre-release security review added: a collection move or
+merge that widens any key's or role's reach needs `access.write` (ADR 0003's amendment); audit `via` from the request,
+`startup` reserved; the break-glass alert matches the action only.
 
 **Impact:** administering QueryAPIGate means holding one shared key, `QUERYAPIGATE_API_KEY`. Nobody can be given less
 than everything, nobody signs in as themselves, and the audit log records every change as "admin" - so it can't say

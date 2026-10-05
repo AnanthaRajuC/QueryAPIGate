@@ -62,7 +62,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   says who the caller is. `queryapigate admins create|token|list` creates the first owner without a server. Audit
   entries gain `via` (`token`, `break-glass`, `open`, `cli`, `startup`). `QUERYAPIGATE_API_KEY` keeps working as an
   owner - the break-glass key: once a named owner exists, each use is logged and raises a `break_glass_used` alert.
-  Authentication stays required while any administrator exists, even with `QUERYAPIGATE_API_KEY` unset.
+  Authentication stays required while any administrator exists, even with `QUERYAPIGATE_API_KEY` unset. Moving a
+  query or merging collections in a way that gives an API key or role new reach takes an owner or admin
+  (`access.write`) - a developer organises queries but doesn't decide who can call them.
   `/api/v1/administrators` manages administrators and tokens (owners; anyone manages their own tokens). In the
   Console: an **Administrators** screen (owners see everyone; others, their own account and tokens), "Signed in as
   alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.

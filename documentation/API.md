@@ -627,7 +627,7 @@ alone; deactivating the administrator stops them all.
 |---|---|
 | `owner` | everything, including administrators |
 | `admin` | everything but administrators: connections, API keys and roles, saved queries, cache, examples, settings |
-| `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes |
+| `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes, and no moves that give a key or role new reach |
 | `auditor` | read only: queries, connections, API keys and roles, the audit log, history, alerts, instances, settings. No SQL at all |
 
 Owners, admins and developers run SQL and saved queries on every connection, as `QUERYAPIGATE_API_KEY` does. Each
@@ -1452,7 +1452,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `wrong_connection_type` | 400 | A Mongo call on a SQL connection |
 | `unauthorized` | 401 | Missing or wrong `X-API-Key` or bearer token |
 | `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
-| `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role |
+| `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role. For a move or merge that would widen access, `gaining` lists the keys and roles |
 | `connection_forbidden` | 403 | This key may not use this connection |
 | `connection_inactive` | 403 | The connection is switched off |
 | `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |

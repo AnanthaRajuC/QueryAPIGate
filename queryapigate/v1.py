@@ -94,9 +94,11 @@ def update_query(name):
         raise ApiError(f"Only 'collection' can be changed on a query (unknown: {', '.join(unknown)}) - change "
                        'anything else by adding a version', code='unknown_field')
     if 'collection' in data:
+        access = collection_admin.access_change(store.read_collection(content), data['collection'])
+        adminroles.require_to_widen_access(g.permission, {k: v['gain'] for k, v in access.items()},
+                                           f"Moving '{name}' to collection '{data['collection']}'")
         previous = store.set_collection(name, data['collection'])
         if previous != data['collection']:
-            access = collection_admin.access_change(previous, data['collection'])
             store.record_audit(caller_key_name(), 'move_query', name,
                                {'collection': {'from': previous, 'to': data['collection']},
                                 'keys_gaining_access': access['keys']['gain'],
@@ -579,7 +581,7 @@ def list_collections():
 def rename_collection(name):
     """Rename it: `{"name": "new"}`; into an existing collection only with `"merge": true`. Grants follow, and
     nobody's access narrows part-way."""
-    return jsonify(collections.rename(name, get_json_body(), caller_key_name())), 200
+    return jsonify(collections.rename(name, get_json_body(), caller_key_name(), g.permission)), 200
 
 
 @bp.route('/collections/<name>/postman', methods=['GET'])

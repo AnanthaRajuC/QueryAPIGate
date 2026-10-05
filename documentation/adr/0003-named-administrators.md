@@ -133,3 +133,20 @@ About 1-1.5 weeks, in slices that each leave everything working:
 3. `/api/v1/administrators` and tokens (OpenAPI, `API.md`), audit `via`.
 4. Console: a Users screen (administrators, roles, tokens), "Signed in as ...", screens and actions by role.
 5. A how-to guide ("Give your team their own admin access"), the threat model, `CHANGELOG.md`.
+
+## Amendment (2026-10-05): who decides who can call a query
+
+Found in the security review before 0.16.0. API keys and roles reach saved queries through collection membership,
+read live; moving a query between collections, and renaming or merging collections, needed only `queries.write`. So a
+developer - who by this record has "no keys" - could move a query into a collection a partner's key holds and give
+that key the data, which the review showed end to end.
+
+**Decision:** a move, rename or merge that gives any API key or role reach it doesn't have now also needs
+`access.write` (owners and admins); otherwise `403 role_forbidden`, naming the keys and roles that would gain
+(`gaining`). Changes that give no one anything new - filing into a collection nobody holds, taking a query out of
+one, renaming a collection (its grants follow) - stay with developers.
+
+**Not changed, and stated as the developer's power:** a developer decides what saved queries *return* - publishing a
+new version of a query a partner already calls, or adding a query to a collection a partner holds. That is authoring;
+drafts, the audit log and the run history make it reviewable. Owners and admins decide *who* can call what.
+

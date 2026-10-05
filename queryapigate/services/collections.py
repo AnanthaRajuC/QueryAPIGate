@@ -6,7 +6,7 @@ A collection is a name a saved query is filed under (moving a query is a change 
 and its Postman export. The example APIs are a marked set of connection, queries, roles and keys that can be installed
 and removed as a unit. Every change is audited exactly as the legacy routes audit theirs.
 """
-from .. import collection_admin, examples, postman, store
+from .. import adminroles, collection_admin, examples, postman, store
 from ..errors import ApiError
 
 
@@ -24,7 +24,7 @@ def _valid(name, what):
         raise ApiError(f'{what}: {error.message}', code='invalid_name') from error
 
 
-def rename(old, data, actor):
+def rename(old, data, actor, permission=None):
     """Rename `old` to `data['name']`; into an existing collection only with `merge: true` (which also finishes a
     rename that was interrupted). Never narrows anyone's access part-way - see collection_admin.rename_collection()."""
     if not isinstance(data, dict):
@@ -45,6 +45,9 @@ def rename(old, data, actor):
     if new in known and not merge:
         raise ApiError(f"Collection '{new}' already exists - pass merge: true to merge '{old}' into it (which also "
                        'finishes a rename that was interrupted part-way)', 409, code='collection_exists')
+    if permission is not None:
+        adminroles.require_to_widen_access(permission, collection_admin.rename_access_gain(old, new),
+                                           f"Merging '{old}' into '{new}'")
     result = collection_admin.rename_collection(old, new, merge=merge)
     store.record_audit(actor, 'rename_collection', old, {'to': new, **result})
     return {'name': new, 'moved': result}

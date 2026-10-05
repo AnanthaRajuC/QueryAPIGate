@@ -34,6 +34,26 @@ def access_change(previous, current):
             for kind in ('keys', 'roles')}
 
 
+def rename_access_gain(old, new):
+    """The keys and roles that would reach a query they don't reach now if ``old`` were renamed - or merged - into
+    ``new``: the grantees of each side gain the other side's queries. A rename to a fresh name gains no one."""
+    members = store.collection_members()
+    grants = apikeys.collection_grants()
+
+    def side(name, kind):
+        return set(grants.get(name, {}).get(kind, []))
+
+    gained = {}
+    for kind in ('keys', 'roles'):
+        names = set()
+        if members.get(old):
+            names |= side(new, kind) - side(old, kind)
+        if members.get(new):
+            names |= side(old, kind) - side(new, kind)
+        gained[kind] = sorted(names)
+    return gained
+
+
 def rename_collection(old, new, merge=False):
     """Rename ``old`` to ``new``, resumable and never narrowing access part-way: (1) widen every grant on
     ``old`` to also hold ``new``, (2) re-file the queries, (3) drop ``old`` from the grants. An interruption
