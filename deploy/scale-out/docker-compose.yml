@@ -9,7 +9,7 @@
 # Redis (rate limits, the response cache), so instances are interchangeable: add one by copying a block below.
 
 x-queryapigate: &queryapigate
-  image: ${QUERYAPIGATE_IMAGE:?set QUERYAPIGATE_IMAGE in .env, e.g. ghcr.io/anantharajuc/queryapigate:0.15.0}
+  image: ${QUERYAPIGATE_IMAGE:?set QUERYAPIGATE_IMAGE in .env, e.g. ghcr.io/anantharajuc/queryapigate:0.16.0}
   restart: unless-stopped
   env_file: .env
   environment:

@@ -1175,7 +1175,7 @@ running QueryAPIGate day to day, not a replacement for an on-call alerting syste
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.15.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.16.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

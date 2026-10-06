@@ -43,6 +43,28 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-06
+
+Named administrators replace the one shared admin key - each person or pipeline with a role, their own tokens, and an
+audit log that says who changed what - which completes the last change to the management API before the 1.0 freeze.
+Any query can come back as Parquet, a folder or bucket of files becomes a set of tables by itself, and the read-only
+guard closes a gap that let DuckDB, H2 and JDBC connections run writes hidden behind `EXPLAIN ANALYZE` or a CTE.
+
+### Upgrading from 0.15
+Nothing has to change: no route, setting or stored field is removed, and the shared key keeps working.
+- **Schema 7** adds two tables (`administrators`, `admin_tokens`); nothing existing changes. A 0.15 instance still
+  running keeps working against the upgraded store, but can't be restarted on it - upgrade every instance.
+- **`QUERYAPIGATE_API_KEY` keeps working, as an owner.** To give people their own access and retire the shared key,
+  follow [guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md).
+  Once a named owner exists, each use of the shared key is logged and raises the `break_glass_used` alert. The startup
+  warning about scoped keys without `QUERYAPIGATE_API_KEY` is no longer logged once an active owner exists.
+- **Read-only is stricter** (see Security): with writes off, a statement that hides a write behind `WITH`, `EXPLAIN
+  ANALYZE` or `SELECT ... INTO` is now refused with `read_only` on every database type - on PostgreSQL, MySQL,
+  ClickHouse and SQLite those already failed, in the database. A key's `allowed_write_ops` counts those writes too.
+- **The Management API checks roles**: a caller that isn't an administrator gets `403 admin_only`, as before; an
+  administrator whose role lacks an operation's capability gets `403 role_forbidden`. The shared key is an owner, so
+  existing scripts are unaffected.
+
 ### Added
 - **Parquet output** (BACKLOG #81): `?format=parquet` on any query and any database type - paged or streamed - and
   `queryapigate export --format parquet`. Written by DuckDB (no new dependency; in the Docker image), with column
@@ -78,13 +100,6 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `allowed_write_ops` is checked against those too: a key limited to `insert` could delete through a writable CTE on
   PostgreSQL. Response caching and the MCP tool list use the same rule. PostgreSQL, MySQL, ClickHouse and SQLite
   refused these writes already, in their read-only sessions.
-
-### Upgrading
-- **Nothing to do for administrators**: `QUERYAPIGATE_API_KEY` keeps working as before, as an owner. To give people
-  their own access, follow [guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md). The startup warning
-  about scoped keys without `QUERYAPIGATE_API_KEY` is no longer logged once an active owner exists.
-- **Schema 7** adds two tables (`administrators`, `admin_tokens`); nothing existing changes. As always, a 0.15 instance
-  still running keeps working against the upgraded store, but can't be restarted on it.
 
 ## [0.15.0] - 2026-10-04
 
@@ -1678,7 +1693,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.16.0
 [0.15.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.15.0
 [0.14.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.14.0
 [0.13.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.13.0

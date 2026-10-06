@@ -25,7 +25,7 @@ spec:
       terminationGracePeriodSeconds: 45   # the preStop pause plus gunicorn's 30 s to finish requests in flight
       containers:
         - name: queryapigate
-          image: ghcr.io/anantharajuc/queryapigate:0.15.0
+          image: ghcr.io/anantharajuc/queryapigate:0.16.0
           ports: [{name: http, containerPort: 5000}]
           envFrom: [{secretRef: {name: queryapigate}}]
           env:
@@ -79,7 +79,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: events
-          image: ghcr.io/anantharajuc/queryapigate:0.15.0
+          image: ghcr.io/anantharajuc/queryapigate:0.16.0
           command: ["queryapigate", "events", "--host", "0.0.0.0"]
           ports: [{name: http, containerPort: 5002}]
           envFrom: [{secretRef: {name: queryapigate}}]
