@@ -99,9 +99,14 @@ class RollingUpgradeTests(unittest.TestCase):
                                                                 'connection_name': 'data', 'description': 'd',
                                                                 'publish': True})
         self.assertEqual(status, 201, body)
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL, options=f'-csearch_path={self.schema}')
+        cursor = conn.cursor()
+        cursor.execute('SELECT version FROM schema_version')
+        released_schema = cursor.fetchone()[0]  # what the previous release's store is at
+        conn.close()
 
         new, _ = self.start([sys.executable, '-m', 'queryapigate'], 'new')  # upgrades the store
-        import psycopg2
         conn = psycopg2.connect(DATABASE_URL, options=f'-csearch_path={self.schema}')
         from queryapigate import db
         cursor = conn.cursor()
@@ -125,12 +130,18 @@ class RollingUpgradeTests(unittest.TestCase):
         self.assertEqual(call(old, 'GET', '/q/total', key=body['secret'])[1], [{'s': 30}])
         self.assertTrue(eventually(lambda: len(call(new, 'GET', '/api/v1/history?query=total')[1]['items']) >= 3))
 
-        # A node that restarts mid-upgrade can't come back on the old release: it refuses, saying why.
-        _, again = self.start([OLD_BIN], 'old-again')
-        again.wait(timeout=30)
-        self.assertNotEqual(again.returncode, 0)
-        with open(again.log_path) as log:
-            self.assertIn('from a newer release of QueryAPIGate', log.read())
+        # A node that restarts mid-upgrade comes back on the old release only while the store is still at that
+        # release's schema; once the new code has moved it on, the old release refuses, saying why. (Right after a
+        # release, the code under development usually hasn't changed the schema yet - both cases are the rule.)
+        again_url, again = self.start([OLD_BIN], 'old-again')
+        if db.SCHEMA_VERSION > released_schema:
+            again.wait(timeout=30)
+            self.assertNotEqual(again.returncode, 0)
+            with open(again.log_path) as log:
+                self.assertIn('from a newer release of QueryAPIGate', log.read())
+        else:
+            self.assertIsNone(again.poll())
+            self.assertEqual(call(again_url, 'GET', '/q/total')[1], [{'s': 30}])
 
 
 if __name__ == '__main__':
