@@ -35,7 +35,7 @@ clickhouse = ["clickhouse-driver>=0.2"]
 h2 = ["JayDeBeApi>=1.2", "JPype1>=1.4"]  # also needs a Java runtime
 duckdb = ["duckdb>=1.0"]  # Connection.interrupt()/InterruptException, relied on for query timeouts, verified from here
 mongo = ["pymongo>=4.0"]
-flow = ["sqlglot>=23,<26"]  # best-effort table/join extraction for the Access tab - see sqlflow.py
+flow = ["sqlglot>=23,<31"]  # best-effort table/join extraction for the Access tab - see sqlflow.py
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
 mcp = ["mcp>=1.10,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. 1.10 is the floor because
