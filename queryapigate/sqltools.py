@@ -69,6 +69,52 @@ def first_keyword(sql, dialect=None):
     return match.group(1).lower() if match else ''
 
 
+# Data-changing statements that can hide inside one whose first keyword reads as read-only: a writable CTE
+# (`WITH d AS (DELETE ... RETURNING *) SELECT ...` - PostgreSQL, DuckDB, SQLite, MySQL), and `MERGE INTO` /
+# `REPLACE INTO`. MERGE and REPLACE only with INTO, so ClickHouse's merge() table function and replace() don't count;
+# a locking `FOR UPDATE` / `FOR NO KEY UPDATE` clause is removed first.
+_EMBEDDED_WRITE_RE = re.compile(r'\b(insert|update|delete)\b|\b(merge|replace)\s+into\b', re.IGNORECASE)
+_LOCKING_RE = re.compile(r'\bfor\s+(?:no\s+key\s+)?update\b', re.IGNORECASE)
+_SELECT_INTO_RE = re.compile(r'\binto\b', re.IGNORECASE)
+# EXPLAIN's own options, before the statement it explains: ANALYZE (which *runs* it, in PostgreSQL, DuckDB, H2 and
+# MySQL), VERBOSE, SQLite's QUERY PLAN, ClickHouse's PLAN/PIPELINE/AST/SYNTAX/ESTIMATE, MySQL's FORMAT=..., (...).
+_EXPLAIN_RE = re.compile(r'\s*explain\b(?:\s*\([^)]*\)|\s+(?:analy[sz]e|verbose|query\s+plan|plan|pipeline|ast|syntax|'
+                         r'estimate|extended|format\s*=?\s*\w+))*', re.IGNORECASE)
+# What a statement explained by EXPLAIN may begin with and still be a write; anything else after EXPLAIN (MySQL's
+# `EXPLAIN customers`, a table) is a read.
+_WRITE_KEYWORDS = {'insert', 'update', 'delete', 'merge', 'replace', 'upsert', 'copy', 'create', 'drop', 'alter',
+                   'truncate', 'attach', 'detach', 'grant', 'revoke', 'call', 'do', 'set', 'reset', 'install', 'load',
+                   'vacuum', 'checkpoint', 'export', 'import', 'pragma'}
+
+
+def write_operations(sql, dialect=None):
+    """The write operations a statement performs - empty for a read. Its first keyword when that isn't a read-only
+    statement; otherwise any data change hidden behind one (a writable CTE, the statement `EXPLAIN ANALYZE` runs, a
+    `SELECT ... INTO`). Literals, quoted names and comments are ignored, so a word inside one never counts."""
+    masked = _literals_re(dialect).sub(' ', sql)
+    keyword = first_keyword(sql, dialect)
+    if keyword == 'explain':
+        inner = _EXPLAIN_RE.sub('', masked, count=1)
+        inner_keyword = first_keyword(inner, dialect)
+        if inner_keyword in READ_ONLY_STATEMENTS:
+            return write_operations(inner, dialect)
+        return {inner_keyword} if inner_keyword in _WRITE_KEYWORDS else set()
+    if keyword not in READ_ONLY_STATEMENTS:
+        return {keyword} if keyword else set()
+    if keyword in ('show', 'describe', 'desc'):
+        return set()
+    unlocked = _LOCKING_RE.sub(' ', masked)
+    found = {(match.group(1) or match.group(2)).lower() for match in _EMBEDDED_WRITE_RE.finditer(unlocked)}
+    if not found and _SELECT_INTO_RE.search(unlocked):
+        found.add('select into')  # a new table (PostgreSQL), a file on the server (MySQL's INTO OUTFILE)
+    return found
+
+
+def is_read_only(sql, dialect=None):
+    """Whether a statement only reads - by write_operations(), the same rule validate_sql() enforces."""
+    return not write_operations(sql, dialect)
+
+
 def is_paginated(sql, dialect=None):
     """Whether the runner should append its own LIMIT/OFFSET. Always False for a generic 'jdbc' connection:
     that syntax is not portable across arbitrary vendors (Oracle and SQL Server use OFFSET/FETCH, not
@@ -101,13 +147,17 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     sql = re.sub(r'[\s;]+$', '', sql.strip())
     if ';' in _literals_re(dialect).sub(' ', sql):
         raise ApiError('Only a single SQL statement can be executed at a time', code='multiple_statements')
+    # Every write the statement performs - including one hidden behind a read-only first keyword (a writable CTE,
+    # EXPLAIN ANALYZE, SELECT ... INTO), which DuckDB, H2 and JDBC connections would otherwise run: they are opened
+    # read-write, so this check is their only lock.
+    writes = write_operations(sql, dialect)
     if not (config.allow_writes() if allow_writes is None else allow_writes):
-        if first_keyword(sql, dialect) not in READ_ONLY_STATEMENTS or '/*!' in sql:
-            raise ApiError('Only read-only statements (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN) are allowed. '
+        if writes or '/*!' in sql:
+            raise ApiError('Only read-only statements (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN) are allowed - not one '
+                           f"that writes ({', '.join(sorted(writes)) or 'an executable comment'}). "
                            'Set QUERYAPIGATE_ALLOW_WRITES=1 to lift this restriction.', 403, code='read_only')
     elif allowed_write_ops is not None:
-        keyword = first_keyword(sql, dialect)
-        if keyword not in READ_ONLY_STATEMENTS and keyword not in allowed_write_ops:
+        if writes - set(allowed_write_ops):
             raise ApiError(f"This API key may only perform these write operations: "
                            f"{', '.join(sorted(allowed_write_ops))}.", 403, code='write_op_not_allowed')
     if allowed_tables is not None:

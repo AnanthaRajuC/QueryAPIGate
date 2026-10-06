@@ -148,7 +148,13 @@ This is the part worth being the most precise about, because it's also the part 
   string literals and comments (dialect-aware - MySQL/ClickHouse honor backslash escapes inside string
   literals by default, PostgreSQL/SQLite/H2 do not, and the guard accounts for the difference), checks for
   a bare `;` outside what's left to block multi-statement smuggling, and classifies the leading keyword
-  against an allow-list when writes aren't permitted. **This is explicitly documented as defence in depth,
+  against an allow-list when writes aren't permitted - then looks behind a read-only one for writes it can hide: a
+  writable CTE (`WITH d AS (DELETE ... RETURNING *) SELECT ...`), the statement `EXPLAIN ANALYZE` runs, and
+  `SELECT ... INTO`. The same rule covers a key's `allowed_write_ops`. PostgreSQL, MySQL, ClickHouse and SQLite
+  connections also run read-only queries in read-only sessions, so the database refuses a write even if the guard
+  missed it; **DuckDB, H2 and JDBC connections are opened read-write, so there the guard is the only lock** - the
+  case where 0.16 closed a real gap (`EXPLAIN ANALYZE DELETE` ran on DuckDB with writes off). **This is explicitly
+  documented as defence in depth,
   not a substitute for least-privileged database grants** - a regex can approximate a SQL parser's
   boundaries but can never fully replace one, and the project has already found and fixed a real gap of
   exactly this kind (see below).

@@ -397,8 +397,8 @@ class _DuckDB(_Driver):
     configuration than existing connections"), which the pool's read-only/read-write connections-are-
     pooled-separately design would trip over constantly. So, like H2 and the generic jdbc driver, every
     connection here is opened read-write regardless of the caller's read_only flag, and the read-only
-    guarantee rests on validate_sql() alone - verified safe against a real DuckDB database, see
-    tests/test_duckdb.py.
+    guarantee rests on validate_sql() alone - including the writes a read-only first keyword can hide (a writable
+    CTE, EXPLAIN ANALYZE), which DuckDB would run; see sqltools.write_operations() and tests/test_sql_guard_writes.py.
 
     Unlike H2/jdbc, DuckDB autocommits each statement by default (nothing is normally left open for
     reset() to end) and its Python connection does support cancelling an in-progress statement

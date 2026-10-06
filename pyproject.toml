@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "queryapigate"
 dynamic = ["version"]
-description = "Turn SQL into a REST API: run queries against MySQL, PostgreSQL, ClickHouse, SQLite or H2 over HTTP and get JSON, CSV, XML, YAML or XLSX back."
+description = "Turn SQL into governed REST APIs over MySQL, PostgreSQL, ClickHouse, SQLite, DuckDB, H2, MongoDB, and Parquet/CSV/JSON files - JSON, CSV, Parquet or Excel out, with scoped keys, an admin Console and MCP for AI agents."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "FSL-1.1-MIT"
 authors = [{ name = "Anantha Raju C", email = "arcswdev@gmail.com" }]
-keywords = ["sql", "api", "rest", "flask", "database", "mysql", "postgresql", "clickhouse", "sqlite", "h2", "jdbc"]
+keywords = ["sql", "api", "rest", "rest-api", "data-api", "flask", "database", "mysql", "postgresql", "clickhouse",
+            "sqlite", "duckdb", "mongodb", "h2", "jdbc", "parquet", "s3", "mcp", "ai-agents"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Web Environment",

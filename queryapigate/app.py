@@ -703,7 +703,7 @@ def run_saved(ref, body, url_params):
     cache_key = None
     if ttl > 0:
         dialect = store.get_connection(connection_name)['db']
-        if sqltools.first_keyword(sql, dialect) in sqltools.READ_ONLY_STATEMENTS:
+        if sqltools.is_read_only(sql, dialect):
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
                                                 values=values, format=output_format, page=page, page_size=limit)
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,

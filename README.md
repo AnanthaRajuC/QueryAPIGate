@@ -21,8 +21,9 @@
   <sub>Every feature, one by one: <a href="https://youtu.be/cTkv6smFtWA"><b>the full walkthrough</b></a> (6 minutes, in chapters)</sub>
 </p>
 
-**QueryAPIGate** is a self-hosted, single Flask service that runs SQL against your databases and returns the results as
-JSON, NDJSON, XML, YAML, CSV, TSV or Excel. Save a query once and it becomes a versioned endpoint with typed,
+**QueryAPIGate** is a self-hosted service that runs SQL against your databases - and against Parquet, CSV and JSON files
+on disk, S3, GCS or the web, through DuckDB - and returns the results as JSON, NDJSON, XML, YAML, CSV, TSV, Excel or
+Parquet. Save a query once and it becomes a versioned endpoint with typed,
 injection-safe parameters and run history - without writing a controller, a repository layer, pagination, auth or
 serialization boilerplate for it.
 
@@ -579,7 +580,8 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
 | `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](documentation/INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
-| `QUERYAPIGATE_API_KEY` | unset | A full-access admin key. When set (or once a scoped key exists via `/api/v1/api-keys`), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs a matching `X-API-Key` header. |
+| `QUERYAPIGATE_API_KEY` | unset | The shared admin key, with the owner role. When set (or once a scoped key or a [named administrator](documentation/API.md#administrators-and-admin-roles) exists), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs an `X-API-Key` header. Once named owners exist it is the break-glass key: every use is logged and alerted, and it can be removed. |
+| `QUERYAPIGATE_REDIS_URL` | unset | A `redis://` URL: share rate limits and the response cache across every instance and process (`serve`, `mcp`, `events`). Needs `queryapigate[redis]`. Without it, each process counts and caches on its own. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
 | `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |
 | `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
@@ -597,6 +599,8 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version (and shown in lists). |
 | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /api/v1/history`. Best with `QUERYAPIGATE_DATABASE_URL`. |
 | `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of successful runs recorded; failed runs always are. |
+| `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` | `1000` | Ad-hoc SQL runs (`/execute_sql`, MCP) kept in all, unless a retention period is set. |
+| `QUERYAPIGATE_HISTORY_ADHOC_SQL` | `text` | What an ad-hoc run keeps of its SQL: `text`, `hash` (a SHA-256 only) or `none` - choose `hash` or `none` if SQL may embed sensitive literals. |
 | `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes; `0` writes inside each request. See [Run history](documentation/API.md#run-history). |
 | `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
 | `QUERYAPIGATE_LOAD_EXAMPLES` | unset | `yes` loads the [example APIs](documentation/EXAMPLES.md) (reporting, dashboard, export, partner) at startup - idempotent; a malformed value stops startup. Never removes anything: use `queryapigate examples unload`. |
@@ -613,8 +617,10 @@ Everything is configured through environment variables (all optional):
 
 QueryAPIGate runs whatever SQL it is given against your databases, so it ships locked down and expects you to finish the job:
 
-- Set `QUERYAPIGATE_API_KEY` and serve over TLS (put it behind a reverse proxy). It's a full-access admin key;
-  for anyone who only needs to run queries against specific connections, create a scoped key instead
+- Set `QUERYAPIGATE_API_KEY` and serve over TLS (put it behind a reverse proxy). It's the shared admin key; give the
+  people who manage the server their own admin tokens and roles instead, and keep it as a break-glass key
+  ([guide 43](how-to/43-give-your-team-their-own-admin-access.md)). For anyone who only needs to run queries
+  against specific connections, create a scoped key instead
   (`POST /api/v1/api-keys`, admin only) - see [documentation/API.md](documentation/API.md#authentication-and-permissions).
   For an external client that should only reach a curated handful of saved queries and nothing else, scope
   the key to those query names specifically (`queries`) instead of a whole connection - see
@@ -761,10 +767,16 @@ OpenAPI, metrics, the admin UI, security and deployment. Start at the
 
 ## Roadmap
 
-See [BACKLOG.md](BACKLOG.md) for the full, prioritized list with rationale. Currently open: table-level
-query allow-listing (write operation-type granularity and a streaming row ceiling already shipped), and not
-recommended without a specific hard requirement since it needs real SQL parsing. Everything else on the list
-is shipped, including reusable permission roles/templates on top of per-key ACLs.
+See [BACKLOG.md](BACKLOG.md) for the full, prioritized list with rationale. Next is **1.0**: a release candidate
+that freezes the REST and management APIs, the CLI, settings, error codes and the store, followed by 1.0.0. After
+that, all additive:
+
+- **Admin identity, phase 2** (#84): sign in to the Console through your identity provider (OIDC), groups mapped to
+  admin roles.
+- **AI agents** (#85-#88): OAuth 2.1 for the MCP server, descriptions for agents, a per-agent usage view, and write
+  tools with a confirmation step.
+- **More sources** (#76-#80): Trino, cloud warehouses, MongoDB aggregation pipelines, and more.
+- **Exports to object storage**, incremental (#89), and column masking for partners (#63).
 
 ## Contributing
 

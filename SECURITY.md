@@ -16,8 +16,8 @@ Security fixes are made against the latest released version.
 
 ## Hardening checklist for deployments
 
-- Set `QUERYAPIGATE_API_KEY`, and put the service behind TLS (a reverse proxy) - the key is sent in a header. It is a
-  full-access admin key; give anyone or anything that only needs to run queries a scoped key instead
+- Set `QUERYAPIGATE_API_KEY`, and put the service behind TLS (a reverse proxy) - the key is sent in a header. It is the
+  shared, full-access admin key; give anyone or anything that only needs to run queries a scoped key instead
   (`POST /api/v1/api-keys`), limited to specific connections and, separately, to read-only access.
 - Give the people (and pipelines) who manage the server their own admin tokens, with the narrowest role that fits -
   `queryapigate admins create NAME --role owner` for the first - and then keep the shared key sealed as a break-glass
@@ -27,7 +27,9 @@ Security fixes are made against the latest released version.
   is defence in depth, not a substitute for grants; it is dialect-aware (MySQL/ClickHouse honour backslash escapes
   in string literals by default, PostgreSQL/SQLite/H2 do not) and is exercised by a fuzz test suite
   (`tests/test_sql_guard_fuzz.py`), but a regex-based guard can never be a full SQL parser for every server mode.
-- Keep credentials out of `db_connections.json`: use `"password": "${ENV_VAR}"` references.
+- Keep database passwords out of the store: use `"password": "${ENV_VAR}"` references, or set
+  `QUERYAPIGATE_SECRET_KEY` to encrypt them at rest
+  ([guide 22](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md)).
 - Do not enable `QUERYAPIGATE_DEBUG` on a reachable host.
 - Set `QUERYAPIGATE_RATE_LIMIT` on anything reachable beyond a trusted network; it also throttles API key guessing.
 - Behind a reverse proxy, set `QUERYAPIGATE_TRUST_PROXY` to the number of proxies so limits apply per real client - and

@@ -69,6 +69,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   Console: an **Administrators** screen (owners see everyone; others, their own account and tokens), "Signed in as
   alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.
 
+### Security
+- **Writes hidden behind a read-only statement are refused.** The read-only guard classified a statement by its first
+  keyword, so with writes switched off a DuckDB connection - opened read-write, with the guard as its only lock - ran
+  `EXPLAIN ANALYZE DELETE FROM t` (emptying the table) and `WITH x AS (...) INSERT ...`; H2 and JDBC connections are
+  in the same position. The guard now also finds writable CTEs, the statement `EXPLAIN ANALYZE` runs, and
+  `SELECT ... INTO`, and refuses them (`read_only`), ignoring literals, quoted names and comments. A key's
+  `allowed_write_ops` is checked against those too: a key limited to `insert` could delete through a writable CTE on
+  PostgreSQL. Response caching and the MCP tool list use the same rule. PostgreSQL, MySQL, ClickHouse and SQLite
+  refused these writes already, in their read-only sessions.
+
 ### Upgrading
 - **Nothing to do for administrators**: `QUERYAPIGATE_API_KEY` keeps working as before, as an owner. To give people
   their own access, follow [guide 43](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/43-give-your-team-their-own-admin-access.md). The startup warning

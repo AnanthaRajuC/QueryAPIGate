@@ -69,7 +69,7 @@ def is_read_only(data):
     becomes an MCP tool at all."""
     if data.get('query_type') == 'mongo':
         return True
-    return sqltools.first_keyword(data.get('sql_query') or '') in sqltools.READ_ONLY_STATEMENTS
+    return sqltools.is_read_only(data.get('sql_query') or '')
 
 
 def input_schema(data):

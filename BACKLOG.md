@@ -48,6 +48,9 @@ by accident.
 procedures. **More from DuckDB:** #81 Parquet and Arrow output, #82 snapshots of slow queries, #83 Iceberg and Delta
 tables (federation considered and deferred, see #83).
 
+**Partners and pipelines, after 1.0:** #89 exports to object storage, incremental - the clock stays with cron,
+systemd or Kubernetes.
+
 **AI agents:** #85 OAuth 2.1 for the MCP server (first - it opens hosted AI clients), #63 column masking, #86
 descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 
@@ -1062,16 +1065,13 @@ vectors.
 
 ### In-app *historical* usage-analytics dashboards (trends over time, per-consumer breakdowns as their own product)
 
-`/metrics` already labels request/query counts and latencies by calling key name, so a per-consumer
-breakdown already exists as a Prometheus label query - see [Observability](documentation/API.md#observability).
-Building a second, in-app analytics UI with real history and trend lines on top of that would duplicate
-Grafana rather than complement it, and would need real persistence this project deliberately doesn't have
-(metrics are in-memory, single-process - see the note at the end of the Observability section). This is
-distinct from what #29 ships - a live, no-history *snapshot* view (today's totals only, explicitly labeled
-as such) is a much smaller thing than a historical dashboard, and doesn't need the persistence this rejection
-is actually about; see #29's own "correction" note for exactly where that line sits. #29's Grafana dashboard
-remains the right answer for real trends, alerting and per-consumer history - without turning QueryAPIGate itself
-into a dashboard product.
+`/metrics` labels request/query counts and latencies by calling key, so per-consumer trends are a Prometheus query
+and a Grafana panel (#29 ships the dashboard) - see [Observability](documentation/API.md#observability). Run history
+is durable now (the store, `GET /api/v1/history`), but it is bounded by design (`QUERYAPIGATE_HISTORY_LIMIT`, or a
+retention period) and kept for debugging and audit, not as a time-series database; `/metrics` stays per process.
+Building trend lines and per-consumer analytics as a product inside QueryAPIGate would duplicate Grafana rather than
+complement it. A narrow, live view is different and fine - #29's snapshot, and #87's per-agent usage summary over
+run history.
 
 ### Cost/usage reporting
 
@@ -1081,39 +1081,33 @@ box, or a cloud warehouse billed by credits or IOPS. Any cost model built in her
 deployments and right for none in particular. Belongs in the surrounding cloud/database billing tooling,
 which already has the pricing data this project has no way to know.
 
-### Alerting
+### Alerting with notification channels
 
-Exactly what Prometheus Alertmanager (or Grafana's own alerting) already does, and `/metrics` is exposed in
-the standard exposition format specifically so that stack can consume it. Building thresholds, notification
-channels (email/Slack/webhook) and silencing into a single-process gateway is a large, mature product
-category on its own, orthogonal to what QueryAPIGate is for - the same shape of "not recommended" as the native
-JVM port above.
+**Partly shipped, deliberately narrow:** the Alerts screen and `GET /api/v1/alerts` (`alerts.py`) list live
+conditions worked out from the store - expiring keys, failing connections, slow or failing queries, rate limits being
+hit, instances not sharing state, the break-glass key used - with nothing stored and nothing to configure. **Not
+recommended** beyond that: thresholds per metric, notification channels (email, Slack, webhooks), silencing and
+escalation are what Prometheus Alertmanager and Grafana alerting already do, from `/metrics` - or from polling
+`/api/v1/alerts`. Building them in would be a second alerting product, orthogonal to what QueryAPIGate is for.
 
 ### Anomaly detection
 
-Needs a statistical baseline of normal traffic built up over time, which needs real persistence across
-restarts and workers - the in-memory, single-worker metrics this project deliberately keeps (see the note at
-the end of [Observability](documentation/API.md#observability)) are the wrong foundation for it, and getting
-it wrong has a real cost (false positives train people to ignore alerts; false negatives miss the thing that
-mattered). Better served by dedicated APM/observability tooling that specializes in this problem.
+Run history is durable and shared across instances now, so the old objection (in-memory, single-process metrics) no
+longer applies - but the real one does: a statistical baseline of "normal" that is wrong costs more than it saves
+(false positives train people to ignore alerts; false negatives miss what mattered), and dedicated APM tooling
+specializes in it. The narrow, explainable version is in scope where it earns its place: #87's alert for an agent
+suddenly reading far more than usual, a plain comparison with its own recent runs.
 
-### A built-in multi-destination scheduler (cron/timezone config, S3/SFTP/FTP/WebDAV delivery, retry and
-retention policies, an execution-history/monitoring UI)
+### A general job scheduler (cron and time-zone configuration in the app, SFTP/FTP/WebDAV delivery, a scheduling UI)
 
-Conflicts directly with this project's core architecture, not just its current scope: every design decision
-so far - metrics kept in-memory for one process, production guidance is explicitly `gunicorn --workers 1`
-"because saved-query and connection files are protected by an in-process lock," the audit log and rate
-limiter both intentionally non-persistent beyond a JSON file - assumes there is no durable job store and no
-long-lived background process outside of handling an HTTP request. A scheduler that has to survive restarts
-without double-firing, retry failures, and keep durable execution history is a fundamentally different
-runtime shape, needing exactly the persistence and coordination this project has deliberately avoided
-everywhere else. It also duplicates mature tooling that already solves "run this reliably, retry it, alert on
-failure" well - cron, systemd timers, Kubernetes CronJob, Airflow - the same shape of "not recommended" as
-Alerting above. Each additional destination (S3, SFTP, FTP, WebDAV) is also a new credential type needing the
-same encryption-at-rest treatment #24 just gave connection passwords, and Parquet output needs `pyarrow`, a
-heavy new dependency for a single format. #31 above gets the actual common case - a file dropped on a
-schedule - without any of this: local filesystem only, no new daemon, scheduling/retry/alerting left to tools
-that already do it well.
+**Superseded in part by #89.** The old objections were about this project's runtime - JSON-file stores,
+`--workers 1` for an in-process lock, in-memory state, Parquet needing `pyarrow` - and none of them hold any more:
+the store is SQLite or a shared PostgreSQL database, several instances are supported, and Parquet is written by
+DuckDB. What remains is the product argument: *when* to run something, retrying it and alerting on failure is what
+cron, systemd timers, Kubernetes CronJobs and Airflow already do well. So the export itself belongs here - to object
+storage, incremental, from the CLI or the API (#89) - and the clock stays with those tools. Still not recommended:
+an in-app scheduler with its own cron syntax and time zones, and delivery protocols beyond object storage (SFTP, FTP,
+WebDAV), each a new credential type and failure mode.
 
 ## 36. Broader database backend support
 
@@ -2805,3 +2799,24 @@ its own two originally-deferred follow-ups (an on-demand reachability check and 
 its own entry. The "still
 open" note under #9 (confirming its CI changes
 on a real run) is a smaller follow-up on finished work, not an open capability gap.
+
+## 89. Exports to object storage, incremental
+
+**Status: open; after 1.0.** The partner and data-pipeline track: a saved query's result delivered as a file where
+the other side picks it up, on whatever schedule the deployer's own scheduler runs.
+
+**Impact:** `queryapigate export` writes a local file, and `?stream=true` returns one over HTTP - so delivering to a
+partner's bucket, or loading a lake, still needs a script around them. And every run exports everything: a daily
+export of a growing table reads the whole table every day.
+
+**Notes:**
+- **Destinations:** `--out s3://bucket/exports/{name}_{date}.parquet` (and `gs://`, `r2://`), written through DuckDB's
+  `httpfs`, as #75 reads them - with credentials from a named storage connection (the same fields a DuckDB files
+  connection uses, encrypted the same way), never on the command line.
+- **Incremental:** an export remembers a watermark per saved query and destination - the largest value of a declared
+  column (`updated_at`, an id) it last delivered - and binds it to a parameter (`since`) on the next run, so each file
+  holds only what changed. Stored in the store, so it survives restarts and is shared by instances.
+- **Also from the API:** `POST /api/v1/queries/{name}/exports` for a scheduler that calls HTTP (Kubernetes CronJob,
+  Airflow), with the run in history and a failure in Alerts.
+- **Not in scope:** scheduling itself (see "A general job scheduler" under Not recommended), and SFTP/FTP/WebDAV.
+- Pairs with #63 column masking for partner exports, and #82 snapshots (a scheduled copy served instead of exported).
