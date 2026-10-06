@@ -1472,12 +1472,15 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `connection_not_found` | 404 | No such connection |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
 | `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
+| `destination_not_found` | 404 | No such destination |
 | `collection_not_found` | 404 | No such collection (or it is empty) |
 | `cache_entry_not_found` | 404 | No such cached response |
 | `table_not_found` | 404 | No such table on the connection |
 | `database_file_not_found` | 404 | A SQLite/DuckDB connection's file doesn't exist |
 | `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
 | `admin_exists` | 409 | An administrator by that name exists |
+| `destination_exists` | 409 | A destination by that name exists |
+| `destination_in_use` | 409 | An export still writes to the destination |
 | `name_taken` | 409 | An administrator and an API key can't share a name |
 | `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
@@ -1490,5 +1493,6 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |
 | `internal_error` | 500 | Anything unexpected; the log has the traceback under `request_id` |
 | `connection_failed` | 502 | The database couldn't be reached |
+| `destination_unreachable` | 502 | A destination couldn't be written to - its url, credentials or permissions |
 | `too_many_streams` | 503 | Every live-event stream slot is taken; retry shortly |
 | `query_timeout` | 504 | The query ran past its time limit and was cancelled |

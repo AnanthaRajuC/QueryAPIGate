@@ -320,6 +320,44 @@ SCHEMAS = {
                        'expires_at': {'type': 'string', 'nullable': True,
                                       'description': 'YYYY-MM-DD; null or absent for no expiry.'}},
     },
+    'Destination': {
+        'type': 'object', 'required': ['name', 'url', 'created_at', 'updated_at'],
+        'properties': {
+            'name': {'type': 'string'},
+            'url': {'type': 'string',
+                    'description': 'An s3://, gs:// or r2:// prefix, or a local folder (file:///path/), ending in /. '
+                                   'Exports write under it and nowhere else.'},
+            'storage': {'type': 'string', 'enum': ['s3', 'gcs', 'r2'], 'description': "From the url's scheme."},
+            'region': {'type': 'string'}, 'endpoint': {'type': 'string'},
+            'url_style': {'type': 'string', 'enum': ['vhost', 'path']}, 'use_ssl': {'type': 'boolean'},
+            'account_id': {'type': 'string'},
+            'user': {'type': 'string', 'description': 'The access key id.'},
+            'password': {'type': 'string', 'description': 'The secret: masked, or a ${VAR} reference as written.'},
+            'created_at': {'type': 'string'}, 'updated_at': {'type': 'string'},
+        },
+    },
+    'DestinationList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Destination')}},
+    },
+    'DestinationInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'},
+            'url': {'type': 'string'}, 'storage': {'type': 'string', 'nullable': True},
+            'region': _NULLABLE_STRING, 'endpoint': _NULLABLE_STRING,
+            'url_style': {'type': 'string', 'nullable': True, 'enum': ['vhost', 'path', None]},
+            'use_ssl': {'type': 'boolean', 'nullable': True}, 'account_id': _NULLABLE_STRING,
+            'user': _NULLABLE_STRING,
+            'password': {'type': 'string', 'nullable': True,
+                         'description': 'The secret, or a ${VAR} reference; the mask sent back keeps the stored one.'},
+        },
+    },
+    'DestinationTest': {
+        'type': 'object', 'required': ['object', 'elapsed_ms'],
+        'properties': {'object': {'type': 'string', 'description': 'The probe object written.'},
+                       'elapsed_ms': {'type': 'number'}},
+    },
     'AuditLog': {
         'type': 'object', 'required': ['items', 'total', 'actions', 'retention'],
         'properties': {
@@ -806,6 +844,28 @@ PATHS = {
                      body=_ref('ApiKeyInput')),
         'delete': _op('Revoke and remove it', {'204': {'description': 'Revoked'}, **_PRECONDITION},
                       parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/destinations': {
+        'get': _op('List destinations - where exports may write (secrets masked)',
+                   {'200': _ok(_ref('DestinationList'))}),
+        'post': _op('Create a destination: a bucket prefix or folder, and the credentials to write there',
+                    {'201': _ok(_ref('Destination'), etag=True), **_CONFLICT}, body=_ref('DestinationInput')),
+    },
+    '/api/v1/destinations/test': {
+        'post': _op('Write a probe object with fields not saved yet', {'200': _ok(_ref('DestinationTest'))},
+                    body=_ref('DestinationInput')),
+    },
+    '/api/v1/destinations/{name}': {
+        'get': _op('Get a destination', {'200': _ok(_ref('Destination'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change some of its fields', {'200': _ok(_ref('Destination'), etag=True), **_PRECONDITION},
+                     parameters=[_NAME, _IF_MATCH], body=_ref('DestinationInput')),
+        'delete': _op('Remove it - refused while an export writes there',
+                      {'204': {'description': 'Removed'}, **_PRECONDITION, **_CONFLICT},
+                      parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/destinations/{name}/test': {
+        'post': _op('Write a probe object under its prefix: url, credentials and permission at once',
+                    {'200': _ok(_ref('DestinationTest'))}, parameters=[_NAME]),
     },
     '/api/v1/administrators': {
         'get': _op('List administrators (owners only)', {'200': _ok(_ref('AdministratorList'))}),

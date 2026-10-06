@@ -26,9 +26,9 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 7  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 8  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
-#                    7: administrators and admin_tokens - see _upgrade()
+#                    7: administrators and admin_tokens; 8: destinations and exports - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -142,6 +142,24 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
   details_json TEXT NOT NULL   -- label, last_used_at
 );
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
+-- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
+CREATE TABLE IF NOT EXISTS destinations (
+  name TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+);
+
+-- Saved exports (exports.py, ADR 0004): a query delivered to a destination, with its incremental watermark and the
+-- lease that keeps two runs of one export from overlapping.
+CREATE TABLE IF NOT EXISTS exports (
+  name TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  watermark TEXT,              -- JSON: the largest incremental value delivered so far, or NULL
+  lease_until REAL,            -- epoch seconds; a run holds the export until then
+  details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
+);
 """
 
 
@@ -246,6 +264,24 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
   details_json TEXT NOT NULL   -- label, last_used_at
 );
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
+-- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
+CREATE TABLE IF NOT EXISTS destinations (
+  name TEXT COLLATE "C" PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+);
+
+-- Saved exports (exports.py, ADR 0004): a query delivered to a destination, with its incremental watermark and the
+-- lease that keeps two runs of one export from overlapping.
+CREATE TABLE IF NOT EXISTS exports (
+  name TEXT COLLATE "C" PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  watermark TEXT,              -- JSON: the largest incremental value delivered so far, or NULL
+  lease_until DOUBLE PRECISION,            -- epoch seconds; a run holds the export until then
+  details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
+);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -454,7 +490,8 @@ def _upgrade(conn, postgres):
     6: the instances table - new, so CREATE TABLE IF NOT EXISTS makes it; nothing to change in place. Additive, as
        every change within a minor line must be (see DEPLOYMENT.md, Rolling upgrades): a 0.14 process still
        running against the upgraded store keeps working.
-    7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive."""
+    7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive.
+    8: destinations and exports (ADR 0004) - new tables, likewise."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -623,6 +660,8 @@ _MIGRATED_TABLES = (
     ('audit_log', ('timestamp', 'entry_json'), 'id'),
     ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),
     ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
+    ('destinations', ('name', 'created_at', 'updated_at', 'details_json'), 'name'),
+    ('exports', ('name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
 )
 
 

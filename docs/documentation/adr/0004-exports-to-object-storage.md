@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0004-exports-to-object-storage.md"

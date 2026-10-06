@@ -20,6 +20,7 @@ from . import adminroles, alerts, collection_admin, config, history, instances, 
 from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
+from .services import destinations as destination_service
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -384,6 +385,71 @@ def delete_role(name):
     _check_entry_if_match(access.load_role(name), 'role')
     access.delete_role(name, caller_key_name())
     return '', 204
+
+
+# --------------------------------------------------------------------------------------
+# Destinations: where exports may write (ADR 0004)
+# --------------------------------------------------------------------------------------
+
+def _destination_etag(destination):
+    return destination_service.etag({k: v for k, v in destination.items() if k not in ('updated_at',)})
+
+
+def _destination_response(name, status=200):
+    destination = destination_service.load(name)
+    response = jsonify(destination)
+    response.headers['ETag'] = _destination_etag(destination)
+    return response, status
+
+
+def _check_destination_if_match(name):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != _destination_etag(destination_service.load(name)):
+        raise ApiError('This destination changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+@bp.route('/destinations', methods=['GET'])
+def list_destinations():
+    return jsonify({'items': destination_service.list_all()}), 200
+
+
+@bp.route('/destinations', methods=['POST'])
+def create_destination():
+    """A bucket prefix or folder exports may write under, and the credentials to write there."""
+    return _destination_response(destination_service.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/destinations/test', methods=['POST'])
+def test_destination_fields():
+    """Write the probe object with fields not saved yet - the form's Test button."""
+    return jsonify(destination_service.test(fields=get_json_body())), 200
+
+
+@bp.route('/destinations/<name>', methods=['GET'])
+def get_destination(name):
+    return _destination_response(name)
+
+
+@bp.route('/destinations/<name>', methods=['PATCH'])
+def update_destination(name):
+    """Change some fields; null removes an optional one; the masked secret sent back keeps it."""
+    _check_destination_if_match(name)
+    destination_service.update(name, get_json_body(), caller_key_name())
+    return _destination_response(name)
+
+
+@bp.route('/destinations/<name>', methods=['DELETE'])
+def delete_destination(name):
+    _check_destination_if_match(name)
+    destination_service.delete(name, caller_key_name())
+    return '', 204
+
+
+@bp.route('/destinations/<name>/test', methods=['POST'])
+def test_destination(name):
+    """Write one small probe object under the prefix, as an export would: url, credentials and permission."""
+    return jsonify(destination_service.test(name=name)), 200
 
 
 # --------------------------------------------------------------------------------------

@@ -12,6 +12,8 @@ one it supersedes.
 | [0001](0001-console-and-management-api.md) | QueryAPIGate Console: a React/TypeScript frontend over a versioned Management API | Accepted |
 | [0002](0002-event-ids.md) | Event ids stay execution_history row ids in 0.13; a future events table continues them | Accepted |
 | [0003](0003-named-administrators.md) | Named administrators with fixed roles, signing in with personal admin tokens | Accepted |
+| [0004](0004-exports-to-object-storage.md) | Exports to object storage - destinations, saved exports, incremental runs | Accepted |
+| [0005](0005-column-masking.md) | Column masking - rules on keys, roles and exports, traced to source columns, failing closed | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

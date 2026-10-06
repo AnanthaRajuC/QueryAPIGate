@@ -27,14 +27,18 @@ CAPABILITIES = {
     'admins.read': 'read administrators and their tokens',
     'admins.write': 'create, change and delete administrators, and issue or revoke anyone\'s tokens',
     'self': 'see who you are, and manage your own admin tokens',
+    'exports.read': 'read destinations (secrets masked), exports and their runs',
+    'exports.write': 'create, change and delete exports',
+    'exports.run': 'run an export',
+    'destinations.write': 'create, change, test and delete destinations',
 }
 
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
     'owner': set(CAPABILITIES),
     'admin': set(CAPABILITIES) - {'admins.read', 'admins.write'},
-    'developer': _EVERYONE | {'queries.write'},
-    'auditor': _EVERYONE | {'access.read', 'settings.read'},
+    'developer': _EVERYONE | {'queries.write', 'exports.read', 'exports.run'},
+    'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read'},
 }
 
 # Which roles may run SQL - ad-hoc or saved - on every connection, as the shared key can. An auditor reads what
@@ -70,6 +74,10 @@ OPERATIONS = {
     # your own tokens, whatever your role; someone else's take admins.read/write, checked in the route
     'v1.list_admin_tokens': 'self', 'v1.issue_admin_token': 'self', 'v1.revoke_admin_token': 'self',
     'v1.me': 'self',
+    'v1.list_destinations': 'exports.read', 'v1.get_destination': 'exports.read',
+    'v1.create_destination': 'destinations.write', 'v1.update_destination': 'destinations.write',
+    'v1.delete_destination': 'destinations.write', 'v1.test_destination': 'destinations.write',
+    'v1.test_destination_fields': 'destinations.write',
 }
 
 

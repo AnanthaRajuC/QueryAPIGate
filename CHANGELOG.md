@@ -43,6 +43,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Destinations** (BACKLOG #89, [ADR 0004](documentation/adr/0004-exports-to-object-storage.md), in progress - the
+  first part of exports to object storage): `/api/v1/destinations` - an `s3://`, `gs://` or `r2://` prefix, or a
+  local folder, and the credentials to write there, stored like a connection password (masked, `${VAR}`, or encrypted
+  with `QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can
+  be written elsewhere; `POST /api/v1/destinations/{name}/test` writes a probe object to prove the url, credentials and
+  permission together. Owners and admins define destinations (`destinations.write`); every administrator can read them.
+
+### Upgrading
+- **Schema 8** adds two tables (`destinations`, `exports`); nothing existing changes.
+
 ## [0.16.0] - 2026-10-06
 
 Named administrators replace the one shared admin key - each person or pipeline with a role, their own tokens, and an
