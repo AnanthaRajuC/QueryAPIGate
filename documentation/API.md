@@ -105,6 +105,59 @@ format_unavailable`. Column types come from the values: integers `BIGINT` (`DECI
   saved query's `execution_history` still records it as `"success"` with the truncated row count - it did succeed,
   just not to completion.
 
+## Exports to object storage
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.17, destinations, exports and their
+> runs may change as they are used.
+
+A saved query's full result, delivered as a file to a bucket or a folder - Parquet, CSV or NDJSON, written by
+DuckDB in steady memory ([ADR 0004](adr/0004-exports-to-object-storage.md)). Two resources:
+
+**A destination** is where exports may write: an `s3://`, `gs://` or `r2://` prefix, or a local folder, and the
+credentials to write there - stored like a connection password (masked, `${VAR}`, or encrypted with
+`QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can be
+written anywhere else.
+
+~~~json
+{"name": "partner-acme", "url": "s3://acme-exchange/from-us/", "region": "eu-west-1",
+ "user": "AKIA...", "password": "${ACME_SECRET_KEY}"}
+~~~
+
+**An export** is a saved query, its parameters, a format, a destination and an object path:
+
+~~~json
+{"name": "acme-daily-orders", "query": "orders_since", "params": {"region": "EU"}, "format": "parquet",
+ "destination": "partner-acme", "path": "orders/{date}/orders_{run}.parquet",
+ "incremental": {"column": "updated_at", "parameter": "since", "start": "2026-01-01"}}
+~~~
+
+- It runs the query's **published** version. `path` may use `{name}`, `{date}`, `{time}`, `{run}` (the run's id) and
+  the query's parameters (`{region}`, plain values only).
+- **Incremental:** each run binds the largest `column` value it last delivered (the **watermark**; `start` the first
+  time) to `:since`, so the query - `WHERE updated_at > :since` - returns only what changed. The watermark moves only
+  after the file is written: a failed run is sent again next time, never lost. `PATCH` with `{"watermark": ...}` (or
+  `null`) rewinds or resets it.
+- `skip_empty` (default `true`): a run with no rows writes no file. `timeout`: seconds, within the server's limit.
+
+| Method and path | What it does |
+|---|---|
+| `GET`, `POST /api/v1/destinations` | List; create one (`destination_exists`) |
+| `GET`, `PATCH`, `DELETE /api/v1/destinations/{name}` | One destination; change it (the masked secret sent back keeps it); remove it - refused while an export uses it (`destination_in_use`). `If-Match` |
+| `POST /api/v1/destinations/{name}/test` | Write one small probe object (`_queryapigate_probe.csv`) under the prefix: url, credentials and permission at once. `POST /api/v1/destinations/test` does it for fields not saved yet |
+| `GET`, `POST /api/v1/exports` | List; create one - checked against the destination and the published query (`export_exists`) |
+| `GET`, `PATCH`, `DELETE /api/v1/exports/{name}` | One export, with its `watermark` and whether it is `running`. `If-Match` |
+| `POST /api/v1/exports/{name}/runs` | Run it now; answers `201` once the object is written: `{"id", "object", "rows", "bytes", "watermark": {"from", "to"}}`. `409 export_running` (with `retry_after`) while another run of it holds the lease |
+| `GET /api/v1/exports/{name}/runs` | Its newest runs, from run history |
+
+From the server's shell, with no server running: `queryapigate exports run NAME`, `queryapigate exports list`, and
+`queryapigate export QUERY --to DESTINATION --out PATH` for a one-off.
+
+Scheduling stays with cron, a Kubernetes CronJob or Airflow. Each run is in run history (`transport: "export"`,
+with the destination, the object and the watermark), and the `export_failing` alert fires while an export's newest
+run failed. Owners and admins define destinations and exports (`destinations.write`, `exports.write`) - that decides
+who receives data; a developer may run one (`exports.run`); every administrator can read them.
+
 ## Save a query
 
 `POST /api/v1/queries` creates a saved query with its first version; `POST /api/v1/queries/{name}/versions` adds the
@@ -1156,6 +1209,8 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `history_failed`, `history_dropped` | warning | Runs could not be recorded, or were dropped because the store could not keep up |
 | `instances_not_shared` | warning | Several processes share this store, and some of them without Redis - their rate limits and cache are per process |
 | `instances_versions_differ` | warning | Processes sharing this store run different versions - expected only during a rolling upgrade |
+| `break_glass_used` | warning | The shared `QUERYAPIGATE_API_KEY` was used in the last 24 hours although named owners exist |
+| `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 
@@ -1473,14 +1528,15 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `connection_not_found` | 404 | No such connection |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
 | `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
-| `destination_not_found` | 404 | No such destination |
+| `destination_not_found`, `export_not_found` | 404 | No such destination or export |
 | `collection_not_found` | 404 | No such collection (or it is empty) |
 | `cache_entry_not_found` | 404 | No such cached response |
 | `table_not_found` | 404 | No such table on the connection |
 | `database_file_not_found` | 404 | A SQLite/DuckDB connection's file doesn't exist |
 | `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
 | `admin_exists` | 409 | An administrator by that name exists |
-| `destination_exists` | 409 | A destination by that name exists |
+| `destination_exists`, `export_exists` | 409 | A destination or export by that name exists |
+| `export_running` | 409 | Another run of the export holds its lease; retry after `retry_after` seconds |
 | `destination_in_use` | 409 | An export still writes to the destination |
 | `name_taken` | 409 | An administrator and an API key can't share a name |
 | `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |

@@ -201,17 +201,22 @@
           "kind": {
             "enum": [
               "open_server",
+              "break_glass_used",
+              "connection_failing",
               "key_expired",
               "key_expiring",
-              "key_unused",
-              "connection_failing",
               "query_errors",
               "query_timeouts",
               "query_slow",
               "key_rate_limited",
               "client_rate_limited",
               "history_failed",
-              "history_dropped"
+              "history_dropped",
+              "instances_not_shared",
+              "instances_versions_differ",
+              "rate_limits_not_shared",
+              "export_failing",
+              "key_unused"
             ],
             "type": "string"
           },
@@ -239,7 +244,8 @@
                   "key",
                   "query",
                   "connection",
-                  "settings"
+                  "settings",
+                  "export"
                 ],
                 "type": "string"
               }
@@ -1226,6 +1232,232 @@
           "roles",
           "keys",
           "collections"
+        ],
+        "type": "object"
+      },
+      "Export": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "parquet",
+              "csv",
+              "ndjson"
+            ],
+            "type": "string"
+          },
+          "incremental": {
+            "properties": {
+              "column": {
+                "description": "Its largest value is the watermark.",
+                "type": "string"
+              },
+              "parameter": {
+                "description": "The query parameter it is bound to.",
+                "type": "string"
+              },
+              "start": {
+                "description": "Bound on the first run, before any watermark."
+              }
+            },
+            "required": [
+              "column",
+              "parameter"
+            ],
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "description": "Values for its parameters.",
+            "type": "object"
+          },
+          "path": {
+            "description": "Under the destination; {name} {date} {time} {run} and {a parameter} are filled in.",
+            "type": "string"
+          },
+          "query": {
+            "description": "The saved query; its published version runs.",
+            "type": "string"
+          },
+          "running": {
+            "description": "Whether a run holds its lease now.",
+            "type": "boolean"
+          },
+          "skip_empty": {
+            "description": "A run with no rows writes no file.",
+            "type": "boolean"
+          },
+          "timeout": {
+            "description": "Seconds, within the server's own limit.",
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "watermark": {
+            "description": "The largest incremental value delivered so far.",
+            "nullable": true
+          }
+        },
+        "required": [
+          "name",
+          "query",
+          "params",
+          "format",
+          "destination",
+          "path",
+          "skip_empty",
+          "watermark",
+          "running",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ExportInput": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "parquet",
+              "csv",
+              "ndjson"
+            ],
+            "type": "string"
+          },
+          "incremental": {
+            "nullable": true,
+            "properties": {
+              "column": {
+                "description": "Its largest value is the watermark.",
+                "type": "string"
+              },
+              "parameter": {
+                "description": "The query parameter it is bound to.",
+                "type": "string"
+              },
+              "start": {
+                "description": "Bound on the first run, before any watermark."
+              }
+            },
+            "required": [
+              "column",
+              "parameter"
+            ],
+            "type": "object"
+          },
+          "name": {
+            "description": "Create only.",
+            "type": "string"
+          },
+          "params": {
+            "nullable": true,
+            "type": "object"
+          },
+          "path": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "skip_empty": {
+            "type": "boolean"
+          },
+          "timeout": {
+            "nullable": true,
+            "type": "number"
+          },
+          "watermark": {
+            "description": "Update only: set, or (null) reset, the watermark.",
+            "nullable": true
+          }
+        },
+        "type": "object"
+      },
+      "ExportList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Export"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ExportRun": {
+        "properties": {
+          "bytes": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "duration_ms": {
+            "type": "number"
+          },
+          "export": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "description": "Null when an empty run wrote nothing.",
+            "nullable": true,
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "watermark": {
+            "nullable": true,
+            "properties": {
+              "from": {},
+              "to": {}
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "export",
+          "object",
+          "rows",
+          "bytes",
+          "watermark",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
+      "ExportRunList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -4830,6 +5062,7 @@
     },
     "/api/v1/destinations": {
       "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -4885,9 +5118,11 @@
         "summary": "List destinations - where exports may write (secrets masked)",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       },
       "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4971,11 +5206,13 @@
         "summary": "Create a destination: a bucket prefix or folder, and the credentials to write there",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/destinations/test": {
       "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5041,11 +5278,13 @@
         "summary": "Write a probe object with fields not saved yet",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/destinations/{name}": {
       "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -5133,9 +5372,11 @@
         "summary": "Remove it - refused while an export writes there",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       },
       "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -5209,9 +5450,11 @@
         "summary": "Get a destination",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       },
       "patch": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -5314,11 +5557,13 @@
         "summary": "Change some of its fields",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/destinations/{name}/test": {
       "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -5384,7 +5629,8 @@
         "summary": "Write a probe object under its prefix: url, credentials and permission at once",
         "tags": [
           "Management API v1"
-        ]
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/examples": {
@@ -5571,6 +5817,595 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/exports": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "List exports - saved queries delivered to destinations",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Export"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Create an export",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/exports/{name}": {
+      "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Remove it",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Export"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Get an export, with its watermark",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "patch": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Export"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Change some of its fields, or set or reset its watermark",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/exports/{name}/runs": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportRunList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Its newest runs, from run history",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportRun"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Another run of it holds the lease (export_running)"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "The destination couldn't be written (destination_unreachable)"
+          }
+        },
+        "summary": "Run it now; answers once the object is written",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/history": {

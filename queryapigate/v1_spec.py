@@ -3,6 +3,7 @@
 Unlike the legacy routes' entries, every v1 operation describes its responses in full: the Console's TypeScript
 types are generated from this (ADR 0001), and tests/test_api_v1.py validates real responses against it.
 """
+from .alerts import KINDS as _ALERT_KINDS
 
 TAG = 'Management API v1'
 
@@ -34,6 +35,11 @@ _NAME = {'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'str
 _VERSION = {'name': 'version', 'in': 'path', 'required': True, 'schema': {'type': 'integer'}}
 
 _NULLABLE_STRING = {'type': 'string', 'nullable': True}
+_INCREMENTAL = {
+    'type': 'object', 'required': ['column', 'parameter'],
+    'properties': {'column': {'type': 'string', 'description': 'Its largest value is the watermark.'},
+                   'parameter': {'type': 'string', 'description': 'The query parameter it is bound to.'},
+                   'start': {'description': 'Bound on the first run, before any watermark.'}}}
 
 SCHEMAS = {
     'V1Error': {
@@ -199,15 +205,12 @@ SCHEMAS = {
         'properties': {
             'id': {'type': 'string', 'description': 'Stable while the condition holds: kind and subject.'},
             'severity': {'type': 'string', 'enum': ['critical', 'warning', 'info']},
-            'kind': {'type': 'string', 'enum': [
-                'open_server', 'key_expired', 'key_expiring', 'key_unused', 'connection_failing', 'query_errors',
-                'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed',
-                'history_dropped']},
+            'kind': {'type': 'string', 'enum': list(_ALERT_KINDS)},
             'title': {'type': 'string'}, 'detail': {'type': 'string'},
             'since': {'type': 'string', 'nullable': True,
                       'description': 'When the condition began or will begin, where known (server time).'},
             'target': {'type': 'object', 'nullable': True, 'required': ['type', 'name'], 'properties': {
-                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings']},
+                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export']},
                 'name': {'type': 'string'}}},
         },
     },
@@ -363,6 +366,54 @@ SCHEMAS = {
         'type': 'object', 'required': ['object', 'elapsed_ms'],
         'properties': {'object': {'type': 'string', 'description': 'The probe object written.'},
                        'elapsed_ms': {'type': 'number'}},
+    },
+    'Export': {
+        'type': 'object', 'required': ['name', 'query', 'params', 'format', 'destination', 'path', 'skip_empty',
+                                       'watermark', 'running', 'created_at', 'updated_at'],
+        'properties': {
+            'name': {'type': 'string'}, 'description': {'type': 'string'},
+            'query': {'type': 'string', 'description': 'The saved query; its published version runs.'},
+            'params': {'type': 'object', 'description': 'Values for its parameters.'},
+            'format': {'type': 'string', 'enum': ['parquet', 'csv', 'ndjson']},
+            'destination': {'type': 'string'},
+            'path': {'type': 'string', 'description': 'Under the destination; {name} {date} {time} {run} and '
+                                                    '{a parameter} are filled in.'},
+            'incremental': _INCREMENTAL,
+            'skip_empty': {'type': 'boolean', 'description': 'A run with no rows writes no file.'},
+            'timeout': {'type': 'number', 'description': "Seconds, within the server's own limit."},
+            'watermark': {'nullable': True, 'description': 'The largest incremental value delivered so far.'},
+            'running': {'type': 'boolean', 'description': 'Whether a run holds its lease now.'},
+            'created_at': {'type': 'string'}, 'updated_at': {'type': 'string'},
+        },
+    },
+    'ExportList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Export')}},
+    },
+    'ExportInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'}, 'description': _NULLABLE_STRING,
+            'query': {'type': 'string'}, 'params': {'type': 'object', 'nullable': True},
+            'format': {'type': 'string', 'enum': ['parquet', 'csv', 'ndjson']}, 'destination': {'type': 'string'},
+            'path': {'type': 'string'}, 'incremental': {**_INCREMENTAL, 'nullable': True},
+            'skip_empty': {'type': 'boolean'}, 'timeout': {'type': 'number', 'nullable': True},
+            'watermark': {'nullable': True, 'description': 'Update only: set, or (null) reset, the watermark.'},
+        },
+    },
+    'ExportRun': {
+        'type': 'object', 'required': ['id', 'export', 'object', 'rows', 'bytes', 'watermark', 'duration_ms'],
+        'properties': {
+            'id': {'type': 'string'}, 'export': {'type': 'string'},
+            'object': {'type': 'string', 'nullable': True, 'description': 'Null when an empty run wrote nothing.'},
+            'rows': {'type': 'integer'}, 'bytes': {'type': 'integer', 'nullable': True},
+            'watermark': {'type': 'object', 'nullable': True, 'properties': {'from': {}, 'to': {}}},
+            'duration_ms': {'type': 'number'},
+        },
+    },
+    'ExportRunList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('HistoryEntry')}},
     },
     'AuditLog': {
         'type': 'object', 'required': ['items', 'total', 'actions', 'retention'],
@@ -872,6 +923,27 @@ PATHS = {
     '/api/v1/destinations/{name}/test': {
         'post': _op('Write a probe object under its prefix: url, credentials and permission at once',
                     {'200': _ok(_ref('DestinationTest'))}, parameters=[_NAME]),
+    },
+    '/api/v1/exports': {
+        'get': _op('List exports - saved queries delivered to destinations', {'200': _ok(_ref('ExportList'))}),
+        'post': _op('Create an export', {'201': _ok(_ref('Export'), etag=True), **_CONFLICT}, body=_ref('ExportInput')),
+    },
+    '/api/v1/exports/{name}': {
+        'get': _op('Get an export, with its watermark', {'200': _ok(_ref('Export'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change some of its fields, or set or reset its watermark',
+                     {'200': _ok(_ref('Export'), etag=True), **_PRECONDITION}, parameters=[_NAME, _IF_MATCH],
+                     body=_ref('ExportInput')),
+        'delete': _op('Remove it', {'204': {'description': 'Removed'}, **_PRECONDITION}, parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/exports/{name}/runs': {
+        'get': _op('Its newest runs, from run history', {'200': _ok(_ref('ExportRunList'))}, parameters=[
+            _NAME, {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 50}}]),
+        'post': _op('Run it now; answers once the object is written',
+                    {'201': _ok(_ref('ExportRun')),
+                     '409': {'description': 'Another run of it holds the lease (export_running)',
+                             **_json(_ref('V1Error'))},
+                     '502': {'description': "The destination couldn't be written (destination_unreachable)",
+                             **_json(_ref('V1Error'))}}, parameters=[_NAME]),
     },
     '/api/v1/administrators': {
         'get': _op('List administrators (owners only)', {'200': _ok(_ref('AdministratorList'))}),

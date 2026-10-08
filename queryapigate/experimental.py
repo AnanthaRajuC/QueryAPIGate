@@ -33,6 +33,17 @@ FEATURES: dict[str, dict[str, Any]] = {
             for p in details.get('allowed_paths') or []),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Files on S3, GCS, R2 and the web'),
     },
+    'exports': {
+        'name': 'Exports to object storage',
+        'why': 'new in 0.17 - destinations, exports and their runs may change as they are used',
+        'operations': tuple((method, path) for path, methods in (
+            ('/api/v1/destinations', ('get', 'post')), ('/api/v1/destinations/test', ('post',)),
+            ('/api/v1/destinations/{name}', ('get', 'patch', 'delete')),
+            ('/api/v1/destinations/{name}/test', ('post',)),
+            ('/api/v1/exports', ('get', 'post')), ('/api/v1/exports/{name}', ('get', 'patch', 'delete')),
+            ('/api/v1/exports/{name}/runs', ('get', 'post'))) for method in methods),
+        'docs': ('documentation/API.md', 'Exports to object storage'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',

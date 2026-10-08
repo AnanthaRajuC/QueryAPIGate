@@ -144,6 +144,19 @@ class CliTests(unittest.TestCase):
             code = cli.main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
+    def test_a_stream_closed_before_its_first_row_ends_the_query(self):
+        from queryapigate import engine, metrics
+        before = metrics._active_queries
+        columns, rows = engine.stream_sql('SELECT id FROM t', 'lite', {}, None)
+        self.assertEqual((list(columns), metrics._active_queries), (['id'], before + 1))
+        rows.close()  # nothing read: a generator closed unstarted would have run none of its cleanup
+        rows.close()  # and closing twice is harmless
+        self.assertEqual(metrics._active_queries, before)
+        columns, rows = engine.stream_sql('SELECT id FROM t', 'lite', {}, None)
+        self.assertEqual(len(list(rows)), 10)  # read to the end: ended once, by the drain itself
+        rows.close()
+        self.assertEqual(metrics._active_queries, before)
+
     def test_export_to_a_destination(self):
         code, out, err = self.run_cli('export', 'by_region', '--param', 'region=EU', '--to', 'drop', '--format',
                                       'parquet', '--out', '{name}/{region}/{date}.parquet')

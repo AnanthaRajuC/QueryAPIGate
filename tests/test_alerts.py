@@ -1,6 +1,7 @@
 """GET /api/v1/alerts (alerts.py): each check raises its alert when its condition holds, says what to do, points at
 what to fix - and the alert goes away by itself once the condition does."""
 import os
+import re
 import tempfile
 import unittest
 from datetime import date, datetime, timedelta
@@ -242,3 +243,17 @@ class SettingsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class KindsTests(unittest.TestCase):
+    def test_every_kind_is_documented_and_in_the_spec(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, 'documentation', 'API.md')) as f:
+            api = f.read()
+        table = api.split('## Alerts', 1)[1].split('\n## ', 1)[0]
+        documented = {kind for row in table.splitlines() if row.startswith('| `')
+                      for kind in re.findall(r'`([a-z_]+)`', row.split('|')[1])}
+        self.assertEqual(set(alerts.KINDS) - documented, set())
+        from queryapigate import openapi
+        enum = openapi.build_spec('test')['components']['schemas']['Alert']['properties']['kind']['enum']
+        self.assertEqual(set(enum), set(alerts.KINDS))

@@ -16,11 +16,12 @@ Routes here translate HTTP to services/ calls and back; the meaning of each oper
 """
 from flask import Blueprint, Response, current_app, g, jsonify, request
 
-from . import adminroles, alerts, collection_admin, config, history, instances, schema, sqlflow, store
+from . import adminroles, alerts, collection_admin, config, exports, history, instances, schema, sqlflow, store
 from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
 from .services import destinations as destination_service
+from .services import exports as export_service
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -442,7 +443,7 @@ def update_destination(name):
 @bp.route('/destinations/<name>', methods=['DELETE'])
 def delete_destination(name):
     _check_destination_if_match(name)
-    destination_service.delete(name, caller_key_name())
+    destination_service.delete(name, caller_key_name(), used_by=exports.using_destination(name))
     return '', 204
 
 
@@ -450,6 +451,70 @@ def delete_destination(name):
 def test_destination(name):
     """Write one small probe object under the prefix, as an export would: url, credentials and permission."""
     return jsonify(destination_service.test(name=name)), 200
+
+
+# --------------------------------------------------------------------------------------
+# Exports: a saved query delivered to a destination (ADR 0004)
+# --------------------------------------------------------------------------------------
+
+def _export_etag(export):
+    return export_service.etag({k: v for k, v in export.items() if k not in ('updated_at', 'running')})
+
+
+def _export_response(name, status=200):
+    export = export_service.load(name)
+    response = jsonify(export)
+    response.headers['ETag'] = _export_etag(export)
+    return response, status
+
+
+def _check_export_if_match(name):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != _export_etag(export_service.load(name)):
+        raise ApiError('This export changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+@bp.route('/exports', methods=['GET'])
+def list_exports():
+    return jsonify({'items': export_service.list_all()}), 200
+
+
+@bp.route('/exports', methods=['POST'])
+def create_export():
+    """A saved query delivered to a destination: parameters, format, object path, optionally incremental."""
+    return _export_response(export_service.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/exports/<name>', methods=['GET'])
+def get_export(name):
+    return _export_response(name)
+
+
+@bp.route('/exports/<name>', methods=['PATCH'])
+def update_export(name):
+    """Change some fields; null removes an optional one; `watermark` sets or (null) resets the incremental position."""
+    _check_export_if_match(name)
+    export_service.update(name, get_json_body(), caller_key_name())
+    return _export_response(name)
+
+
+@bp.route('/exports/<name>', methods=['DELETE'])
+def delete_export(name):
+    _check_export_if_match(name)
+    export_service.delete(name, caller_key_name())
+    return '', 204
+
+
+@bp.route('/exports/<name>/runs', methods=['POST'])
+def run_export(name):
+    """Run it now, and answer when the object is written - for a scheduler that calls HTTP."""
+    return jsonify(export_service.run(name, caller_key_name())), 201
+
+
+@bp.route('/exports/<name>/runs', methods=['GET'])
+def list_export_runs(name):
+    return jsonify({'items': export_service.runs(name, limit=get_int(request.args.get('limit'), 'limit') or 50)}), 200
 
 
 # --------------------------------------------------------------------------------------

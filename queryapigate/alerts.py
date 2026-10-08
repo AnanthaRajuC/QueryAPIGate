@@ -53,7 +53,15 @@ def note_rate_limited(kind, who):
         times.append(now)
 
 
+# Every kind of alert, the one list: the OpenAPI enum is built from it and tests/test_alerts.py checks API.md's table.
+KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
+         'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
+         'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused')
+
+
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
+    if kind not in KINDS:
+        raise ValueError(f'{kind} is not in alerts.KINDS')
     return {'id': f'{kind}:{subject}', 'severity': severity, 'kind': kind, 'title': title, 'detail': detail,
             'since': since, 'target': target}
 
@@ -151,7 +159,26 @@ def _recent_runs(now):
 
 def _runs(now):
     runs = _recent_runs(now)
-    return [*_failing_connections(runs, now), *_queries(runs, now)]
+    # An export's run can fail at its destination, which says nothing about the query or its connection.
+    served = [run for run in runs if run[2].get('transport') != 'export']
+    return [*_failing_connections(served, now), *_queries(served, now), *_exports(runs)]
+
+
+def _exports(runs):
+    """An export whose newest run failed: nothing reaches its destination until it is fixed."""
+    found, seen = [], set()
+    for _, executed_at, entry in runs:  # newest first
+        name = entry.get('export')
+        if entry.get('transport') != 'export' or not name or name in seen:
+            continue
+        seen.add(name)
+        if entry.get('status') == 'error':
+            found.append(_alert('warning', 'export_failing', name, f"Export '{name}' is failing",
+                                f"Its last run, at {executed_at}, failed: {entry.get('error')}. Nothing new reaches "
+                                f"{entry.get('destination')} until it succeeds; an incremental export catches up "
+                                'then, since its watermark only moves after a file is written.',
+                                {'type': 'export', 'name': name}, executed_at))
+    return found
 
 
 def _failing_connections(runs, now):

@@ -56,10 +56,11 @@ def render_path(template, name, params=None, run_id=None, now=None):
     return rendered
 
 
-def deliver(destination, relative, columns, rows, fmt='parquet', track=None, skip_empty=False):
+def deliver(destination, relative, columns, rows, fmt='parquet', track=None, skip_empty=False, check_largest=None):
     """Write `rows` under `columns` to `relative` in `destination`. Returns {'object', 'rows', 'bytes', 'largest'}:
     `object` None when `skip_empty` and there were no rows; `bytes` for a local folder only; `largest` the largest
-    value of the `track` column (an incremental watermark), or None."""
+    value of the `track` column (an incremental watermark), or None. `check_largest(value)` runs once the rows are
+    staged and before anything is written - raising there writes nothing."""
     if fmt not in FORMATS:
         raise ApiError(f"format must be one of: {', '.join(FORMATS)}", code='invalid_body')
     parquet._require()
@@ -67,6 +68,8 @@ def deliver(destination, relative, columns, rows, fmt='parquet', track=None, ski
     try:
         if skip_empty and not staged.count:
             return {'object': None, 'rows': 0, 'bytes': None, 'largest': None}
+        if check_largest is not None and staged.largest is not None:
+            check_largest(staged.largest)
         conn, prefix = destinations.open_writer(destination, read_files=[staged.path])
         try:
             target = destinations.target(prefix, relative)

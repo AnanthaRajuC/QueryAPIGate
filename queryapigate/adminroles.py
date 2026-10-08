@@ -78,6 +78,9 @@ OPERATIONS = {
     'v1.create_destination': 'destinations.write', 'v1.update_destination': 'destinations.write',
     'v1.delete_destination': 'destinations.write', 'v1.test_destination': 'destinations.write',
     'v1.test_destination_fields': 'destinations.write',
+    'v1.list_exports': 'exports.read', 'v1.get_export': 'exports.read', 'v1.list_export_runs': 'exports.read',
+    'v1.create_export': 'exports.write', 'v1.update_export': 'exports.write', 'v1.delete_export': 'exports.write',
+    'v1.run_export': 'exports.run',
 }
 
 

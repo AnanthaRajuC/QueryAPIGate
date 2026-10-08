@@ -312,7 +312,40 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
         if status == 'error':
             metrics.observe_stream(connection_name, details['db'], status, key_name)
             metrics.dec_active_query()
-    return columns, _drain(stream, connection_name, details['db'], key_name)
+    return columns, _Rows(stream, connection_name, details['db'], key_name)
+
+
+class _Rows:
+    """The rows stream_sql() returns: an iterator over _drain(), whose close() ends the query even before the first
+    row is read. Closing a generator that hasn't started runs none of its code, so a caller that gave up first - an
+    export whose destination failed, a client gone before the first chunk - used to leave the query counted as
+    active and its connection checked out until garbage collection."""
+
+    def __init__(self, stream, connection_name, dialect, key_name):
+        self._stream = stream  # already primed by stream_sql(): its own cleanup runs when it is closed
+        self._where = (connection_name, dialect, key_name)
+        self._drain = _drain(stream, connection_name, dialect, key_name)
+        self._started = False
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._started = True
+        return next(self._drain)
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self._started:
+            self._drain.close()  # _drain's own GeneratorExit handling does the bookkeeping
+            return
+        self._stream.close()  # releases the connection (runners._make_stream_runner)
+        connection_name, dialect, key_name = self._where
+        metrics.observe_rows(connection_name, dialect, key_name, 0)
+        metrics.dec_active_query()
 
 
 def _drain(rows, connection_name, dialect, key_name):

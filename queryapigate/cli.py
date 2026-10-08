@@ -1,6 +1,7 @@
 """Command line entry point: ``queryapigate serve``, ``init``, ``migrate-to-postgres``, ``export`` and
 ``collection export|import``."""
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -166,8 +167,6 @@ def _export(args):
     from .engine import stream_sql
     from .errors import ApiError
     from .formats import STREAM_FORMATTERS, iter_stream_chunks
-    from .params import resolve as resolve_params
-    from .sqltools import fill_placeholders, placeholder_names
 
     tmp_path = None
     try:
@@ -178,18 +177,9 @@ def _export(args):
         except ValueError:
             raise ApiError('--param must look like name=value') from None
 
-        path = store.resolve_saved_file(args.query)
+        from . import exports
+        path, version, connection_name, sql, values = exports.prepare(args.query, raw_params, args.connection)
         name = store.query_name(path)
-        version, saved = store.select_version(store.load_versions(path), None)
-        connection_name = args.connection or saved.get('connection_name')
-        if not connection_name:
-            raise ApiError('Connection name is missing - pass --connection or set one on the saved query')
-        sql = saved.get('sql_query')
-        if not isinstance(sql, str):
-            raise ApiError('Saved query has no SQL', 500)
-        used = set(placeholder_names(sql))
-        values = resolve_params(saved.get('query_parameters'), raw_params, used=used)
-        sql = fill_placeholders(sql, values)
 
         if args.to:
             return _export_to_destination(args, path, name, version, connection_name, sql, values)
@@ -256,7 +246,8 @@ def _export_to_destination(args, path, name, version, connection_name, sql, valu
              'transport': 'export', 'destination': args.to, 'run_id': run_id}
     try:
         columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
-        result = exporting.deliver(destination, relative, columns, rows, args.format)
+        with contextlib.closing(rows):  # a failed write must still end the query and give its connection back
+            result = exporting.deliver(destination, relative, columns, rows, args.format)
     except ApiError as error:
         store.record_execution(path, version, {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
@@ -469,6 +460,49 @@ def _admins_list(args):
     return 0
 
 
+def _exports_command(action):
+    """`queryapigate exports ...` - straight against the store, no server: what cron on the host runs."""
+    def run(args):
+        try:
+            config.check_settings()
+            return action(args)
+        except ApiError as error:
+            print(f'queryapigate exports {args.action}: {error.message}', file=sys.stderr)
+            return 1
+        except (OSError, ValueError) as error:
+            print(f'queryapigate exports {args.action}: {error}', file=sys.stderr)
+            return 1
+    return run
+
+
+@_exports_command
+def _exports_run(args):
+    from . import exports
+    run = exports.run(args.name, 'cli')
+    rows = run['rows']
+    if run['object'] is None:
+        print(f"No rows - nothing written (skip_empty). Run {run['id']}.")
+    else:
+        print(f"Wrote {rows} row{'' if rows == 1 else 's'} to {run['object']} (run {run['id']}).")
+    if run['watermark']:
+        print(f"Watermark: {run['watermark']['from']} -> {run['watermark']['to']}")
+    return 0
+
+
+@_exports_command
+def _exports_list(args):
+    from . import exports
+    found = exports.list_all()
+    if not found:
+        print('No exports. Define one with POST /api/v1/exports, or in the Console.')
+    for export in found:
+        incremental = f"  watermark {export['watermark']}" if export.get('incremental') else ''
+        running = '  (running)' if export['running'] else ''
+        print(f"{export['name']}  {export['query']} -> {export['destination']}:{export['path']}  "
+              f"{export.get('format', 'parquet')}{incremental}{running}")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='queryapigate', description='Expose SQL databases as a REST API.')
     parser.add_argument('--version', action='version', version=f'queryapigate {__version__}')
@@ -592,8 +626,18 @@ def build_parser():
     admins_token.set_defaults(func=_admins_token)
     admins_list.set_defaults(func=_admins_list)
 
+    exports_parser = commands.add_parser('exports', help='run or list saved exports (deliveries of a saved query to a '
+                                                         'destination) - for cron on the host, no server needed')
+    exports_parser.set_defaults(func=lambda a: exports_parser.print_help() or 2)
+    export_actions = exports_parser.add_subparsers(dest='action')
+    exports_run = export_actions.add_parser('run', help='run a saved export once, now')
+    exports_run.add_argument('name')
+    exports_run.set_defaults(func=_exports_run)
+    exports_list = export_actions.add_parser('list', help='list saved exports')
+    exports_list.set_defaults(func=_exports_list)
+
     for sub in (serve, init, export, collection_export, collection_import, examples_load, examples_unload,
-                examples_status, admins_create, admins_token, admins_list):
+                examples_status, admins_create, admins_token, admins_list, exports_run, exports_list):
         sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
     return parser

@@ -22,7 +22,8 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
-`gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), and alerts (`GET /api/v1/alerts`). The
+`gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
+(`/api/v1/destinations`, `/api/v1/exports`), and alerts (`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -54,12 +55,25 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   as Parquet, CSV or NDJSON, through DuckDB: `--out 'orders/{date}/orders_{run}.parquet'` - with `{name}`, `{date}`,
   `{time}`, `{run}` and the query's own parameters (`{region}`), whose values may only be plain names, so none can add
   a folder or climb out. Each run is in history (`transport: "export"`, the destination and the object written).
+- **Saved exports** (experimental): `/api/v1/exports` - a saved query, its parameters, a format, a destination and an
+  object path, run with `POST /api/v1/exports/{name}/runs` or `queryapigate exports run NAME` (scheduling stays with
+  cron, a CronJob or Airflow). **Incremental:** each run binds the largest value of a column it last delivered to a
+  parameter (`WHERE updated_at > :since`), so a file holds only what changed; the watermark moves only after the file
+  is written, so a failed run is sent again, never lost - and a value the parameter wouldn't accept back is refused
+  before anything is written. One run at a time per export (`409 export_running`, a lease that a crashed run can't
+  hold for ever). Runs are in history, and the `export_failing` alert fires while an export's newest run failed.
+  Owners and admins define exports (`exports.write`); developers may run them (`exports.run`).
 
 ### Fixed
 - **Parquet output now runs in steady memory.** DuckDB wrote Parquet with a thread per core, each buffering its share,
   so memory grew with the result: about 600 MB for 2 million rows and 1.4 GB for 6 million, for `?format=parquet`
   (paged or streamed) and `queryapigate export --format parquet` alike. It now writes on one thread - about 150 MB
   at either size, at the same speed, and rows always keep the query's order.
+- **A stream closed before its first row ends its query.** `?stream=true` and `queryapigate export` hand back rows as
+  they come; a caller that stopped before reading one - a client gone before the first chunk - left the query counted
+  in `queryapigate_active_queries` and its pooled connection checked out until garbage collection.
+- **The OpenAPI alert `kind` enum lists every alert** - `break_glass_used` (0.16) and the instance and Redis alerts
+  were missing from it. `alerts.KINDS` is now the one list, checked against the docs.
 
 ### Upgrading
 - **Schema 8** adds two tables (`destinations`, `exports`); nothing existing changes.
