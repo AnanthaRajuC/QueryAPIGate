@@ -183,9 +183,10 @@ def _usable(destination):
     return store.resolve_ad_hoc({k: destination[k] for k in FIELDS if k in destination})
 
 
-def open_writer(destination):
+def open_writer(destination, read_files=()):
     """A DuckDB connection that may write under the destination's prefix and nowhere else. Returns (conn, prefix):
-    `prefix` is how a target inside it is spelled for DuckDB."""
+    `prefix` is how a target inside it is spelled for DuckDB. `read_files` are exact local files it may also open -
+    the staged rows an export copies from (parquet.stage()), and nothing beside them."""
     import duckdb
     fields = _usable(destination)
     url = fields['url']
@@ -193,11 +194,14 @@ def open_writer(destination):
     prefix = os.path.normpath(folder) + os.sep if folder is not None else url
     if folder is not None:
         os.makedirs(prefix, exist_ok=True)
-    details = {'database': ':memory:', 'allowed_paths': [prefix],
+    details = {'database': ':memory:', 'allowed_paths': [prefix, *read_files],
                **{k: fields[k] for k in ('storage', 'region', 'endpoint', 'url_style', 'use_ssl', 'account_id',
                                          'user', 'password') if fields.get(k) not in (None, '')}}
     conn = duckdb.connect()
     try:
+        from .parquet import WRITER_SETTINGS
+        for setting in WRITER_SETTINGS:  # before the lock: steady memory, rows in order
+            conn.execute(setting)
         duckfiles.lock_down(conn, details)
     except Exception:
         conn.close()

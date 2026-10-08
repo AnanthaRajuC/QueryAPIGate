@@ -174,7 +174,13 @@ SCHEMAS = {
             'kind': {'type': 'string', 'enum': ['saved', 'adhoc'],
                      'description': 'A saved query run, or ad-hoc SQL (/execute_sql, /execute_mongo, MCP '
                                     'execute_sql).'},
-            'transport': {'type': 'string', 'enum': ['rest', 'mcp'], 'description': 'The front door it came through.'},
+            'transport': {'type': 'string', 'enum': ['rest', 'mcp', 'export'],
+                          'description': 'The front door it came through; export: written to a destination.'},
+            'destination': {'type': 'string', 'description': 'Export runs: the destination written to.'},
+            'object': {'type': 'string', 'nullable': True,
+                       'description': 'Export runs: the object or file written (null when an empty run wrote none).'},
+            'bytes': {'type': 'integer', 'nullable': True, 'description': 'Export runs to a local folder: its size.'},
+            'run_id': {'type': 'string', 'description': 'Export runs: the {run} in the object path.'},
             'sql': {'type': 'string', 'description': "Ad-hoc only, unless QUERYAPIGATE_HISTORY_ADHOC_SQL says 'hash' "
                                                      "or 'none'; at most 4000 characters (sql_truncated)."},
             'sql_sha256': {'type': 'string', 'description': "Ad-hoc only, with QUERYAPIGATE_HISTORY_ADHOC_SQL=hash."},

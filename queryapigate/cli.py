@@ -191,6 +191,8 @@ def _export(args):
         values = resolve_params(saved.get('query_parameters'), raw_params, used=used)
         sql = fill_placeholders(sql, values)
 
+        if args.to:
+            return _export_to_destination(args, path, name, version, connection_name, sql, values)
         out_path = _resolve_export_path(args.out, name)
         out_dir = os.path.dirname(out_path) or '.'
         os.makedirs(out_dir, exist_ok=True)
@@ -236,6 +238,33 @@ def _export(args):
             os.remove(tmp_path)  # only ever left behind by a failed run - a success already renamed it away
 
     print(f'Wrote {row_count} row{"" if row_count == 1 else "s"} to {out_path}')
+    return 0
+
+
+def _export_to_destination(args, path, name, version, connection_name, sql, values):
+    """`queryapigate export QUERY --to DESTINATION --out PATH`: the same run, written by DuckDB under a destination's
+    prefix (ADR 0004) - a bucket or a folder - instead of a local file. Raises ApiError; the caller reports it."""
+    from . import destinations, exporting
+    from .engine import stream_sql
+    if args.format not in exporting.FORMATS:
+        raise ApiError(f"--format must be one of {', '.join(exporting.FORMATS)} with --to")
+    destination = destinations.get(args.to)
+    run_id = exporting.new_run_id()
+    relative = exporting.render_path(args.out, name, values, run_id)
+    started = time.monotonic()
+    entry = {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': None, 'key_name': 'cli',
+             'transport': 'export', 'destination': args.to, 'run_id': run_id}
+    try:
+        columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
+        result = exporting.deliver(destination, relative, columns, rows, args.format)
+    except ApiError as error:
+        store.record_execution(path, version, {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
+        raise
+    store.record_execution(path, version, {**entry, 'status': 'success', 'rows': result['rows'],
+                                           'object': result['object'], 'bytes': result['bytes'],
+                                           'duration_ms': round((time.monotonic() - started) * 1000, 1)})
+    count = result['rows']
+    print(f'Wrote {count} row{"" if count == 1 else "s"} to {result["object"]}')
     return 0
 
 
@@ -491,7 +520,12 @@ def build_parser():
     export.add_argument('--out', required=True,
                         help='output path; {date} (YYYY-MM-DD) and {name} are filled in, e.g. '
                              '/exports/{name}_{date}.csv - written to a temp file and renamed into place '
-                             'only on success, so a failed run never leaves a partial or missing file there')
+                             'only on success, so a failed run never leaves a partial or missing file there. '
+                             'With --to, a path inside the destination, which may also use {time}, {run} and '
+                             '{a_parameter}: orders/{date}/orders_{run}.parquet')
+    export.add_argument('--to', metavar='DESTINATION',
+                        help='write under this destination (an s3://, gs://, r2:// prefix or a folder, defined with '
+                             '/api/v1/destinations) instead of a local path; --format parquet, csv or ndjson')
     export.add_argument('--param', action='append', default=[], metavar='name=value',
                         help='a query parameter, e.g. --param customer_id=42 (repeatable)')
     export.add_argument('--timeout', type=float, help='seconds allowed for the query (default: the server '

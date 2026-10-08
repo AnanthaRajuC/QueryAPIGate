@@ -1450,6 +1450,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `unsupported_database` | 400 | A database type QueryAPIGate doesn't support |
 | `unsupported_operation` | 400 | The operation isn't available for this database type (listing databases, schema, DDL) |
 | `wrong_connection_type` | 400 | A Mongo call on a SQL connection |
+| `invalid_watermark` | 400 | An export's incremental column isn't in the result, or holds values that can't be compared |
 | `unauthorized` | 401 | Missing or wrong `X-API-Key` or bearer token |
 | `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
 | `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role. For a move or merge that would widen access, `gaining` lists the keys and roles |

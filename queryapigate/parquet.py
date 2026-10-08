@@ -100,14 +100,19 @@ def _quote(text):
     return "'" + str(text).replace("'", "''") + "'"
 
 
-def write(columns, rows, path):
-    """Write `rows` (any iterable of sequences) under `columns` to a Parquet file at `path`. Returns the row count."""
-    _require()
-    import duckdb
+def stage(columns, rows, track=None):
+    """Write `rows` once to a temporary newline-delimited JSON file, working out each column's type on the way.
+    Returns a Staged; the caller removes `staged.path` (os.unlink) when done. `track`, a column name, also finds the
+    largest non-null value in that column (an export's incremental watermark)."""
     kinds = [set() for _ in columns]
     scales = [0] * len(columns)
     count = 0
-    fd, staging = tempfile.mkstemp(suffix='.ndjson', prefix='qag-parquet-')
+    if track is not None and track not in columns:
+        raise ApiError(f"The incremental column '{track}' isn't in the query's result (columns: "
+                       f"{', '.join(columns)})", code='invalid_watermark')
+    tracked = columns.index(track) if track is not None else None
+    largest = None
+    fd, staging = tempfile.mkstemp(suffix='.ndjson', prefix='qag-stage-')
     try:
         with os.fdopen(fd, 'w') as out:
             for row in rows:
@@ -119,26 +124,71 @@ def write(columns, rows, path):
                         if kind == 'decimal':
                             scales[i] = max(scales[i], max(0, -value.as_tuple().exponent))
                     record.append(_encode(value))
+                if tracked is not None and row[tracked] is not None:
+                    value = row[tracked]
+                    try:
+                        if largest is None or value > largest:
+                            largest = value
+                    except TypeError:
+                        raise ApiError(f"Column '{track}' mixes values that can't be compared ({largest!r}, "
+                                       f'{value!r}) - it can\'t be an incremental column', code='invalid_watermark') \
+                            from None
                 out.write(json.dumps({'r': record}) + '\n')
                 count += 1
-        types = [_column_type(k, s) for k, s in zip(kinds, scales, strict=False)]
+    except BaseException:
+        os.unlink(staging)
+        raise
+    types = [_column_type(k, s) for k, s in zip(kinds, scales, strict=False)]
+    return Staged(staging, columns, types, count, largest)
+
+
+class Staged:
+    """Rows staged for DuckDB: the file, the columns and their types, how many rows, and the tracked maximum."""
+
+    def __init__(self, path, columns, types, count, largest):
+        self.path, self.columns, self.types, self.count, self.largest = path, columns, types, count, largest
+
+
+# One thread: DuckDB's COPY from the staged file then holds a steady ~150 MB, whatever the size - with its default
+# (one thread per core) it buffered every thread's share, and memory grew with the result (about 600 MB for 2 million
+# rows, 1.4 GB for 6 million). One thread also keeps the rows in the query's order.
+WRITER_SETTINGS = ('SET threads = 1',)
+
+COPY_FORMATS = {'parquet': '(FORMAT parquet)', 'csv': '(FORMAT csv, HEADER true)', 'ndjson': '(FORMAT json)'}
+
+
+def copy(conn, staged, target, fmt='parquet'):
+    """Have DuckDB write the staged rows to `target` (a local path, or an object-storage URL `conn` may write to) as
+    Parquet, CSV or NDJSON."""
+    options = COPY_FORMATS[fmt]
+    if staged.count:
+        # Each line holds the row as a JSON array; columns are picked out by position, so names (duplicates, odd
+        # characters) never have to survive as JSON keys.
+        source = f"read_json({_quote(staged.path)}, format='newline_delimited', columns={{'r': 'JSON'}})"
+        conn.execute(f'COPY (SELECT {_json_select(staged.columns, staged.types)} FROM {source}) TO {_quote(target)} '
+                     f'{options}')
+    else:
+        empty = ', '.join(f'NULL::{t} AS "{n.replace(chr(34), chr(34) * 2)}"'
+                          for n, t in zip(staged.columns, staged.types, strict=False))
+        conn.execute(f'COPY (SELECT {empty} WHERE false) TO {_quote(target)} {options}')
+
+
+def write(columns, rows, path):
+    """Write `rows` (any iterable of sequences) under `columns` to a Parquet file at `path`. Returns the row count."""
+    _require()
+    import duckdb
+    staged = stage(columns, rows)
+    try:
         conn = duckdb.connect()
         try:
-            if count:
-                # Each line holds the row as a JSON array; columns are picked out by position, so names (duplicates,
-                # odd characters) never have to survive as JSON keys.
-                source = f"read_json({_quote(staging)}, format='newline_delimited', columns={{'r': 'JSON'}})"
-                conn.execute(f'COPY (SELECT {_json_select(columns, types)} FROM {source}) TO {_quote(path)} '
-                             '(FORMAT parquet)')
-            else:
-                empty = ', '.join(f'NULL::{t} AS "{n.replace(chr(34), chr(34) * 2)}"'
-                                  for n, t in zip(columns, types, strict=False))
-                conn.execute(f'COPY (SELECT {empty} WHERE false) TO {_quote(path)} (FORMAT parquet)')
+            for setting in WRITER_SETTINGS:
+                conn.execute(setting)
+            copy(conn, staged, path)
         finally:
             conn.close()
     finally:
-        os.unlink(staging)
-    return count
+        os.unlink(staged.path)
+    return staged.count
 
 
 def _json_select(columns, types):

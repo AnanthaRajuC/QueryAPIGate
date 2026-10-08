@@ -1337,11 +1337,20 @@
       "HistoryEntry": {
         "additionalProperties": true,
         "properties": {
+          "bytes": {
+            "description": "Export runs to a local folder: its size.",
+            "nullable": true,
+            "type": "integer"
+          },
           "code": {
             "description": "A failed run's error code (API.md, Errors), from 0.13 on.",
             "type": "string"
           },
           "connection_name": {
+            "type": "string"
+          },
+          "destination": {
+            "description": "Export runs: the destination written to.",
             "type": "string"
           },
           "duration_ms": {
@@ -1367,6 +1376,11 @@
             ],
             "type": "string"
           },
+          "object": {
+            "description": "Export runs: the object or file written (null when an empty run wrote none).",
+            "nullable": true,
+            "type": "string"
+          },
           "params": {
             "description": "Ad-hoc only: the parameters' names - never their values.",
             "items": {
@@ -1387,6 +1401,10 @@
             "nullable": true,
             "type": "integer"
           },
+          "run_id": {
+            "description": "Export runs: the {run} in the object path.",
+            "type": "string"
+          },
           "sql": {
             "description": "Ad-hoc only, unless QUERYAPIGATE_HISTORY_ADHOC_SQL says 'hash' or 'none'; at most 4000 characters (sql_truncated).",
             "type": "string"
@@ -1403,10 +1421,11 @@
             "type": "string"
           },
           "transport": {
-            "description": "The front door it came through.",
+            "description": "The front door it came through; export: written to a destination.",
             "enum": [
               "rest",
-              "mcp"
+              "mcp",
+              "export"
             ],
             "type": "string"
           },

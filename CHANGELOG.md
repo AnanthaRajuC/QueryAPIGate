@@ -50,6 +50,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   with `QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can
   be written elsewhere; `POST /api/v1/destinations/{name}/test` writes a probe object to prove the url, credentials and
   permission together. Owners and admins define destinations (`destinations.write`); every administrator can read them.
+- **`queryapigate export QUERY --to DESTINATION --out PATH`** writes a saved query's full result under a destination
+  as Parquet, CSV or NDJSON, through DuckDB: `--out 'orders/{date}/orders_{run}.parquet'` - with `{name}`, `{date}`,
+  `{time}`, `{run}` and the query's own parameters (`{region}`), whose values may only be plain names, so none can add
+  a folder or climb out. Each run is in history (`transport: "export"`, the destination and the object written).
+
+### Fixed
+- **Parquet output now runs in steady memory.** DuckDB wrote Parquet with a thread per core, each buffering its share,
+  so memory grew with the result: about 600 MB for 2 million rows and 1.4 GB for 6 million, for `?format=parquet`
+  (paged or streamed) and `queryapigate export --format parquet` alike. It now writes on one thread - about 150 MB
+  at either size, at the same speed, and rows always keep the query's order.
 
 ### Upgrading
 - **Schema 8** adds two tables (`destinations`, `exports`); nothing existing changes.
