@@ -2802,7 +2802,17 @@ on a real run) is a smaller follow-up on finished work, not an open capability g
 
 ## 89. Exports to object storage, incremental
 
-**Status: open; after 1.0.** The partner and data-pipeline track: a saved query's result delivered as a file where
+**Status: shipped (experimental, for 0.17).** [ADR 0004](documentation/adr/0004-exports-to-object-storage.md):
+destinations (`destinations.py`, writes locked to the prefix by DuckDB), the writer (`exporting.py`: Parquet/CSV/NDJSON
+from staged rows, path templates), saved exports (`exports.py`: incremental watermarks that move only after a file is
+written, refused up front when the parameter couldn't take them back; a lease per export), `/api/v1/destinations`,
+`/api/v1/exports`, `queryapigate export --to` and `queryapigate exports run|list`, run history, the `export_failing`
+alert, and the Console's Delivery screens. Guide 44. Found on the way and fixed: Parquet output's memory grew with the
+result (now one DuckDB thread, ~150 MB), and a stream closed before its first row kept its query active and its
+connection checked out. Not done: the AWS credential chain (instance roles) for destinations, and a CI job with an
+S3-compatible service.
+
+**Was: open; after 1.0.** The partner and data-pipeline track: a saved query's result delivered as a file where
 the other side picks it up, on whatever schedule the deployer's own scheduler runs.
 
 **Impact:** `queryapigate export` writes a local file, and `?stream=true` returns one over HTTP - so delivering to a

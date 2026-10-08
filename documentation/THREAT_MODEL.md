@@ -166,6 +166,14 @@ This is the part worth being the most precise about, because it's also the part 
   allowed paths, `lock_configuration`): no SQL can reach another file, URL or extension, or change the setting back.
   Object-storage prefixes are a second lock behind the credentials' own permissions, since an S3-compatible server
   could resolve `..` in a key; web addresses must name files for the same reason.
+- **Exports write only under their destination's prefix** (ADR 0004). A destination is a bucket prefix or folder and
+  write credentials, stored like a connection password. Each run writes through a fresh DuckDB connection locked the
+  same way - `allowed_paths` is exactly the prefix plus the one temporary file the rows were staged in - and object
+  paths are checked before DuckDB sees them: a parameter value in a path may only be a plain name, `..` and absolute
+  paths are refused. So a path template, parameter or file name can't reach another partner's prefix. The residual
+  risks: credentials that can write more than the prefix (scope them, as for reading), and *what* is delivered -
+  defining an export decides who receives which data, so only owners and admins may (`exports.write`), and every
+  change to one is audited; a developer may only run one already defined.
 - **Older `{name}` text placeholders are string substitution**, not parameterization - restricted to a
   narrow safe-character pattern (digits and plain text only) specifically because they're substituted
   directly into the SQL text. Prefer `:name` bound parameters; `{name}` exists for cases (identifiers,

@@ -149,6 +149,8 @@ With Docker Compose instead, run it in the existing container from the host's cr
 
 ## Next steps
 
+- [Deliver a daily file to a partner's bucket](44-deliver-a-daily-file-to-a-partners-bucket.md) - to S3, GCS or R2
+  instead of a local file, and only the rows that are new each time.
 - [Get the exact CLI command for a saved query](31-get-the-cli-command-for-a-query.md).
 - [Export a large result without running out of memory](09-stream-a-large-export.md) - the same streaming, over HTTP.
 - [Group queries into a collection](07-group-queries-into-a-collection.md) - `queryapigate collection export` moves

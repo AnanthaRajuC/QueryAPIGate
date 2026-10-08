@@ -291,6 +291,12 @@ const DOCS = [
     path: 'how-to/43-give-your-team-their-own-admin-access.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-44',
+    title: "Deliver a daily file to a partner's bucket",
+    path: 'how-to/44-deliver-a-daily-file-to-a-partners-bucket.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

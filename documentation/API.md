@@ -153,6 +153,10 @@ written anywhere else.
 From the server's shell, with no server running: `queryapigate exports run NAME`, `queryapigate exports list`, and
 `queryapigate export QUERY --to DESTINATION --out PATH` for a one-off.
 
+**Memory:** a run streams the rows through the server once, into a temporary file, and DuckDB writes from it on one
+thread - about 150 MB for a local file whatever the size, 180-300 MB to S3 for 2-6 million rows (measured). The step by
+step: [deliver a daily file to a partner's bucket](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/44-deliver-a-daily-file-to-a-partners-bucket.md).
+
 Scheduling stays with cron, a Kubernetes CronJob or Airflow. Each run is in run history (`transport: "export"`,
 with the destination, the object and the watermark), and the `export_failing` alert fires while an export's newest
 run failed. Owners and admins define destinations and exports (`destinations.write`, `exports.write`) - that decides

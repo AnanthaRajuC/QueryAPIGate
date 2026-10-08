@@ -80,6 +80,8 @@ guide covers one scenario end to end, and every command and response in it was r
     `queryapigate export`, and how failures are reported.
 31. [**Get the exact CLI command for a saved query**](31-get-the-cli-command-for-a-query.md) - the API Repository's
     CLI tab.
+44. [**Deliver a daily file to a partner's bucket**](44-deliver-a-daily-file-to-a-partners-bucket.md) (experimental) -
+    a destination, an incremental export, a schedule, and what happens when a run fails.
 
 ## Operating in production
 
