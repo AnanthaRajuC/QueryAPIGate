@@ -63,6 +63,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   before anything is written. One run at a time per export (`409 export_running`, a lease that a crashed run can't
   hold for ever). Runs are in history, and the `export_failing` alert fires while an export's newest run failed.
   Owners and admins define exports (`exports.write`); developers may run them (`exports.run`).
+- **Exports and Destinations in the Console** (a new Delivery group): define a destination and test it before saving;
+  define an export - query, destination, format, file path, parameters, incremental column - run it with **Run now**,
+  and see its runs. Each role sees what it may do: owners and admins everything, developers the Run button, auditors
+  the lists.
 
 ### Fixed
 - **Parquet output now runs in steady memory.** DuckDB wrote Parquet with a thread per core, each buffering its share,
@@ -72,6 +76,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **A stream closed before its first row ends its query.** `?stream=true` and `queryapigate export` hand back rows as
   they come; a caller that stopped before reading one - a client gone before the first chunk - left the query counted
   in `queryapigate_active_queries` and its pooled connection checked out until garbage collection.
+- **Switching keys in the Console's key box no longer briefly keeps the previous key's role** - the sidebar could
+  show screens the new key can't use until something else redrew it.
 - **The OpenAPI alert `kind` enum lists every alert** - `break_glass_used` (0.16) and the instance and Redis alerts
   were missing from it. `alerts.KINDS` is now the one list, checked against the docs.
 

@@ -148,8 +148,9 @@ function KeyPanel() {
     setKey(value);
     setDraft('');
     setEditing(false);
-    queryClient.removeQueries({ queryKey: ['me'] }); // who this key is - asked afresh before anything else
-    queryClient.invalidateQueries();
+    // Who this key is, asked afresh - its readers see it emptied at once and refetched - and only then everything
+    // else, so nothing is fetched (or shown) on the previous key's role.
+    void queryClient.resetQueries({ queryKey: ['me'] }).finally(() => queryClient.invalidateQueries());
   }
 
   return (

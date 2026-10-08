@@ -53,6 +53,14 @@ const AdministratorsPage = lazy(() =>
   import('@/features/administrators/AdministratorsPage').then((m) => ({ default: m.AdministratorsPage })),
 );
 
+const ExportsPage = lazy(() =>
+  import('@/features/exports/ExportsPage').then((m) => ({ default: m.ExportsPage })),
+);
+
+const DestinationsPage = lazy(() =>
+  import('@/features/exports/DestinationsPage').then((m) => ({ default: m.DestinationsPage })),
+);
+
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
@@ -104,6 +112,22 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RolesPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="exports"
+          element={
+            <Suspense fallback={<Loading />}>
+              <ExportsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="destinations"
+          element={
+            <Suspense fallback={<Loading />}>
+              <DestinationsPage />
             </Suspense>
           }
         />

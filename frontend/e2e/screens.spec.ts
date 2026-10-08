@@ -11,6 +11,8 @@ const SCREENS: [string, string, string][] = [
   ['API Designer', 'API Designer', 'Recent Queries'],
   ['API keys', 'API keys', 'example-partner'],
   ['Roles', 'Roles', 'example-partner'],
+  ['Exports', 'Exports', 'No exports yet'],
+  ['Destinations', 'Destinations', 'No destinations yet'],
   ['Access map', 'Access map', 'API KEYS'],
   ['Administrators', 'Administrators', 'No administrators yet'],
   ['Alerts', 'Alerts', 'What needs attention now'],

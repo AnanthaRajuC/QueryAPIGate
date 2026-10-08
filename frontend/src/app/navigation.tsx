@@ -109,6 +109,39 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
+    label: 'Delivery',
+    items: [
+      {
+        tab: 'exports',
+        path: '/exports',
+        group: 'Delivery',
+        label: 'Exports',
+        needs: 'exports.read',
+        icon: svg(
+          <>
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M5 21h14" />
+          </>,
+        ),
+      },
+      {
+        tab: 'destinations',
+        path: '/destinations',
+        group: 'Delivery',
+        label: 'Destinations',
+        needs: 'exports.read',
+        icon: svg(
+          <>
+            <path d="M4 7h16v12H4z" />
+            <path d="M4 7l2-3h12l2 3" />
+            <path d="M9 12h6" />
+          </>,
+        ),
+      },
+    ],
+  },
+  {
     label: 'Access',
     items: [
       {

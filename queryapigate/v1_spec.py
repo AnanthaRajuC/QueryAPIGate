@@ -373,7 +373,7 @@ SCHEMAS = {
         'properties': {
             'name': {'type': 'string'}, 'description': {'type': 'string'},
             'query': {'type': 'string', 'description': 'The saved query; its published version runs.'},
-            'params': {'type': 'object', 'description': 'Values for its parameters.'},
+            'params': {'type': 'object', 'additionalProperties': True, 'description': 'Values for its parameters.'},
             'format': {'type': 'string', 'enum': ['parquet', 'csv', 'ndjson']},
             'destination': {'type': 'string'},
             'path': {'type': 'string', 'description': 'Under the destination; {name} {date} {time} {run} and '
@@ -394,7 +394,7 @@ SCHEMAS = {
         'type': 'object',
         'properties': {
             'name': {'type': 'string', 'description': 'Create only.'}, 'description': _NULLABLE_STRING,
-            'query': {'type': 'string'}, 'params': {'type': 'object', 'nullable': True},
+            'query': {'type': 'string'}, 'params': {'type': 'object', 'nullable': True, 'additionalProperties': True},
             'format': {'type': 'string', 'enum': ['parquet', 'csv', 'ndjson']}, 'destination': {'type': 'string'},
             'path': {'type': 'string'}, 'incremental': {**_INCREMENTAL, 'nullable': True},
             'skip_empty': {'type': 'boolean'}, 'timeout': {'type': 'number', 'nullable': True},

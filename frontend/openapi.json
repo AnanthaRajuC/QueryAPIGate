@@ -1278,6 +1278,7 @@
             "type": "string"
           },
           "params": {
+            "additionalProperties": true,
             "description": "Values for its parameters.",
             "type": "object"
           },
@@ -1367,6 +1368,7 @@
             "type": "string"
           },
           "params": {
+            "additionalProperties": true,
             "nullable": true,
             "type": "object"
           },
