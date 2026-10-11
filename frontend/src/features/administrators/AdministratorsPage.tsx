@@ -6,6 +6,7 @@ import { useCan, useGate, useMe } from '@/app/data';
 import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
+import { useSession } from '@/auth/session';
 import { SecretReveal } from '@/features/access/forms';
 
 // Named administrators and their admin tokens (ADR 0003), on /api/v1/administrators. Owners see everyone; every other
@@ -100,7 +101,12 @@ export function AdministratorsPage() {
       </div>
     );
   } else {
-    body = <AdministratorTable items={list.data} self={me.data.via === 'token' ? me.data.name : null} />;
+    body = (
+      <AdministratorTable
+        items={list.data}
+        self={me.data.via === 'token' || me.data.via === 'sso' ? me.data.name : null}
+      />
+    );
   }
 
   return (
@@ -166,6 +172,19 @@ function AdministratorTable({ items, self }: { items: Administrator[]; self: str
                   />
                   <span className="name">{a.name}</span>
                   {a.name === self && <span className="tag">you</span>}
+                  {a.sso?.status === 'linked' && (
+                    <span
+                      className="tag"
+                      title={`Signs in through ${a.sso.issuer ?? 'SSO'}; role from their groups`}
+                    >
+                      SSO
+                    </span>
+                  )}
+                  {a.sso?.status === 'pending' && (
+                    <span className="tag" title="Linked at their next SSO sign-in, by their verified email">
+                      SSO pending
+                    </span>
+                  )}
                 </div>
               </td>
               <td>{roleLabel(a.role)}</td>
@@ -276,6 +295,9 @@ function AdministratorFields({
   const [role, setRole] = useState<string>(existing?.role ?? 'developer');
   const [email, setEmail] = useState(existing?.email ?? '');
   const [active, setActive] = useState(existing ? existing.active : true);
+  const session = useSession();
+  const linkedSso = existing?.sso?.status === 'linked';
+  const [sso, setSso] = useState<'none' | 'pending' | 'linked'>(existing?.sso?.status ?? 'none');
 
   const save = useMutation({
     mutationFn: async () => {
@@ -284,7 +306,13 @@ function AdministratorFields({
         unwrap(
           await api.PATCH('/api/v1/administrators/{name}', {
             params: { path: { name: name! }, header: etag ? { 'If-Match': etag } : {} },
-            body: { ...fields, active },
+            body: {
+              ...(linkedSso ? { email: fields.email } : fields), // a linked one's role is their groups'
+              active,
+              ...(sso !== (existing?.sso?.status ?? 'none')
+                ? { sso: sso === 'pending' ? 'pending' : null }
+                : {}),
+            },
           }),
         );
         return null;
@@ -349,8 +377,16 @@ function AdministratorFields({
           onChange={(e) => setAdminName(e.target.value)}
         />
       </Field>
-      <Field id="a-role" label="Role" hint={ROLES.find((r) => r.value === role)?.text}>
-        <select id="a-role" value={role} onChange={(e) => setRole(e.target.value)}>
+      <Field
+        id="a-role"
+        label="Role"
+        hint={
+          linkedSso
+            ? 'From their groups at the identity provider, at every sign-in - change it there.'
+            : ROLES.find((r) => r.value === role)?.text
+        }
+      >
+        <select id="a-role" value={role} disabled={linkedSso} onChange={(e) => setRole(e.target.value)}>
           {ROLES.map((r) => (
             <option key={r.value} value={r.value}>
               {r.label}
@@ -377,6 +413,23 @@ function AdministratorFields({
           />
           Active<span className="hint">— unchecking stops every token of theirs immediately</span>
         </label>
+      )}
+      {isEdit && session.data?.sso && (
+        <Field
+          id="a-sso"
+          label="Sign-in through SSO"
+          hint={
+            sso === 'linked'
+              ? 'They sign in through the identity provider. Unlinking ends their sessions; their next SSO sign-in makes a new administrator.'
+              : 'Pending: their next SSO sign-in, with a verified email matching the one above, is bound to this account - once.'
+          }
+        >
+          <select id="a-sso" value={sso} onChange={(e) => setSso(e.target.value as typeof sso)}>
+            {linkedSso && <option value="linked">Linked</option>}
+            {!linkedSso && <option value="pending">Link at their next sign-in</option>}
+            <option value="none">{linkedSso ? 'Unlink' : 'Not through SSO'}</option>
+          </select>
+        </Field>
       )}
       {!isEdit && (
         <div className="hint">

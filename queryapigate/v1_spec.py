@@ -294,7 +294,7 @@ SCHEMAS = {
         'properties': {
             'timestamp': {'type': 'string'}, 'actor': _NULLABLE_STRING, 'action': {'type': 'string'},
             'via': {'type': 'string', 'nullable': True,
-                    'enum': ['token', 'break-glass', 'open', 'cli', 'startup', None],
+                    'enum': ['token', 'sso', 'break-glass', 'open', 'cli', 'startup', None],
                     'description': "How the actor authenticated: a personal admin token, the shared "
                                    "QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. "
                                    'Absent on entries written before 0.16.'},
@@ -309,7 +309,7 @@ SCHEMAS = {
             'name': {'type': 'string', 'nullable': True,
                      'description': "The administrator's name; 'admin' for the shared key, null on an open server."},
             'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
-            'via': {'type': 'string', 'enum': ['token', 'break-glass', 'open']},
+            'via': {'type': 'string', 'enum': ['token', 'sso', 'break-glass', 'open']},
             'capabilities': {'type': 'array', 'items': {'type': 'string'},
                              'description': 'What the role may do in this API (adminroles.py).'},
             'data_access': {'type': 'boolean', 'description': 'Whether it may run SQL and saved queries.'},

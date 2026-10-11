@@ -646,6 +646,7 @@
             "description": "How the actor authenticated: a personal admin token, the shared QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. Absent on entries written before 0.16.",
             "enum": [
               "token",
+              "sso",
               "break-glass",
               "open",
               "cli",
@@ -2175,6 +2176,7 @@
           "via": {
             "enum": [
               "token",
+              "sso",
               "break-glass",
               "open"
             ],

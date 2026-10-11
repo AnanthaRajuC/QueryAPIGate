@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { getApiKey, setApiKey } from '@/auth/apiKey';
+import { signInUrl, signOut, useSession } from '@/auth/session';
 
 import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
@@ -129,6 +130,7 @@ const ROLE_LABEL: Record<string, string> = {
 function identity(me: ReturnType<typeof useMe>['data'], key: string) {
   if (!me) return key ? 'API key applied' : 'No API key';
   if (me.via === 'token') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role}`;
+  if (me.via === 'sso') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role} via SSO`;
   if (me.via === 'break-glass') return 'Shared admin key (owner)';
   return 'No API key needed';
 }
@@ -136,6 +138,7 @@ function identity(me: ReturnType<typeof useMe>['data'], key: string) {
 function KeyPanel() {
   const queryClient = useQueryClient();
   const me = useMe();
+  const session = useSession();
   const [key, setKey] = useState(getApiKey);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -153,13 +156,44 @@ function KeyPanel() {
     void queryClient.resetQueries({ queryKey: ['me'] }).finally(() => queryClient.invalidateQueries());
   }
 
+  const sso = session.data?.sso ?? false;
+  const viaSso = !key && Boolean(session.data?.signed_in);
+
+  async function leave() {
+    const providerSignOut = await signOut();
+    // Out of the provider too, where it has a sign-out page; otherwise just back to a signed-out Console.
+    if (providerSignOut) globalThis.location.assign(providerSignOut);
+    else globalThis.location.reload();
+  }
+
   return (
     <div id="key-panel">
       <div className="kp-state">
-        <span className={`dot ${key ? 'ok' : 'off'}`} id="key-dot" />
+        <span className={`dot ${key || viaSso ? 'ok' : 'off'}`} id="key-dot" />
         <span id="key-state">{identity(me.data, key)}</span>
         <span className="scope">this tab</span>
       </div>
+      {sso && viaSso && (
+        <div className="kp-row">
+          <span className="kp-mask">{session.data?.email ?? session.data?.admin}</span>
+          <button type="button" id="sso-sign-out" onClick={() => void leave()}>
+            Sign out
+          </button>
+        </div>
+      )}
+      {sso && !viaSso && !key && (
+        <div className="kp-row">
+          <a
+            className="btn primary sm"
+            id="sso-sign-in"
+            href={signInUrl()}
+            onClick={() => setApiKey('')} // the session, not a key, from here on
+          >
+            Sign in with SSO
+          </a>
+          <span className="dim kp-or">or a token below</span>
+        </div>
+      )}
       <div className="kp-row" id="key-view" hidden={!showView}>
         <span className="kp-mask" id="key-mask">
           {'••••••••' + (key.length >= 16 ? key.slice(-4) : '')}
@@ -168,7 +202,7 @@ function KeyPanel() {
           Change
         </button>
       </div>
-      <form id="key-bar" autoComplete="off" hidden={showView} onSubmit={submit}>
+      <form id="key-bar" autoComplete="off" hidden={showView || viaSso} onSubmit={submit}>
         <input
           id="key"
           type="password"

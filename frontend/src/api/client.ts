@@ -1,15 +1,17 @@
 import createClient, { type Middleware } from 'openapi-fetch';
 
 import { getApiKey } from '@/auth/apiKey';
+import { getCsrf, loadSession } from '@/auth/session';
 
 import type { components, paths } from './schema';
 
 // Typed client generated from openapi.json (the backend's own API description - ADR 0001). Screens call the API
 // only through this client, never with hand-written URLs or hand-copied response types.
 const withApiKey: Middleware = {
-  onRequest({ request }) {
+  async onRequest({ request }) {
     const key = getApiKey();
     if (key) request.headers.set('X-API-Key', key);
+    else if ((await loadSession()).signed_in) request.headers.set('X-QAG-CSRF', getCsrf()); // auth/session.ts
     return request;
   },
 };
@@ -95,10 +97,11 @@ export function unwrapWithEtag<T>(result: Result<T>): { data: T; etag: string | 
 /** A raw request with the API key - for responses the typed client doesn't model: a saved query's own output
  * (any format, paged by headers) and the legacy management routes the Console still reads (/api_keys, /roles,
  * /collections) until their /api/v1 resources exist. */
-export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   const key = getApiKey();
   if (key) headers.set('X-API-Key', key);
+  else if ((await loadSession()).signed_in) headers.set('X-QAG-CSRF', getCsrf());
   return globalThis
     .fetch(
       new Request(new URL(path, globalThis.location?.origin ?? 'http://localhost'), { ...init, headers }),

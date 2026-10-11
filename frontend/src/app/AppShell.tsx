@@ -1,6 +1,7 @@
-import { Outlet, useLocation } from 'react-router';
+import { useEffect } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 
-import { DrawerHost, ErrorBanner, FeedbackProvider, Toasts } from './feedback';
+import { DrawerHost, ErrorBanner, FeedbackProvider, Toasts, useFeedback } from './feedback';
 import { Header } from './Header';
 import { usePrefs } from './prefs';
 import { activeItem, Sidebar } from './Sidebar';
@@ -14,6 +15,7 @@ export function AppShell() {
   const section = activeItem(useLocation().pathname);
   return (
     <FeedbackProvider>
+      <SignInRefused />
       <Sidebar />
       <div className="content">
         <Header />
@@ -28,4 +30,23 @@ export function AppShell() {
       <Toasts />
     </FeedbackProvider>
   );
+}
+
+/** A sign-in through SSO the server refused comes back as ?sso_error=...&sso_message=...: said once, in the error
+ * banner, and taken off the address so a reload doesn't say it again. */
+function SignInRefused() {
+  const { showError } = useFeedback();
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get('sso_error');
+    if (!code) return;
+    showError(`Sign-in through SSO didn't go ahead: ${params.get('sso_message') || code} (${code})`);
+    params.delete('sso_error');
+    params.delete('sso_message');
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? '?' + rest : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate, showError]);
+  return null;
 }
