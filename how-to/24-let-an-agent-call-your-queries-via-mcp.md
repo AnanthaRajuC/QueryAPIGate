@@ -61,6 +61,9 @@ whatever client you're using.
 
 ## Step 3: Connect a GUI agent (Claude Desktop, or similar)
 
+> **A hosted assistant that signs its user in, rather than taking an API key?** That's OAuth - see
+> [Let AI clients sign in through your identity provider](46-let-ai-clients-sign-in-through-your-identity-provider.md).
+
 The mechanics are the same as Step 2 - a Streamable HTTP MCP server at `http://<host>:<port>/mcp`,
 authenticated with an `X-API-Key` header - but the exact steps to add a *remote* MCP server (as opposed to
 a local stdio-based one) vary by client and change between versions, so rather than risk giving you stale
@@ -107,3 +110,5 @@ without needing an MCP client at all.
 - [Read structured MCP results properly](26-mcp-structured-results.md) - `outputSchema`/`structuredContent`.
 - [Set up your first scoped API key](13-set-up-a-scoped-api-key.md) - don't hand an agent the admin key.
 - [Check the MCP server from the Console](27-check-the-mcp-server-from-the-console.md).
+- [Let AI clients sign in through your identity provider](46-let-ai-clients-sign-in-through-your-identity-provider.md) -
+  OAuth instead of an API key.

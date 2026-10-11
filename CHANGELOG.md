@@ -50,7 +50,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   a rate-limited client with `429`. A client with a valid key or token sees no change.
 
 ### Added
-- **OAuth for the MCP server** (BACKLOG #85, [ADR 0006](documentation/adr/0006-ai-agents.md), experimental): hosted
+- **OAuth for the MCP server** (BACKLOG #85, [ADR 0006](documentation/adr/0006-ai-agents.md),
+  [guide 46](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/46-let-ai-clients-sign-in-through-your-identity-provider.md),
+  experimental): hosted
   AI clients sign in through your identity provider. `/mcp` becomes an OAuth 2.1 resource server - Protected Resource
   Metadata at `/.well-known/oauth-protected-resource`, `401`/`403` with `WWW-Authenticate` - accepting tokens that
   name its own URL as their audience (`QUERYAPIGATE_MCP_RESOURCE_URL`) from the provider in

@@ -303,6 +303,12 @@ const DOCS = [
     path: 'how-to/45-hide-personal-data-from-a-partner-or-an-ai-agent.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-46',
+    title: 'Let AI clients sign in through your identity provider',
+    path: 'how-to/46-let-ai-clients-sign-in-through-your-identity-provider.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

@@ -135,6 +135,8 @@ startup. Then:
   Client Registration where the provider supports them, or an administrator registering it by hand. QueryAPIGate
   plays no part, and issues no tokens of its own.
 
+The step by step, with Keycloak: [let AI clients sign in through your identity provider](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/46-let-ai-clients-sign-in-through-your-identity-provider.md).
+
 ## Governance: the same rules as REST
 
 Every tool call passes through the same checks a REST request does, in the same order, by calling the same code

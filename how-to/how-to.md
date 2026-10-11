@@ -68,6 +68,9 @@ guide covers one scenario end to end, and every command and response in it was r
 26. [**Read structured MCP results properly**](26-mcp-structured-results.md) - `structuredContent`, `truncated`,
     error codes.
 27. [**Check whether your MCP server is running, from the Console**](27-check-the-mcp-server-from-the-console.md).
+46. [**Let AI clients sign in through your identity provider**](46-let-ai-clients-sign-in-through-your-identity-provider.md)
+    (experimental) - OAuth for the MCP server: a hosted assistant connects as the signed-in user, with that user's
+    role and masking.
 
 ## Live updates (SSE)
 
