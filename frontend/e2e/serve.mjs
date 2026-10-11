@@ -15,6 +15,9 @@ const server = spawn(process.env.QUERYAPIGATE_BIN ?? 'queryapigate', ['serve', '
     QUERYAPIGATE_API_KEY: 'e2e-admin-key',
     QUERYAPIGATE_LOAD_EXAMPLES: '1',
     QUERYAPIGATE_EXPORT_DIRS: tmpdir(),
+    // Every test's page opens a live-events stream, and a closed page's is only noticed at the next keepalive (15 s):
+    // tests opening pages in quick succession would otherwise find the default 4 slots still held, and get a 503.
+    QUERYAPIGATE_EVENTS_MAX_STREAMS: '64',
   },
 });
 const stop = () => server.kill('SIGTERM');
