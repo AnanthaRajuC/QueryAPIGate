@@ -38,6 +38,7 @@ nav:
       - 0008 MCP write tools with approval: documentation/adr/0008-mcp-write-tools-with-approval.md
       - 0009 Key rotation: documentation/adr/0009-key-rotation.md
       - 0010 Tracing and security headers: documentation/adr/0010-tracing-and-security-headers.md
+      - 0011 Per-key limits and quotas: documentation/adr/0011-per-key-limits-and-quotas.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

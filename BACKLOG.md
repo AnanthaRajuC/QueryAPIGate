@@ -84,7 +84,8 @@ documentation. #99 workspaces only if asked for.
 11. **0.23: #92 OpenTelemetry tracing and #93 security headers**
     ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)). (Released as 0.23.0 on 2026-10-11; 0.22.1
     before it made cached responses private.)
-12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas.**
+12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas**
+    ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
     compliance documentation; #99 workspaces only on demand.
@@ -2961,7 +2962,7 @@ setting - HSTS on plain HTTP locks browsers out). Documented in DEPLOYMENT.md ne
 
 ## 94. Per-key limits on simultaneous queries, time and rows
 
-**Status: open; planned for 0.24.**
+**Status: open; planned for 0.24** ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
 
 **Impact:** a key's rate limit counts calls, not their cost: one key can fill a connection's pool with slow queries while
 staying under its limit, and everyone else sharing that connection waits. The time limit
@@ -2974,7 +2975,7 @@ across instances), `query_timeout` and `max_rows` - each narrowing the server's 
 
 ## 95. Usage quotas: calls, rows and bytes per day or month
 
-**Status: open; planned for 0.24, after #94.**
+**Status: open; planned for 0.24, after #94** ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
 
 **Impact:** partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates.
 Today the only limits are token buckets per minute or hour.
