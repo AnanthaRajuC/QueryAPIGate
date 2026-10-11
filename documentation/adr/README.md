@@ -19,7 +19,7 @@ one it supersedes.
 | [0008](0008-mcp-write-tools-with-approval.md) | Write tools over MCP, each write approved by a person before it runs | Accepted |
 | [0009](0009-key-rotation.md) | Rotating the encryption key, and reissuing an API key's secret | Accepted |
 | [0010](0010-tracing-and-security-headers.md) | Distributed tracing with OpenTelemetry, and security headers on every response | Accepted |
-| [0011](0011-per-key-limits-and-quotas.md) | Per-key limits on concurrency, time and rows, and usage quotas | Proposed |
+| [0011](0011-per-key-limits-and-quotas.md) | Per-key limits on concurrency, time and rows, and usage quotas | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

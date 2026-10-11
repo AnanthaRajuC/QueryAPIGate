@@ -375,7 +375,7 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
+| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`, `max_concurrent`, `query_timeout`, `max_rows`), `effective_limits` (each against the server's now), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
 | `POST /api/v1/api-keys` | Create one, from explicit grants or from a `role` (whose grants are copied once; no grant fields then). The response's `secret` is the only time it is ever shown, and is sent with `Cache-Control: no-store`. 409 `key_exists`, 404 `role_not_found`. |
 | `GET /api/v1/api-keys/{name}` | One key. |
 | `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. Honours `If-Match`. |
@@ -935,6 +935,31 @@ ceiling every caller already sits under, and a per-key limit still applies even 
 `QUERYAPIGATE_RATE_LIMIT` is unset entirely, since throttling one specific external caller is a reasonable ask
 on its own. Omitted (or `null`) means no limit of this key's own - `PATCH /api/v1/api-keys/<name>` with an
 explicit `{"rate_limit": null}` clears an existing one, the same pattern `expires_at` uses.
+
+### Per-key limits: concurrency, time and rows
+
+A rate limit counts calls, not their cost: twenty slow queries a minute stay under `60/minute` and can still hold
+every connection in the pool. Three more grant fields, on keys and roles ([ADR 0011](adr/0011-per-key-limits-and-quotas.md)),
+give one caller less than the server allows - each **narrows** the server's own limit, never widens it:
+
+~~~json
+{"name": "acme-corp", "queries": ["monthly_revenue"], "max_concurrent": 2, "query_timeout": 5, "max_rows": 500}
+~~~
+
+| Field | What it limits | Effective |
+|---|---|---|
+| `max_concurrent` (1-1000) | queries this caller has running at once - from when one is sent until its last row is read, so a stream or a large export holds its slot as long as it runs; REST, ad-hoc SQL and MCP tools all count, a cached response and a live `/events` stream don't | over it: `429 too_many_concurrent`, `Retry-After: 1` - not queued |
+| `query_timeout` (seconds, 0.1-86400) | how long one query may run | the smallest of this, the saved query version's own `timeout`, `?timeout=` and `QUERYAPIGATE_QUERY_TIMEOUT` |
+| `max_rows` (1-10,000,000) | rows one call returns | the smaller of this and the server's limit for that kind of call: a page is cut to it (pages of `max_rows`, `X-Has-More`), a stream stops there, an MCP result is `truncated` |
+
+- **With several instances**, `max_concurrent` is counted in Redis (`QUERYAPIGATE_REDIS_URL`), one count for all of
+  them. Each running query holds a slot with a lease - its time limit plus 30 seconds, renewed while a stream runs -
+  so a slot held by a process that died is freed when its lease ends. Without Redis, or while it's failing, each
+  process counts its own, as rate limits do.
+- **A value above the server's** is kept as granted, and the server's applies: the server's limit can change later. A
+  key's `effective_limits` (`GET /api/v1/api-keys/{name}`) says what each comes to now.
+- **Signed-in users** get their role's, counted per user. Administrators and the break-glass key have none.
+- `null` clears one (`PATCH /api/v1/api-keys/{name}` with `{"max_rows": null}`), as for `rate_limit`.
 
 ### IP allowlisting
 
@@ -1808,6 +1833,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |
 | `rate_limited` | 429 | Over `QUERYAPIGATE_RATE_LIMIT` or the key's own `rate_limit`; retry after `retry_after` seconds |
+| `too_many_concurrent` | 429 | The caller already has `max_concurrent` queries running; retry when one finishes (`Retry-After: 1`) |
 | `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
 | `driver_missing` | 500 | The database driver isn't installed on the server, or is too old (DuckDB before 1.2) |
 | `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |

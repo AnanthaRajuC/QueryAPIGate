@@ -301,6 +301,12 @@ left at its default of `0` with a direct-connecting client, or set to the actual
 getting this wrong in either direction lets a client forge its apparent IP and evade both the rate limiter
 and `allowed_ips` checks.
 
+
+A rate limit counts calls, not what they cost, so a key under its rate can still hold every pooled connection with
+slow queries and starve everyone sharing them. A key's or role's own `max_concurrent`, `query_timeout` and `max_rows`
+(ADR 0011) bound that: queries running at once (a stream counts until its last row), how long each may run, how many
+rows a call returns - each only ever narrowing the server's limits. Counted in Redis across instances, with leases so
+a crashed process can't hold a caller's slots forever; without Redis, per process, as rate limits are.
 ### CORS
 
 Cross-origin access is off unless `QUERYAPIGATE_CORS_ORIGINS` is explicitly set, and CORS is a browser-only

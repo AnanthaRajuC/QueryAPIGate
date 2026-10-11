@@ -750,7 +750,7 @@ SCHEMAS = {
     'Grants': {
         'type': 'object',
         'required': ['connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
-                     'rate_limit', 'allowed_ips', 'mask'],
+                     'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows'],
         'properties': {
             'mask': {'type': 'array', 'nullable': True, 'items': _ref('MaskRule'),
                      'description': 'Column-masking rules applied to everything this caller receives (experimental).'},
@@ -772,13 +772,22 @@ SCHEMAS = {
             'rate_limit': {'type': 'string', 'nullable': True, 'description': 'e.g. 100/minute.'},
             'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True,
                             'description': 'Addresses or CIDR ranges.'},
+            'max_concurrent': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 1000,
+                               'description': "Queries this caller may have running at once, across instances; more "
+                                              'get 429 too_many_concurrent (ADR 0011).'},
+            'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400,
+                              'description': "Seconds one query may run - narrows the server's, never widens it."},
+            'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000,
+                         'description': "Rows one call may return (a page, a stream, an MCP result) - narrows the "
+                                        "server's limit for that kind of call."},
         },
     },
     'ApiKey': {
         'allOf': [_ref('Grants'), {
             'type': 'object',
             'required': ['name', 'active', 'expires_at', 'expired', 'created_at', 'created_from_role',
-                         'last_used_at', 'previous_expires_at', 'previous_last_used_at', 'example', 'usage'],
+                         'last_used_at', 'previous_expires_at', 'previous_last_used_at', 'example', 'usage',
+                         'effective_limits'],
             'properties': {
                 'name': {'type': 'string'}, 'active': {'type': 'boolean'},
                 'expires_at': {'type': 'string', 'nullable': True,
@@ -792,6 +801,15 @@ SCHEMAS = {
                 'previous_last_used_at': {'type': 'string', 'nullable': True,
                                           'description': 'When the old secret was last used, while it still '
                                                          'works - has the caller switched? (at most once a minute)'},
+                'effective_limits': {
+                    'type': 'object', 'required': ['max_concurrent', 'query_timeout', 'max_rows'],
+                    'description': "What the key's limits come to against the server's own now: the smaller of each.",
+                    'properties': {
+                        'max_concurrent': {'type': 'integer', 'nullable': True},
+                        'query_timeout': {'type': 'number', 'nullable': True},
+                        'max_rows': {'type': 'object', 'required': ['page', 'stream', 'mcp'], 'properties': {
+                            'page': {'type': 'integer'}, 'stream': {'type': 'integer', 'nullable': True},
+                            'mcp': {'type': 'integer'}}}}},
                 'usage': {'type': 'object', 'required': ['queries', 'errors', 'rows'],
                           'properties': {'queries': {'type': 'integer'}, 'errors': {'type': 'integer'},
                                          'rows': {'type': 'integer'}}},
@@ -817,6 +835,9 @@ SCHEMAS = {
             'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True},
             'rate_limit': {'type': 'string', 'nullable': True},
             'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'max_concurrent': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 1000},
+            'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400},
+            'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000},
         },
     },
     'ApiKeyList': {
@@ -841,6 +862,9 @@ SCHEMAS = {
             'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True},
             'rate_limit': {'type': 'string', 'nullable': True},
             'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'max_concurrent': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 1000},
+            'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400},
+            'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000},
         },
     },
     'RoleList': {

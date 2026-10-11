@@ -486,6 +486,45 @@
                 "nullable": true,
                 "type": "string"
               },
+              "effective_limits": {
+                "description": "What the key's limits come to against the server's own now: the smaller of each.",
+                "properties": {
+                  "max_concurrent": {
+                    "nullable": true,
+                    "type": "integer"
+                  },
+                  "max_rows": {
+                    "properties": {
+                      "mcp": {
+                        "type": "integer"
+                      },
+                      "page": {
+                        "type": "integer"
+                      },
+                      "stream": {
+                        "nullable": true,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "page",
+                      "stream",
+                      "mcp"
+                    ],
+                    "type": "object"
+                  },
+                  "query_timeout": {
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "max_concurrent",
+                  "query_timeout",
+                  "max_rows"
+                ],
+                "type": "object"
+              },
               "example": {
                 "type": "boolean"
               },
@@ -545,7 +584,8 @@
               "previous_expires_at",
               "previous_last_used_at",
               "example",
-              "usage"
+              "usage",
+              "effective_limits"
             ],
             "type": "object"
           }
@@ -618,11 +658,29 @@
             "nullable": true,
             "type": "array"
           },
+          "max_concurrent": {
+            "maximum": 1000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "max_rows": {
+            "maximum": 10000000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
           "name": {
             "description": "Create only.",
             "type": "string"
           },
           "queries": {},
+          "query_timeout": {
+            "maximum": 86400,
+            "minimum": 0.1,
+            "nullable": true,
+            "type": "number"
+          },
           "rate_limit": {
             "nullable": true,
             "type": "string"
@@ -1878,6 +1936,20 @@
             "nullable": true,
             "type": "array"
           },
+          "max_concurrent": {
+            "description": "Queries this caller may have running at once, across instances; more get 429 too_many_concurrent (ADR 0011).",
+            "maximum": 1000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "max_rows": {
+            "description": "Rows one call may return (a page, a stream, an MCP result) - narrows the server's limit for that kind of call.",
+            "maximum": 10000000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
           "queries": {
             "description": "Saved queries runnable by name, independent of connections; an object entry can allow writes through that one query.",
             "oneOf": [
@@ -1913,6 +1985,13 @@
               }
             ]
           },
+          "query_timeout": {
+            "description": "Seconds one query may run - narrows the server's, never widens it.",
+            "maximum": 86400,
+            "minimum": 0.1,
+            "nullable": true,
+            "type": "number"
+          },
           "rate_limit": {
             "description": "e.g. 100/minute.",
             "nullable": true,
@@ -1928,7 +2007,10 @@
           "allowed_tables",
           "rate_limit",
           "allowed_ips",
-          "mask"
+          "mask",
+          "max_concurrent",
+          "query_timeout",
+          "max_rows"
         ],
         "type": "object"
       },
@@ -2811,11 +2893,29 @@
             "nullable": true,
             "type": "array"
           },
+          "max_concurrent": {
+            "maximum": 1000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "max_rows": {
+            "maximum": 10000000,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
           "name": {
             "description": "Create only.",
             "type": "string"
           },
           "queries": {},
+          "query_timeout": {
+            "maximum": 86400,
+            "minimum": 0.1,
+            "nullable": true,
+            "type": "number"
+          },
           "rate_limit": {
             "nullable": true,
             "type": "string"

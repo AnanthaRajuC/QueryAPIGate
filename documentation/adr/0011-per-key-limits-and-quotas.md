@@ -1,6 +1,6 @@
 # ADR 0011: Per-key limits on concurrency, time and rows, and usage quotas
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Backlog:** #94 (per-key limits on simultaneous queries, time and rows) and #95 (usage quotas: calls and rows per
   day or month).

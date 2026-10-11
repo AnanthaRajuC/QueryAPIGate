@@ -34,6 +34,7 @@ from . import (
     history,
     instances,
     jwtauth,
+    limits,
     logging_setup,
     masking,
     metrics,
@@ -413,6 +414,7 @@ def get_pagination():
         raise ApiError('page and page_size must be positive', code='invalid_paging')
     if page_size > config.max_page_size():
         raise ApiError(f'page_size must not exceed {config.max_page_size()}', code='invalid_paging')
+    page_size = limits.rows(page_size)  # the caller's own max_rows, if smaller: pages of that size (ADR 0011)
     return page_size, (page - 1) * page_size, page
 
 
@@ -493,8 +495,13 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
 
         def record(finished):
             _record_adhoc_and_broadcast(sql, params, connection_name, finished, broadcaster)
-    rows = _record_stream_history(rows, entry, record)
-    return stream_response(output_format, columns, rows, filename)
+    opened = rows
+    response = stream_response(output_format, columns, _record_stream_history(rows, entry, record), filename)
+    # A response closed before its first chunk - the client gone at once - closes a generator that never started,
+    # which runs none of its code: the rows' own close() is what ends the query, returns its connection and frees
+    # its slot in the caller's max_concurrent. Idempotent, so a stream read to its end is unaffected.
+    response.call_on_close(opened.close)
+    return response
 
 
 def masked_entry(fired):

@@ -4,7 +4,7 @@ import logging
 import re
 import time
 
-from . import config, masking, metrics, mongotools, store, tracing
+from . import config, limits, masking, metrics, mongotools, store, tracing
 from .errors import ApiError
 from .formats import ResultSetDTO
 from .pool import get_pool
@@ -74,6 +74,8 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     # The caller's column-masking rules (masking.py): traced before the query runs, so a query masking can't follow
     # is refused without touching the database.
     masked = masking.prepare(mask, sql, connection_name, details['db'], database)
+    # The caller's own limits (limits.py, ADR 0011), within the server's
+    timeout, limit = limits.timeout(timeout), limits.rows(limit)
     log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
              connection_name, details['db'], limit, offset, timeout, sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
@@ -82,7 +84,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     status = 'error'
     metrics.inc_active_query()
     try:
-        with _db_span(details, sql, connection_name) as span:
+        with limits.acquire(timeout), _db_span(details, sql, connection_name) as span:
             columns, rows = RUNNERS[details['db']](details, sql, params, limit, offset, not effective_allow_writes,
                                                  timeout, get_pool())
             tracing.set_attributes(span, db__response__returned_rows=min(len(rows), limit))
@@ -135,6 +137,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     if details['db'] != 'mongo':
         raise ApiError(f"'{connection_name}' is not a mongo connection", code='wrong_connection_type')
     filter_doc = mongotools.validate_filter(filter_doc or {})
+    timeout, limit = limits.timeout(timeout), limits.rows(limit)
     if params:
         filter_doc = mongotools.fill_placeholders(filter_doc, params)
     log.info('Finding on %s (mongo), collection=%s limit=%s offset=%s timeout=%s',
@@ -145,8 +148,8 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     status = 'error'
     metrics.inc_active_query()
     try:
-        with tracing.span(f'find {connection_name}', 'client',
-                          tracing.db_attributes(details, 'find', connection_name)) as span:
+        with limits.acquire(timeout), tracing.span(f'find {connection_name}', 'client',
+                                                   tracing.db_attributes(details, 'find', connection_name)) as span:
             docs = mongo_find(details, collection, filter_doc, projection, sort, limit, offset, timeout, get_pool())
             tracing.set_attributes(span, db__collection__name=collection,
                                    db__response__returned_rows=min(len(docs), limit))
@@ -318,13 +321,14 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     # Only rows a RETURNING clause gives back can carry a masked value; a write without one returns none.
     returns_rows = re.search(r'\bRETURNING\b', sql, re.IGNORECASE) is not None
     masked = masking.prepare(mask, sql, connection_name, details['db'], None) if mask and returns_rows else None
+    timeout = limits.timeout(timeout)
     log.info('Agent write on %s (%s), at most %s rows: %s', connection_name, details['db'], max_affected_rows, sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     started = time.monotonic()
     status = 'error'
     metrics.inc_active_query()
     try:
-        with _db_span(details, sql, connection_name) as span:
+        with limits.acquire(timeout), _db_span(details, sql, connection_name) as span:
             columns, rows, affected = WRITE_RUNNERS[details['db']](details, sql, params, max_affected_rows, timeout,
                                                                    get_pool())
             tracing.set_attributes(span, db__response__affected_rows=affected)
@@ -368,6 +372,9 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     details = _sql_connection(connection_name)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables)
     masked = masking.prepare(mask, sql, connection_name, details['db'])  # before the query runs, as execute_sql's
+    timeout = limits.timeout(timeout)
+    row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
+    slot = limits.acquire(timeout)  # held until the last row is read - _drain() or _Rows.close() releases it
     log.info('Streaming from %s (%s): %s', connection_name, details['db'], sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     status = 'error'
@@ -393,7 +400,8 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
         if status == 'error':
             metrics.observe_stream(connection_name, details['db'], status, key_name)
             metrics.dec_active_query()
-    rows = _Rows(stream, connection_name, details['db'], key_name)
+            slot.release()
+    rows = _Rows(stream, connection_name, details['db'], key_name, slot, row_limit)
     if masked is None:
         rows.masked = []
         return columns, rows
@@ -412,10 +420,11 @@ class _Rows:
     export whose destination failed, a client gone before the first chunk - used to leave the query counted as
     active and its connection checked out until garbage collection."""
 
-    def __init__(self, stream, connection_name, dialect, key_name):
+    def __init__(self, stream, connection_name, dialect, key_name, slot=limits.NO_SLOT, row_limit=None):
         self._stream = stream  # already primed by stream_sql(): its own cleanup runs when it is closed
         self._where = (connection_name, dialect, key_name)
-        self._drain = _drain(stream, connection_name, dialect, key_name)
+        self._slot = slot
+        self._drain = _drain(stream, connection_name, dialect, key_name, slot, row_limit)
         self._started = False
         self._closed = False
 
@@ -434,12 +443,13 @@ class _Rows:
             self._drain.close()  # _drain's own GeneratorExit handling does the bookkeeping
             return
         self._stream.close()  # releases the connection (runners._make_stream_runner)
+        self._slot.release()
         connection_name, dialect, key_name = self._where
         metrics.observe_rows(connection_name, dialect, key_name, 0)
         metrics.dec_active_query()
 
 
-def _drain(rows, connection_name, dialect, key_name):
+def _drain(rows, connection_name, dialect, key_name, slot=limits.NO_SLOT, row_limit=None):
     """Wraps the row generator stream_sql() returns: records the export's final status once it is fully
     consumed (success) or fails partway through (error - client disconnects are not failures, so
     GeneratorExit is excluded), and makes sure a mid-stream failure lands in the log. Once the response has
@@ -458,12 +468,13 @@ def _drain(rows, connection_name, dialect, key_name):
     GeneratorExit-based cleanup a client disconnecting mid-stream already triggers (see
     runners._make_stream_runner), just initiated from here instead of by the client closing the response.
     """
-    limit = config.stream_max_rows()
+    limit = row_limit  # QUERYAPIGATE_STREAM_MAX_ROWS, or the caller's smaller max_rows - read by stream_sql()
     truncated = False
     count = 0
     try:
         for row in rows:
             count += 1
+            slot.renew()
             yield row
             if limit is not None and count >= limit:
                 truncated = True
@@ -481,12 +492,14 @@ def _drain(rows, connection_name, dialect, key_name):
     else:
         if truncated:
             rows.close()
-            log.warning('Streaming from %s truncated at %s rows (QUERYAPIGATE_STREAM_MAX_ROWS)',
+            log.warning('Streaming from %s truncated at %s rows (QUERYAPIGATE_STREAM_MAX_ROWS or max_rows)',
                        connection_name, limit,
                        extra={'connection': connection_name, 'dialect': dialect, 'row_limit': limit})
         metrics.observe_stream(connection_name, dialect, 'truncated' if truncated else 'success', key_name)
         metrics.observe_rows(connection_name, dialect, key_name, count)
         metrics.dec_active_query()
+    finally:
+        slot.release()  # however it ended: the last row read, a failure, the client gone, the row limit
 
 
 def timed(func, *args, **kwargs):

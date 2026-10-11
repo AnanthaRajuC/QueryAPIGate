@@ -52,6 +52,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Per-key limits on concurrency, time and rows** (BACKLOG #94,
+  [ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)): `max_concurrent`, `query_timeout` and `max_rows`
+  on keys and roles, each narrowing the server's own limit, never widening it, on every front door - REST, ad-hoc
+  SQL, MCP tools. `max_concurrent` counts queries running at once, a stream until its last row is read, across
+  instances through Redis, with leases so a dead process's slots free themselves; over it, `429
+  too_many_concurrent`. A key shows its `effective_limits`. See
+  [Per-key limits](documentation/API.md#per-key-limits-concurrency-time-and-rows).
+
+### Fixed
+- **A streamed response closed before its first chunk** - the client gone at once - left its query counted as
+  active and its database connection checked out until garbage collection: closing a generator that never started
+  runs none of its code. The response now closes the rows itself.
+
 ## [0.23.0] - 2026-10-11
 
 Seeing inside, and hardened at the edge: QueryAPIGate's spans in your traces - from the app's request through the
