@@ -148,6 +148,14 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
       'or more in the last hour (counted by this server since it started).',
   },
   {
+    id: 'agents',
+    label: 'Agents',
+    kinds: ['agent_unusual_volume'],
+    about:
+      'AI agents that read at least QUERYAPIGATE_ALERT_AGENT_ROWS rows (default 10,000) over MCP in the last hour, ' +
+      'ten times their own usual hour.',
+  },
+  {
     id: 'open-access',
     label: 'Open access',
     kinds: ['open_server'],

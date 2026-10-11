@@ -66,11 +66,18 @@ FEATURES: dict[str, dict[str, Any]] = {
                        ('post', '/api/v1/connections/{name}/descriptions/import')),
         'docs': ('documentation/API.md', 'Descriptions'),
     },
+    'agent_usage': {
+        'name': 'Agent usage',
+        'why': 'new in 0.18 - what is summarised per agent may change as it is used (ADR 0006)',
+        'operations': (('get', '/api/v1/usage/agents'),),
+        'docs': ('documentation/API.md', 'Agent usage'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',
         'operations': (('get', '/api/v1/alerts'),),
-        'settings': ('QUERYAPIGATE_ALERT_ERROR_RATE', 'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS'),
+        'settings': ('QUERYAPIGATE_ALERT_ERROR_RATE', 'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS',
+                     'QUERYAPIGATE_ALERT_AGENT_ROWS'),
         'docs': ('documentation/API.md', 'Alerts'),
     },
 }

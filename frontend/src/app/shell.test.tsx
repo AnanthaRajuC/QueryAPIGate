@@ -36,6 +36,7 @@ describe('Console shell - the classic frame', () => {
       'Administrators',
       'Alerts',
       'Metrics',
+      'Agents',
       'Audit log',
     ]);
     await waitFor(() =>
@@ -69,6 +70,7 @@ describe('Console shell - the classic frame', () => {
       'Administrators',
       'Alerts',
       'Metrics',
+      'Agents',
       'Audit log',
     ]);
     expect(screen.queryByRole('tab', { name: /Settings/ })).toBeNull();

@@ -214,8 +214,43 @@ SCHEMAS = {
             'since': {'type': 'string', 'nullable': True,
                       'description': 'When the condition began or will begin, where known (server time).'},
             'target': {'type': 'object', 'nullable': True, 'required': ['type', 'name'], 'properties': {
-                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export']},
+                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export', 'agent']},
                 'name': {'type': 'string'}}},
+        },
+    },
+    'AgentUsage': {
+        'type': 'object',
+        'required': ['agent', 'calls', 'rows', 'errors', 'masked_calls', 'first_seen', 'last_seen', 'connections',
+                     'queries', 'adhoc_calls', 'refusals', 'top_statements'],
+        'properties': {
+            'agent': {'type': 'string', 'description': 'The caller on the MCP server: a key name, or jwt:<user>.'},
+            'calls': {'type': 'integer'}, 'rows': {'type': 'integer', 'description': 'Rows returned, all calls.'},
+            'errors': {'type': 'integer', 'description': 'Calls that failed or were refused.'},
+            'masked_calls': {'type': 'integer', 'description': 'Calls whose result masking changed.'},
+            'first_seen': {'type': 'string'}, 'last_seen': {'type': 'string'},
+            'connections': {'type': 'array', 'items': {'type': 'string'}},
+            'queries': {'type': 'object', 'additionalProperties': {'type': 'integer'},
+                        'description': 'Saved queries run, with how many times, most first.'},
+            'adhoc_calls': {'type': 'integer', 'description': 'execute_sql calls.'},
+            'refusals': {'type': 'object', 'additionalProperties': {'type': 'integer'},
+                         'description': 'Failures by error code, most first - table_not_allowed, '
+                                        'mask_unresolvable, read_only, ...'},
+            'top_statements': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['sql', 'sql_sha256', 'count', 'rows', 'errors'],
+                'properties': {'sql': _NULLABLE_STRING, 'sql_sha256': _NULLABLE_STRING,
+                               'count': {'type': 'integer'}, 'rows': {'type': 'integer'},
+                               'errors': {'type': 'integer'}}},
+                'description': 'Its most frequent ad-hoc statements - by text, or by hash when history keeps only '
+                               'a hash.'},
+        },
+    },
+    'AgentUsageList': {
+        'type': 'object', 'required': ['since', 'until', 'sample_rate', 'truncated', 'items'],
+        'properties': {
+            'since': {'type': 'string'}, 'until': {'type': 'string'},
+            'sample_rate': {'type': 'number', 'description': 'Below 1, successful runs are a sample of them.'},
+            'truncated': {'type': 'boolean', 'description': 'More runs than one summary reads (100,000).'},
+            'items': {'type': 'array', 'items': _ref('AgentUsage')},
         },
     },
     'AlertList': {
@@ -882,6 +917,16 @@ PATHS = {
     '/api/v1/alerts': {
         'get': _op('What needs attention now - expiring keys, failing connections, slow or failing queries, '
                    'rate limits being hit - most severe first', {'200': _ok(_ref('AlertList'))}),
+    },
+    '/api/v1/usage/agents': {
+        'get': _op('What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements',
+                   {'200': _ok(_ref('AgentUsageList'))}, parameters=[
+                       {'name': 'since', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                        'description': 'A date or a time, inclusive; default 24 hours ago.'},
+                       {'name': 'until', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                        'description': 'A date or a time, exclusive; default now.'},
+                       {'name': 'hours', 'in': 'query', 'required': False, 'schema': {'type': 'integer'},
+                        'description': "Instead of since: the last this many hours, by the server's clock."}]),
     },
     '/api/v1/instances': {
         'get': _op('The processes using this store now - serve, mcp and events, seen in the last 90 seconds - and '

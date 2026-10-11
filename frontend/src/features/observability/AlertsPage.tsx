@@ -23,6 +23,8 @@ const OPEN_LABEL: Record<string, string> = {
   query: 'Open query',
   connection: 'Open connections',
   settings: 'Open settings',
+  export: 'Open exports',
+  agent: 'Open agents',
 };
 
 function useOpen() {
@@ -31,6 +33,8 @@ function useOpen() {
     if (target.type === 'query') navigate(`/queries/${encodeURIComponent(target.name)}`);
     else if (target.type === 'key') navigate('/api-keys');
     else if (target.type === 'connection') navigate('/connections');
+    else if (target.type === 'export') navigate('/exports');
+    else if (target.type === 'agent') navigate('/agents');
     else {
       rememberSection(target.name);
       navigate('/settings');

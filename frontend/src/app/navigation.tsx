@@ -233,6 +233,21 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ),
       },
       {
+        tab: 'agents',
+        needs: 'observe',
+        path: '/agents',
+        group: 'Observability',
+        label: 'Agents',
+        icon: svg(
+          <>
+            <rect x="5" y="8" width="14" height="11" rx="2" />
+            <path d="M12 4v4" />
+            <circle cx="9.5" cy="13" r="1" />
+            <circle cx="14.5" cy="13" r="1" />
+          </>,
+        ),
+      },
+      {
         tab: 'auditlog',
         needs: 'observe',
         path: '/audit-log',

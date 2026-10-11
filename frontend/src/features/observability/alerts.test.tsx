@@ -72,6 +72,7 @@ describe('Alerts', () => {
         'Query errors0',
         'Slow queries1',
         'Rate limits0',
+        'Agents0',
         'Open access0',
         'Run history0',
       ]),

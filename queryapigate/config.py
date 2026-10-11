@@ -347,6 +347,9 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS must be a whole number of days (0 turns the check off)')
+    raw = os.environ.get('QUERYAPIGATE_ALERT_AGENT_ROWS', '').strip()
+    if raw and not raw.isdigit():
+        raise ValueError('QUERYAPIGATE_ALERT_AGENT_ROWS must be a whole number of rows (0 turns the check off)')
     for entry in os.environ.get('QUERYAPIGATE_EXPORT_DIRS', '').split(','):
         if entry.strip() and not os.path.isabs(entry.strip()):
             raise ValueError(f"QUERYAPIGATE_EXPORT_DIRS must be absolute folder paths; '{entry.strip()}' is relative")
@@ -729,6 +732,16 @@ def alert_error_rate():
     return int(raw) if raw else DEFAULT_ALERT_ERROR_RATE
 
 
+DEFAULT_ALERT_AGENT_ROWS = 10_000
+
+
+def alert_agent_rows():
+    """QUERYAPIGATE_ALERT_AGENT_ROWS: rows an AI agent may read over MCP in an hour before a sudden rise is an alert
+    (agent_unusual_volume) - below it, nothing fires however unusual. Default 10000; 0 turns the check off."""
+    raw = os.environ.get('QUERYAPIGATE_ALERT_AGENT_ROWS', '').strip()
+    return int(raw) if raw else DEFAULT_ALERT_AGENT_ROWS
+
+
 def alert_key_unused_days():
     """QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS: days an active API key may go unused before it is an alert - an unused
     credential is risk without benefit. Default 90; 0 turns the check off. Validated at startup."""
@@ -898,7 +911,10 @@ def describe_settings():
                 f'{alert_error_rate()}%' if alert_error_rate() else 'off'),
             row('Unused key', 'Days an active API key may go unused before it is an alert. 0 turns the check off.',
                 'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS',
-                f'{alert_key_unused_days()} days' if alert_key_unused_days() else 'off')]},
+                f'{alert_key_unused_days()} days' if alert_key_unused_days() else 'off'),
+            row('Agent volume', 'Rows an AI agent may read over MCP in an hour before a sudden rise is an alert. 0 '
+                'turns the check off.', 'QUERYAPIGATE_ALERT_AGENT_ROWS',
+                f'{alert_agent_rows():,} rows' if alert_agent_rows() else 'off')]},
         {'id': 'mcp', 'title': 'MCP server',
          'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process this one doesn\'t '
              'start. "Check now" tries its port on this host.', 'rows': [

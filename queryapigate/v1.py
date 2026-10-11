@@ -28,6 +28,7 @@ from . import (
     schema,
     sqlflow,
     store,
+    usage,
 )
 from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
@@ -635,6 +636,12 @@ def revoke_admin_token(name, token_id):
 def list_alerts():
     """What needs an admin's attention now (alerts.py), worked out afresh each time."""
     return jsonify({'items': alerts.collect(), 'checked_at': store.now()}), 200
+
+
+@bp.route('/usage/agents', methods=['GET'])
+def agent_usage():
+    """What each AI agent did over MCP (usage.py), from run history."""
+    return jsonify(usage.agents(request.args.get('since'), request.args.get('until'), request.args.get('hours'))), 200
 
 
 @bp.route('/instances', methods=['GET'])

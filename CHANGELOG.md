@@ -24,8 +24,8 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
 `gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
 (`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), OAuth for the MCP server
-(`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), and alerts
-(`GET /api/v1/alerts`). The
+(`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
+(`GET /api/v1/usage/agents`), and alerts (`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -69,6 +69,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   dictionary MCP resource per connection - only for the tables a caller can reach, marking the columns it gets
   masked. A saved query describes its result columns (`columns`), in its MCP tool's output schema.
   See [Descriptions](documentation/API.md#descriptions).
+- **Agent usage** (BACKLOG #87, experimental): `GET /api/v1/usage/agents` and the Console's **Agents** screen - per AI
+  agent on the MCP server, its calls, rows read, refusals by code, how often masking applied, the saved queries it ran
+  and its most frequent ad-hoc statements, from run history. A new alert, `agent_unusual_volume`, warns when an agent
+  reads ten times its usual hourly rows, past `QUERYAPIGATE_ALERT_AGENT_ROWS` (default 10,000). See
+  [Agent usage](documentation/API.md#agent-usage).
 
 ## [0.17.0] - 2026-10-12
 

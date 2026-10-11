@@ -189,6 +189,139 @@
         ],
         "type": "object"
       },
+      "AgentUsage": {
+        "properties": {
+          "adhoc_calls": {
+            "description": "execute_sql calls.",
+            "type": "integer"
+          },
+          "agent": {
+            "description": "The caller on the MCP server: a key name, or jwt:<user>.",
+            "type": "string"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "connections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "errors": {
+            "description": "Calls that failed or were refused.",
+            "type": "integer"
+          },
+          "first_seen": {
+            "type": "string"
+          },
+          "last_seen": {
+            "type": "string"
+          },
+          "masked_calls": {
+            "description": "Calls whose result masking changed.",
+            "type": "integer"
+          },
+          "queries": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Saved queries run, with how many times, most first.",
+            "type": "object"
+          },
+          "refusals": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failures by error code, most first - table_not_allowed, mask_unresolvable, read_only, ...",
+            "type": "object"
+          },
+          "rows": {
+            "description": "Rows returned, all calls.",
+            "type": "integer"
+          },
+          "top_statements": {
+            "description": "Its most frequent ad-hoc statements - by text, or by hash when history keeps only a hash.",
+            "items": {
+              "properties": {
+                "count": {
+                  "type": "integer"
+                },
+                "errors": {
+                  "type": "integer"
+                },
+                "rows": {
+                  "type": "integer"
+                },
+                "sql": {
+                  "nullable": true,
+                  "type": "string"
+                },
+                "sql_sha256": {
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sql",
+                "sql_sha256",
+                "count",
+                "rows",
+                "errors"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "calls",
+          "rows",
+          "errors",
+          "masked_calls",
+          "first_seen",
+          "last_seen",
+          "connections",
+          "queries",
+          "adhoc_calls",
+          "refusals",
+          "top_statements"
+        ],
+        "type": "object"
+      },
+      "AgentUsageList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentUsage"
+            },
+            "type": "array"
+          },
+          "sample_rate": {
+            "description": "Below 1, successful runs are a sample of them.",
+            "type": "number"
+          },
+          "since": {
+            "type": "string"
+          },
+          "truncated": {
+            "description": "More runs than one summary reads (100,000).",
+            "type": "boolean"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "sample_rate",
+          "truncated",
+          "items"
+        ],
+        "type": "object"
+      },
       "Alert": {
         "properties": {
           "detail": {
@@ -216,7 +349,8 @@
               "instances_versions_differ",
               "rate_limits_not_shared",
               "export_failing",
-              "key_unused"
+              "key_unused",
+              "agent_unusual_volume"
             ],
             "type": "string"
           },
@@ -245,7 +379,8 @@
                   "query",
                   "connection",
                   "settings",
-                  "export"
+                  "export",
+                  "agent"
                 ],
                 "type": "string"
               }
@@ -9041,6 +9176,97 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/usage/agents": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "description": "A date or a time, inclusive; default 24 hours ago.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A date or a time, exclusive; default now.",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Instead of since: the last this many hours, by the server's clock.",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentUsageList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/catalog": {

@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import admins, apikeys, config, db, history, instances, metrics, ratelimit
+from . import admins, apikeys, config, db, history, instances, metrics, ratelimit, usage
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -56,7 +56,8 @@ def note_rate_limited(kind, who):
 # Every kind of alert, the one list: the OpenAPI enum is built from it and tests/test_alerts.py checks API.md's table.
 KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
-         'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused')
+         'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
+         'agent_unusual_volume')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -161,7 +162,19 @@ def _runs(now):
     runs = _recent_runs(now)
     # An export's run can fail at its destination, which says nothing about the query or its connection.
     served = [run for run in runs if run[2].get('transport') != 'export']
-    return [*_failing_connections(served, now), *_queries(served, now), *_exports(runs)]
+    return [*_failing_connections(served, now), *_queries(served, now), *_exports(runs), *_agents(runs, now)]
+
+
+def _agents(runs, now):
+    """An AI agent suddenly reading far more than it usually does - a loop gone wrong, or someone pulling data out."""
+    found = []
+    for name, rows, average in usage.unusual_volume(runs, now, config.alert_agent_rows()):
+        usual = f'about {round(average):,} an hour' if average >= 1 else 'next to nothing before'
+        found.append(_alert('warning', 'agent_unusual_volume', name, f"Agent '{name}' is reading far more than usual",
+                            f'{rows:,} rows over MCP in the last hour, against {usual}. Check what it is asking on '
+                            'the Agents screen; narrow its grant, or lower its rate_limit, if it shouldn\'t.',
+                            {'type': 'agent', 'name': name}, (now - timedelta(hours=1)).strftime(history.TIME_FORMAT)))
+    return found
 
 
 def _exports(runs):

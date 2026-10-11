@@ -1296,16 +1296,54 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
+| `agent_unusual_volume` | warning | An AI agent read at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows over MCP in the last hour, and ten times its own average hour - see [Agent usage](#agent-usage) |
 
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `QUERYAPIGATE_ALERT_ERROR_RATE` | `20` | Percentage of a saved query's recent runs that may fail before `query_errors`. `0` turns it off. |
 | `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` | `90` | Days an active key may go unused before `key_unused`. `0` turns it off. |
+| `QUERYAPIGATE_ALERT_AGENT_ROWS` | `10000` | Rows an agent may read over MCP in an hour before a sudden rise is `agent_unusual_volume`. `0` turns it off. |
 
 The history checks read the newest 5,000 runs, so their cost doesn't grow with how much history is kept. Rate-limit
 and history-write counts are this process's own, since it started (like `/metrics`): with several instances, each
 reports its share. For production paging, alert on `/metrics` from Prometheus too - this list is for the people
 running QueryAPIGate day to day, not a replacement for an on-call alerting system.
+
+## Agent usage
+
+> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); what is summarised per agent may change in any
+> minor release, always noted in the changelog.
+
+What each AI agent did over MCP - for "what is this agent asking, and is it trying things it shouldn't?":
+
+```bash
+curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key: $TOKEN"
+```
+
+```json
+{"since": "2026-10-10", "until": "2026-10-11 10:42:07", "sample_rate": 1.0, "truncated": false, "items": [
+  {"agent": "jwt:7222e50f-b640-4e00-ab30-da4c0c9c9261", "calls": 41, "rows": 1830, "errors": 3, "masked_calls": 12,
+   "first_seen": "2026-10-10 09:12:44", "last_seen": "2026-10-11 10:40:03", "connections": ["examples"],
+   "queries": {"example_top_films": 20}, "adhoc_calls": 21,
+   "refusals": {"mask_unresolvable": 2, "table_not_allowed": 1},
+   "top_statements": [{"sql": "SELECT first_name, email FROM customer LIMIT 2", "sql_sha256": null,
+                       "count": 9, "rows": 18, "errors": 0}, ...]}]}
+```
+
+- An **agent** is a caller on the MCP server: an API key, or a signed-in user (`jwt:<sub>`). `since` (inclusive) and
+  `until` (exclusive) take a date or a time, in the server's time; or `hours=6` for the last six hours. The default is
+  the last 24 hours.
+- **`refusals`** counts failures by [error code](#errors): `table_not_allowed`, `mask_unresolvable` or `read_only`
+  are an agent trying what its grant doesn't allow. **`masked_calls`** are the calls masking changed.
+- **`top_statements`** are its most frequent ad-hoc statements, whitespace aside - by text, or by `sql_sha256` when
+  `QUERYAPIGATE_HISTORY_ADHOC_SQL` is `hash` (none with `none`).
+- It's worked out from [run history](#run-history), so it holds what history holds: calls refused before they ran
+  (no credential, a rate limit) are only in `/metrics`; with `QUERYAPIGATE_HISTORY_SAMPLE_RATE` below 1, successful
+  runs are a sample (`sample_rate` says so; failures are always kept); and at most 100,000 runs are read for one
+  summary (`truncated`).
+- **`agent_unusual_volume`** ([Alerts](#alerts)) warns when an agent reads at least `QUERYAPIGATE_ALERT_AGENT_ROWS`
+  (default 10,000) rows in an hour, and ten times its own average hour over the runs the alerts read.
+- Who may: every administrator role (`observe`). In the Console: **Observability → Agents**.
 
 ## Instances
 
