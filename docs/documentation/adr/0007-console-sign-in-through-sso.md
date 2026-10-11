@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0007-console-sign-in-through-sso.md"

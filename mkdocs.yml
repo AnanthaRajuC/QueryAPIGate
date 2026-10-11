@@ -34,6 +34,7 @@ nav:
       - 0004 Exports to object storage: documentation/adr/0004-exports-to-object-storage.md
       - 0005 Column masking: documentation/adr/0005-column-masking.md
       - 0006 AI agents: documentation/adr/0006-ai-agents.md
+      - 0007 Console sign-in through SSO: documentation/adr/0007-console-sign-in-through-sso.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md
