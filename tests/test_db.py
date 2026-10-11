@@ -387,12 +387,19 @@ class MigrateToPostgresTests(unittest.TestCase):
         with mock.patch.object(config, 'database_url', return_value=None), \
                 mock.patch.object(db, '_target', return_value=('sqlite', self.sqlite_path)):
             db.close()
-            write_connections({'lite': {'db': 'sqlite', 'database': self.sqlite_path, 'active': True}})
+            # The queries' data lives in a file of its own: a connection may not open the store itself.
+            data_path = os.path.join(self.tmp.name, 'data.db')
+            data = sqlite3.connect(data_path)
+            data.execute('CREATE TABLE t (name TEXT)')
+            data.executemany('INSERT INTO t VALUES (?)', [('one',), ('two',)])
+            data.commit()
+            data.close()
+            write_connections({'lite': {'db': 'sqlite', 'database': data_path, 'active': True}})
             client, admin = create_app().test_client(), {'X-API-Key': 'admin'}
             for name in ('b_query', 'a_query'):
                 save_query(client, headers=admin, body={
                     'author': 'a', 'description': 'd', 'filename': name, 'connection_name': 'lite',
-                    'sql_query': 'SELECT name FROM roles ORDER BY name', 'collection': 'reports'})
+                    'sql_query': 'SELECT name FROM t ORDER BY name', 'collection': 'reports'})
             client.post('/api/v1/api-keys', headers=admin, json={'name': 'partner', 'connections': ['lite']})
             client.post('/api/v1/roles', headers=admin, json={'name': 'reader', 'connections': ['lite']})
             for _ in range(3):

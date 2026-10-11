@@ -61,8 +61,10 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
    0.14 deprecated, removed. (Released as 0.15.0 on 2026-10-04.)
 4. **0.16: #84 Phase 1**, admin identity - the last contract change before the freeze; with #81 Parquet output and
    automatic views over files. (Released as 0.16.0 on 2026-10-06.)
-5. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-6. **1.0.0.**
+5. **0.17: #89 exports to object storage and #63 column masking**, both experimental - delivering data to partners
+   and pipelines. (Released as 0.17.0 on 2026-10-12.)
+6. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+7. **1.0.0.**
 
 ## 1. Per-key API permissions
 

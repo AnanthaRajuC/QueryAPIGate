@@ -44,6 +44,26 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-12
+
+Delivering data to partners and pipelines: a saved query can be exported to a bucket or folder as Parquet, CSV or
+NDJSON - incrementally, a file of only what changed each run - and column masking hides personal data from the
+callers you hand it to, traced through the SQL so a renamed column doesn't slip past. Both are experimental. A
+security review before release keeps exports, connections and the store out of an administrator's reach, and three
+fixes reach back into 0.16: Parquet output in steady memory, a stream closed before its first row, and switching keys
+in the Console.
+
+### Upgrading from 0.16
+Nothing has to change for what you run today; check two things if they apply to you.
+- **Schema 8** adds three tables (`destinations`, `exports`, `server_secrets`); nothing existing changes. A 0.16
+  instance still running keeps working against the upgraded store, but can't be restarted on it - upgrade every
+  instance.
+- **A `${VAR}` reference to a `QUERYAPIGATE_*` setting** in a connection is now refused - the connection fails with
+  `connection_misconfigured` until it refers to a variable of its own (one that isn't a server setting).
+- **A connection that opens the server's own `queryapigate.db`** - by `database`, or a DuckDB `allowed_paths` folder
+  containing it - is now refused (`store_not_allowed`).
+- **Local-folder export destinations** need `QUERYAPIGATE_EXPORT_DIRS`; object-storage destinations need nothing.
+
 ### Added
 - **Destinations** (BACKLOG #89, [ADR 0004](documentation/adr/0004-exports-to-object-storage.md),
   [guide 44](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/44-deliver-a-daily-file-to-a-partners-bucket.md),
@@ -93,8 +113,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **The OpenAPI alert `kind` enum lists every alert** - `break_glass_used` (0.16) and the instance and Redis alerts
   were missing from it. `alerts.KINDS` is now the one list, checked against the docs.
 
-### Upgrading
-- **Schema 8** adds three tables (`destinations`, `exports`, `server_secrets`); nothing existing changes.
+### Security
+- **Exports, connections and the store are kept apart from an administrator's reach** (the 0.17 pre-release review,
+  now that `admin` is a role below `owner`): a local-folder export destination is off unless the operator sets
+  `QUERYAPIGATE_EXPORT_DIRS`, must sit inside a folder listed there, and is never the server's home - so no export can
+  write over the store or elsewhere on the host; a connection can't be pointed at the server's own `queryapigate.db`
+  (`store_not_allowed`), by `database` or by a DuckDB `allowed_paths` folder containing it; and a `${VAR}` reference
+  in a connection or destination can't name one of the server's own `QUERYAPIGATE_*` settings. Object-storage
+  destinations are unaffected - their credentials bound them.
 
 ## [0.16.0] - 2026-10-06
 
@@ -145,13 +171,6 @@ Nothing has to change: no route, setting or stored field is removed, and the sha
   alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.
 
 ### Security
-- **Exports, connections and the store are kept apart from an administrator's reach** (the 0.17 pre-release review,
-  now that `admin` is a role below `owner`): a local-folder export destination is off unless the operator sets
-  `QUERYAPIGATE_EXPORT_DIRS`, must sit inside a folder listed there, and is never the server's home - so no export can
-  write over the store or elsewhere on the host; a connection can't be pointed at the server's own `queryapigate.db`
-  (`store_not_allowed`), by `database` or by a DuckDB `allowed_paths` folder containing it; and a `${VAR}` reference
-  in a connection or destination can't name one of the server's own `QUERYAPIGATE_*` settings. Object-storage
-  destinations are unaffected - their credentials bound them.
 - **Writes hidden behind a read-only statement are refused.** The read-only guard classified a statement by its first
   keyword, so with writes switched off a DuckDB connection - opened read-write, with the guard as its only lock - ran
   `EXPLAIN ANALYZE DELETE FROM t` (emptying the table) and `WITH x AS (...) INSERT ...`; H2 and JDBC connections are
@@ -1753,7 +1772,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.17.0
 [0.16.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.16.0
 [0.15.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.15.0
 [0.14.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.14.0
