@@ -83,7 +83,7 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   were missing from it. `alerts.KINDS` is now the one list, checked against the docs.
 
 ### Upgrading
-- **Schema 8** adds two tables (`destinations`, `exports`); nothing existing changes.
+- **Schema 8** adds three tables (`destinations`, `exports`, `server_secrets`); nothing existing changes.
 
 ## [0.16.0] - 2026-10-06
 

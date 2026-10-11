@@ -1522,6 +1522,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `path_not_allowed` | 403 | A DuckDB connection was asked to read a file or URL outside its `allowed_paths` |
 | `table_check_unsupported` | 403 | `allowed_tables` can't be enforced on this database type, so the query is refused |
 | `table_check_failed` | 403 | The SQL couldn't be analysed to enforce `allowed_tables`, so it is refused |
+| `mask_unresolvable` | 403 | The caller has column-masking rules, and a result column couldn't be traced to its source columns - so the query is refused rather than served unmasked; the message says which and why |
 | `mongo_operator_forbidden` | 403 | A Mongo operator that runs server-side JavaScript |
 | `sign_in_required` | 403 | The query takes values from a sign-in token; call it with one |
 | `claim_missing` | 403 | The sign-in token lacks a claim the query needs |
@@ -1552,6 +1553,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |
 | `secret_key_required`, `password_undecryptable` | 500 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset or has changed |
 | `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |
+| `masking_unavailable` | 500 | Column masking needs the `sqlglot` package (`queryapigate[flow]`), which isn't installed |
 | `internal_error` | 500 | Anything unexpected; the log has the traceback under `request_id` |
 | `connection_failed` | 502 | The database couldn't be reached |
 | `destination_unreachable` | 502 | A destination couldn't be written to - its url, credentials or permissions |

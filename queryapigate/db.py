@@ -28,7 +28,7 @@ from . import config
 
 SCHEMA_VERSION = 8  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
-#                    7: administrators and admin_tokens; 8: destinations and exports - see _upgrade()
+#                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -160,6 +160,13 @@ CREATE TABLE IF NOT EXISTS exports (
   lease_until REAL,            -- epoch seconds; a run holds the export until then
   details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
 );
+-- Secrets the server makes for itself, shared by every instance: the key masking's `hash` action is keyed with
+-- (masking.py, ADR 0005), unless QUERYAPIGATE_MASK_KEY sets one.
+CREATE TABLE IF NOT EXISTS server_secrets (
+  name TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 
@@ -281,6 +288,13 @@ CREATE TABLE IF NOT EXISTS exports (
   watermark TEXT,              -- JSON: the largest incremental value delivered so far, or NULL
   lease_until DOUBLE PRECISION,            -- epoch seconds; a run holds the export until then
   details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
+);
+-- Secrets the server makes for itself, shared by every instance: the key masking's `hash` action is keyed with
+-- (masking.py, ADR 0005), unless QUERYAPIGATE_MASK_KEY sets one.
+CREATE TABLE IF NOT EXISTS server_secrets (
+  name TEXT COLLATE "C" PRIMARY KEY,
+  value TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
@@ -491,7 +505,7 @@ def _upgrade(conn, postgres):
        every change within a minor line must be (see DEPLOYMENT.md, Rolling upgrades): a 0.14 process still
        running against the upgraded store keeps working.
     7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive.
-    8: destinations and exports (ADR 0004) - new tables, likewise."""
+    8: destinations and exports (ADR 0004), server_secrets (ADR 0005) - new tables, likewise."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -662,6 +676,7 @@ _MIGRATED_TABLES = (
     ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
     ('destinations', ('name', 'created_at', 'updated_at', 'details_json'), 'name'),
     ('exports', ('name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
+    ('server_secrets', ('name', 'value', 'created_at'), 'name'),
 )
 
 
