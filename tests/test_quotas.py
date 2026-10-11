@@ -9,6 +9,7 @@ from datetime import datetime
 from unittest import mock
 
 import jwt
+import redis
 
 from queryapigate import alerts, apikeys, create_app, db, history, mcp_server, quotas
 from tests.helpers import create_key, save_query, secret_of, write_connections
@@ -176,6 +177,54 @@ class ImmediateWriteTests(QuotaTestCase):
         secret = self.key({'calls': 5, 'per': 'day'})
         self.get(secret)
         self.assertEqual(db.connection().execute('SELECT calls FROM usage_counters').fetchone()[0], 1)
+
+
+REDIS_URL = os.environ.get('QUERYAPIGATE_TEST_REDIS_URL')
+
+
+class RedisDownTests(QuotaTestCase):
+    def test_redis_failing_falls_back_to_the_stores_view(self):
+        secret = self.key({'calls': 2, 'per': 'day'})
+
+        class Failing:
+            def __getattr__(self, _name):
+                def fail(*_args, **_kwargs):
+                    raise redis.ConnectionError('Connection refused')
+                return fail
+
+        shared = quotas._Shared('redis://unused')
+        shared._client = Failing()
+        with mock.patch.object(quotas, '_redis', return_value=shared):
+            self.assertEqual(self.get(secret).status_code, 200)
+            self.assertEqual(self.get(secret).status_code, 200)
+            self.assertEqual(self.get(secret).status_code, 429)  # still enforced: this process's own counts
+
+
+@unittest.skipUnless(REDIS_URL, 'set QUERYAPIGATE_TEST_REDIS_URL to run against Redis')
+class RedisTests(QuotaTestCase):
+    def setUp(self):
+        self.env = {'QUERYAPIGATE_REDIS_URL': REDIS_URL, 'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '5'}
+        super().setUp()
+        quotas._shared.clear()
+        self.addCleanup(quotas._shared.clear)
+        self.client_redis = redis.Redis.from_url(REDIS_URL)
+        for name in ('partner',):
+            for per in ('day', 'month'):
+                self.client_redis.delete(f'qag:quota:{name}:{quotas.period(per)[0]}')
+
+    def test_every_instance_counts_against_one_counter_seeded_from_the_store(self):
+        secret = self.key({'calls': 3, 'per': 'day'})
+        key = quotas.period('day')[0]
+        self.client_redis.delete(f'qag:quota:partner:{key}')  # (the create response already read - and seeded - it)
+        quotas._counter.add('partner', key, 1, 10)  # a call counted before Redis held this period
+        quotas.write()
+        self.assertEqual(self.get(secret).status_code, 200)  # seeds Redis from the store: 1, then counts: 2
+        self.assertEqual(int(self.client_redis.hget(f'qag:quota:partner:{key}', 'calls')), 2)
+        self.client_redis.hincrby(f'qag:quota:partner:{key}', 'calls', 1)  # another instance's call
+        refused = self.get(secret)  # nothing written to the store meanwhile: only Redis knows it's used up
+        self.assertEqual((refused.status_code, refused.get_json()['code']), (429, 'quota_exceeded'))
+        listed = self.client.get('/api/v1/usage/quotas', headers=ADMIN).get_json()['items']
+        self.assertIn(('partner', 'day', 3), [(c['caller'], c['per'], c['calls']) for c in listed])  # Redis's count
 
 
 class PeriodTests(unittest.TestCase):

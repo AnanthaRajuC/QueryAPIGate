@@ -5,12 +5,20 @@ counter - a key's, or for signed-in users one per user (`jwt:<subject>`), so a r
 Periods are calendar days or months in the server's time zone. Counted: successful calls that return data and the
 rows they return - saved queries, ad-hoc SQL, MCP tool calls, cached responses. Refused calls aren't.
 
-Checked before a call, counted after it, and kept in the store (usage_counters) so every instance shares it and it
-survives restarts. Counts aren't a write per call: they gather in this process and are written by the run-history
-writer's batch (history.py), every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL. So a check sees the store as of its last
-read - at most an interval old - plus this process's own unwritten counts: a caller spread over several instances
-can overshoot by about one interval's calls, and the call that crosses the row quota completes (its rows aren't
-known before it runs; max_rows bounds it).
+Checked before a call, counted after it. Kept in the store (usage_counters), so counts survive restarts and every
+instance reads them - but not a write per call: they gather in this process and the run-history writer's batch
+(history.py) writes them, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL.
+
+What a check compares against:
+- **With QUERYAPIGATE_REDIS_URL** (several instances): a counter in Redis, added to atomically by every instance as
+  each call is counted, and seeded from the store the first time a period is used there - so a Redis restart loses
+  nothing the store has. A caller can overshoot only by the calls it has in flight at once: checked before, counted
+  after.
+- **Without it** (or while Redis is failing): the store as this process last read it - at most an interval old - plus
+  this process's own unwritten counts. One instance counts exactly; with several, each sees the others' counts only
+  once written and re-read, so a burst shorter than that can get up to a quota's worth through each instance.
+
+Either way, the call that crosses the row quota completes: its rows aren't known before it runs (max_rows bounds it).
 """
 import threading
 import time
@@ -103,6 +111,101 @@ class _Counter:
 _counter = _Counter()
 
 
+class _Shared:
+    """The period's counters in Redis (QUERYAPIGATE_REDIS_URL): one count for every instance. None from used() means
+    Redis can't answer now - the caller falls back to the store's view."""
+
+    RETRY_AFTER_FAILURE = 5.0
+
+    def __init__(self, url):
+        import redis
+        self._error = redis.RedisError
+        self._client = redis.Redis.from_url(url, socket_timeout=0.5, socket_connect_timeout=0.5)
+        self._skip_until = 0.0
+
+    def _down(self, error):
+        from . import ratelimit
+        self._skip_until = time.monotonic() + self.RETRY_AFTER_FAILURE
+        ratelimit._note_failure(error)
+
+    def _key(self, caller, key):
+        return f'qag:quota:{caller}:{key}'
+
+    def used(self, caller, key, seed):
+        if time.monotonic() < self._skip_until:
+            return None
+        name = self._key(caller, key)
+        try:
+            calls, rows = self._client.hmget(name, 'calls', 'rows')
+            if calls is None:  # first use of this period in Redis: start from what the store has
+                stored_calls, stored_rows = seed()
+                pipe = self._client.pipeline()
+                pipe.hsetnx(name, 'calls', stored_calls)
+                pipe.hsetnx(name, 'rows', stored_rows)
+                pipe.expire(name, 40 * 86400)
+                pipe.hmget(name, 'calls', 'rows')
+                calls, rows = pipe.execute()[-1]
+            return int(calls or 0), int(rows or 0)
+        except self._error as error:
+            self._down(error)
+            return None
+
+    def current(self, *keys):
+        """{(caller, period): (calls, rows)} for these periods, as Redis has them - {} if it can't answer."""
+        found = {}
+        try:
+            for key in keys:
+                for name in self._client.scan_iter(match=f'qag:quota:*:{key}', count=500):
+                    caller = name.decode()[len('qag:quota:'):-len(key) - 1]
+                    calls, rows = self._client.hmget(name, 'calls', 'rows')
+                    found[(caller, key)] = (int(calls or 0), int(rows or 0))
+        except self._error as error:
+            self._down(error)
+            return {}
+        return found
+
+    def add(self, caller, key, calls, rows):
+        if time.monotonic() < self._skip_until:
+            return
+        name = self._key(caller, key)
+        try:
+            if not self._client.exists(name):
+                return  # not seeded yet: the next check seeds it from the store, which these counts will reach
+            pipe = self._client.pipeline()
+            pipe.hincrby(name, 'calls', calls)
+            pipe.hincrby(name, 'rows', rows)
+            pipe.execute()
+        except self._error as error:
+            self._down(error)
+
+
+_shared: dict = {}  # QUERYAPIGATE_REDIS_URL -> its counters
+
+
+def _redis():
+    url = config.redis_url()
+    if not url:
+        return None
+    if url not in _shared:
+        _shared[url] = _Shared(url)
+    return _shared[url]
+
+
+def _used(caller, key):
+    """(calls, rows) this period, from Redis when it's set and answering, else the store's view (_Counter)."""
+    shared = _redis()
+    if shared is not None:
+        found = shared.used(caller, key, lambda: _stored(caller, key))
+        if found is not None:
+            return found
+    return _counter.used(caller, key)
+
+
+def _stored(caller, key):
+    """What the store has for the period, with this process's unwritten counts - Redis's starting point."""
+    return _counter.used(caller, key)
+
+
 def write():
     """Add what's been counted to the store(s) it was counted against - the history writer's batch calls this (and
     tests). A failed write puts the counts back, to be written next time rather than lost."""
@@ -149,7 +252,7 @@ def check(permission):
     if not quota:
         return
     key, _start, resets = period(quota['per'])
-    calls, rows = _counter.used(permission.name, key)
+    calls, rows = _used(permission.name, key)
     for name, used in (('calls', calls), ('rows', rows)):
         if quota.get(name) is not None and used >= quota[name]:
             raise ApiError(f"This caller's {ADJECTIVE[quota['per']]} quota of {quota[name]:,} {name} is used up - it "
@@ -163,7 +266,11 @@ def count(permission, rows):
     quota = getattr(permission, 'quota', None)
     if not quota:
         return
-    _counter.add(permission.name, period(quota['per'])[0], 1, max(0, int(rows or 0)))
+    key, rows = period(quota['per'])[0], max(0, int(rows or 0))
+    _counter.add(permission.name, key, 1, rows)
+    shared = _redis()
+    if shared is not None:
+        shared.add(permission.name, key, 1, rows)
     _ensure_written()
 
 
@@ -172,7 +279,11 @@ def count_rows(permission, rows):
     quota = getattr(permission, 'quota', None)
     if not quota or not rows:
         return
-    _counter.add(permission.name, period(quota['per'])[0], 0, int(rows))
+    key = period(quota['per'])[0]
+    _counter.add(permission.name, key, 0, int(rows))
+    shared = _redis()
+    if shared is not None:
+        shared.add(permission.name, key, 0, int(rows))
     _ensure_written()
 
 
@@ -182,7 +293,7 @@ def headers(permission):
     if not quota:
         return {}
     key, _start, resets = period(quota['per'])
-    calls, rows = _counter.used(permission.name, key)
+    calls, rows = _used(permission.name, key)
     out = {'X-Quota-Reset': resets.strftime(_TIME)}
     if quota.get('calls') is not None:
         out['X-Quota-Remaining-Calls'] = str(max(0, quota['calls'] - calls))
@@ -196,7 +307,7 @@ def usage(caller, quota):
     if not quota:
         return None
     key, start, resets = period(quota['per'])
-    calls, rows = _counter.used(caller, key)
+    calls, rows = _used(caller, key)
     return {'per': quota['per'], 'period_start': start.strftime(_TIME), 'resets_at': resets.strftime(_TIME),
             'calls': calls, 'rows': rows, 'calls_limit': quota.get('calls'), 'rows_limit': quota.get('rows')}
 
@@ -214,5 +325,10 @@ def current_counters():
                 entry = found.setdefault((caller, key), [0, 0, None])
                 entry[0] += calls
                 entry[1] += rows
+    shared = _redis()
+    if shared is not None:  # every instance's counts as of now, not only the ones written so far
+        for (caller, key), (calls, rows) in shared.current(day, month).items():
+            entry = found.setdefault((caller, key), [0, 0, None])
+            entry[0], entry[1] = calls, rows
     return [{'caller': caller, 'per': key.split(':')[0], 'period': key.split(':', 1)[1], 'calls': calls,
              'rows': rows, 'updated_at': updated} for (caller, key), (calls, rows, updated) in sorted(found.items())]

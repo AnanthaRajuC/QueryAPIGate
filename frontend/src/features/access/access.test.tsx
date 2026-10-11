@@ -125,11 +125,64 @@ describe('API keys', () => {
       allowed_write_ops: null,
       allowed_tables: null,
       mask: null,
+      max_concurrent: null,
+      query_timeout: null,
+      max_rows: null,
+      quota: null,
       expires_at: null,
     });
     expect(await within(drawer).findByLabelText('Secret key')).toHaveValue('sk_secret123');
     expect(document.getElementById('drawer-title')).toHaveTextContent('API key created');
     expect(drawer).toHaveTextContent('Store this now — it cannot be shown again.');
+  });
+
+  it("sends a key's own limits and its quota, and leaves blanks unset", async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/api-keys': () => jsonResponse({ ...apiKey('metered'), secret: 'sk_m' }, 201),
+    });
+    renderAt('/api-keys');
+    await userEvent.click(await screen.findByRole('button', { name: 'New API key' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.type(within(drawer).getByLabelText('Name'), 'metered');
+    await userEvent.type(within(drawer).getByLabelText('Queries at once'), '2');
+    await userEvent.type(within(drawer).getByLabelText('Rows per call'), '500');
+    await userEvent.type(within(drawer).getByLabelText('Quota: calls'), '100000');
+    await userEvent.selectOptions(within(drawer).getByLabelText('Per'), 'day');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Create key' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
+      max_concurrent: 2,
+      query_timeout: null,
+      max_rows: 500,
+      quota: { calls: 100000, per: 'day' },
+    });
+  });
+
+  it('shows how much of its quota a key has used', async () => {
+    fakeBackend({
+      ...routes(),
+      'GET /api/v1/api-keys': () => ({
+        items: [
+          apiKey('metered', {
+            quota: { calls: 1000, rows: 100000, per: 'month' },
+            usage_this_period: {
+              per: 'month',
+              period_start: '2026-10-01 00:00:00',
+              resets_at: '2026-11-01 00:00:00',
+              calls: 850,
+              rows: 20000,
+              calls_limit: 1000,
+              rows_limit: 100000,
+            },
+          }),
+        ],
+      }),
+    });
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('metered')).not.toBeNull());
+    expect(row('metered')).toHaveTextContent('850 / 1,000 calls this month');
+    expect(row('metered').querySelector('.quota-bar')).toHaveClass('near');
   });
 
   it('creates a key from a role, sending only the role and the expiry', async () => {

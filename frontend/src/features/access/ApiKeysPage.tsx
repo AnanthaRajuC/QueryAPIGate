@@ -1,3 +1,4 @@
+import type { Schemas } from '@/api/client';
 import { useApiKeys, useCan, useCollections } from '@/app/data';
 import { Loading } from '@/app/feedback';
 import { AccessCell } from '@/features/repository/reach';
@@ -12,6 +13,34 @@ import { PencilIcon } from '@/components/icons';
 function isExpiringSoon(expires: string | null, today: string) {
   const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   return Boolean(expires && expires >= today && expires <= soon);
+}
+
+type QuotaUsage = NonNullable<Schemas['ApiKey']['usage_this_period']>;
+
+/** A key's use of its quota this period - the fuller of calls and rows - as a line and a bar (ADR 0011). */
+function QuotaUsageLine({ usage }: { usage: QuotaUsage }) {
+  const parts = (['calls', 'rows'] as const)
+    .map((what) => ({ what, used: usage[what], limit: usage[`${what}_limit`] }))
+    .filter((p): p is { what: 'calls' | 'rows'; used: number; limit: number } => p.limit != null);
+  const fullest = parts.reduce((a, b) => (b.used / b.limit > a.used / a.limit ? b : a), parts[0]!);
+  const share = Math.min(1, fullest.used / fullest.limit);
+  const per = usage.per === 'day' ? 'today' : 'this month';
+  return (
+    <div
+      className="quota-usage"
+      title={
+        parts.map((p) => `${p.used.toLocaleString()} of ${p.limit.toLocaleString()} ${p.what}`).join(' · ') +
+        ` ${per} · resets ${usage.resets_at}`
+      }
+    >
+      <span className="dim">
+        {fullest.used.toLocaleString()} / {fullest.limit.toLocaleString()} {fullest.what} {per}
+      </span>
+      <div className={`quota-bar${share >= 1 ? ' full' : share >= 0.8 ? ' near' : ''}`}>
+        <span style={{ width: `${Math.round(share * 100)}%` }} />
+      </div>
+    </div>
+  );
 }
 
 function usageText(usage: { queries: number; errors: number }) {
@@ -146,7 +175,12 @@ export function ApiKeysPage() {
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
                     <Time value={k.last_used_at} fallback="never" />
                   </td>
-                  {usage ? (
+                  {k.usage_this_period ? (
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {usage}
+                      <QuotaUsageLine usage={k.usage_this_period} />
+                    </td>
+                  ) : usage ? (
                     <td
                       title={`${k.usage.rows}${k.usage.rows === 1 ? ' row' : ' rows'} returned in total · since this process started`}
                       style={{ whiteSpace: 'nowrap' }}

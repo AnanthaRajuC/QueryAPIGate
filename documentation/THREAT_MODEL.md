@@ -307,9 +307,9 @@ slow queries and starve everyone sharing them. A key's or role's own `max_concur
 (ADR 0011) bound that: queries running at once (a stream counts until its last row), how long each may run, how many
 rows a call returns - each only ever narrowing the server's limits. Counted in Redis across instances, with leases so
 a crashed process can't hold a caller's slots forever; without Redis, per process, as rate limits are. Usage quotas
-(experimental) cap a caller's calls and rows per day or month. They're a contract's meter, enforced to within about
-one history flush interval across instances - not a hard security boundary: a caller spread over many instances can
-overshoot by an interval's calls, and `max_concurrent` and the rate limit are what bound a burst.
+(experimental) cap a caller's calls and rows per day or month. They're a contract's meter, not a hard security
+boundary: a caller overshoots by its calls in flight, and with several instances but no Redis by up to a quota per
+instance in a short burst. `max_concurrent` and the rate limit are what bound a burst.
 ### CORS
 
 Cross-origin access is off unless `QUERYAPIGATE_CORS_ORIGINS` is explicitly set, and CORS is a browser-only

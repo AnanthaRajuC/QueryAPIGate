@@ -76,11 +76,13 @@ New grant fields on API keys and roles. For a signed-in user, the role their tok
 - **Checked before the call, counted after it.** A call is refused once the period's counts reach the quota. The one
   call that crosses the row quota still completes, because its rows aren't known until it has run, and `max_rows`
   bounds how far it can go over.
-- **Where it's counted:** in the store, so it survives restarts and every instance shares it (schema 13,
-  `usage_counters`: caller, period, calls, rows). Counts are added in the batched write that run history already uses,
-  not as a write per call. Enforcement is therefore exact to within one flush interval
-  (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, 1 second by default): a caller making many calls a second can overshoot by
-  about a second's worth. The guide measures it.
+- **Where it's counted:** in the store, so it survives restarts (schema 13, `usage_counters`: caller, period, calls,
+  rows). Counts are added in the batched write that run history already uses, not as a write per call. With several
+  instances, the count a check compares against is kept in Redis (`QUERYAPIGATE_REDIS_URL`), added to atomically by
+  every instance and seeded from the store, so a caller overshoots only by its calls in flight. *(Amended while
+  building it: the store alone, re-read once a flush interval, let a short burst through each instance nearly a
+  whole quota - 1,615 calls for 1,000 on two instances - not "one interval's calls" as first written. With Redis the
+  same burst got 1,016 through.)* Without Redis, the store's view applies, and the docs say what that means.
 - **Visible:** each key's `usage_this_period` (calls, rows, period start, `resets_at`) in `/api/v1/api-keys`, and a bar
   in the Console. A `quota_nearly_used` alert fires at 80% (warning) and again when the quota is used up (critical).
   Each change to a quota is audited, as every grant change is.

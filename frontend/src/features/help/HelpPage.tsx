@@ -339,6 +339,12 @@ const DOCS = [
     path: 'how-to/51-see-queryapigate-in-your-traces.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-52',
+    title: 'Give a partner a quota and a concurrency cap',
+    path: 'how-to/52-give-a-partner-a-quota-and-a-concurrency-cap.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

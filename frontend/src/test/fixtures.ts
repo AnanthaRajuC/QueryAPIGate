@@ -157,6 +157,7 @@ export function apiKey(name: string, extra: Record<string, unknown> = {}) {
     last_used_at: null,
     previous_expires_at: null,
     previous_last_used_at: null,
+    usage_this_period: null,
     example: false,
     usage: { queries: 0, errors: 0, rows: 0 },
     ...extra,

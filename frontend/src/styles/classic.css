@@ -376,6 +376,11 @@
   .approval-args-cell { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .key-secret { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .key-secret select { width: auto; }
+  .grant-limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+  .quota-bar { height: 4px; border-radius: 2px; background: var(--line); margin-top: 4px; overflow: hidden; width: 120px; }
+  .quota-bar span { display: block; height: 100%; background: var(--accent); }
+  .quota-bar.near span { background: var(--warn); }
+  .quota-bar.full span { background: var(--danger); }
   .schema-usage { flex: none; width: 26px; height: 26px; padding: 0; border: 0; background: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .schema-usage:hover .amap-dot { filter: brightness(1.15); }
   .schema-table .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

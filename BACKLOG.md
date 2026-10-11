@@ -85,7 +85,7 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)). (Released as 0.23.0 on 2026-10-11; 0.22.1
     before it made cached responses private.)
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas**
-    ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
+    ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)). (Released as 0.24.0 on 2026-10-11.)
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
     compliance documentation; #99 workspaces only on demand.
@@ -2962,9 +2962,12 @@ setting - HSTS on plain HTTP locks browsers out). Documented in DEPLOYMENT.md ne
 
 ## 94. Per-key limits on simultaneous queries, time and rows
 
-**Status: open; planned for 0.24** ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
+**Status: shipped (0.24).** [ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md): `limits.py` -
+`max_concurrent`, `query_timeout` and `max_rows` on keys and roles, applied in the engine on every front door;
+running-query slots in Redis with leases, per process without it. Found on the way and fixed: a stream closed before
+its first chunk kept its connection checked out.
 
-**Impact:** a key's rate limit counts calls, not their cost: one key can fill a connection's pool with slow queries while
+**Was:** a key's rate limit counts calls, not their cost: one key can fill a connection's pool with slow queries while
 staying under its limit, and everyone else sharing that connection waits. The time limit
 (`QUERYAPIGATE_QUERY_TIMEOUT`) and the row ceiling apply to the whole server, so a partner's key can't be given less
 than an internal service's.
@@ -2975,9 +2978,13 @@ across instances), `query_timeout` and `max_rows` - each narrowing the server's 
 
 ## 95. Usage quotas: calls, rows and bytes per day or month
 
-**Status: open; planned for 0.24, after #94** ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)).
+**Status: shipped (0.24, experimental).** [ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md):
+`quotas.py` - calls and rows per calendar day or month, per caller; schema 13 (`usage_counters`) written through the
+run-history batch; counted in Redis across instances (measured: 1,016 answered for 1,000; 1,615 without Redis);
+`X-Quota-*` headers, `usage_this_period`, `/api/v1/usage/quotas`, the `quota_nearly_used` alert; the Console's
+fields and usage bar. Guide 52. Graduating before 1.0.0-rc1 is the aim.
 
-**Impact:** partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates.
+**Was:** partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates.
 Today the only limits are token buckets per minute or hour.
 
 **Notes:** a `quota` grant field (`{"calls": 100000, "rows": 10000000, "per": "month"}`) counted in the store (or

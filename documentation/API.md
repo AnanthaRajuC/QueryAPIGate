@@ -983,11 +983,13 @@ role can carry one:
   `Retry-After` until then. A cached response is refused too.
 - **Every response to a caller with a quota** carries `X-Quota-Remaining-Calls` and/or `X-Quota-Remaining-Rows`, and
   `X-Quota-Reset` - so a client can slow down before it's refused.
-- **Precision:** checked before a call, counted after it. The call that crosses the row quota completes (its rows
-  aren't known before it runs - `max_rows` bounds it). Counts are kept in the store, shared by every instance, and
-  written in the run-history batch (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, 1 second by default) rather than one write
-  per call - so a caller spread over several instances can overshoot by about one interval's calls. One instance
-  always counts its own calls exactly.
+- **Precision:** checked before a call, counted after it, so a caller can overshoot by the calls it has in flight at
+  once; the call that crosses the row quota completes (its rows aren't known before it runs - `max_rows` bounds it).
+  Counts are kept in the store - written in the run-history batch (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`), not a write
+  per call - and, **with several instances, counted in Redis** (`QUERYAPIGATE_REDIS_URL`), one counter for all of
+  them, seeded from the store. Measured on two instances, 32 clients calling as fast as they could: 1,016 calls
+  answered for a quota of 1,000. **Without Redis**, each instance sees the others' counts only once they're written
+  and re-read: a burst shorter than that got 1,615 calls through for 1,000. One instance alone is exact.
 - **Watching it:** a key's `usage_this_period` (`calls`, `rows`, their limits, `period_start`, `resets_at`);
   `GET /api/v1/usage/quotas` lists every caller's counts for this day and this month, for metering of your own (it's
   not billing); the `quota_nearly_used` alert fires at 80% and when used up. `null` clears a quota.
@@ -1531,7 +1533,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.23.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.24.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

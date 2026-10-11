@@ -52,6 +52,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-11
+
+Limits a contract can be written in: a key or role can cap the queries it runs at once, how long each may run and
+how many rows a call returns - so one partner can't starve the rest - and carry a quota of calls and rows per day or
+month, enforced across every instance and reported on every response. The limits are stable; quotas are
+experimental.
+
 ### Added
 - **Per-key limits on concurrency, time and rows** (BACKLOG #94,
   [ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)): `max_concurrent`, `query_timeout` and `max_rows`
@@ -66,9 +73,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   calls and their rows count, cached responses included; used up, `429 quota_exceeded` with `resets_at`.
   `X-Quota-Remaining-Calls`, `X-Quota-Remaining-Rows` and `X-Quota-Reset` on every response to a caller with one; a
   key's `usage_this_period`, `GET /api/v1/usage/quotas` and the `quota_nearly_used` alert. Counted in the store
-  (schema 13, `usage_counters`) through the run-history batch, not a write per call. See
+  (schema 13, `usage_counters`) through the run-history batch, not a write per call, and with several instances in
+  Redis, one counter for all of them: measured, 1,016 calls answered for a quota of 1,000 on two instances under
+  load (1,615 without Redis). See
   [Usage quotas](documentation/API.md#usage-quotas).
 - **`X-Row-Count`** on every paged data response: the rows in it.
+- **The Console:** the key and role forms take *Queries at once*, *Time limit*, *Rows per call* and a *Quota*; the API
+  keys list shows how much of its quota each key has used, amber from 80%, red when used up. Guide 52,
+  [Give a partner a quota and a concurrency cap](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/52-give-a-partner-a-quota-and-a-concurrency-cap.md),
+  with the precision measured.
 
 ### Upgrading from 0.23
 - **Schema 13** adds one table (`usage_counters`); nothing existing changes. A 0.23 instance still running keeps
@@ -2047,7 +2060,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...v0.22.0

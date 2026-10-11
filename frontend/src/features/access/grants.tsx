@@ -90,6 +90,13 @@ export interface GrantState {
   rateLimit: string;
   ips: string;
   mask: MaskRule[];
+  /** ADR 0011: the caller's own limits, narrowing the server's - '' for none */
+  maxConcurrent: string;
+  queryTimeout: string;
+  maxRows: string;
+  quotaCalls: string;
+  quotaRows: string;
+  quotaPer: 'day' | 'month';
 }
 
 export function initialGrants(existing?: RoleEntry): GrantState {
@@ -112,8 +119,17 @@ export function initialGrants(existing?: RoleEntry): GrantState {
     rateLimit: existing?.rate_limit ?? '',
     ips: (existing?.allowed_ips ?? []).join(', '),
     mask: (existing?.mask ?? []).map((r) => ({ column: r.column, action: r.action })),
+    maxConcurrent: existing?.max_concurrent?.toString() ?? '',
+    queryTimeout: existing?.query_timeout?.toString() ?? '',
+    maxRows: existing?.max_rows?.toString() ?? '',
+    quotaCalls: existing?.quota?.calls?.toString() ?? '',
+    quotaRows: existing?.quota?.rows?.toString() ?? '',
+    quotaPer: existing?.quota?.per ?? 'month',
   };
 }
+
+/** A number field's value: null when blank (no limit of its own). */
+const num = (text: string) => (text.trim() ? Number(text) : null);
 
 const list = (text: string, lower = false) => {
   const items = text
@@ -139,6 +155,17 @@ export function grantsPayload(state: GrantState, connectionNames: string[], quer
     allowed_write_ops: list(state.writeOps, true),
     allowed_tables: list(state.tables, true),
     mask: maskPayload(state.mask, null),
+    max_concurrent: num(state.maxConcurrent),
+    query_timeout: num(state.queryTimeout),
+    max_rows: num(state.maxRows),
+    quota:
+      state.quotaCalls.trim() || state.quotaRows.trim()
+        ? {
+            ...(state.quotaCalls.trim() ? { calls: Number(state.quotaCalls) } : {}),
+            ...(state.quotaRows.trim() ? { rows: Number(state.quotaRows) } : {}),
+            per: state.quotaPer,
+          }
+        : null,
   };
 }
 
@@ -354,6 +381,87 @@ export function GrantFields({
           onChange={(e) => set({ ips: e.target.value })}
         />
       </Field>
+      <div className="grant-limits">
+        <Field
+          id={`${prefix}-max-concurrent`}
+          label="Queries at once"
+          hint="Running at the same time, across instances. Blank: no limit of its own."
+        >
+          <input
+            id={`${prefix}-max-concurrent`}
+            type="number"
+            min={1}
+            max={1000}
+            step={1}
+            value={state.maxConcurrent}
+            onChange={(e) => set({ maxConcurrent: e.target.value })}
+          />
+        </Field>
+        <Field
+          id={`${prefix}-query-timeout`}
+          label="Time limit (s)"
+          hint="Per query. The server's own limit still applies if lower."
+        >
+          <input
+            id={`${prefix}-query-timeout`}
+            type="number"
+            min={0.1}
+            step="any"
+            value={state.queryTimeout}
+            onChange={(e) => set({ queryTimeout: e.target.value })}
+          />
+        </Field>
+        <Field id={`${prefix}-max-rows`} label="Rows per call" hint="A page, a stream or an MCP result.">
+          <input
+            id={`${prefix}-max-rows`}
+            type="number"
+            min={1}
+            step={1}
+            value={state.maxRows}
+            onChange={(e) => set({ maxRows: e.target.value })}
+          />
+        </Field>
+      </div>
+      <div className="grant-limits">
+        <Field
+          id={`${prefix}-quota-calls`}
+          label="Quota: calls"
+          hint={
+            prefix === 'k'
+              ? 'Experimental. Successful data calls per period - then 429 until it resets.'
+              : 'Experimental. Each signed-in user gets this allowance of their own.'
+          }
+        >
+          <input
+            id={`${prefix}-quota-calls`}
+            type="number"
+            min={1}
+            step={1}
+            value={state.quotaCalls}
+            onChange={(e) => set({ quotaCalls: e.target.value })}
+          />
+        </Field>
+        <Field id={`${prefix}-quota-rows`} label="Quota: rows" hint="Rows those calls return.">
+          <input
+            id={`${prefix}-quota-rows`}
+            type="number"
+            min={1}
+            step={1}
+            value={state.quotaRows}
+            onChange={(e) => set({ quotaRows: e.target.value })}
+          />
+        </Field>
+        <Field id={`${prefix}-quota-per`} label="Per" hint="Calendar periods, server time.">
+          <select
+            id={`${prefix}-quota-per`}
+            value={state.quotaPer}
+            onChange={(e) => set({ quotaPer: e.target.value as 'day' | 'month' })}
+          >
+            <option value="month">month</option>
+            <option value="day">day</option>
+          </select>
+        </Field>
+      </div>
     </>
   );
 }

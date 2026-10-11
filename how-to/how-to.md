@@ -62,6 +62,8 @@ guide covers one scenario end to end, and every command and response in it was r
     - column masking: hash, mask or drop values, whatever the SQL calls them.
 50. [**Rotate an API key without downtime**](50-rotate-an-api-key-without-downtime.md) - a new secret, the old one
     working until the partner has switched, then ended.
+52. [**Give a partner a quota and a concurrency cap**](52-give-a-partner-a-quota-and-a-concurrency-cap.md) - queries
+    at once, rows a call and calls a day, across instances; how exact a quota is, measured.
 
 ## MCP (AI agent access)
 
