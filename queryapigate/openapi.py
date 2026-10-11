@@ -241,6 +241,38 @@ def build_spec(version, saved_queries=None, jwt=None):
                                                       'it can tell (e.g. Asia/Kolkata).'},
                                         'utc_offset': {'type': 'string', 'description':
                                                        "That zone's current UTC offset, e.g. +05:30."}}}}}}}}},
+            '/auth/sso/login': {'get': {
+                'summary': "Console sign-in through SSO: redirects to the identity provider (ADR 0007)",
+                'tags': ['Console sign-in'], 'security': [],
+                'parameters': [{'name': 'next', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                                'description': 'The Console page to land on - only ever a /console/ path.'}],
+                'responses': {'302': {'description': "To the provider's sign-in"},
+                              '404': {'description': 'SSO is not configured'}}}},
+            '/auth/sso/callback': {'get': {
+                'summary': 'Where the identity provider sends the person back: starts a Console session',
+                'tags': ['Console sign-in'], 'security': [],
+                'responses': {'302': {'description': 'To the Console - signed in, or with sso_error saying why not'},
+                              '404': {'description': 'SSO is not configured'}}}},
+            '/auth/session': {'get': {
+                'summary': "Whether SSO is on, and the Console session's administrator and CSRF token",
+                'tags': ['Console sign-in'], 'security': [],
+                'responses': {'200': {'description': 'OK', 'content': {'application/json': {'schema': {
+                    'type': 'object', 'required': ['sso', 'signed_in', 'sso_only'], 'properties': {
+                        'sso': {'type': 'boolean'}, 'signed_in': {'type': 'boolean'}, 'sso_only': {'type': 'boolean'},
+                        'admin': {'type': 'string'}, 'role': {'type': 'string'},
+                        'email': {'type': 'string', 'nullable': True}, 'expires_at': {'type': 'string'},
+                        'csrf': {'type': 'string', 'description': 'Send as X-QAG-CSRF with every request the '
+                                                                  'session cookie should authenticate.'}}}}}}}}},
+            '/auth/sso/logout': {'post': {
+                'summary': 'Ends the Console session (needs X-QAG-CSRF)', 'tags': ['Console sign-in'],
+                'security': [],
+                'responses': {'200': {'description': "Signed out; provider_sign_out is the provider's own sign-out, "
+                                                     'where it has one', 'content': {'application/json': {'schema': {
+                                                         'type': 'object', 'required': ['signed_out'],
+                                                         'properties': {'signed_out': {'type': 'boolean'},
+                                                                        'provider_sign_out': {'type': 'string',
+                                                                                              'nullable': True}}}}}},
+                              '401': {'description': 'Not signed in'}}}},
             '/metrics': {'get': {
                 'summary': 'Prometheus text-format metrics: request/query counts and latencies, pool occupancy, '
                            'rate-limit rejections', 'tags': ['Service'],

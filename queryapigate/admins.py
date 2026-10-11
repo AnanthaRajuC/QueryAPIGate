@@ -46,11 +46,11 @@ def _row_to_admin(row):
     details = json.loads(row['details_json'])
     return {'name': row['name'], 'role': row['role'], 'active': bool(row['active']), 'created_at': row['created_at'],
             'email': details.get('email'), 'created_by': details.get('created_by'),
-            'last_seen_at': details.get('last_seen_at')}
+            'last_seen_at': details.get('last_seen_at'), 'sso': details.get('sso')}
 
 
 def _write_admin(conn, admin):
-    details = {k: admin.get(k) for k in ('email', 'created_by', 'last_seen_at')}
+    details = {k: admin.get(k) for k in ('email', 'created_by', 'last_seen_at', 'sso')}
     conn.execute("""
         INSERT INTO administrators (name, role, active, created_at, details_json) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET role = excluded.role, active = excluded.active,
@@ -306,3 +306,60 @@ def last_break_glass_use(since):
         'SELECT entry_json FROM audit_log WHERE timestamp >= ? AND entry_json LIKE ? ORDER BY id DESC LIMIT 1',
         (since, '%"action": "break_glass_used"%')).fetchone()
     return json.loads(row['entry_json']) if row is not None else None
+
+
+# --------------------------------------------------------------------------------------
+# Signed in through SSO (sso.py, ADR 0007)
+# --------------------------------------------------------------------------------------
+
+def find_by_sso(issuer, subject):
+    """The administrator bound to this provider's person, or None. The binding is (issuer, subject) - never an
+    email, which a provider may reassign or not have verified."""
+    for row in db.connection().execute('SELECT name, role, active, created_at, details_json FROM administrators'):
+        admin = _row_to_admin(row)
+        if admin['sso'] == {'issuer': issuer, 'subject': subject}:
+            return admin
+    return None
+
+
+def _free_name(conn, wanted):
+    base = re.sub(r'[^\w.\-]+', '-', wanted).strip('-.')[:90] or 'admin'
+    if base in RESERVED_NAMES:
+        base += '-sso'
+    for n in range(1, 1000):
+        name = base if n == 1 else f'{base}-{n}'
+        taken = _get(conn, name) is not None or conn.execute('SELECT 1 FROM api_keys WHERE name = ?',
+                                                              (name,)).fetchone() is not None
+        if not taken:
+            return name
+    raise ApiError('Could not find a free administrator name', 409, code='admin_exists')
+
+
+def sign_in_sso(issuer, subject, role, wanted_name, email):
+    """The administrator for someone who just signed in through SSO, created on first sign-in - (admin, change) where
+    change is 'created', 'role' (their groups gave a new role) or None. The provider decides the role: one moved out
+    of the owners' group is no longer an owner, last one or not - owners come from that group."""
+    with db.transaction() as conn:
+        found = find_by_sso(issuer, subject)
+        if found is not None:
+            if found['role'] == role:
+                return found, None
+            found = {**found, 'role': role}
+            _write_admin(conn, found)
+            return found, 'role'
+        admin = {'name': _free_name(conn, wanted_name), 'role': role, 'active': True, 'created_at': store.now(),
+                 'email': email if email and _EMAIL_RE.match(email) else None, 'created_by': 'sso',
+                 'last_seen_at': None, 'sso': {'issuer': issuer, 'subject': subject}}
+        _write_admin(conn, admin)
+        return admin, 'created'
+
+
+def note_seen(name):
+    """last_seen_at for an administrator acting through a session - the caller throttles it. Never raises."""
+    try:
+        with db.transaction() as conn:
+            admin = _get(conn, name)
+            if admin is not None:
+                _write_admin(conn, {**admin, 'last_seen_at': store.now()})
+    except db.Error:
+        log.warning('Could not record when %s was last seen', name, exc_info=True)

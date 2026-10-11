@@ -9269,6 +9269,141 @@
         "x-experimental": true
       }
     },
+    "/auth/session": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "admin": {
+                      "type": "string"
+                    },
+                    "csrf": {
+                      "description": "Send as X-QAG-CSRF with every request the session cookie should authenticate.",
+                      "type": "string"
+                    },
+                    "email": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "signed_in": {
+                      "type": "boolean"
+                    },
+                    "sso": {
+                      "type": "boolean"
+                    },
+                    "sso_only": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "sso",
+                    "signed_in",
+                    "sso_only"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [],
+        "summary": "Whether SSO is on, and the Console session's administrator and CSRF token",
+        "tags": [
+          "Console sign-in"
+        ]
+      }
+    },
+    "/auth/sso/callback": {
+      "get": {
+        "responses": {
+          "302": {
+            "description": "To the Console - signed in, or with sso_error saying why not"
+          },
+          "404": {
+            "description": "SSO is not configured"
+          }
+        },
+        "security": [],
+        "summary": "Where the identity provider sends the person back: starts a Console session",
+        "tags": [
+          "Console sign-in"
+        ]
+      }
+    },
+    "/auth/sso/login": {
+      "get": {
+        "parameters": [
+          {
+            "description": "The Console page to land on - only ever a /console/ path.",
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "To the provider's sign-in"
+          },
+          "404": {
+            "description": "SSO is not configured"
+          }
+        },
+        "security": [],
+        "summary": "Console sign-in through SSO: redirects to the identity provider (ADR 0007)",
+        "tags": [
+          "Console sign-in"
+        ]
+      }
+    },
+    "/auth/sso/logout": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "provider_sign_out": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "signed_out": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "signed_out"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Signed out; provider_sign_out is the provider's own sign-out, where it has one"
+          },
+          "401": {
+            "description": "Not signed in"
+          }
+        },
+        "security": [],
+        "summary": "Ends the Console session (needs X-QAG-CSRF)",
+        "tags": [
+          "Console sign-in"
+        ]
+      }
+    },
     "/catalog": {
       "get": {
         "description": "Not just what /openapi.json already documents (parameters, description, connection) but the governance half it has no field for: whether a response can be cached and for how long, whether this specific caller can write through this query (may differ per query - see per-query write curation under Authentication and permissions), and this caller's own rate limit alongside the server-wide one. Scoped the same way /openapi.json already scopes its saved-query list - a query this caller cannot reach through /q/<name> is never listed here either. Requires authentication like any other functional endpoint (unlike /openapi.json, this is never public), since the whole point is answering \"what can *I* use.\"",

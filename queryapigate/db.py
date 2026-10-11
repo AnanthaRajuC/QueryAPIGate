@@ -26,10 +26,10 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 9  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 10  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
-#                    9: descriptions - see _upgrade()
+#                    9: descriptions; 10: admin_sessions, sso_logins - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -181,6 +181,26 @@ CREATE TABLE IF NOT EXISTS descriptions (
   updated_by TEXT,
   PRIMARY KEY (connection_name, table_name, column_name)
 );
+
+-- Console sign-in through SSO (sso.py, ADR 0007): a signed-in administrator's session - only its ID's SHA-256 hash -
+-- and the sign-ins started but not finished, each kept ten minutes.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id_hash TEXT PRIMARY KEY,
+  admin_name TEXT NOT NULL,
+  csrf TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at REAL NOT NULL,    -- epoch seconds
+  details_json TEXT NOT NULL   -- via, issuer, last_seen_at
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_name);
+CREATE TABLE IF NOT EXISTS sso_logins (
+  state_hash TEXT PRIMARY KEY,
+  browser_hash TEXT NOT NULL,  -- the sign-in is bound to the browser that started it
+  nonce TEXT NOT NULL,
+  verifier TEXT NOT NULL,      -- PKCE
+  return_to TEXT NOT NULL,
+  created_at REAL NOT NULL     -- epoch seconds
+);
 """
 
 
@@ -322,6 +342,26 @@ CREATE TABLE IF NOT EXISTS descriptions (
   updated_at TEXT NOT NULL,
   updated_by TEXT,
   PRIMARY KEY (connection_name, table_name, column_name)
+);
+
+-- Console sign-in through SSO (sso.py, ADR 0007): a signed-in administrator's session - only its ID's SHA-256 hash -
+-- and the sign-ins started but not finished, each kept ten minutes.
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id_hash TEXT COLLATE "C" PRIMARY KEY,
+  admin_name TEXT NOT NULL,
+  csrf TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at DOUBLE PRECISION NOT NULL,    -- epoch seconds
+  details_json TEXT NOT NULL   -- via, issuer, last_seen_at
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin ON admin_sessions(admin_name);
+CREATE TABLE IF NOT EXISTS sso_logins (
+  state_hash TEXT COLLATE "C" PRIMARY KEY,
+  browser_hash TEXT NOT NULL,  -- the sign-in is bound to the browser that started it
+  nonce TEXT NOT NULL,
+  verifier TEXT NOT NULL,      -- PKCE
+  return_to TEXT NOT NULL,
+  created_at DOUBLE PRECISION NOT NULL     -- epoch seconds
 );
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
@@ -533,7 +573,9 @@ def _upgrade(conn, postgres):
        running against the upgraded store keeps working.
     7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive.
     8: destinations and exports (ADR 0004), server_secrets (ADR 0005) - new tables, likewise.
-    9: descriptions (ADR 0006) - a new table, likewise."""
+    9: descriptions (ADR 0006) - a new table, likewise.
+    10: admin_sessions and sso_logins (ADR 0007) - new tables, likewise; an administrator's SSO link lives in its
+        details_json, so nothing existing changes."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -691,6 +733,7 @@ Error = _error_types()
 
 # Every table migrate_sqlite_to_postgres() copies, parents before children (foreign keys), with the columns it
 # copies - execution_history's and audit_log's own row ids are left for Postgres to assign, in source order.
+# admin_sessions and sso_logins aren't copied: they last hours at most, and signing in again after a move is right.
 _MIGRATED_TABLES = (
     ('connections', ('name', 'db', 'active', 'created_at', 'updated_at', 'details_json'), 'name'),
     ('saved_queries', ('name', 'collection', 'example', 'published_version'), 'name'),

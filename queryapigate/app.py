@@ -42,6 +42,7 @@ from . import (
     ratelimit,
     schema,
     sqltools,
+    sso,
     store,
 )
 from . import params as param_rules
@@ -54,7 +55,9 @@ bp = Blueprint('api', __name__)
 # Query-string arguments that control a request rather than supplying query parameters.
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
-                    'api.console_page', 'api.metrics_endpoint'}
+                    'api.console_page', 'api.metrics_endpoint',
+                    # Console sign-in (sso.py): each checks what it needs itself - state, the session and its CSRF token
+                    'auth.login', 'auth.callback', 'auth.session', 'auth.logout'}
 # Monitoring keeps working while a client is throttled; the Console's static files are exempt so loading the page
 # (several hashed assets) never spends a client's quota - they carry no data and no key.
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
@@ -259,6 +262,7 @@ def create_app():
     app.register_blueprint(bp)
     from . import v1  # imports this module's request helpers, so only once it is fully loaded
     app.register_blueprint(v1.bp)
+    app.register_blueprint(sso.bp)
     return app
 
 
@@ -306,11 +310,16 @@ def check_key_rate_limit():
 
 def resolve_permission():
     """The caller's Permission: a matched key (admin or scoped), a signed-in user's verified bearer token
-    (jwtauth.py), the unrestricted OPEN default when no key is configured anywhere, or None when a key is
-    required but missing or wrong. A request carrying an X-API-Key is judged on that key alone - a wrong key
-    never falls through to the token."""
-    return authenticate_headers(request.headers.get('X-API-Key', ''), request.headers.get('Authorization', ''),
-                                request.remote_addr)
+    (jwtauth.py), an administrator's Console session (sso.py), the unrestricted OPEN default when no key is
+    configured anywhere, or None when a key is required but missing or wrong. A request carrying an X-API-Key is
+    judged on that key alone - a wrong key never falls through to the token - and a session cookie counts only when
+    neither header is sent, and only with its CSRF token (X-QAG-CSRF)."""
+    api_key, authorization = request.headers.get('X-API-Key', ''), request.headers.get('Authorization', '')
+    if not api_key and not authorization and request.cookies.get(sso.SESSION_COOKIE):
+        permission = sso.authenticate(request.cookies.get(sso.SESSION_COOKIE), request.headers.get(sso.CSRF_HEADER))
+        if permission is not None:
+            return permission
+    return authenticate_headers(api_key, authorization, request.remote_addr)
 
 
 def authenticate_headers(api_key, authorization, client_ip):

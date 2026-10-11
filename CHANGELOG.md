@@ -25,8 +25,8 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 `gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
 (`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
-(`GET /api/v1/usage/agents`), and alerts (`GET /api/v1/alerts`). The
-list is `queryapigate/experimental.py`.
+(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), and alerts (`GET /api/v1/alerts`).
+The list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
 take that license casually. A patch release (`0.10.0` -> `0.10.1`) never breaks a covered surface. A minor
@@ -45,6 +45,18 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Upgrading from 0.18
+- **Schema 10** adds two tables (`admin_sessions`, `sso_logins`); nothing existing changes. A 0.18 instance still
+  running keeps working against the upgraded store, but can't be restarted on it - upgrade every instance.
+
+### Added
+- **Console sign-in through SSO** (BACKLOG #84 Phase 2, [ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md),
+  experimental): administrators sign in through the organisation's identity provider (OpenID Connect, the
+  authorization code flow with PKCE, run by the server), with their role from their groups at every sign-in
+  (`QUERYAPIGATE_SSO_ROLES`) and an administrator created on first sign-in. The session is a `SameSite=Strict`,
+  `HttpOnly` cookie that authenticates only together with its CSRF token. See
+  [Console sign-in through SSO](documentation/API.md#console-sign-in-through-sso).
 
 ## [0.18.0] - 2026-10-11
 

@@ -72,6 +72,15 @@ FEATURES: dict[str, dict[str, Any]] = {
         'operations': (('get', '/api/v1/usage/agents'),),
         'docs': ('documentation/API.md', 'Agent usage'),
     },
+    'sso': {
+        'name': 'Console sign-in through SSO',
+        'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',
+        'settings': ('QUERYAPIGATE_SSO_ISSUER', 'QUERYAPIGATE_SSO_CLIENT_ID', 'QUERYAPIGATE_SSO_CLIENT_SECRET',
+                     'QUERYAPIGATE_SSO_REDIRECT_URL', 'QUERYAPIGATE_SSO_ROLES', 'QUERYAPIGATE_SSO_GROUPS_CLAIM',
+                     'QUERYAPIGATE_SSO_SESSION_HOURS', 'QUERYAPIGATE_SSO_ONLY', 'QUERYAPIGATE_SSO_DEFAULT_ROLE',
+                     'QUERYAPIGATE_SSO_ALLOWED_DOMAINS'),
+        'docs': ('documentation/API.md', 'Console sign-in through SSO'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',

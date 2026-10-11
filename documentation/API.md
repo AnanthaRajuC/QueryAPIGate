@@ -756,6 +756,36 @@ and the last active owner can't be demoted, deactivated or removed while the sha
 Administrator names and API key names never overlap (`409 name_taken`), so a name in the logs, `/metrics` and run
 history means one caller; `admin` and `cli` are reserved.
 
+### Console sign-in through SSO
+
+> **Experimental** - new in 0.19 ([ADR 0007](adr/0007-console-sign-in-through-sso.md)); its settings and the session's
+> shape may change in any minor release, always noted in the changelog.
+
+Administrators sign in to the Console through the organisation's identity provider (OpenID Connect) - its MFA and
+policies apply, and their role comes from their groups:
+
+| Variable | Effect |
+|---|---|
+| `QUERYAPIGATE_SSO_ISSUER` | The provider's issuer URL; its endpoints and keys come from its published metadata |
+| `QUERYAPIGATE_SSO_CLIENT_ID`, `QUERYAPIGATE_SSO_CLIENT_SECRET` | This server, registered at the provider as a confidential client |
+| `QUERYAPIGATE_SSO_REDIRECT_URL` | The callback as the provider calls it - `https://data.example.com/auth/sso/callback` |
+| `QUERYAPIGATE_SSO_ROLES` | Groups to roles: `owner=qag-owners,admin=qag-admins,developer=qag-devs,auditor=qag-audit` |
+| `QUERYAPIGATE_SSO_GROUPS_CLAIM` | The ID token claim with the person's groups (default `groups`) |
+| `QUERYAPIGATE_SSO_SESSION_HOURS` | How long a session lasts (default 8, at most 168) |
+| `QUERYAPIGATE_SSO_DEFAULT_ROLE`, `QUERYAPIGATE_SSO_ALLOWED_DOMAINS` | For providers whose ID tokens carry no groups: a role (never owner) for a verified email at these domains - only together |
+
+- **The flow** is the authorization code flow with PKCE, run by the server: `GET /auth/sso/login` sends the browser
+  to the provider; `GET /auth/sso/callback` takes the sign-in back - once, and only in the browser that started it
+  - exchanges the code with the client secret, and checks the ID token: signature, issuer, audience (the client
+  ID), nonce, expiry. The browser never holds a token.
+- **Who**: the person is bound to their administrator by the provider's `sub`, never by email; the first sign-in
+  creates the administrator (`via: sso`). **The role is the groups'**, at every sign-in - the most capable that maps;
+  none, and the sign-in is refused (`sso_no_role`).
+- **The session** is an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, and a request is authenticated by it only
+  together with the session's CSRF token in `X-QAG-CSRF` - which the Console reads from `GET /auth/session`. Sent
+  with an `X-API-Key` or `Authorization` header, the header is judged instead. `POST /auth/sso/logout` ends it.
+- Every sign-in, refusal and sign-out is in the audit log, and every action in a session says `via: sso`.
+
 ## Authentication and permissions
 
 `QUERYAPIGATE_API_KEY`, if set, is a full-access **admin** key - the break-glass key once named administrators
