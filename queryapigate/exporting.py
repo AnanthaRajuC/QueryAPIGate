@@ -63,7 +63,7 @@ def deliver(destination, relative, columns, rows, fmt='parquet', track=None, ski
     staged and before anything is written - raising there writes nothing."""
     if fmt not in FORMATS:
         raise ApiError(f"format must be one of: {', '.join(FORMATS)}", code='invalid_body')
-    parquet._require()
+    destinations.require_duckdb()  # before the rows are read and staged, whatever the format
     staged = parquet.stage(columns, rows, track)
     try:
         if skip_empty and not staged.count:

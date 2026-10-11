@@ -1557,6 +1557,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |
 | `write_op_not_allowed` | 403 | A write this key's `allowed_write_ops` doesn't include |
 | `table_not_allowed` | 403 | A table outside this key's `allowed_tables`, or a table function (`read_parquet(...)`) for such a key |
+| `exports_unavailable` | 500 | Exports and destination tests need DuckDB (`pip install "queryapigate[duckdb]"`), which isn't installed |
 | `format_unavailable` | 500 | `format=parquet` on a server without DuckDB (`pip install "queryapigate[duckdb]"`) |
 | `path_not_allowed` | 403 | A DuckDB connection was asked to read a file or URL outside its `allowed_paths` |
 | `table_check_unsupported` | 403 | `allowed_tables` can't be enforced on this database type, so the query is refused |

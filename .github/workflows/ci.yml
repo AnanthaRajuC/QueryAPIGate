@@ -132,7 +132,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e .
+      # The optional packages the screens under test use, as the Docker image has them: DuckDB (exports, Parquet,
+      # files) and sqlglot (column masking). Without them those features refuse, saying what to install.
+      - run: pip install -e ".[duckdb,flow]"
       - uses: actions/setup-node@v7
         with:
           node-version-file: frontend/.nvmrc

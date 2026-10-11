@@ -203,10 +203,22 @@ def _usable(destination):
     return store.resolve_ad_hoc({k: destination[k] for k in FIELDS if k in destination})
 
 
+def require_duckdb():
+    """Exports and destination tests write through DuckDB, an optional package: without it, say so - and how to get it -
+    instead of failing with a bare internal error."""
+    try:
+        import duckdb  # noqa: F401
+    except ImportError:
+        raise ApiError('Exports write files through DuckDB, which isn\'t installed - run '
+                       '`pip install "queryapigate[duckdb]"` (the Docker image includes it)', 500,
+                       code='exports_unavailable') from None
+
+
 def open_writer(destination, read_files=()):
     """A DuckDB connection that may write under the destination's prefix and nowhere else. Returns (conn, prefix):
     `prefix` is how a target inside it is spelled for DuckDB. `read_files` are exact local files it may also open -
     the staged rows an export copies from (parquet.stage()), and nothing beside them."""
+    require_duckdb()
     import duckdb
     fields = _usable(destination)
     url = fields['url']

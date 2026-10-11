@@ -40,6 +40,22 @@ class LocalFolderTests(V1TestCase):
         self.assertEqual(caught.exception.code, 'invalid_body')
 
 
+class WithoutDuckDbTests(V1TestCase):
+    """DuckDB is optional: without it, a destination test or an export says what's missing - not a bare 500."""
+
+    def test_a_clear_error_naming_the_package(self):
+        import sys
+        allowed = export_dir(self)
+        self.call('post', LIST, LIST, 201, json={'name': 'ok', 'url': allowed + '/feed/'})
+        with mock.patch.dict(sys.modules, {'duckdb': None}):  # import duckdb now raises ImportError
+            for path in (f'{LIST}/ok/test', f'{LIST}/test'):
+                with self.subTest(path=path):
+                    res = self.client.post(path, headers={'X-API-Key': 'admin-key'}, json={'url': allowed + '/x/'})
+                    body = res.get_json()
+                    self.assertEqual((res.status_code, body['code']), (500, 'exports_unavailable'))
+                    self.assertIn('queryapigate[duckdb]', body['error'])
+
+
 class ServerSettingTests(V1TestCase):
     def test_a_destination_cant_reference_a_server_setting(self):
         allowed = export_dir(self)

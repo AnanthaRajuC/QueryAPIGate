@@ -72,6 +72,7 @@ Nothing has to change for what you run today; check two things if they apply to 
   with `QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can
   be written elsewhere; `POST /api/v1/destinations/{name}/test` writes a probe object to prove the url, credentials and
   permission together. Owners and admins define destinations (`destinations.write`); every administrator can read them.
+  Exports need DuckDB (`queryapigate[duckdb]`, in the Docker image); without it they say so (`exports_unavailable`).
 - **`queryapigate export QUERY --to DESTINATION --out PATH`** writes a saved query's full result under a destination
   as Parquet, CSV or NDJSON, through DuckDB: `--out 'orders/{date}/orders_{run}.parquet'` - with `{name}`, `{date}`,
   `{time}`, `{run}` and the query's own parameters (`{region}`), whose values may only be plain names, so none can add

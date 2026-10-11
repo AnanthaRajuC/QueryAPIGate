@@ -281,6 +281,7 @@ def run(name, actor):
     """Run export `name` once. Returns the run: id, object, rows, bytes, watermark before and after."""
     from .engine import stream_sql
     export = get(name)
+    destinations.require_duckdb()  # before the lease and the query: there'd be no way to write what it returns
     timeout = config.effective_timeout(export.get('timeout'))
     _take_lease(name, (timeout or NO_LIMIT_LEASE) + LEASE_MARGIN)
     started = time.monotonic()
