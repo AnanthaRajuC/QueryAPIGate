@@ -51,7 +51,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Upgrading from 0.21
+- **Schema 12** adds two nullable columns to `api_keys` (`previous_hash`, `previous_expires_at`) and an index; nothing
+  existing changes. A 0.21 instance still running keeps working against the upgraded store, but doesn't know a
+  rotated key's old secret - so upgrade every instance before rotating a key.
+
 ### Added
+- **Reissuing an API key's secret** (BACKLOG #91, [ADR 0009](documentation/adr/0009-key-rotation.md)):
+  `POST /api/v1/api-keys/{name}/rotate` gives a key a new secret, shown once, while the old one keeps working for
+  `grace_minutes` (default 60, at most a week; 0 for a leaked secret) - same name, same grants, the same history, so
+  whoever uses the key switches without an outage. `previous_expires_at` and `previous_last_used_at` on the key show
+  whether they have; `DELETE /api/v1/api-keys/{name}/previous` ends the grace early. A second rotation while an old
+  secret still works is refused (`key_rotation_pending`). Audited as `rotate_api_key` and `end_previous_secret`.
 - **Rotating the encryption key** (BACKLOG #90, [ADR 0009](documentation/adr/0009-key-rotation.md)):
   `QUERYAPIGATE_SECRET_KEY` takes several keys, comma-separated - the first encrypts, every one decrypts - and
   `queryapigate rekey` (or `POST /api/v1/settings/rekey`, owners only: the new `secrets.rotate` capability)

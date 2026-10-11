@@ -73,6 +73,8 @@ def to_key(name, entry):
         'created_at': entry.get('created_at'),
         'created_from_role': entry.get('created_from_role'),
         'last_used_at': entry.get('last_used_at'),
+        'previous_expires_at': entry.get('previous_expires_at'),
+        'previous_last_used_at': entry.get('previous_last_used_at') if entry.get('previous_expires_at') else None,
         'example': entry.get('example') is True,
         'usage': {'queries': usage.get('queries', 0), 'errors': usage.get('errors', 0), 'rows': usage.get('rows', 0)},
     }
@@ -115,6 +117,24 @@ def update_key(name, data, actor):
     changes = _diff(before, apikeys.list_keys().get(name))
     if changes:
         store.record_audit(actor, 'update_key', name, changes)
+
+
+def rotate_key(name, data, actor):
+    """A new secret for an existing key (ADR 0009), returned once; the old one keeps working for `grace_minutes`."""
+    _refuse_unknown(data, ('grace_minutes',))
+    load_key(name)
+    grace = data.get('grace_minutes')
+    secret, until = apikeys.rotate_key(name, grace)
+    store.record_audit(actor, 'rotate_api_key', name, {
+        'grace_minutes': apikeys.DEFAULT_GRACE_MINUTES if grace is None else grace, 'previous_expires_at': until})
+    return secret
+
+
+def end_previous_secret(name, actor):
+    """Stop a key's old secret now, before its grace period ends."""
+    load_key(name)
+    until = apikeys.end_previous(name)
+    store.record_audit(actor, 'end_previous_secret', name, {'was_valid_until': until})
 
 
 def delete_key(name, actor):

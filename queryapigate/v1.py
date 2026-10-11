@@ -376,6 +376,21 @@ def update_api_key(name):
     return _key_response(name)
 
 
+@bp.route('/api-keys/<name>/rotate', methods=['POST'])
+def rotate_api_key(name):
+    """A new secret for the key, shown this once - the old one keeps working for `grace_minutes` (default 60, 0 stops
+    it at once), so whoever uses the key can switch without an outage. Name, grants and history stay."""
+    secret = access.rotate_key(name, get_json_body(required=False), caller_key_name())
+    return _key_response(name, 200, secret)
+
+
+@bp.route('/api-keys/<name>/previous', methods=['DELETE'])
+def end_previous_secret(name):
+    """Stop the key's old secret now, before its grace period ends."""
+    access.end_previous_secret(name, caller_key_name())
+    return _key_response(name)
+
+
 @bp.route('/api-keys/<name>', methods=['DELETE'])
 def delete_api_key(name):
     """Revoke and remove it: anything still using it stops working immediately."""

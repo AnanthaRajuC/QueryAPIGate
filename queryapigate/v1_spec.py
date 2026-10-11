@@ -775,7 +775,7 @@ SCHEMAS = {
         'allOf': [_ref('Grants'), {
             'type': 'object',
             'required': ['name', 'active', 'expires_at', 'expired', 'created_at', 'created_from_role',
-                         'last_used_at', 'example', 'usage'],
+                         'last_used_at', 'previous_expires_at', 'previous_last_used_at', 'example', 'usage'],
             'properties': {
                 'name': {'type': 'string'}, 'active': {'type': 'boolean'},
                 'expires_at': {'type': 'string', 'nullable': True,
@@ -783,6 +783,12 @@ SCHEMAS = {
                 'expired': {'type': 'boolean'},
                 'created_at': _NULLABLE_STRING, 'created_from_role': _NULLABLE_STRING,
                 'last_used_at': _NULLABLE_STRING, 'example': {'type': 'boolean'},
+                'previous_expires_at': {'type': 'string', 'nullable': True,
+                                        'description': 'After a rotation: the old secret works until then. Null when '
+                                                       'there is none, or it was ended.'},
+                'previous_last_used_at': {'type': 'string', 'nullable': True,
+                                          'description': 'When the old secret was last used, while it still '
+                                                         'works - has the caller switched? (at most once a minute)'},
                 'usage': {'type': 'object', 'required': ['queries', 'errors', 'rows'],
                           'properties': {'queries': {'type': 'integer'}, 'errors': {'type': 'integer'},
                                          'rows': {'type': 'integer'}}},
@@ -1096,6 +1102,23 @@ PATHS = {
                      body=_ref('ApiKeyInput')),
         'delete': _op('Revoke and remove it', {'204': {'description': 'Revoked'}, **_PRECONDITION},
                       parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/api-keys/{name}/rotate': {
+        'post': _op("Reissue the key's secret: a new one, shown this once, and the old one still working for "
+                    '`grace_minutes`', {'200': _ok(_ref('ApiKeyCreated'), etag=True),
+                                        '409': {'description': 'An old secret from the last rotation still works '
+                                                               '(`key_rotation_pending`) - end it first',
+                                                **_json(_ref('V1Error'))}},
+                    parameters=[_NAME],
+                    body={'type': 'object', 'properties': {'grace_minutes': {
+                        'type': 'integer', 'minimum': 0, 'maximum': 10080, 'default': 60,
+                        'description': 'How long the old secret keeps working; 0 stops it at once.'}}},
+                    description='Name, grants, expiry and history stay the same; `allowed_ips`, expiry and the rate '
+                                'limit apply to both secrets alike (ADR 0009). Audited as `rotate_api_key`.'),
+    },
+    '/api/v1/api-keys/{name}/previous': {
+        'delete': _op('Stop the old secret now, before its grace period ends', {'200': _ok(_ref('ApiKey'), etag=True)},
+                      parameters=[_NAME], description='404 `previous_secret_not_found` when no old secret works.'),
     },
     '/api/v1/destinations': {
         'get': _op('List destinations - where exports may write (secrets masked)',

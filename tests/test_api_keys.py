@@ -481,7 +481,7 @@ class LastUsedTests(AppTestCase):
                          headers={'X-API-Key': key})
         first = self.listed()['last_used_at']
         # simulate the throttle window having elapsed, rather than sleeping the test for real
-        apikeys._last_recorded_use['reporting'] = time.monotonic() - apikeys._USE_RECORD_INTERVAL - 1
+        apikeys._last_recorded_use[('reporting', False)] = time.monotonic() - apikeys._USE_RECORD_INTERVAL - 1
         with mock.patch.object(apikeys, '_upsert', wraps=apikeys._upsert) as spy:
             self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                              headers={'X-API-Key': key})

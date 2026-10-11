@@ -504,6 +504,16 @@
               "name": {
                 "type": "string"
               },
+              "previous_expires_at": {
+                "description": "After a rotation: the old secret works until then. Null when there is none, or it was ended.",
+                "nullable": true,
+                "type": "string"
+              },
+              "previous_last_used_at": {
+                "description": "When the old secret was last used, while it still works - has the caller switched? (at most once a minute)",
+                "nullable": true,
+                "type": "string"
+              },
               "usage": {
                 "properties": {
                   "errors": {
@@ -532,6 +542,8 @@
               "created_at",
               "created_from_role",
               "last_used_at",
+              "previous_expires_at",
+              "previous_last_used_at",
               "example",
               "usage"
             ],
@@ -4317,6 +4329,193 @@
           }
         },
         "summary": "Change some of its grants, its expiry, or active (false revokes it)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{name}/previous": {
+      "delete": {
+        "description": "404 `previous_secret_not_found` when no old secret works.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKey"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Stop the old secret now, before its grace period ends",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{name}/rotate": {
+      "post": {
+        "description": "Name, grants, expiry and history stay the same; `allowed_ips`, expiry and the rate limit apply to both secrets alike (ADR 0009). Audited as `rotate_api_key`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "grace_minutes": {
+                    "default": 60,
+                    "description": "How long the old secret keeps working; 0 stops it at once.",
+                    "maximum": 10080,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "An old secret from the last rotation still works (`key_rotation_pending`) - end it first"
+          }
+        },
+        "summary": "Reissue the key's secret: a new one, shown this once, and the old one still working for `grace_minutes`",
         "tags": [
           "Management API v1"
         ]

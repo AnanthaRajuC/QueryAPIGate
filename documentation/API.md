@@ -374,10 +374,12 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`. Never secrets. |
+| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
 | `POST /api/v1/api-keys` | Create one, from explicit grants or from a `role` (whose grants are copied once; no grant fields then). The response's `secret` is the only time it is ever shown, and is sent with `Cache-Control: no-store`. 409 `key_exists`, 404 `role_not_found`. |
 | `GET /api/v1/api-keys/{name}` | One key. |
 | `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. Honours `If-Match`. |
+| `POST /api/v1/api-keys/{name}/rotate` | Reissue its secret: the response carries the new `secret`, shown this once (`Cache-Control: no-store`), and the old one keeps working for `grace_minutes` (default 60, at most 10080 - a week; 0 stops it at once). Name, grants, expiry and history stay; `active`, expiry, `allowed_ips` and the rate limit apply to both secrets alike. 409 `key_rotation_pending` while an old secret from the last rotation still works. Audited as `rotate_api_key`. |
+| `DELETE /api/v1/api-keys/{name}/previous` | Stop the old secret now, before its grace period ends. 404 `previous_secret_not_found` when none works. Audited as `end_previous_secret`. |
 | `DELETE /api/v1/api-keys/{name}` | Revoke and remove it: anything still using it stops working immediately. |
 | `GET /api/v1/roles` | Every role's grants, with `keys_created`: the keys created from it. |
 | `POST /api/v1/roles` | Create one. 409 `role_exists`. |
@@ -1711,6 +1713,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `not_published` | 404 | The query has no published version |
 | `connection_not_found` | 404 | No such connection |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
+| `key_rotation_pending` | 409 | The key's old secret from its last rotation still works (`previous_expires_at`) - end it (`DELETE /api/v1/api-keys/{name}/previous`) or wait, then rotate again |
+| `previous_secret_not_found` | 404 | The key has no old secret that still works - nothing to end |
 | `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
 | `destination_not_found`, `export_not_found` | 404 | No such destination or export |
 | `collection_not_found` | 404 | No such collection (or it is empty) |

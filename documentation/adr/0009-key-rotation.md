@@ -76,7 +76,7 @@ count. An `encryption_key_rotation_incomplete` alert reminds whoever started a r
 
 ```
 POST /api/v1/api-keys/{name}/rotate   {"grace_minutes": 1440}
--> {"name": "partner-acme", "key": "sk_...new...", "previous_expires_at": "2026-10-12 14:00:00"}
+-> {"name": "partner-acme", "secret": "sk_...new...", "previous_expires_at": "2026-10-12 14:00:00", ...the key}
 ```
 
 - **The new secret** is generated and shown once, as when the key was created. Name, grants, expiry, rate limit and
@@ -90,7 +90,7 @@ POST /api/v1/api-keys/{name}/rotate   {"grace_minutes": 1440}
   Console shows "The old secret was last used 3 minutes ago" and, once its grace period ends, "has expired".
 - **How it's stored** (schema 12): `api_keys` gains `previous_hash` (indexed) and `previous_expires_at`. Authentication
   stays one indexed lookup: `WHERE hash = ? OR previous_hash = ?`. A match on `previous_hash` counts only before
-  `previous_expires_at`. An expired old hash is cleared on the next rotation or the retention sweep. The secret itself
+  `previous_expires_at`. An expired old hash is never matched, and is replaced at the next rotation. The secret itself
   is never stored, before or after, as today.
 - **Every rule applies to both secrets the same way:** `allowed_ips`, expiry, `active`, the rate limit (one bucket per
   key, not per secret).

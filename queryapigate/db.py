@@ -26,10 +26,11 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 11  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 12  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
-#                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests - see _upgrade()
+#                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
+#                    12: api_keys.previous_hash/previous_expires_at - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -90,8 +91,10 @@ CREATE TABLE IF NOT EXISTS api_keys (
   expires_at TEXT,           -- checked in Python (apikeys.is_expired()), kept a real column anyway to match
                               -- active/created_at as a plausible future "keys expiring soon" filter target
   created_at TEXT NOT NULL,
-  details_json TEXT NOT NULL  -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+  details_json TEXT NOT NULL, -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
                                -- allowed_write_ops, created_from_role, last_used_at - everything else
+  previous_hash TEXT,          -- the secret before the last rotation (ADR 0009), accepted until previous_expires_at;
+  previous_expires_at TEXT     -- indexed by _upgrade(), which also adds both to an older store
 );
 
 CREATE TABLE IF NOT EXISTS roles (
@@ -275,7 +278,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
   active INTEGER NOT NULL DEFAULT 1,
   expires_at TEXT,
   created_at TEXT NOT NULL,
-  details_json TEXT NOT NULL
+  details_json TEXT NOT NULL,
+  previous_hash TEXT,
+  previous_expires_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS roles (
@@ -608,7 +613,11 @@ def _upgrade(conn, postgres):
     9: descriptions (ADR 0006) - a new table, likewise.
     10: admin_sessions and sso_logins (ADR 0007) - new tables, likewise; an administrator's SSO link lives in its
         details_json, so nothing existing changes.
-    11: write_requests (ADR 0008) - a new table, likewise."""
+    11: write_requests (ADR 0008) - a new table, likewise.
+    12: api_keys.previous_hash and previous_expires_at (ADR 0009), nullable - a key never rotated has neither - and an
+        index on previous_hash, made here rather than in the schema so it can follow the column on an older store.
+        Additive: a 0.21 process still running ignores them (so an old secret in its grace period doesn't
+        authenticate there - upgrade every instance before rotating a key)."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -624,6 +633,10 @@ def _upgrade(conn, postgres):
         conn.execute('ALTER TABLE saved_queries ADD COLUMN published_version INTEGER')
         conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
                      'WHERE saved_query_versions.query_name = saved_queries.name)')
+    if 'previous_hash' not in _columns(conn, 'api_keys', postgres):
+        conn.execute('ALTER TABLE api_keys ADD COLUMN previous_hash TEXT')
+        conn.execute('ALTER TABLE api_keys ADD COLUMN previous_expires_at TEXT')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_previous_hash ON api_keys(previous_hash)')
     if _history_requires_a_query(conn, postgres):
         if postgres:
             conn.execute('ALTER TABLE execution_history ALTER COLUMN query_name DROP NOT NULL')
@@ -773,7 +786,8 @@ _MIGRATED_TABLES = (
     ('saved_query_versions', ('query_name', 'version', 'uuid', 'status', 'created_at', 'last_modified_at',
                               'fields_json'), 'query_name, version'),
     ('execution_history', ('query_name', 'version', 'executed_at', 'entry_json', 'status', 'key_name'), 'rowid'),
-    ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json'), 'name'),
+    ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json', 'previous_hash',
+                  'previous_expires_at'), 'name'),
     ('roles', ('name', 'created_at', 'details_json'), 'name'),
     ('audit_log', ('timestamp', 'entry_json'), 'id'),
     ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),

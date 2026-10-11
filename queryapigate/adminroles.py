@@ -65,6 +65,7 @@ OPERATIONS = {
     'v1.list_api_keys': 'access.read', 'v1.get_api_key': 'access.read', 'v1.list_roles': 'access.read',
     'v1.get_role': 'access.read',
     'v1.create_api_key': 'access.write', 'v1.update_api_key': 'access.write', 'v1.delete_api_key': 'access.write',
+    'v1.rotate_api_key': 'access.write', 'v1.end_previous_secret': 'access.write',
     'v1.create_role': 'access.write', 'v1.update_role': 'access.write', 'v1.delete_role': 'access.write',
     'v1.list_cache_entries': 'cache.read', 'v1.get_cache_entry': 'cache.read',
     'v1.clear_cache': 'cache.write', 'v1.delete_cache_entry': 'cache.write',
