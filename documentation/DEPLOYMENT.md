@@ -217,7 +217,8 @@ The schema is recreated under its original name, so the URL's `search_path` (if 
 
 - **`QUERYAPIGATE_SECRET_KEY`**, if you set it: connection passwords are stored encrypted with it. A store restored
   without the same key has every encrypted password unreadable - each connection must be given its password again.
-  Keep the key in your secrets manager, with the `.env` it lives in.
+  Keep the key in your secrets manager, with the `.env` it lives in. After a key rotation (`queryapigate rekey`), a
+  backup taken before it still needs the old key: list it after the new one to restore it, then run `rekey` again.
 - **`QUERYAPIGATE_API_KEY`**, the admin key, and any environment variable a connection refers to (`"password":
   "${WAREHOUSE_PASSWORD}"`). Scoped API keys *are* in the store - as hashes, so they keep working after a restore,
   but a lost secret can't be recovered from a backup: issue a new key instead.

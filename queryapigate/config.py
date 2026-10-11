@@ -383,19 +383,7 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_MCP_MAX_ROWS', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
-    raw = os.environ.get('QUERYAPIGATE_SECRET_KEY', '').strip()
-    if raw:
-        try:
-            from cryptography.fernet import Fernet
-        except ImportError:
-            raise ValueError('QUERYAPIGATE_SECRET_KEY is set but the "cryptography" package is not installed - '
-                             'run `pip install "queryapigate[encryption]"`') from None
-        try:
-            Fernet(raw.encode('utf-8'))
-        except (ValueError, TypeError):
-            raise ValueError('QUERYAPIGATE_SECRET_KEY must be a valid Fernet key - 32 url-safe base64-encoded '
-                             'bytes, e.g. from `python -c "from cryptography.fernet import Fernet; '
-                             'print(Fernet.generate_key().decode())"`') from None
+    check_secret_keys()
     check_database_url()
     check_jwt_settings()
     check_mcp_oauth_settings()
@@ -426,11 +414,52 @@ def mask_key():
     return os.environ.get('QUERYAPIGATE_MASK_KEY', '').strip() or None
 
 
+def secret_keys():
+    """The keys connection and destination passwords are encrypted with at rest (QUERYAPIGATE_SECRET_KEY), first
+    to last - empty when unset: encryption at rest is opt-in, and without it a password is stored exactly as given.
+    Several, comma-separated, while rotating (ADR 0009): the first encrypts, every one decrypts, and
+    `queryapigate rekey` moves what's stored under the others to the first. Validated by check_secret_keys()."""
+    return [k.strip() for k in os.environ.get('QUERYAPIGATE_SECRET_KEY', '').split(',') if k.strip()]
+
+
 def secret_key():
-    """The server-side key used to encrypt connection passwords at rest (QUERYAPIGATE_SECRET_KEY), or None when
-    unset - encryption at rest is opt-in; without it, a connection's password is stored exactly as given,
-    today's unchanged behaviour. Validated as a real Fernet key at startup by check_settings(), not here."""
-    return os.environ.get('QUERYAPIGATE_SECRET_KEY') or None
+    """The key new values are encrypted with - the first of secret_keys() - or None when encryption is off."""
+    keys = secret_keys()
+    return keys[0] if keys else None
+
+
+def _encryption_state():
+    keys = secret_keys()
+    if len(keys) < 2:
+        return 'enabled' if keys else 'off'
+    from . import rekey
+    old = rekey.report()['under_old_keys']
+    return (f'{len(keys)} keys - {old} password(s) still under an old key: run `queryapigate rekey`' if old
+            else f'{len(keys)} keys - every password under the first: remove the others')
+
+
+def check_secret_keys():
+    """Each key in QUERYAPIGATE_SECRET_KEY a real Fernet key, none twice - saying which one is wrong."""
+    keys = secret_keys()
+    if not keys:
+        return
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        raise ValueError('QUERYAPIGATE_SECRET_KEY is set but the "cryptography" package is not installed - '
+                         'run `pip install "queryapigate[encryption]"`') from None
+    for i, key in enumerate(keys):
+        which = ('QUERYAPIGATE_SECRET_KEY' if len(keys) == 1
+                 else f'Key {i + 1} of {len(keys)} in QUERYAPIGATE_SECRET_KEY')
+        try:
+            Fernet(key.encode('utf-8'))
+        except (ValueError, TypeError):
+            raise ValueError(f'{which} must be a valid Fernet key - 32 url-safe base64-encoded bytes, e.g. from '
+                             '`python -c "from cryptography.fernet import Fernet; '
+                             'print(Fernet.generate_key().decode())"`') from None
+        if key in keys[:i]:
+            raise ValueError(f'{which} is the same as key {keys.index(key) + 1} - list each key once, the one to '
+                             'encrypt with first')
 
 
 _REDIS_SCHEME_RE = re.compile(r'^(rediss?|unix)://', re.I)
@@ -956,8 +985,9 @@ def describe_settings():
                 'QUERYAPIGATE_API_KEY', 'configured' if api_key() else 'not set - open access', secret=True),
             row('Allow writes', 'When off, statements that modify data are rejected.',
                 'QUERYAPIGATE_ALLOW_WRITES', on_off(allow_writes())),
-            row('Encryption at rest', 'Fernet key used to encrypt connection passwords on disk.',
-                'QUERYAPIGATE_SECRET_KEY', 'enabled' if secret_key() else 'off', secret=True),
+            row('Encryption at rest', 'Fernet key used to encrypt connection and destination passwords on disk; '
+                'several, comma-separated, while rotating it - the first encrypts.',
+                'QUERYAPIGATE_SECRET_KEY', _encryption_state(), secret=True),
             row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
                 'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
             row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',

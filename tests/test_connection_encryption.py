@@ -171,7 +171,7 @@ class FailureModeTests(AppTestCase):
         res = client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'a'},
                           headers=self.admin_headers)
         self.assertEqual(res.status_code, 500)
-        self.assertIn('rotated', res.get_json()['error'])
+        self.assertIn('no longer listed', res.get_json()['error'])
 
     def test_a_malformed_secret_key_is_rejected_at_startup(self):
         os.environ['QUERYAPIGATE_SECRET_KEY'] = 'not-a-valid-key'

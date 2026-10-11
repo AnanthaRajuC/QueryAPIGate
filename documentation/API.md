@@ -435,6 +435,7 @@ Clearing the cache is housekeeping, not a change, so it is not audited.
 | Method and path | What it does |
 |---|---|
 | `GET /api/v1/settings` | The server's effective configuration, as sections (`id`, `title`, `description`, `rows`). Each row has the `env` variable, its displayed `value`, its `source` (`env` or `default`) and `env_value`, the raw value for a `.env` export. A secret's `value` only says whether it is configured, and its `env_value` is always null. Read-only: change settings in the environment and restart. |
+| `POST /api/v1/settings/rekey` | Re-encrypt every stored password (connections and destinations) under the first key in `QUERYAPIGATE_SECRET_KEY`, so the others can be removed - all in one transaction, or nothing when one can't be decrypted. `{"check": true}` only reports: `keys`, `values`, `by_key` (how many under each listed key, in order), `under_old_keys`, `undecryptable`; a rekey adds `rekeyed`. Owners only (`secrets.rotate`); audited as `rekey`, counts only. See [Rotating the key](#rotating-the-key). |
 | `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
 | `GET /api/v1/mcp/tools` | What `tools/list` returns for an unrestricted caller: each tool's `name`, `description`, `kind` (`ad-hoc` or `saved query`), `params` and `read_only`. Computed in this process, so it works whether or not `queryapigate mcp` is running. |
 
@@ -658,6 +659,17 @@ disk but no key is configured to read them - the same "fail closed, say why" pre
 without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhere safe, outside
 `QUERYAPIGATE_HOME` and outside version control, the same way you would any other credential.
 
+#### Rotating the key
+
+`QUERYAPIGATE_SECRET_KEY` takes several keys, comma-separated ([ADR 0009](adr/0009-key-rotation.md)): the first
+encrypts, every one decrypts. Restart with `<new-key>,<old-key>`, run `queryapigate rekey` (or
+`POST /api/v1/settings/rekey`) to re-encrypt every stored password - connections' and destinations' - under the new
+key, then restart with `<new-key>` alone. `queryapigate rekey --check` only reports how many are under each key. Until
+the old keys are gone, startup logs a warning and the `encryption_key_rotation_incomplete` alert says what's left. Each
+listed key is validated at startup, by its place in the list (*Key 2 of 2 in QUERYAPIGATE_SECRET_KEY must be a valid
+Fernet key*). Step by step, with several instances:
+[How to encrypt passwords at rest](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md#changing-the-key).
+
 `GET /connections/reporting/schema` lists its tables and views for self-service query writing:
 
 ~~~json
@@ -723,8 +735,8 @@ alone; deactivating the administrator stops them all.
 
 | Role | May |
 |---|---|
-| `owner` | everything, including administrators |
-| `admin` | everything but administrators: connections, API keys and roles, saved queries, cache, examples, settings |
+| `owner` | everything, including administrators and re-encrypting stored passwords under a new key |
+| `admin` | everything but administrators and re-encrypting passwords: connections, API keys and roles, saved queries, cache, examples, settings |
 | `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes, and no moves that give a key or role new reach |
 | `auditor` | read only: queries, connections, API keys and roles, the audit log, history, alerts, instances, settings. No SQL at all |
 
@@ -1337,6 +1349,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
+| `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
 | `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |
 | `sso_unreachable` | critical | Console sign-in through SSO is on, but the identity provider's metadata can't be fetched - nobody can sign in that way; open sessions keep working |
 | `agent_unusual_volume` | warning | An AI agent read at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows over MCP in the last hour, and ten times its own average hour - see [Agent usage](#agent-usage) |
@@ -1732,7 +1745,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
 | `driver_missing` | 500 | The database driver isn't installed on the server, or is too old (DuckDB before 1.2) |
 | `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |
-| `secret_key_required`, `password_undecryptable` | 500 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset or has changed |
+| `secret_key_required`, `password_undecryptable` | 500, 409 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset, or lists no key it was encrypted with (500). From `POST /api/v1/settings/rekey`: no key is set, or a stored password no listed key decrypts - nothing changed, `values` names them (409) |
 | `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |
 | `masking_unavailable` | 500 | Column masking needs the `sqlglot` package (`queryapigate[flow]`), which isn't installed |
 | `internal_error` | 500 | Anything unexpected; the log has the traceback under `request_id` |

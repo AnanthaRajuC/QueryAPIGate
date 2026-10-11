@@ -209,14 +209,15 @@ def _is_encrypted(value):
 
 
 def _get_fernet():
-    """The configured Fernet instance for connection-password encryption at rest (QUERYAPIGATE_SECRET_KEY), or
-    None when unset - encryption at rest is opt-in. The key's format is already validated at startup
-    (config.check_settings()), so a Fernet() call here should not itself fail."""
-    key = config.secret_key()
-    if not key:
+    """What encrypts and decrypts passwords at rest (QUERYAPIGATE_SECRET_KEY), or None when unset - encryption at
+    rest is opt-in. With several keys (rotating, ADR 0009) a MultiFernet: it encrypts with the first and decrypts
+    with whichever works. The keys are already validated at startup (config.check_secret_keys())."""
+    keys = config.secret_keys()
+    if not keys:
         return None
-    from cryptography.fernet import Fernet
-    return Fernet(key.encode('utf-8'))
+    from cryptography.fernet import Fernet, MultiFernet
+    fernets = [Fernet(key.encode('utf-8')) for key in keys]
+    return fernets[0] if len(fernets) == 1 else MultiFernet(fernets)
 
 
 def _encrypt_password(value):
@@ -248,8 +249,11 @@ def _decrypt_password(value):
     try:
         return fernet.decrypt(value[len(_ENC_PREFIX):].encode('ascii')).decode('utf-8')
     except InvalidToken:
-        raise ApiError("This connection's password could not be decrypted - QUERYAPIGATE_SECRET_KEY may have "
-                       'been rotated since it was encrypted', 500, code='password_undecryptable') from None
+        keys = len(config.secret_keys())
+        which = 'QUERYAPIGATE_SECRET_KEY' if keys == 1 else f'any of the {keys} keys in QUERYAPIGATE_SECRET_KEY'
+        raise ApiError(f"This connection's password could not be decrypted with {which} - it was encrypted with a "
+                       'key that is no longer listed. Add that key back (after the first), or enter the password '
+                       'again', 500, code='password_undecryptable') from None
 
 
 def resolve_ad_hoc(details):

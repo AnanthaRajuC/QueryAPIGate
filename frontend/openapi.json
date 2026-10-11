@@ -391,7 +391,8 @@
               "key_unused",
               "agent_unusual_volume",
               "sso_unreachable",
-              "writes_awaiting_approval"
+              "writes_awaiting_approval",
+              "encryption_key_rotation_incomplete"
             ],
             "type": "string"
           },
@@ -1347,6 +1348,65 @@
         "required": [
           "object",
           "elapsed_ms"
+        ],
+        "type": "object"
+      },
+      "EncryptionKeys": {
+        "description": "The passwords stored encrypted, by the key in QUERYAPIGATE_SECRET_KEY each is under (ADR 0009).",
+        "properties": {
+          "by_key": {
+            "description": "How many are under each listed key, in order: the first encrypts.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "keys": {
+            "description": "How many keys QUERYAPIGATE_SECRET_KEY lists.",
+            "type": "integer"
+          },
+          "rekeyed": {
+            "description": "How many were re-encrypted under the first key (not with `check`).",
+            "type": "integer"
+          },
+          "undecryptable": {
+            "description": "What no listed key decrypts.",
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "connection",
+                    "destination"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "under_old_keys": {
+            "description": "How many are under a key other than the first.",
+            "type": "integer"
+          },
+          "values": {
+            "description": "Encrypted passwords stored - connections and destinations.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keys",
+          "values",
+          "by_key",
+          "under_old_keys",
+          "undecryptable"
         ],
         "type": "object"
       },
@@ -9328,6 +9388,93 @@
           }
         },
         "summary": "The server's effective configuration, by section (read-only)",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/settings/rekey": {
+      "post": {
+        "description": "All or nothing, in one transaction; running it again is harmless. Owners only (`secrets.rotate`). Recorded in the audit log as `rekey`, with counts only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "check": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncryptionKeys"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "No key is set (`secret_key_required`), or a password no listed key decrypts (`password_undecryptable`, nothing changed)"
+          }
+        },
+        "summary": "Re-encrypt every stored password under the first key in QUERYAPIGATE_SECRET_KEY, so the others can be removed - or, with `check`, only say how many are under each key",
         "tags": [
           "Management API v1"
         ]

@@ -258,6 +258,24 @@ SCHEMAS = {
         'type': 'object', 'required': ['items'],
         'properties': {'items': {'type': 'array', 'items': _ref('WriteRequest')}},
     },
+    'EncryptionKeys': {
+        'type': 'object', 'required': ['keys', 'values', 'by_key', 'under_old_keys', 'undecryptable'],
+        'description': 'The passwords stored encrypted, by the key in QUERYAPIGATE_SECRET_KEY each is under '
+                       '(ADR 0009).',
+        'properties': {
+            'keys': {'type': 'integer', 'description': 'How many keys QUERYAPIGATE_SECRET_KEY lists.'},
+            'values': {'type': 'integer', 'description': 'Encrypted passwords stored - connections and destinations.'},
+            'by_key': {'type': 'array', 'items': {'type': 'integer'},
+                       'description': 'How many are under each listed key, in order: the first encrypts.'},
+            'under_old_keys': {'type': 'integer', 'description': 'How many are under a key other than the first.'},
+            'undecryptable': {'type': 'array', 'description': 'What no listed key decrypts.', 'items': {
+                'type': 'object', 'required': ['type', 'name'],
+                'properties': {'type': {'type': 'string', 'enum': ['connection', 'destination']},
+                               'name': {'type': 'string'}}}},
+            'rekeyed': {'type': 'integer', 'description': 'How many were re-encrypted under the first key (not with '
+                                                          '`check`).'},
+        },
+    },
     'AgentUsage': {
         'type': 'object',
         'required': ['agent', 'calls', 'rows', 'errors', 'masked_calls', 'first_seen', 'last_seen', 'connections',
@@ -1046,6 +1064,17 @@ PATHS = {
     '/api/v1/settings': {
         'get': _op("The server's effective configuration, by section (read-only)",
                    {'200': _ok(_ref('SettingsList'))}),
+    },
+    '/api/v1/settings/rekey': {
+        'post': _op('Re-encrypt every stored password under the first key in QUERYAPIGATE_SECRET_KEY, so the others '
+                    'can be removed - or, with `check`, only say how many are under each key',
+                    {'200': _ok(_ref('EncryptionKeys')),
+                     '409': {'description': 'No key is set (`secret_key_required`), or a password no listed key '
+                                            'decrypts (`password_undecryptable`, nothing changed)',
+                             **_json(_ref('V1Error'))}},
+                    body={'type': 'object', 'properties': {'check': {'type': 'boolean', 'default': False}}},
+                    description='All or nothing, in one transaction; running it again is harmless. Owners only '
+                                '(`secrets.rotate`). Recorded in the audit log as `rekey`, with counts only.'),
     },
     '/api/v1/mcp/status': {
         'get': _op("Whether the MCP server's port answers (a TCP connect, run only when asked)",

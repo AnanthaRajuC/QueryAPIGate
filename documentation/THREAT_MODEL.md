@@ -253,7 +253,11 @@ or - with `QUERYAPIGATE_SECRET_KEY` set - Fernet-encrypted at rest. Encryption i
 default**; without a secret key, a connection password is only as protected as the file/volume it sits in.
 The key itself must be kept outside `QUERYAPIGATE_HOME` and out of version control - there is no recovery
 path for an encrypted password without it, by design, the same property that makes it real encryption
-rather than obfuscation. API responses always mask stored passwords regardless of how they're stored.
+rather than obfuscation. API responses always mask stored passwords regardless of how they're stored. The key can
+be rotated without taking a connection down (ADR 0009): `QUERYAPIGATE_SECRET_KEY` lists the new key first and the old
+one after it, `queryapigate rekey` re-encrypts every stored password under the new one in a single transaction (all or
+nothing), and the old key is then removed. A key suspected leaked is replaced the same way; backups taken before the
+rekey still open with the old key, so they need retiring with it.
 
 ### Transport
 

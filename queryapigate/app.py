@@ -159,6 +159,16 @@ def create_app():
         # Encrypt any literal password already on disk immediately, rather than waiting for its next
         # PATCH /api/v1/connections - a connection saved before QUERYAPIGATE_SECRET_KEY existed benefits right away.
         store.encrypt_plaintext_passwords_in_place()
+        from . import rekey
+        found = rekey.report()
+        if found['undecryptable']:
+            log.warning('No key in QUERYAPIGATE_SECRET_KEY decrypts the password of %s - add the key it was '
+                        'encrypted with (after the first), or enter it again.',
+                        ', '.join(f"{v['type']} '{v['name']}'" for v in found['undecryptable']))
+        if found['under_old_keys']:
+            log.warning('%d password(s) are still encrypted with an old key in QUERYAPIGATE_SECRET_KEY - run '
+                        '`queryapigate rekey` to move them to the first key, then remove the others.',
+                        found['under_old_keys'])
     else:
         encrypted = store.encrypted_password_connections()
         if encrypted:

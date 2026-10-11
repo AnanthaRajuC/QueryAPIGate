@@ -2904,8 +2904,7 @@ and a leaked key must be replaceable at once.
   (`cryptography`'s `MultiFernet`). One key stays exactly today's behaviour.
 - `queryapigate rekey` re-encrypts every stored value under the first key, in one transaction, and refuses - changing
   nothing - when a value can't be decrypted by any key; `--check` only reports which values are under an old key.
-- What it covers: connection passwords (active and deleted connections) and destination passwords - every value the
-  store marks `enc:`. Hashed secrets (API keys, admin tokens) aren't encrypted, so aren't affected.
+- What it covers: connection and destination passwords - every value the store marks `enc:`. Hashed secrets (API keys, admin tokens) aren't encrypted, so aren't affected.
 
 ## 91. Reissuing an API key's secret, with the old one working for a while
 

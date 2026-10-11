@@ -510,6 +510,41 @@ def _exports_list(args):
     return 0
 
 
+def _describe_keys(found):
+    keys, by_key = found['keys'], found['by_key']
+    if not found['values']:
+        return 'No encrypted passwords are stored.'
+    parts = [f"{by_key[0]} under the first key"] + [f"{n} under key {i + 2}" for i, n in enumerate(by_key[1:])]
+    if found['undecryptable']:
+        parts.append(f"{len(found['undecryptable'])} under no listed key")
+    return f"{found['values']} encrypted password(s), {keys} key(s) listed: " + ', '.join(parts) + '.'
+
+
+def _rekey(args):
+    from . import rekey
+    try:
+        config.check_secret_keys()
+        found = rekey.check() if args.check else rekey.rekey('cli')
+    except ValueError as error:
+        print(f'queryapigate rekey: {error}', file=sys.stderr)
+        return 2
+    except ApiError as error:
+        print(f'queryapigate rekey: {error.message}', file=sys.stderr)
+        return 1
+    if not args.check:
+        print(f"Re-encrypted {found['rekeyed']} password(s) under the first key.")
+    print(_describe_keys(found))
+    for value in found['undecryptable']:
+        print(f"  no listed key decrypts {value['type']} '{value['name']}'")
+    if found['undecryptable']:
+        return 1
+    if found['keys'] > 1 and not found['under_old_keys']:
+        print('Nothing is left under the other keys: remove them from QUERYAPIGATE_SECRET_KEY on every instance.')
+    elif args.check and found['under_old_keys']:
+        print('Run `queryapigate rekey` to move them to the first key.')
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='queryapigate', description='Expose SQL databases as a REST API.')
     parser.add_argument('--version', action='version', version=f'queryapigate {__version__}')
@@ -633,6 +668,13 @@ def build_parser():
     admins_token.set_defaults(func=_admins_token)
     admins_list.set_defaults(func=_admins_list)
 
+    rekey_parser = commands.add_parser('rekey', help='re-encrypt every stored password under the first key in '
+                                                     'QUERYAPIGATE_SECRET_KEY, so the others can be removed (rotating '
+                                                     'the key)')
+    rekey_parser.add_argument('--check', action='store_true',
+                              help='only report how many passwords are under each key - change nothing')
+    rekey_parser.set_defaults(func=_rekey)
+
     exports_parser = commands.add_parser('exports', help='run or list saved exports (deliveries of a saved query to a '
                                                          'destination) - for cron on the host, no server needed')
     exports_parser.set_defaults(func=lambda a: exports_parser.print_help() or 2)
@@ -644,7 +686,7 @@ def build_parser():
     exports_list.set_defaults(func=_exports_list)
 
     for sub in (serve, init, export, collection_export, collection_import, examples_load, examples_unload,
-                examples_status, admins_create, admins_token, admins_list, exports_run, exports_list):
+                examples_status, admins_create, admins_token, admins_list, exports_run, exports_list, rekey_parser):
         sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
     return parser

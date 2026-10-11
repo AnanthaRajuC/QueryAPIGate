@@ -715,6 +715,19 @@ def get_settings():
     return jsonify({'items': config.describe_settings()}), 200
 
 
+@bp.route('/settings/rekey', methods=['POST'])
+def rekey():
+    """Re-encrypt every stored password under QUERYAPIGATE_SECRET_KEY's first key (ADR 0009) - or, with `check`,
+    only report which key each is under."""
+    from . import rekey as rekeying
+    check = get_json_body(required=False).get('check', False)
+    if not isinstance(check, bool):
+        raise ApiError('check is true or false', code='invalid_body')
+    if check:
+        return jsonify(rekeying.check()), 200
+    return jsonify(rekeying.rekey(caller_key_name(), g.permission.via)), 200
+
+
 @bp.route('/mcp/status', methods=['GET'])
 def mcp_status():
     """Whether something answers on the MCP server's port - a plain TCP connect, run only when asked."""

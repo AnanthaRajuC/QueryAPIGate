@@ -57,7 +57,7 @@ def note_rate_limited(kind, who):
 KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
-         'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval')
+         'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -74,7 +74,8 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_writes(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
+    found = [*_server(now), *_sso(), *_encryption(), *_writes(), *_keys(now), *_runs(now), *_rate_limited(),
+             *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
@@ -96,6 +97,26 @@ def _sso():
                    'in through it - sessions already open keep working. Check the provider is up and '
                    'QUERYAPIGATE_SSO_ISSUER is right; until then, sign in with an admin token or the break-glass key.',
                    {'type': 'settings', 'name': 'sso'})]
+
+
+def _encryption():
+    """QUERYAPIGATE_SECRET_KEY lists more than one key: a rotation was started (ADR 0009) and isn't finished -
+    passwords are still under an old key (run rekey), or none are (remove the old keys)."""
+    if len(config.secret_keys()) < 2:
+        return []
+    from . import rekey
+    found = rekey.report()
+    target = {'type': 'settings', 'name': 'security'}
+    old = found['under_old_keys']
+    if old:
+        return [_alert('warning', 'encryption_key_rotation_incomplete', 'secret_key',
+                       f"{_plural(old, 'password')} {'is' if old == 1 else 'are'} still encrypted with an old key",
+                       'QUERYAPIGATE_SECRET_KEY lists several keys, so a rotation has started. Run `queryapigate '
+                       'rekey` to re-encrypt them with the first key, then remove the others.', target)]
+    return [_alert('info', 'encryption_key_rotation_incomplete', 'secret_key',
+                   'Every password is under the new encryption key - remove the old ones',
+                   f"QUERYAPIGATE_SECRET_KEY still lists {found['keys']} keys, but nothing is encrypted with any but "
+                   'the first. Remove the others from every instance to finish the rotation.', target)]
 
 
 def _writes():

@@ -75,6 +75,7 @@ describe('Alerts', () => {
         'Agents0',
         'Sign-in0',
         'Open access0',
+        'Encryption key0',
         'Run history0',
       ]),
     );

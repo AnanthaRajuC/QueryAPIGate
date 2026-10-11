@@ -80,28 +80,55 @@ Nothing silently falls back to plaintext. Verified:
   QUERYAPIGATE_SECRET_KEY is not set - they cannot be used until the key that encrypted them is restored* - and each
   query on them fails with `500`, `"code": "secret_key_required"`.
 - **Started with a different key:** `500`, `"code": "password_undecryptable"` - *This connection's password could not
-  be decrypted - QUERYAPIGATE_SECRET_KEY may have been rotated since it was encrypted.*
+  be decrypted with QUERYAPIGATE_SECRET_KEY - it was encrypted with a key that is no longer listed. Add that key back
+  (after the first), or enter the password again.*
 
 Both also raise a **connection failing** alert once runs start failing. There is no way to recover an encrypted
 password without its key - which is the point. Re-enter the password, or restore the key.
 
 ## Changing the key
 
-There's one key at a time and no built-in re-encryption, so rotating is a short manual job:
+`QUERYAPIGATE_SECRET_KEY` can list several keys, comma-separated: the **first** encrypts, **every one** decrypts. So a
+rotation never takes a connection down (new in 0.22, verified against PostgreSQL connections `warehouse` and `shop`):
 
-1. Restart with the **new** key. Connections encrypted with the old one now fail with `password_undecryptable`.
-2. Re-enter each of those passwords - **Connections → edit**, or:
+1. Generate the new key, and restart with it **first** and the old one after it:
 
    ```bash
-   curl -X PATCH http://127.0.0.1:5000/api/v1/connections/warehouse -H 'X-API-Key: demo-key' \
-     -H 'Content-Type: application/json' -d '{"password": "pg-secret-pw"}'
+   QUERYAPIGATE_SECRET_KEY=<new-key>,<old-key>
    ```
 
-   Each is saved encrypted with the new key and works from the next query (verified).
-3. Delete the old key from your secret manager.
+   Every connection keeps working - the old key still decrypts them - and the server says what's left to do:
+   *2 password(s) are still encrypted with an old key in QUERYAPIGATE_SECRET_KEY - run `queryapigate rekey` to move
+   them to the first key, then remove the others.* Settings and Alerts say the same.
 
-Plan for the few minutes between steps 1 and 2 when those connections are down - or switch them to `${VAR}`
-references first, which don't depend on the key.
+2. Re-encrypt everything under the new key, on the server (with the same `QUERYAPIGATE_SECRET_KEY`):
+
+   ```bash
+   queryapigate rekey --check
+   # 2 encrypted password(s), 2 key(s) listed: 0 under the first key, 2 under key 2.
+   # Run `queryapigate rekey` to move them to the first key.
+   queryapigate rekey
+   # Re-encrypted 2 password(s) under the first key.
+   # 2 encrypted password(s), 2 key(s) listed: 2 under the first key, 0 under key 2.
+   # Nothing is left under the other keys: remove them from QUERYAPIGATE_SECRET_KEY on every instance.
+   ```
+
+   Or, with no shell, as an owner: `POST /api/v1/settings/rekey` (`{"check": true}` to only report). It covers
+   connection and destination passwords, in one transaction - all of them or, if any can't be decrypted by a listed
+   key, none (*No key in QUERYAPIGATE_SECRET_KEY decrypts the password of connection 'shop', ... - nothing was
+   changed*). Running it twice is harmless. The audit log records `rekey`, with counts only.
+
+3. Restart with the new key alone, `QUERYAPIGATE_SECRET_KEY=<new-key>`, and delete the old one from your secret manager.
+   Queries work as before; started with the old key alone, they now fail with `password_undecryptable`.
+
+**Several instances:** do step 1 on all of them before step 2. While they restart one by one, one still on the old key
+alone can't read a password just saved by one on `new,old` - to avoid even that, roll out `<old-key>,<new-key>` first
+(still encrypting with the old one), then `<new-key>,<old-key>`.
+
+**Backups** taken before step 2 need the old key to read their passwords - keep it as long as you keep them.
+
+A key that isn't valid stops the server, and `rekey`, naming its place in the list: *Key 2 of 2 in
+QUERYAPIGATE_SECRET_KEY must be a valid Fernet key*. The same key twice is refused too.
 
 ## What this does and doesn't protect
 

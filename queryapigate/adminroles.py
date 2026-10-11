@@ -24,6 +24,7 @@ CAPABILITIES = {
     'examples.write': 'load and remove the bundled example APIs',
     'observe': 'read the audit log, run history, alerts, instances and MCP status',
     'settings.read': "read the server's settings",
+    'secrets.rotate': 're-encrypt stored passwords under a new encryption key (ADR 0009)',
     'admins.read': 'read administrators and their tokens',
     'admins.write': 'create, change and delete administrators, and issue or revoke anyone\'s tokens',
     'self': 'see who you are, and manage your own admin tokens',
@@ -37,7 +38,7 @@ CAPABILITIES = {
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
     'owner': set(CAPABILITIES),
-    'admin': set(CAPABILITIES) - {'admins.read', 'admins.write'},
+    'admin': set(CAPABILITIES) - {'admins.read', 'admins.write', 'secrets.rotate'},
     'developer': _EVERYONE | {'queries.write', 'exports.read', 'exports.run'},
     'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read'},
 }
@@ -73,7 +74,7 @@ OPERATIONS = {
     'v1.list_write_requests': 'writes.approve', 'v1.get_write_request': 'writes.approve',
     'v1.approve_write_request': 'writes.approve', 'v1.reject_write_request': 'writes.approve',
     'v1.mcp_status': 'observe', 'v1.mcp_tools': 'observe',
-    'v1.get_settings': 'settings.read',
+    'v1.get_settings': 'settings.read', 'v1.rekey': 'secrets.rotate',
     'v1.list_administrators': 'admins.read', 'v1.get_administrator': 'admins.read',
     'v1.create_administrator': 'admins.write', 'v1.update_administrator': 'admins.write',
     'v1.delete_administrator': 'admins.write',

@@ -169,6 +169,14 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
     about: 'Whether the server runs with no API key at all, letting anyone query and change it.',
   },
   {
+    id: 'encryption',
+    label: 'Encryption key',
+    kinds: ['encryption_key_rotation_incomplete'],
+    about:
+      'A rotation of QUERYAPIGATE_SECRET_KEY that is not finished: passwords still encrypted with an old key (run ' +
+      'queryapigate rekey), or old keys still listed once nothing uses them.',
+  },
+  {
     id: 'run-history',
     label: 'Run history',
     kinds: ['history_failed', 'history_dropped'],

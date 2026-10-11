@@ -51,6 +51,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Rotating the encryption key** (BACKLOG #90, [ADR 0009](documentation/adr/0009-key-rotation.md)):
+  `QUERYAPIGATE_SECRET_KEY` takes several keys, comma-separated - the first encrypts, every one decrypts - and
+  `queryapigate rekey` (or `POST /api/v1/settings/rekey`, owners only: the new `secrets.rotate` capability)
+  re-encrypts every stored connection and destination password under the first, in one transaction: all of them, or
+  none when one can't be decrypted by a listed key. `--check` (`{"check": true}`) only reports how many are under
+  each key. Until the old keys are removed, startup logs it, Settings shows it, and the
+  `encryption_key_rotation_incomplete` alert says what's left. Audited as `rekey`, with counts only. One key behaves
+  exactly as before. Guide 22's [Changing the key](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md#changing-the-key).
+
+### Changed
+- `password_undecryptable` now says that no listed key decrypts the password, and how to fix it. Each key in
+  `QUERYAPIGATE_SECRET_KEY` is validated at startup by its place in the list; the same key twice is refused.
+
 ## [0.21.0] - 2026-10-11
 
 Agents that act, governed: an AI agent may write through a saved query its author marked for agents - opening a

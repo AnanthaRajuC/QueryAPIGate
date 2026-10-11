@@ -49,8 +49,9 @@ queryapigate rekey --check   # how many stored values are under each listed key,
 queryapigate rekey           # re-encrypt them all under the first key
 ```
 
-- **What it covers:** every value the store marks `enc:`. Today those are connection passwords, for active and deleted
-  connections, and destination passwords. A future encrypted field joins by being registered in the same list.
+- **What it covers:** every value the store marks `enc:`. Today those are connection and destination passwords (a
+  deleted connection keeps none: its audit entry has the password masked). A future encrypted field joins by being
+  registered in the same list.
 - **All or nothing:** everything is re-encrypted in one store transaction. If any value can't be decrypted by any listed
   key, the command changes nothing and names the connections and destinations involved.
 - **Safe to run again** and while servers are running. A value already under the first key is left alone. A connection
