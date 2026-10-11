@@ -241,7 +241,8 @@ values, `format` and page - anything else is a separate entry. It is **never** u
 write (`INSERT`/`UPDATE`/`DELETE`/DDL), regardless of `cache_ttl`: caching such a query would silently skip the
 write on every call after the first.
 
-A fresh response carries `ETag`, `Cache-Control: max-age=<cache_ttl>` and `X-Cache: MISS`. A request within the TTL
+A fresh response carries `ETag`, `Cache-Control: private, max-age=<cache_ttl>` and `X-Cache: MISS` - `private`, so
+the caller's own client may keep it but no shared cache (a CDN, a caching proxy) in front of the server may. A request within the TTL
 gets the same body with `X-Cache: HIT`; send back `If-None-Match: <ETag>` to get `304 Not Modified` with no body
 instead. A cache hit is not appended to `execution_history` - nothing ran against the database. The cache is kept
 in this one process's memory by default, or shared across restarts/instances when `QUERYAPIGATE_REDIS_URL` is set
@@ -1412,7 +1413,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.22.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.22.1",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

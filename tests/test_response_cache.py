@@ -371,9 +371,13 @@ class CacheHeaderTests(AppTestCase):
         first = self.client.get('/q/q?id=1')
         self.assertEqual(first.headers['X-Cache'], 'MISS')
         self.assertIn('ETag', first.headers)
-        self.assertEqual(first.headers['Cache-Control'], 'max-age=60')
+        self.assertEqual(first.headers['Cache-Control'], 'private, max-age=60')
         second = self.client.get('/q/q?id=1')
         self.assertEqual(second.headers['X-Cache'], 'HIT')
+        # private on a hit and a 304 too: no shared cache in front may keep one caller's rows for the next caller
+        self.assertEqual(second.headers['Cache-Control'], 'private, max-age=60')
+        unchanged = self.client.get('/q/q?id=1', headers={'If-None-Match': first.headers['ETag']})
+        self.assertEqual((unchanged.status_code, unchanged.headers['Cache-Control']), (304, 'private, max-age=60'))
         self.assertEqual(second.get_data(), first.get_data())
         self.assertEqual(second.headers['ETag'], first.headers['ETag'])
 

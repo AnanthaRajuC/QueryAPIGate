@@ -36,7 +36,7 @@ curl -X PATCH http://127.0.0.1:5000/api/v1/queries/hit_count/versions/1 -H 'X-AP
 curl -i 'http://127.0.0.1:5000/q/hit_count' -H 'X-API-Key: demo-key'
 # X-Cache: MISS
 # ETag: "f22c7a09230338d15d1faa7812a0bf9f8d8d555c98cc6e1ea791f59deceabad0"
-# Cache-Control: max-age=30
+# Cache-Control: private, max-age=30
 ```
 
 Now change the underlying data **directly**, bypassing the API entirely (something only caching, not any

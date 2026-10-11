@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0010-tracing-and-security-headers.md"

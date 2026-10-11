@@ -81,7 +81,8 @@ documentation. #99 workspaces only if asked for.
    ([ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md)). (Released as 0.21.0 on 2026-10-11.)
 10. **0.22: #90 rotating the encryption key and #91 reissuing an API key's secret**
     ([ADR 0009](documentation/adr/0009-key-rotation.md)). (Released as 0.22.0 on 2026-10-11.)
-11. **0.23: #92 OpenTelemetry tracing and #93 security headers.**
+11. **0.23: #92 OpenTelemetry tracing and #93 security headers**
+    ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas.**
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
@@ -2929,7 +2930,7 @@ drift from the old one's, and run history and audit split across two names.
 
 ## 92. Distributed tracing (OpenTelemetry)
 
-**Status: open; planned for 0.23.**
+**Status: open; planned for 0.23** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
 
 **Impact:** there are request ids and Prometheus metrics, but nothing reads an incoming W3C `traceparent` header or
 exports spans - so in Datadog, Tempo or Honeycomb the gateway is a gap between the caller's span and the database's.
@@ -2941,7 +2942,7 @@ to its trace.
 
 ## 93. Security headers on every response, not only the Console's
 
-**Status: open; planned for 0.23.**
+**Status: open; planned for 0.23** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
 
 **Impact:** the Console's responses carry a Content-Security-Policy and `X-Content-Type-Options` (`console.py`); the API
 and docs routes carry none and rely on the reverse proxy. A scanner flags it, and a deployment without a proxy that adds

@@ -51,6 +51,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-11
+
+### Security
+- **A cached saved query's response could be kept by a shared cache in front of the server** (0.4.0 to 0.22.0). A
+  saved query with `cache_ttl` answered with `Cache-Control: max-age=<cache_ttl>`. Callers authenticate with
+  `X-API-Key`, not `Authorization`, so HTTP's rule that keeps authenticated responses out of shared caches doesn't
+  apply: a CDN or caching proxy between callers and QueryAPIGate could store one caller's rows - masked or filtered
+  for that caller's key - and serve them to the next request for the same URL, with any key or none. The server's own
+  response cache was never affected: it checks the caller's grant before answering, and keys each response by its
+  parameter values and the caller's masking rules. Now it is `Cache-Control: private,
+  max-age=<cache_ttl>`, on hits and `304`s too. To check whether it could have happened: whether anything in front of
+  the server caches responses, and whether it honoured `max-age` on `/q/` paths.
+
 ## [0.22.0] - 2026-10-11
 
 Rotating secrets without downtime: the key stored passwords are encrypted with, and an API key's secret, can each be
@@ -1972,7 +1985,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...v0.20.1

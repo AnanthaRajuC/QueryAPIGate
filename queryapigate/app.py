@@ -607,6 +607,14 @@ def execute_mongo_endpoint():
     return render(result, output_format, page, limit)
 
 
+def _client_cache_control(ttl):
+    """How long the *caller* may keep a cached response - `private`, so only the caller's own client may: a request
+    authenticates with X-API-Key, not Authorization, so HTTP's rule keeping authenticated responses out of shared
+    caches (RFC 9111 3.5) doesn't apply, and a CDN or caching proxy in front would otherwise keep one caller's rows -
+    masked for its key - and serve them to the next caller of that URL, with any key or none."""
+    return f'private, max-age={ttl}'
+
+
 def cache_lookup(cache_key, ttl):
     """A live entry rendered as a response (304 if the client already has it), or None on a cache miss."""
     hit = current_app.extensions['queryapigate_cache'].get(cache_key)
@@ -621,7 +629,7 @@ def cache_lookup(cache_key, ttl):
         for name, value in headers:
             response.headers[name] = value
     response.headers['ETag'] = quoted
-    response.headers['Cache-Control'] = f'max-age={ttl}'
+    response.headers['Cache-Control'] = _client_cache_control(ttl)
     response.headers['X-Cache'] = 'HIT'
     return response
 
@@ -635,7 +643,7 @@ def cache_store(cache_key, response, ttl, meta=None):
     etag = current_app.extensions['queryapigate_cache'].set(cache_key, response.get_data(), response.content_type,
                                                        replay_headers, ttl, meta)
     response.headers['ETag'] = f'"{etag}"'
-    response.headers['Cache-Control'] = f'max-age={ttl}'
+    response.headers['Cache-Control'] = _client_cache_control(ttl)
     response.headers['X-Cache'] = 'MISS'
     return response
 
