@@ -69,8 +69,11 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 7. **0.19: #84 Phase 2**, Console sign-in through the organisation's identity provider, experimental
    ([ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md)). (Released as 0.19.0 on 2026-10-11; 0.19.1 fixed
    the DuckDB minimum.)
-8. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-9. **1.0.0.**
+8. **0.20: consolidation** - alerts, remote files, exports and column masking graduate, on terms written into the
+   versioning policy (`experimental.GRADUATION`); CI against real S3, Keycloak and the oldest dependencies allowed.
+   (Released as 0.20.0 on 2026-10-11.)
+9. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+10. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2021,7 +2024,7 @@ week, and with which key?" can't be answered from QueryAPIGate itself.
 
 ## 63. Column masking and PII redaction for query results, starting with agent-facing results
 
-**Status: shipped (experimental, for 0.17).** [ADR 0005](documentation/adr/0005-column-masking.md) and its amendment:
+**Status: shipped (0.17); stable since 0.20.** [ADR 0005](documentation/adr/0005-column-masking.md) and its amendment:
 `masking.py` - rules on source columns (`hash`, `mask`, `null`, `drop`, `keep`) on keys, roles and exports, result
 columns traced through the SQL with sqlglot lineage, refused before running when they can't be; applied on every route
 and format, streams, MCP and exports; the cache keyed per rules; `masked` in run history; `/catalog`'s `masking`; the
@@ -2503,7 +2506,7 @@ MCP and the Console's test run alike.
 
 ## 75. Files and data lakes as a source: Parquet, CSV and JSON on S3, GCS or HTTP, through DuckDB
 
-**Status: shipped (experimental, for 0.15).** `queryapigate/duckfiles.py`: every DuckDB connection is locked as it
+**Status: shipped (0.15); stable since 0.20.** `queryapigate/duckfiles.py`: every DuckDB connection is locked as it
 opens - DuckDB's own `allowed_directories`/`allowed_paths`, `enable_external_access = false` and `lock_configuration`
 - so it reads only its `allowed_paths` (none by default, which closed reading any local file). Object-storage
 credentials reuse `user`/`password`; `views` name files for the schema browser and `allowed_tables`; table functions
@@ -2837,7 +2840,7 @@ on a real run) is a smaller follow-up on finished work, not an open capability g
 
 ## 89. Exports to object storage, incremental
 
-**Status: shipped (experimental, for 0.17).** [ADR 0004](documentation/adr/0004-exports-to-object-storage.md):
+**Status: shipped (0.17); stable since 0.20.** [ADR 0004](documentation/adr/0004-exports-to-object-storage.md):
 destinations (`destinations.py`, writes locked to the prefix by DuckDB), the writer (`exporting.py`: Parquet/CSV/NDJSON
 from staged rows, path templates), saved exports (`exports.py`: incremental watermarks that move only after a file is
 written, refused up front when the parameter couldn't take them back; a lease per export), `/api/v1/destinations`,

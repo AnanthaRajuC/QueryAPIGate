@@ -51,6 +51,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-11
+
+A consolidation release: four features leave the experimental list and come under the compatibility promise -
+alerts, remote files through DuckDB, exports to object storage and column masking - on terms now written into the
+versioning policy. Getting them there found two dependency minimums that weren't true (sqlglot for masking; DuckDB,
+fixed in 0.19.1), and CI now tests against real S3, a real identity provider and the oldest dependencies allowed.
+
+### Upgrading from 0.19
+- **`queryapigate[flow]` needs sqlglot 25.2 or later** (was 23). pip upgrades it with QueryAPIGate; an install that
+  pins an older one keeps everything but column masking working, and masked callers get `masking_unavailable` saying
+  so.
+- Nothing else changes: no schema change, and the graduated features work exactly as in 0.19.
+
 ### Changed
 - **Alerts, remote files through DuckDB, exports to object storage and column masking are stable** - under the
   compatibility promise, no longer experimental: each met the graduation terms now written into the versioning policy
@@ -1883,7 +1896,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...v0.18.0
