@@ -22,10 +22,11 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
-from . import config, db, destinations, exporting, store
+from . import config, db, destinations, exporting, masking, store
 from .errors import ApiError
 
-FIELDS = ('description', 'query', 'params', 'format', 'destination', 'path', 'incremental', 'skip_empty', 'timeout')
+FIELDS = ('description', 'query', 'params', 'format', 'destination', 'path', 'incremental', 'skip_empty', 'timeout',
+          'mask')
 _NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')
 LEASE_MARGIN = 300  # seconds a lease outlasts the run's own time limit, before another run may take it over
 NO_LIMIT_LEASE = 3600  # a run's lease when there is no query time limit at all
@@ -163,8 +164,22 @@ def validate(fields):
             raise _invalid(f"The query doesn't use :{incremental['parameter']} - an incremental export binds the "
                            f"last value it delivered to it, e.g. WHERE {incremental['column']} > "
                            f":{incremental['parameter']}")
-    _, _, _, _, values = prepare(out['query'], {k: v for k, v in raw.items() if v is not None})
+    _, _, connection_name, sql, values = prepare(out['query'], {k: v for k, v in raw.items() if v is not None})
     exporting.render_path(out['path'], out['query'], values)  # every placeholder must fill in
+    if 'mask' in out:
+        out['mask'] = masking.validate_rules(out['mask']) or None
+        if out['mask'] is None:
+            del out['mask']
+    if out.get('mask'):
+        # The export's own rules, traced now against the published query - a query they can't follow is refused
+        # when the export is saved, not at the first run - and never on the incremental column, whose values the
+        # watermark is made of.
+        plan = masking.prepare(out['mask'], sql, connection_name, store.get_connection(connection_name)['db'])
+        if plan is not None and incremental is not None:
+            for (name, _), action in zip(plan.traced, plan.actions, strict=True):
+                if name == incremental['column'] and action is not None:
+                    raise _invalid(f"The incremental column '{name}' can't be masked ({action}) - the watermark is "
+                                   'made of its values')
     return out
 
 
@@ -285,7 +300,9 @@ def run(name, actor):
         entry['connection_name'] = connection_name
         relative = exporting.render_path(export['path'], export['query'], values, run_id)
         destination = destinations.get(export['destination'])
-        columns, rows = stream_sql(sql, connection_name, values, timeout)
+        columns, rows = stream_sql(sql, connection_name, values, timeout, mask=export.get('mask'))
+        if getattr(rows, 'masked', None):
+            entry['masked'] = rows.masked
         with contextlib.closing(rows):  # a failed write must still end the query and give its connection back
             result = exporting.deliver(destination, relative, columns, rows, export.get('format', 'parquet'),
                                        track=incremental['column'] if incremental else None,

@@ -34,6 +34,7 @@ from . import (
     instances,
     jwtauth,
     logging_setup,
+    masking,
     metrics,
     mongotools,
     openapi,
@@ -182,6 +183,10 @@ def create_app():
             permission = g.get('permission')
             if permission is None or not permission.admin:
                 extra = {k: v for k, v in extra.items() if k != 'detail'}
+        # A caller with column-masking rules never gets the database's own text, on any route: an error can quote a
+        # value - "Could not convert string 'jane@example.com' to INT32" - that masking would have hidden.
+        if 'detail' in extra and getattr(g.get('permission'), 'mask', None):
+            extra = {k: v for k, v in extra.items() if k != 'detail'}
         response = jsonify(error_body(error.message, error.status, extra, error.code))
         if 'retry_after' in extra:
             response.headers['Retry-After'] = str(extra['retry_after'])
@@ -409,7 +414,7 @@ def get_stream_flag():
 
 
 def stream_sql_response(sql, connection_name, params, timeout, output_format, filename, saved=None,
-                        allowed_tables=None, database=None):
+                        allowed_tables=None, database=None, mask=None):
     """Shared by execute_sql_endpoint() and run_saved(): validates the stream=true-specific constraints
     (format, no pagination) and returns the chunked Response, the run recorded in history once the stream
     finishes - in its saved query's, when ``saved`` is (path, version), or as an ad-hoc run."""
@@ -420,14 +425,14 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
         raise ApiError('stream=true exports the whole result and does not accept page/page_size', code='invalid_stream')
     key_name = caller_key_name()
     columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
-                                      allowed_tables=allowed_tables)
+                                      allowed_tables=allowed_tables, mask=mask)
     # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the response
     # streams out - by then the request/app context this view function runs in is long gone (no
     # flask.stream_with_context() wrapping is used), so g, caller_key_name() and current_app are only safe to read
     # up front, while still inside the request that's actually issuing the query - this is why the broadcaster
     # instance itself is captured here too.
     broadcaster = current_app.extensions['queryapigate_broadcaster']
-    entry = run_entry(connection_name)
+    entry = {**run_entry(connection_name), **masked_entry(rows.masked)}
     if saved is not None:
         path, number = saved
 
@@ -441,6 +446,12 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
             _record_adhoc_and_broadcast(sql, params, connection_name, finished, broadcaster)
     rows = _record_stream_history(rows, entry, record)
     return stream_response(output_format, columns, rows, filename)
+
+
+def masked_entry(fired):
+    """A run's history field for what masking did (ADR 0005): which result columns, which action, from which source
+    - so "was national_id ever returned to this key?" is answered by history. Nothing when nothing was masked."""
+    return {'masked': fired} if fired else {}
 
 
 def run_entry(connection_name):
@@ -520,7 +531,7 @@ def execute_sql_endpoint():
     if get_stream_flag():
         return stream_sql_response(data['sql'], data['connection_name'], params, timeout, output_format,
                                    filename=data['connection_name'], allowed_tables=g.permission.allowed_tables,
-                                   database=database)
+                                   database=database, mask=g.permission.mask)
     limit, offset, page = get_pagination()
     entry = run_entry(data['connection_name'])
     if database:
@@ -529,13 +540,15 @@ def execute_sql_endpoint():
         result, elapsed_ms = engine.timed(engine.execute_sql, data['sql'], data['connection_name'], limit, offset,
                                           params, timeout, allow_writes=g.permission.allow_writes,
                                           key_name=caller_key_name(), allowed_write_ops=g.permission.allowed_write_ops,
-                                          database=database, allowed_tables=g.permission.allowed_tables)
+                                          database=database, allowed_tables=g.permission.allowed_tables,
+                                          mask=g.permission.mask)
     except ApiError as error:
         _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
-                                {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
+                                {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms,
+                                 **masked_entry(result.masked)})
     return render(result, output_format, page, limit)
 
 
@@ -561,7 +574,7 @@ def execute_mongo_endpoint():
         result, elapsed_ms = engine.timed(engine.execute_mongo, data['collection'], filter_doc,
                                           data['connection_name'], limit, offset, params, timeout,
                                           projection=data.get('projection'), sort=data.get('sort'),
-                                          key_name=caller_key_name())
+                                          key_name=caller_key_name(), mask=g.permission.mask)
     except ApiError as error:
         _record_adhoc_and_broadcast(statement, params, data['connection_name'],
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -693,7 +706,8 @@ def run_saved(ref, body, url_params):
         # No caching for a streamed export - caching would require materialising the whole body anyway,
         # defeating the point - but the run is still recorded once the stream finishes, same as any other.
         return stream_sql_response(sql, connection_name, values, timeout, output_format, filename=ref,
-                                   saved=(path, number), allowed_tables=g.permission.allowed_tables)
+                                   saved=(path, number), allowed_tables=g.permission.allowed_tables,
+                                   mask=g.permission.mask)
 
     limit, offset, page = get_pagination()
 
@@ -704,8 +718,10 @@ def run_saved(ref, body, url_params):
     if ttl > 0:
         dialect = store.get_connection(connection_name)['db']
         if sqltools.is_read_only(sql, dialect):
+            # Callers with different masking rules get different responses, so they never share one.
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
-                                                values=values, format=output_format, page=page, page_size=limit)
+                                                values=values, format=output_format, page=page, page_size=limit,
+                                                mask=masking.fingerprint(g.permission.mask))
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
                          'format': output_format, 'page': page}
             cached = cache_lookup(cache_key, ttl)
@@ -717,7 +733,7 @@ def run_saved(ref, body, url_params):
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, limit, offset, values, timeout,
                                           allow_writes=effective_allow_writes, key_name=caller_key_name(),
                                           allowed_write_ops=g.permission.allowed_write_ops,
-                                          allowed_tables=g.permission.allowed_tables)
+                                          allowed_tables=g.permission.allowed_tables, mask=g.permission.mask)
     except ApiError as error:
         _record_and_broadcast(path, number, connection_name,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -725,7 +741,8 @@ def run_saved(ref, body, url_params):
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
     _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
                                                           'duration_ms': elapsed_ms,
-                                                          'serialization_ms': g.serialization_ms})
+                                                          'serialization_ms': g.serialization_ms,
+                                                          **masked_entry(result.masked)})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl, cache_meta)
     return response
@@ -746,7 +763,7 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
         result, elapsed_ms = engine.timed(engine.execute_mongo, saved['mongo_collection'], filter_doc,
                                           connection_name, limit, offset, timeout=timeout,
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
-                                          key_name=caller_key_name())
+                                          key_name=caller_key_name(), mask=g.permission.mask)
     except ApiError as error:
         _record_and_broadcast(path, number, connection_name,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})

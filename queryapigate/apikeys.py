@@ -94,7 +94,7 @@ import time
 from collections import namedtuple
 from datetime import datetime
 
-from . import admins, config, db, store
+from . import admins, config, db, masking, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -107,11 +107,12 @@ _last_recorded_use: dict[str, float] = {}  # key name -> time.monotonic() of the
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
                                        'allowed_write_ops', 'collections', 'allowed_tables', 'claims', 'role',
-                                       'via'],
-                        defaults=(frozenset(), None, None, None, None))
+                                       'via', 'mask'],
+                        defaults=(frozenset(), None, None, None, None, None))
 # `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
 # `role`: the administrator role (adminroles.py) - 'owner' for the shared key and an open server, an administrator's
 # own role for an admin token, None for a scoped key or a signed-in app user (they can't manage anything).
+# `mask`: column-masking rules (masking.py, ADR 0005) applied to everything this caller receives - None for none.
 # `via`: how an administrator authenticated - 'break-glass' (QUERYAPIGATE_API_KEY), 'token' or 'open'; it goes into
 # the audit log next to the actor's name.
 
@@ -450,7 +451,7 @@ def list_keys():
 
 def create_key(name, connections=None, allow_writes=None, queries=None, expires_at=None, rate_limit=None,
                allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None,
-               example=False):
+               example=False, mask=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     admins.refuse_taken_name(name)
@@ -463,7 +464,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                                             ('rate_limit', rate_limit),
                                             ('allowed_ips', allowed_ips),
                                             ('allowed_write_ops', allowed_write_ops),
-                                            ('allowed_tables', allowed_tables)) if value is not None]
+                                            ('allowed_tables', allowed_tables), ('mask', mask)) if value is not None]
         if given:
             raise ApiError(f"Cannot combine 'role' with explicit {', '.join(given)} - create the key from "
                            "the role, then update it afterward to customize.", code='invalid_body')
@@ -476,6 +477,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
         allowed_ips = role_entry['allowed_ips']
         allowed_write_ops = role_entry['allowed_write_ops']
         allowed_tables = role_entry.get('allowed_tables')
+        mask = role_entry.get('mask')
     secret = 'sk_' + secrets.token_urlsafe(32)
     with db.transaction() as conn:
         if conn.execute('SELECT 1 FROM api_keys WHERE name = ?', (name,)).fetchone() is not None:
@@ -491,6 +493,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
             'allowed_ips': _validate_allowed_ips(allowed_ips),
             'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
             'allowed_tables': _validate_allowed_tables(allowed_tables),
+            'mask': masking.validate_rules(mask),
             'created_from_role': role,
             'active': True,
             'created_at': store.now(),
@@ -502,7 +505,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
 
 def update_key(name, connections=None, allow_writes=None, active=None, queries=None, expires_at=_UNSET,
                rate_limit=_UNSET, allowed_ips=_UNSET, allowed_write_ops=_UNSET, collections=None,
-               allowed_tables=_UNSET):
+               allowed_tables=_UNSET, mask=_UNSET):
     with db.transaction() as conn:
         row = conn.execute(
             'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
@@ -532,6 +535,8 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
             entry['allowed_write_ops'] = _validate_allowed_write_ops(allowed_write_ops)
         if allowed_tables is not _UNSET:  # same as the others: None here explicitly clears it
             entry['allowed_tables'] = _validate_allowed_tables(allowed_tables)
+        if mask is not _UNSET:
+            entry['mask'] = masking.validate_rules(mask)
         _upsert(conn, name, entry)
 
 
@@ -578,7 +583,7 @@ def list_roles():
 
 
 def create_role(name, connections=None, allow_writes=False, queries=None, rate_limit=None, allowed_ips=None,
-                allowed_write_ops=None, collections=None, example=False, allowed_tables=None):
+                allowed_write_ops=None, collections=None, example=False, allowed_tables=None, mask=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     collections = _normalize_collections(collections)
@@ -595,6 +600,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
             'allowed_ips': _validate_allowed_ips(allowed_ips),
             'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
             'allowed_tables': _validate_allowed_tables(allowed_tables),
+            'mask': masking.validate_rules(mask),
             'created_at': store.now(),
             **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
         }
@@ -602,7 +608,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
 
 
 def update_role(name, connections=None, allow_writes=None, queries=None, rate_limit=_UNSET, allowed_ips=_UNSET,
-                allowed_write_ops=_UNSET, collections=None, allowed_tables=_UNSET):
+                allowed_write_ops=_UNSET, collections=None, allowed_tables=_UNSET, mask=_UNSET):
     with db.transaction() as conn:
         row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
         if row is None:
@@ -626,6 +632,8 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
             entry['allowed_write_ops'] = _validate_allowed_write_ops(allowed_write_ops)
         if allowed_tables is not _UNSET:
             entry['allowed_tables'] = _validate_allowed_tables(allowed_tables)
+        if mask is not _UNSET:
+            entry['mask'] = masking.validate_rules(mask)
         _upsert_role(conn, name, entry)
 
 
@@ -734,7 +742,7 @@ def permission_from_grants(name, entry, claims=None):
                       collections=frozenset(entry.get('collections', [])),
                       allowed_tables=frozenset(entry['allowed_tables'])
                       if entry.get('allowed_tables') is not None else None,
-                      claims=claims)
+                      claims=claims, mask=entry.get('mask') or None)
 
 
 def ip_allowed(entry, client_ip):

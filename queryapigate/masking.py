@@ -35,6 +35,8 @@ import json
 import os
 import re
 import secrets
+import threading
+import time
 
 from . import db, sqltools, store
 from .errors import ApiError
@@ -320,7 +322,9 @@ def _mask(value):
 
 
 def apply(columns, rows, actions):
-    """(columns, rows) with `actions` applied - dropped columns removed, the rest replaced row by row, lazily."""
+    """(columns, rows) with `actions` applied - dropped columns removed, the rest replaced row by row, lazily. The
+    rows come back as a list for a list, otherwise as an iterator whose close() closes the one it wraps (a stream's -
+    see engine._Rows)."""
     if not any(actions):
         return columns, rows
     key = hash_key() if 'hash' in actions else None
@@ -340,4 +344,80 @@ def apply(columns, rows, actions):
             values.append(value)
         return tuple(values)
 
-    return out_columns, (convert(row) for row in rows)
+    if isinstance(rows, list):
+        return out_columns, [convert(row) for row in rows]
+    return out_columns, _Masked(rows, convert)
+
+
+class _Masked:
+    """A stream's rows, masked as they pass - closing it closes the stream underneath, read or not."""
+
+    def __init__(self, rows, convert):
+        self._rows, self._iter, self._convert = rows, iter(rows), convert
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self._convert(next(self._iter))
+
+    def close(self):
+        close = getattr(self._rows, 'close', None)
+        if close is not None:
+            close()
+
+
+# --------------------------------------------------------------------------------------
+# For a query: trace before it runs, apply to what comes back
+# --------------------------------------------------------------------------------------
+
+SCHEMA_TTL = 60  # seconds a connection's schema is reused for tracing before it is read again
+_schemas: dict = {}
+_schemas_lock = threading.Lock()
+
+
+def _tables(connection_name, database=None):
+    from . import schema
+    key = (connection_name, database)
+    now = time.monotonic()
+    with _schemas_lock:
+        cached = _schemas.get(key)
+        if cached is not None and now - cached[0] < SCHEMA_TTL:
+            return cached[1]
+    tables = schema.fetch_schema(connection_name, database)['tables']
+    with _schemas_lock:
+        _schemas[key] = (now, tables)
+    return tables
+
+
+def forget_schema(connection_name=None):
+    """Drop cached schemas - one connection's, after it changes, or all."""
+    with _schemas_lock:
+        for key in [k for k in _schemas if connection_name is None or k[0] == connection_name]:
+            del _schemas[key]
+
+
+class Plan:
+    """What masking does to one query's result: traced before the query runs, applied to what comes back."""
+
+    def __init__(self, traced, actions, fired):
+        self.traced, self.actions, self.fired = traced, actions, fired
+
+    def apply(self, columns, rows):
+        check_columns(self.traced, columns)
+        return apply(list(columns), rows, self.actions)
+
+
+def prepare(rules, sql, connection_name, dialect, database=None):
+    """The Plan for running `sql` for a caller with `rules`, or None when there is nothing to mask (no rules, or a
+    statement with no table data). Raises mask_unresolvable - before the query runs - when it can't be traced."""
+    if not rules:
+        return None
+    if dialect == 'mongo':
+        raise _refuse("Column masking isn't supported for MongoDB connections yet, so a caller with mask rules is "
+                      'refused on them')
+    traced = trace(sql, dialect, _tables(connection_name, database) if dialect in _DIALECT_MAP else [])
+    if traced is None:
+        return None
+    actions, fired = plan(rules, traced)
+    return Plan(traced, actions, fired)

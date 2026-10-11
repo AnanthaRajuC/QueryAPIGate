@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 
-from .. import config, duckfiles, engine, metrics, pool, schema, store
+from .. import config, duckfiles, engine, masking, metrics, pool, schema, store
 from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
@@ -110,6 +110,7 @@ def create(data, actor):
 def update(name, data, actor):
     """Merge the given fields into the stored connection - anything not mentioned (driver options included) is
     kept; a field set to null is removed; the password mask keeps the stored password."""
+    masking.forget_schema(name)  # its tables may differ now: masking traces against a fresh schema
     before = load(name)
     fields = _fields(data)
     merged = {k: v for k, v in before.items() if k not in ('created_at', 'updated_at')}
@@ -129,6 +130,7 @@ def update(name, data, actor):
 
 
 def delete(name, reason, actor):
+    masking.forget_schema(name)  # its tables may differ now: masking traces against a fresh schema
     before = load(name)
     if not isinstance(reason, str) or not reason.strip():
         raise ApiError('A reason is required to delete a connection', code='reason_required')

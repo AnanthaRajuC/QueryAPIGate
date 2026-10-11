@@ -380,6 +380,8 @@ SCHEMAS = {
                                                     '{a parameter} are filled in.'},
             'incremental': _INCREMENTAL,
             'skip_empty': {'type': 'boolean', 'description': 'A run with no rows writes no file.'},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'),
+                     'description': 'Column-masking rules applied to every row the export writes (experimental).'},
             'timeout': {'type': 'number', 'description': "Seconds, within the server's own limit."},
             'watermark': {'nullable': True, 'description': 'The largest incremental value delivered so far.'},
             'running': {'type': 'boolean', 'description': 'Whether a run holds its lease now.'},
@@ -398,6 +400,7 @@ SCHEMAS = {
             'format': {'type': 'string', 'enum': ['parquet', 'csv', 'ndjson']}, 'destination': {'type': 'string'},
             'path': {'type': 'string'}, 'incremental': {**_INCREMENTAL, 'nullable': True},
             'skip_empty': {'type': 'boolean'}, 'timeout': {'type': 'number', 'nullable': True},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True},
             'watermark': {'nullable': True, 'description': 'Update only: set, or (null) reset, the watermark.'},
         },
     },
@@ -625,11 +628,21 @@ SCHEMAS = {
         'type': 'object', 'required': ['databases'],
         'properties': {'databases': {'type': 'array', 'items': {'type': 'string'}}},
     },
+    'MaskRule': {
+        'type': 'object', 'required': ['column', 'action'],
+        'properties': {
+            'column': {'type': 'string', 'description': 'A source column: table.column or schema.table.column, '
+                                                        'with * as a wildcard - customers.email, *.phone.'},
+            'action': {'type': 'string', 'enum': ['drop', 'null', 'mask', 'hash', 'keep']},
+        },
+    },
     'Grants': {
         'type': 'object',
         'required': ['connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
-                     'rate_limit', 'allowed_ips'],
+                     'rate_limit', 'allowed_ips', 'mask'],
         'properties': {
+            'mask': {'type': 'array', 'nullable': True, 'items': _ref('MaskRule'),
+                     'description': 'Column-masking rules applied to everything this caller receives (experimental).'},
             'connections': {'oneOf': [{'type': 'string', 'enum': ['*']},
                                       {'type': 'array', 'items': {'type': 'string'}}],
                             'description': '"*" for every connection, or a list of names (ad-hoc SQL and every '
@@ -684,6 +697,7 @@ SCHEMAS = {
             'allow_writes': {'type': 'boolean'},
             'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
             'allowed_tables': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True},
             'rate_limit': {'type': 'string', 'nullable': True},
             'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
         },
@@ -707,6 +721,7 @@ SCHEMAS = {
             'allow_writes': {'type': 'boolean'},
             'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
             'allowed_tables': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True},
             'rate_limit': {'type': 'string', 'nullable': True},
             'allowed_ips': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
         },

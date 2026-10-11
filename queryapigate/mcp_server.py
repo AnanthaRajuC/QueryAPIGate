@@ -271,13 +271,13 @@ def execute_sql_tool(permission, arguments):
     try:
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, page_size, 0, query_params, None,
                                           allow_writes=False, key_name=permission.name or '-', database=database,
-                                          allowed_tables=permission.allowed_tables)
+                                          allowed_tables=permission.allowed_tables, mask=permission.mask)
     except ApiError as error:
         history.record_adhoc({**entry, 'status': 'error', 'error': error.message, 'code': error.code}, sql,
                              query_params)
         return _error(error.message, error.status, error.code)
-    history.record_adhoc({**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms},
-                         sql, query_params)
+    history.record_adhoc({**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms,
+                          **({'masked': result.masked} if result.masked else {})}, sql, query_params)
     rows = [dict(zip(result.columns, row, strict=False)) for row in result.rows]
     structured = {'rows': rows, 'truncated': result.has_more}
     return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}

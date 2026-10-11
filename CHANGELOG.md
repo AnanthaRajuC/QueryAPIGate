@@ -64,6 +64,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   before anything is written. One run at a time per export (`409 export_running`, a lease that a crashed run can't
   hold for ever). Runs are in history, and the `export_failing` alert fires while an export's newest run failed.
   Owners and admins define exports (`exports.write`); developers may run them (`exports.run`).
+- **Column masking** (BACKLOG #63, [ADR 0005](documentation/adr/0005-column-masking.md), experimental, in progress): a
+  `mask` grant on API keys and roles, and on exports - rules on source columns (`customers.email`, `*.phone`) that
+  `hash`, `mask`, `null` or `drop` their values in everything that caller receives: `/q/<name>`, `/execute_sql`, every
+  format, streamed exports, MCP tools and exports. Each result column is traced through the SQL to the table columns it
+  comes from - aliases, expressions, CTEs, unions and joins don't get around it - and a query that can't be traced is
+  refused (`403 mask_unresolvable`) before it runs, never served unmasked. Cached responses are kept per set of rules;
+  run history records what was masked; a caller with rules never sees the database's own error text.
 - **Exports and Destinations in the Console** (a new Delivery group): define a destination and test it before saving;
   define an export - query, destination, format, file path, parameters, incremental column - run it with **Run now**,
   and see its runs. Each role sees what it may do: owners and admins everything, developers the Run button, auditors

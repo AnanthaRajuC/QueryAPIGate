@@ -15,9 +15,9 @@ from ..errors import ApiError
 
 # A grant's fields, shared by keys and roles.
 GRANT_FIELDS = ('connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
-                'rate_limit', 'allowed_ips')
+                'rate_limit', 'allowed_ips', 'mask')
 # Fields where an explicit null means "clear it" (apikeys' _UNSET sentinel), so presence matters, not just value.
-_CLEARABLE = ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables')
+_CLEARABLE = ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables', 'mask')
 
 
 def _diff(before, after):
@@ -36,6 +36,7 @@ def _grants(entry):
         'allowed_tables': entry.get('allowed_tables'),
         'rate_limit': entry.get('rate_limit'),
         'allowed_ips': entry.get('allowed_ips'),
+        'mask': entry.get('mask'),
     }
 
 
@@ -158,7 +159,8 @@ def create_role(data, actor):
     apikeys.create_role(name, connections=data.get('connections'), allow_writes=bool(data.get('allow_writes', False)),
                         queries=data.get('queries'), rate_limit=data.get('rate_limit'),
                         allowed_ips=data.get('allowed_ips'), allowed_write_ops=data.get('allowed_write_ops'),
-                        collections=data.get('collections'), allowed_tables=data.get('allowed_tables'))
+                        collections=data.get('collections'), allowed_tables=data.get('allowed_tables'),
+                        mask=data.get('mask'))
     store.record_audit(actor, 'create_role', name, apikeys.list_roles().get(name))
     return name
 

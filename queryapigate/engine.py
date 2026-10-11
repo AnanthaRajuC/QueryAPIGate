@@ -3,7 +3,7 @@ import hashlib
 import logging
 import time
 
-from . import config, metrics, mongotools, store
+from . import config, masking, metrics, mongotools, store
 from .errors import ApiError
 from .formats import ResultSetDTO
 from .pool import get_pool
@@ -33,7 +33,7 @@ def _sql_connection(connection_name):
 
 
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
-                allowed_write_ops=None, database=None, allowed_tables=None):
+                allowed_write_ops=None, database=None, allowed_tables=None, mask=None):
     """Run ``sql`` on a named connection and return the requested page as a ResultSetDTO.
 
     ``allow_writes`` is the caller's own permission (e.g. a scoped API key); the connection is only ever
@@ -53,6 +53,9 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     effective_allow_writes = config.allow_writes() and allow_writes
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,
                        allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables)
+    # The caller's column-masking rules (masking.py): traced before the query runs, so a query masking can't follow
+    # is refused without touching the database.
+    masked = masking.prepare(mask, sql, connection_name, details['db'], database)
     log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
              connection_name, details['db'], limit, offset, timeout, sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
@@ -85,11 +88,15 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     has_more = len(rows) > limit
     result_rows = rows[:limit]
     metrics.observe_rows(connection_name, details['db'], key_name, len(result_rows))
-    return ResultSetDTO(result_rows, columns, has_more=has_more)
+    if masked is not None:
+        columns, result_rows = masked.apply(columns, list(result_rows))
+    result = ResultSetDTO(result_rows, columns, has_more=has_more)
+    result.masked = masked.fired if masked is not None else []
+    return result
 
 
 def execute_mongo(collection, filter_doc, connection_name, limit, offset, params=None, timeout=None,
-                  projection=None, sort=None, key_name='-'):
+                  projection=None, sort=None, key_name='-', mask=None):
     """Run a Mongo find() on a named connection and return the requested page as a ResultSetDTO - the
     non-SQL sibling of execute_sql(). Always read-only: MongoDB support is find-only in this version (see
     mongotools.py and BACKLOG #36), so unlike execute_sql there is no allow_writes/allowed_write_ops
@@ -103,6 +110,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     lossy for wildly different document shapes, but keeps every existing exporter (json/ndjson/csv/xlsx/
     xml/yaml) working unmodified.
     """
+    masking.prepare(mask, '', connection_name, 'mongo')  # refused for a caller with rules, for now
     details = store.get_connection(connection_name)
     if details['db'] != 'mongo':
         raise ApiError(f"'{connection_name}' is not a mongo connection", code='wrong_connection_type')
@@ -272,7 +280,7 @@ def list_collections(details):
         raise ApiError('Could not list collections', 502, detail=detail, code='connection_failed') from error
 
 
-def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None):
+def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None, mask=None):
     """Like execute_sql, but for the whole result rather than one page - and, unlike execute_sql, always
     read-only regardless of QUERYAPIGATE_ALLOW_WRITES or the caller's own permission. A large export has no
     business mutating data, and forcing this sidesteps a lot of incidental complexity around commit timing
@@ -289,6 +297,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     """
     details = _sql_connection(connection_name)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables)
+    masked = masking.prepare(mask, sql, connection_name, details['db'])  # before the query runs, as execute_sql's
     log.info('Streaming from %s (%s): %s', connection_name, details['db'], sql,
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     status = 'error'
@@ -312,7 +321,17 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
         if status == 'error':
             metrics.observe_stream(connection_name, details['db'], status, key_name)
             metrics.dec_active_query()
-    return columns, _Rows(stream, connection_name, details['db'], key_name)
+    rows = _Rows(stream, connection_name, details['db'], key_name)
+    if masked is None:
+        rows.masked = []
+        return columns, rows
+    try:
+        columns, masked_rows = masked.apply(columns, rows)
+    except ApiError:
+        rows.close()  # the result didn't match what was traced: end the query, return its connection
+        raise
+    masked_rows.masked = masked.fired
+    return columns, masked_rows
 
 
 class _Rows:
