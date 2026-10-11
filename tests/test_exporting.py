@@ -16,7 +16,7 @@ from unittest import mock
 import duckdb
 
 from queryapigate import cli, create_app, destinations, exporting, history
-from tests.helpers import save_query, write_connections
+from tests.helpers import export_dir, save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 COLUMNS = ['id', 'label', 'amount', 'day']
@@ -50,7 +50,7 @@ class DeliverTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         create_app()
-        self.out = os.path.join(self.tmp.name, 'out') + '/'
+        self.out = os.path.join(export_dir(self), 'out') + '/'
         self.destination = {'url': 'file://' + self.out}
 
     def test_each_format_keeps_types_and_order(self):
@@ -135,7 +135,7 @@ class CliTests(unittest.TestCase):
             'filename': 'by_region', 'description': 'd', 'connection_name': 'lite',
             'sql_query': 'SELECT id, region FROM t WHERE region = :region ORDER BY id',
             'query_parameters': {'region': {'type': 'string'}}})
-        self.out = os.path.join(self.tmp.name, 'drop') + '/'
+        self.out = os.path.join(export_dir(self), 'drop') + '/'
         destinations.create('drop', {'url': self.out})
 
     def run_cli(self, *argv):

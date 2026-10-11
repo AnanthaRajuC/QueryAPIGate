@@ -143,6 +143,45 @@ def read_connections():
     return {row['name']: _connection_row_to_dict(row) for row in rows}
 
 
+def _server_setting(name):
+    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL... - are never a
+    # connection's or destination's to read: an administrator could put one in a password sent to a host of theirs.
+    return name.upper().startswith('QUERYAPIGATE_')
+
+
+def refuse_server_settings(fields):
+    """Refuse - when a connection or destination is saved or tried - a ${VAR} reference to one of the server's own
+    QUERYAPIGATE_* settings."""
+    for value in (fields or {}).values():
+        if isinstance(value, str):
+            for name in _ENV_REF_RE.findall(value):
+                if _server_setting(name):
+                    raise ApiError(f"${{{name}}} is one of this server's own settings and can't be referenced - "
+                                   'use a variable of its own for the secret', code='invalid_body')
+
+
+def refuse_store_access(details):
+    """Refuse a connection that would open this server's own store - a SQLite/DuckDB/H2 `database` that is
+    queryapigate.db (or its -wal/-shm/-journal), or a DuckDB `allowed_paths` entry covering it. Through one, an
+    administrator could read key and token hashes and secrets, or - with writes on - give themselves an owner's token.
+    A PostgreSQL store is kept apart by its own credentials: don't give administrators them."""
+    if not isinstance(details, dict):
+        return
+    store_file = os.path.realpath(str(config.db_file()))
+    guarded = {store_file, *(store_file + suffix for suffix in ('-wal', '-shm', '-journal'))}
+    database = details.get('database')
+    if isinstance(database, str) and database not in ('', ':memory:'):
+        path = database[len('file:'):] if database.startswith('file:') else database
+        if os.path.realpath(os.path.expanduser(path.split('?', 1)[0])) in guarded:
+            raise ApiError("A connection can't open this server's own store", 403, code='store_not_allowed')
+    for entry in details.get('allowed_paths') or ():
+        if isinstance(entry, str) and not entry.startswith(duckfiles.REMOTE_SCHEMES):
+            real = os.path.realpath(entry)
+            if real in guarded or store_file.startswith(real.rstrip(os.sep) + os.sep):
+                raise ApiError(f"allowed_paths entry '{entry}' would let the connection read this server's own store "
+                               '- allow a folder that does not contain it', 403, code='store_not_allowed')
+
+
 def _expand_env(value):
     """Replace ${VAR} references in a connection value with the environment variable's content."""
     if not isinstance(value, str):
@@ -150,6 +189,9 @@ def _expand_env(value):
 
     def replace(match):
         name = match.group(1)
+        if _server_setting(name):
+            raise ApiError(f"${{{name}}} is one of this server's own settings and can't be referenced by a "
+                           'connection or destination', 500, code='connection_misconfigured')
         if name not in os.environ:
             raise ApiError(f"Environment variable '{name}' referenced by the connection is not set", 500,
                            code='connection_misconfigured')
@@ -216,6 +258,8 @@ def resolve_ad_hoc(details):
     to try fields that may never be saved. Expands ${VAR} references and decrypts an already-encrypted
     password the same way; a literal password already in ``details`` (the common case - a value just typed
     into the form) passes through unchanged."""
+    refuse_server_settings(details)
+    refuse_store_access(details)
     resolved = {key: _expand_env(value) for key, value in details.items()}
     password = resolved.get('password')
     if password and _is_encrypted(password):
@@ -238,6 +282,7 @@ def get_connection(connection_name):
     if row['db'] not in config.SUPPORTED_DB_TYPES:
         raise ApiError('Unsupported database type', code='unsupported_database')
     details = _connection_row_to_dict(row)
+    refuse_store_access(details)  # one saved before this check existed, too
     resolved = {key: _expand_env(value) for key, value in details.items()}
     if 'password' in resolved:
         resolved['password'] = _decrypt_password(resolved['password'])
@@ -296,6 +341,8 @@ def encrypted_password_connections():
 
 def update_connections(connections):
     for name, details in connections.items():
+        refuse_server_settings(details if isinstance(details, dict) else {})
+        refuse_store_access(details)
         if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
             raise ApiError(f"Connection '{name}' must be an object whose 'db' is one of: "
                            f"{', '.join(config.SUPPORTED_DB_TYPES)}")

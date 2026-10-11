@@ -114,8 +114,8 @@ format_unavailable`. Column types come from the values: integers `BIGINT` (`DECI
 A saved query's full result, delivered as a file to a bucket or a folder - Parquet, CSV or NDJSON, written by
 DuckDB in steady memory ([ADR 0004](adr/0004-exports-to-object-storage.md)). Two resources:
 
-**A destination** is where exports may write: an `s3://`, `gs://` or `r2://` prefix, or a local folder, and the
-credentials to write there - stored like a connection password (masked, `${VAR}`, or encrypted with
+**A destination** is where exports may write: an `s3://`, `gs://` or `r2://` prefix, or a local folder (only inside
+`QUERYAPIGATE_EXPORT_DIRS`, and never the server's home), and the credentials to write there - stored like a connection password (masked, `${VAR}`, or encrypted with
 `QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can be
 written anywhere else.
 
@@ -1552,6 +1552,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
 | `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role. For a move or merge that would widen access, `gaining` lists the keys and roles |
 | `connection_forbidden` | 403 | This key may not use this connection |
+| `store_not_allowed` | 403 | A connection was pointed at the server's own metadata store (`queryapigate.db`) |
 | `connection_inactive` | 403 | The connection is switched off |
 | `read_only` | 403 | A write statement where writes aren't allowed (always, over MCP) |
 | `write_op_not_allowed` | 403 | A write this key's `allowed_write_ops` doesn't include |

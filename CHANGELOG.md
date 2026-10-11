@@ -145,6 +145,13 @@ Nothing has to change: no route, setting or stored field is removed, and the sha
   alice · Developer" in the sidebar, and screens and actions a role can't use are hidden.
 
 ### Security
+- **Exports, connections and the store are kept apart from an administrator's reach** (the 0.17 pre-release review,
+  now that `admin` is a role below `owner`): a local-folder export destination is off unless the operator sets
+  `QUERYAPIGATE_EXPORT_DIRS`, must sit inside a folder listed there, and is never the server's home - so no export can
+  write over the store or elsewhere on the host; a connection can't be pointed at the server's own `queryapigate.db`
+  (`store_not_allowed`), by `database` or by a DuckDB `allowed_paths` folder containing it; and a `${VAR}` reference
+  in a connection or destination can't name one of the server's own `QUERYAPIGATE_*` settings. Object-storage
+  destinations are unaffected - their credentials bound them.
 - **Writes hidden behind a read-only statement are refused.** The read-only guard classified a statement by its first
   keyword, so with writes switched off a DuckDB connection - opened read-write, with the guard as its only lock - ran
   `EXPLAIN ANALYZE DELETE FROM t` (emptying the table) and `WITH x AS (...) INSERT ...`; H2 and JDBC connections are

@@ -12,7 +12,7 @@ from unittest import mock
 import duckdb
 
 from queryapigate import apikeys, create_app, destinations, exports, history, mcp_server
-from tests.helpers import save_query, write_connections
+from tests.helpers import export_dir, save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 RULES = [{'column': 'customers.email', 'action': 'hash'}, {'column': '*.phone', 'action': 'mask'},
@@ -177,7 +177,7 @@ class McpTests(MaskingTestCase):
 class ExportTests(MaskingTestCase):
     def setUp(self):
         super().setUp()
-        self.out = os.path.join(self.tmp.name, 'drop') + '/'
+        self.out = os.path.join(export_dir(self), 'drop') + '/'
         destinations.create('drop', {'url': self.out})
         save_query(self.client, headers=ADMIN, body={
             'filename': 'customers_after', 'description': 'd', 'connection_name': 'shop',

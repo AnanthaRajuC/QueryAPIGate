@@ -14,6 +14,7 @@ const server = spawn(process.env.QUERYAPIGATE_BIN ?? 'queryapigate', ['serve', '
     QUERYAPIGATE_HOME: home,
     QUERYAPIGATE_API_KEY: 'e2e-admin-key',
     QUERYAPIGATE_LOAD_EXAMPLES: '1',
+    QUERYAPIGATE_EXPORT_DIRS: tmpdir(),
   },
 });
 const stop = () => server.kill('SIGTERM');

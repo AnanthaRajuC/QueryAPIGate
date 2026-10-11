@@ -189,6 +189,16 @@ This is the part worth being the most precise about, because it's also the part 
   allowed paths, `lock_configuration`): no SQL can reach another file, URL or extension, or change the setting back.
   Object-storage prefixes are a second lock behind the credentials' own permissions, since an S3-compatible server
   could resolve `..` in a key; web addresses must name files for the same reason.
+- **A local-folder destination is off unless the operator turns it on** (`QUERYAPIGATE_EXPORT_DIRS`), can only be a
+  folder inside one listed there, and is never the server's home - so an administrator can't write a file over the
+  store, or anywhere else the process can reach, through an export. Object-storage destinations need no such list: the
+  credentials bound them. Checked when the destination is saved and again before each write.
+- **A connection can't be pointed at the server's own metadata store** (`store_not_allowed`): neither a
+  SQLite/DuckDB/H2 `database` of `queryapigate.db` nor a DuckDB `allowed_paths` folder containing it - which would
+  otherwise hand an administrator the key and token hashes. A PostgreSQL store is kept apart by its own credentials.
+- **A `${VAR}` reference can't name one of the server's own `QUERYAPIGATE_*` settings** in a connection or
+  destination - otherwise an administrator could carry the admin key or secret key out in a password sent to a host
+  of theirs.
 - **Exports write only under their destination's prefix** (ADR 0004). A destination is a bucket prefix or folder and
   write credentials, stored like a connection password. Each run writes through a fresh DuckDB connection locked the
   same way - `allowed_paths` is exactly the prefix plus the one temporary file the rows were staged in - and object

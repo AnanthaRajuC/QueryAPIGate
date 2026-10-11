@@ -10,6 +10,7 @@ from unittest import mock
 import duckdb
 
 from queryapigate import admins, cli, db, exporting, exports, history, store
+from tests.helpers import export_dir
 from tests.test_api_v1 import ADMIN, V1TestCase
 
 LIST = '/api/v1/exports'
@@ -35,7 +36,7 @@ class ExportTestCase(V1TestCase):
             'sql': 'SELECT id, region, total, updated_at FROM orders WHERE region = :region AND updated_at > :since '
                    'ORDER BY updated_at',
             'parameters': {'region': {'type': 'str'}, 'since': {'type': 'str'}}})
-        self.out = os.path.join(self.tmp.name, 'drop') + '/'
+        self.out = os.path.join(export_dir(self), 'drop') + '/'
         self.call('post', '/api/v1/destinations', '/api/v1/destinations', 201, json={'name': 'drop', 'url': self.out})
 
     def define(self, status=201, **fields):

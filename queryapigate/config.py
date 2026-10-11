@@ -346,6 +346,9 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS must be a whole number of days (0 turns the check off)')
+    for entry in os.environ.get('QUERYAPIGATE_EXPORT_DIRS', '').split(','):
+        if entry.strip() and not os.path.isabs(entry.strip()):
+            raise ValueError(f"QUERYAPIGATE_EXPORT_DIRS must be absolute folder paths; '{entry.strip()}' is relative")
     for name in PORT_SETTINGS:
         port_setting(name, None)
     raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', '').strip()
@@ -394,6 +397,14 @@ def check_settings():
         except ImportError:
             raise ValueError('QUERYAPIGATE_REDIS_URL is set but the "redis" package is not installed - '
                              'run `pip install "queryapigate[redis]"`') from None
+
+
+def export_dirs():
+    """QUERYAPIGATE_EXPORT_DIRS: the local folders a destination may write under - comma-separated absolute paths,
+    set by whoever runs the server. Unset, no local folder may be a destination (object storage only): otherwise an
+    administrator could write files anywhere this process can."""
+    raw = os.environ.get('QUERYAPIGATE_EXPORT_DIRS', '')
+    return [os.path.realpath(p.strip()) for p in raw.split(',') if p.strip()]
 
 
 def mask_key():
@@ -714,6 +725,8 @@ def describe_settings():
                 'QUERYAPIGATE_SECRET_KEY', 'enabled' if secret_key() else 'off', secret=True),
             row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
                 'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
+            row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',
+                'QUERYAPIGATE_EXPORT_DIRS', ', '.join(export_dirs()) or 'object storage only'),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',
                 'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops()))]},
         {'id': 'jwt', 'title': 'Signed-in users (JWT)',

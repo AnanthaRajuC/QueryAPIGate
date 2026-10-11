@@ -47,6 +47,7 @@ def validate(fields, partial=False):
     if unknown:
         raise ApiError(f"Unknown field(s): {', '.join(unknown)}", code='unknown_field')
     out = {k: v for k, v in fields.items() if v is not None}
+    store.refuse_server_settings(out)
     url = out.get('url')
     if url is None:
         if not partial:
@@ -63,6 +64,7 @@ def validate(fields, partial=False):
             if url.startswith(('http://', 'https://')) or not os.path.isabs(folder):
                 raise _invalid('url must be an s3://, gs:// or r2:// prefix, or an absolute folder (file:///path/ or '
                                '/path/) - exports are never written over HTTP')
+            check_local_folder(folder)
         elif len(url) <= len(scheme) + 1:
             raise _invalid('url must name a bucket')
         expected = _SCHEME_STORAGE.get(scheme) if scheme else None
@@ -78,6 +80,24 @@ def validate(fields, partial=False):
     if 'use_ssl' in out and not isinstance(out['use_ssl'], bool):
         raise _invalid('use_ssl must be true or false')
     return out
+
+
+def check_local_folder(folder):
+    """A local folder may be a destination only inside one the operator allowed (QUERYAPIGATE_EXPORT_DIRS), and never
+    the server's own home - where the store lives. Checked when a destination is saved and again before every write,
+    with symbolic links resolved."""
+    allowed = config.export_dirs()
+    real = os.path.realpath(folder)
+    home = os.path.realpath(config.home())
+    if real == home or real.startswith(home + os.sep) or home.startswith(real + os.sep):
+        raise ApiError("A destination can't be the server's own home folder, or contain it - that's where its store "
+                       'lives', code='invalid_body')
+    if not allowed:
+        raise ApiError('Local folders are off: set QUERYAPIGATE_EXPORT_DIRS to the folders exports may write under, '
+                       'or use an s3://, gs:// or r2:// destination', code='invalid_body')
+    if not any(real == root or real.startswith(root + os.sep) for root in allowed):
+        raise ApiError(f"'{folder}' isn't inside a folder exports may write under (QUERYAPIGATE_EXPORT_DIRS)",
+                       code='invalid_body')
 
 
 def _check_name(name):
@@ -193,6 +213,7 @@ def open_writer(destination, read_files=()):
     folder = local_path(url)
     prefix = os.path.normpath(folder) + os.sep if folder is not None else url
     if folder is not None:
+        check_local_folder(folder)  # again: QUERYAPIGATE_EXPORT_DIRS may have changed since it was saved
         os.makedirs(prefix, exist_ok=True)
     details = {'database': ':memory:', 'allowed_paths': [prefix, *read_files],
                **{k: fields[k] for k in ('storage', 'region', 'endpoint', 'url_style', 'use_ssl', 'account_id',

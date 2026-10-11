@@ -9,6 +9,7 @@ from unittest import mock
 import duckdb
 
 from queryapigate import admins, create_app, db, destinations, store
+from tests.helpers import export_dir
 from tests.test_api_v1 import V1TestCase
 
 ADMIN = {'X-API-Key': 'admin-key'}
@@ -19,7 +20,7 @@ ONE = '/api/v1/destinations/{name}'
 class DestinationApiTests(V1TestCase):
     def setUp(self):
         super().setUp()
-        self.out = os.path.join(self.tmp.name, 'exports') + '/'
+        self.out = os.path.join(export_dir(self), 'exports') + '/'
 
     def create(self, status=201, **fields):
         body = {'name': 'local', 'url': self.out, **fields}
@@ -78,7 +79,7 @@ class DestinationApiTests(V1TestCase):
         res = self.call('post', f'{LIST}/local/test', '/api/v1/destinations/{name}/test', 200)
         self.assertTrue(os.path.isfile(os.path.join(self.out, destinations.PROBE_FILE)))
         self.assertEqual(res.get_json()['object'], os.path.join(self.out, destinations.PROBE_FILE))
-        unsaved = os.path.join(self.tmp.name, 'unsaved') + '/'
+        unsaved = os.path.join(os.environ['QUERYAPIGATE_EXPORT_DIRS'], 'unsaved') + '/'
         self.call('post', f'{LIST}/test', '/api/v1/destinations/test', 200, json={'url': unsaved})
         self.assertTrue(os.path.isfile(os.path.join(unsaved, destinations.PROBE_FILE)))
 
@@ -107,7 +108,7 @@ class WriterTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         create_app()
-        self.out = os.path.join(self.tmp.name, 'out') + '/'
+        self.out = os.path.join(export_dir(self), 'out') + '/'
         self.elsewhere = os.path.join(self.tmp.name, 'elsewhere')
         os.makedirs(self.elsewhere)
 

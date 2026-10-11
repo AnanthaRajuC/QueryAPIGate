@@ -6,6 +6,8 @@ untouched and still plain JSON files, written directly as before).
 Call `write_connections()` after QUERYAPIGATE_HOME is patched to the test's temp directory, before
 `create_app()` - the same place a test used to open db_connections.json and json.dump into it.
 """
+import os
+
 from queryapigate import db, store
 
 
@@ -75,3 +77,16 @@ def secret_of(res):
     """The new key from a create_key() response, failing loudly if it wasn't created."""
     assert res.status_code == 201, res.get_data(as_text=True)
     return res.get_json()['secret']
+
+
+def export_dir(test):
+    """A folder exports may write under, outside the test's home (QUERYAPIGATE_EXPORT_DIRS), removed afterwards."""
+    import shutil
+    import tempfile
+    from unittest import mock
+    root = tempfile.mkdtemp(prefix='qag-exports-')
+    test.addCleanup(shutil.rmtree, root, True)
+    patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_EXPORT_DIRS': root})
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return root
