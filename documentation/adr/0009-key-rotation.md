@@ -1,6 +1,6 @@
 # ADR 0009: Rotating the encryption key, and reissuing an API key's secret
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Backlog:** #90 (rotating the key stored passwords are encrypted with) and #91 (reissuing an API key's secret, with
   the old one working for a while).
