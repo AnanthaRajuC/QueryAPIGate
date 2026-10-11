@@ -66,6 +66,40 @@ test('an API key: create from explicit grants, use its secret once, revoke it', 
   expect((await page.request.get('/catalog', { headers: { 'X-API-Key': secret } })).status()).toBe(401);
 });
 
+test("an API key's secret: rotate it, both work, end the old one", async ({ page, allowStatus }) => {
+  allowStatus(401);
+  const created = await (
+    await api(page, 'POST', '/api/v1/api-keys', { name: 'e2e-rotate', connections: ['examples'] })
+  ).json();
+  const run = (secret: string) =>
+    page.request.post('/execute_sql', {
+      headers: { 'X-API-Key': secret },
+      data: { sql: 'SELECT 1 AS one', connection_name: 'examples' },
+    });
+  await open(page, '/api-keys', 'API keys');
+  const row = page.locator('#apikeys-table tr[data-name="e2e-rotate"]');
+  await row.getByRole('button', { name: 'Edit' }).click();
+  const drawer = page.locator('#drawer');
+  await drawer.getByLabel('Secret').selectOption('1440');
+  await drawer.getByRole('button', { name: 'Rotate secret' }).click();
+  await expect(page.locator('#drawer-title')).toHaveText('Secret rotated');
+  const secret = await drawer.getByLabel('New secret').inputValue();
+  expect(secret).toMatch(/^sk_/);
+  expect(secret).not.toBe(created.secret);
+  expect((await run(secret)).status()).toBe(200);
+  expect((await run(created.secret)).status()).toBe(200); // the old one, in its grace period
+  await drawer.getByRole('button', { name: 'Done' }).click();
+  await expect(row).toContainText('rotating');
+  await row.getByRole('button', { name: 'Edit' }).click();
+  await expect(drawer).toContainText('The old secret works until');
+  page.once('dialog', (dialog) => dialog.accept());
+  await drawer.getByRole('button', { name: 'End now' }).click();
+  await expect(page.getByText('The old secret of e2e-rotate stopped working')).toBeVisible();
+  expect((await run(created.secret)).status()).toBe(401);
+  expect((await run(secret)).status()).toBe(200);
+  await api(page, 'DELETE', '/api/v1/api-keys/e2e-rotate');
+});
+
 test('a role, and a key created from it', async ({ page }) => {
   await open(page, '/roles', 'Roles');
   await page.getByRole('button', { name: 'New role' }).click();

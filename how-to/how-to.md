@@ -60,6 +60,8 @@ guide covers one scenario end to end, and every command and response in it was r
     (experimental) - SSO for administrators: roles from groups, people who had tokens linked, SSO only.
 45. [**Hide personal data from a partner or an AI agent**](45-hide-personal-data-from-a-partner-or-an-ai-agent.md)
     - column masking: hash, mask or drop values, whatever the SQL calls them.
+50. [**Rotate an API key without downtime**](50-rotate-an-api-key-without-downtime.md) - a new secret, the old one
+    working until the partner has switched, then ended.
 
 ## MCP (AI agent access)
 

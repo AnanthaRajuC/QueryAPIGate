@@ -80,7 +80,7 @@ documentation. #99 workspaces only if asked for.
 9. **0.21: #88 write tools over MCP, each write approved by a person**, experimental
    ([ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md)). (Released as 0.21.0 on 2026-10-11.)
 10. **0.22: #90 rotating the encryption key and #91 reissuing an API key's secret**
-    ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+    ([ADR 0009](documentation/adr/0009-key-rotation.md)). (Released as 0.22.0 on 2026-10-11.)
 11. **0.23: #92 OpenTelemetry tracing and #93 security headers.**
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas.**
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
@@ -2892,9 +2892,13 @@ export of a growing table reads the whole table every day.
 
 ## 90. Rotating the key stored passwords are encrypted with
 
-**Status: open; planned for 0.22** ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+**Status: shipped (0.22).** [ADR 0009](documentation/adr/0009-key-rotation.md): several keys in
+`QUERYAPIGATE_SECRET_KEY` (`config.secret_keys()`, a `MultiFernet` in `store._get_fernet()`), `rekey.py`
+(`queryapigate rekey [--check]`, `POST /api/v1/settings/rekey`, the owner-only `secrets.rotate`), the
+`encryption_key_rotation_incomplete` alert and the Settings count. Guide 22. Found on the way and fixed: a destination
+password saved before the key was set stayed literal.
 
-**Impact:** `QUERYAPIGATE_SECRET_KEY` is one key. Change it and every stored password encrypted under the old one fails
+**Was:** `QUERYAPIGATE_SECRET_KEY` is one key. Change it and every stored password encrypted under the old one fails
 with `password_undecryptable` (`store._decrypt_password()`), and nothing re-encrypts them - so the key can't be rotated
 without re-entering every connection's and destination's password. Most compliance regimes require periodic rotation,
 and a leaked key must be replaceable at once.
@@ -2908,9 +2912,11 @@ and a leaked key must be replaceable at once.
 
 ## 91. Reissuing an API key's secret, with the old one working for a while
 
-**Status: open; planned for 0.22** ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+**Status: shipped (0.22).** [ADR 0009](documentation/adr/0009-key-rotation.md): `apikeys.rotate_key()` and
+`end_previous()`, `POST /api/v1/api-keys/{name}/rotate` and `DELETE .../previous`, schema 12
+(`api_keys.previous_hash`, `previous_expires_at`), `previous_last_used_at`; the Console's Rotate secret. Guide 50.
 
-**Impact:** a key's secret can't be changed. Rotating it means a new key, its grants copied by hand, then revoking the
+**Was:** a key's secret can't be changed. Rotating it means a new key, its grants copied by hand, then revoking the
 old one - so the partner using it has an outage unless both are coordinated to the minute, the new key's grants can
 drift from the old one's, and run history and audit split across two names.
 

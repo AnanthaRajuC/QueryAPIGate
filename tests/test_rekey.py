@@ -264,6 +264,13 @@ class RekeyApiTests(RekeyTestCase):
             self.assertIn('remove the others', state())
             self.assertEqual(rotation_alerts()[0][0], 'info')
 
+    def test_startup_encrypts_a_destination_password_saved_before_the_key(self):
+        with self.keys(''):
+            destinations.create('plain', {'url': 's3://bucket/plain/', 'user': 'AKIA2', 'password': 'pw-plain'})
+        self.assertEqual(self.raw('destinations', 'plain'), 'pw-plain')
+        create_app()
+        self.assertEqual(self.under(OLD, 'destinations', 'plain'), 'pw-plain')
+
     def test_startup_warns_while_passwords_are_under_an_old_key(self):
         with self.keys(f'{NEW},{OLD}'), self.assertLogs('queryapigate', 'WARNING') as logs:
             create_app()

@@ -327,6 +327,12 @@ const DOCS = [
     path: 'how-to/49-let-an-agent-write-with-a-person-approving-each-write.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-50',
+    title: 'Rotate an API key without downtime',
+    path: 'how-to/50-rotate-an-api-key-without-downtime.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

@@ -785,7 +785,7 @@ SCHEMAS = {
                 'last_used_at': _NULLABLE_STRING, 'example': {'type': 'boolean'},
                 'previous_expires_at': {'type': 'string', 'nullable': True,
                                         'description': 'After a rotation: the old secret works until then. Null when '
-                                                       'there is none, or it was ended.'},
+                                                       'none works - never rotated, ended, or its grace is over.'},
                 'previous_last_used_at': {'type': 'string', 'nullable': True,
                                           'description': 'When the old secret was last used, while it still '
                                                          'works - has the caller switched? (at most once a minute)'},

@@ -101,6 +101,11 @@ export function ApiKeysPage() {
                       >
                         {name}
                       </span>
+                      {k.previous_expires_at ? (
+                        <span className="tag" title="Rotated: the old secret works until then too">
+                          rotating
+                        </span>
+                      ) : null}
                       {k.mask?.length ? (
                         <span
                           className="tag"

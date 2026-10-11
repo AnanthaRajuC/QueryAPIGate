@@ -64,6 +64,8 @@ def _refuse_unknown(data, allowed):
 def to_key(name, entry):
     expires = entry.get('expires_at')
     usage = metrics.summary_for_key(name)
+    previous = entry.get('previous_expires_at')
+    previous = previous if previous and previous > store.now() else None
     return {
         'name': name,
         **_grants(entry),
@@ -73,8 +75,9 @@ def to_key(name, entry):
         'created_at': entry.get('created_at'),
         'created_from_role': entry.get('created_from_role'),
         'last_used_at': entry.get('last_used_at'),
-        'previous_expires_at': entry.get('previous_expires_at'),
-        'previous_last_used_at': entry.get('previous_last_used_at') if entry.get('previous_expires_at') else None,
+        # the old secret after a rotation (ADR 0009) - shown only while it still works
+        'previous_expires_at': previous,
+        'previous_last_used_at': entry.get('previous_last_used_at') if previous else None,
         'example': entry.get('example') is True,
         'usage': {'queries': usage.get('queries', 0), 'errors': usage.get('errors', 0), 'rows': usage.get('rows', 0)},
     }

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 
 import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
 import { useRoles } from '@/app/data';
 import { copyText, Field, FormActions, Loading, useFeedback } from '@/app/feedback';
+import { Time } from '@/components/Time';
 
 import { GrantFields, grantsPayload, initialGrants, useGrantChoices, type GrantState } from './grants';
 
@@ -197,6 +198,7 @@ function ApiKeyFormFields({
           Active<span className="hint">— unchecking revokes it immediately</span>
         </label>
       )}
+      {isEdit && existing && <KeySecret apiKey={existing} />}
       <FormActions onCancel={closeDrawer}>
         <button type="submit" className="btn primary" disabled={save.isPending}>
           {isEdit ? 'Save' : 'Create key'}
@@ -206,16 +208,118 @@ function ApiKeyFormFields({
   );
 }
 
+const GRACE_CHOICES: [string, string][] = [
+  ['60', 'for 1 hour'],
+  ['1440', 'for 1 day'],
+  ['10080', 'for 1 week'],
+  ['0', 'not at all - it stops now'],
+];
+
+/** Rotating a key's secret (ADR 0009): a new one, shown once, and the old one kept working for a while - or, while
+ * an old one still works, when it stops and whether it is still being used. */
+function KeySecret({ apiKey }: { apiKey: ApiKey }) {
+  const { openDrawer, toast } = useFeedback();
+  const reportError = useReportError();
+  const invalidate = useInvalidateAccess();
+  const [grace, setGrace] = useState('60');
+  const path = { params: { path: { name: apiKey.name } } };
+  const rotate = useMutation({
+    mutationFn: async () =>
+      unwrap(
+        await api.POST('/api/v1/api-keys/{name}/rotate', { ...path, body: { grace_minutes: Number(grace) } }),
+      ),
+    onSuccess: (rotated) => {
+      invalidate();
+      openDrawer({
+        title: 'Secret rotated',
+        kicker: rotated.name,
+        content: (
+          <SecretReveal
+            secret={rotated.secret}
+            label="New secret"
+            hint={
+              rotated.previous_expires_at ? (
+                <>
+                  Store this now — it cannot be shown again. The old secret keeps working until{' '}
+                  <Time value={rotated.previous_expires_at} />: switch whoever uses this key before then.
+                </>
+              ) : (
+                'Store this now — it cannot be shown again. The old secret has stopped working.'
+              )
+            }
+          />
+        ),
+      });
+    },
+    onError: (error) => reportError(error, 'API key'),
+  });
+  const end = useMutation({
+    mutationFn: async () => unwrap(await api.DELETE('/api/v1/api-keys/{name}/previous', path)),
+    onSuccess: () => {
+      invalidate();
+      toast('The old secret of ' + apiKey.name + ' stopped working');
+    },
+    onError: (error) => reportError(error, 'API key'),
+  });
+
+  if (apiKey.previous_expires_at) {
+    return (
+      <Field label="Secret" hint="Rotated: the new secret and the old one both work until then.">
+        <div className="key-secret" id="k-previous">
+          <span>
+            The old secret works until <Time value={apiKey.previous_expires_at} /> · last used{' '}
+            <Time value={apiKey.previous_last_used_at} fallback="not since the rotation" />
+          </span>
+          <button
+            type="button"
+            className="btn sm danger"
+            disabled={end.isPending}
+            onClick={() => {
+              if (
+                window.confirm(`Stop the old secret of '${apiKey.name}' now? Anything still using it fails.`)
+              )
+                end.mutate();
+            }}
+          >
+            End now
+          </button>
+        </div>
+      </Field>
+    );
+  }
+  return (
+    <Field
+      id="k-grace"
+      label="Secret"
+      hint="Rotate: a new secret, shown once. Name, grants and history stay the same."
+    >
+      <div className="key-secret">
+        <span>Keep the old secret working</span>
+        <select id="k-grace" value={grace} onChange={(e) => setGrace(e.target.value)}>
+          {GRACE_CHOICES.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn sm" disabled={rotate.isPending} onClick={() => rotate.mutate()}>
+          Rotate secret
+        </button>
+      </div>
+    </Field>
+  );
+}
+
 /** Shown once, right after creation - the secret is never retrievable again after this. */
 export function SecretReveal({
   secret,
   label = 'Secret key',
-  hint = 'Store this now — it cannot be shown again. To rotate it, revoke this key and create a new one.',
+  hint = 'Store this now — it cannot be shown again. To change it later, rotate it from Edit.',
   onDone,
 }: {
   secret: string;
   label?: string;
-  hint?: string;
+  hint?: ReactNode;
   /** What Done does - closes the drawer unless given. */
   onDone?: () => void;
 }) {

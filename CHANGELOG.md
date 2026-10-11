@@ -51,6 +51,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-11
+
+Rotating secrets without downtime: the key stored passwords are encrypted with, and an API key's secret, can each be
+replaced while everything keeps working - several encryption keys at once and `queryapigate rekey`, and a reissued
+API key whose old secret works for a grace period you choose. Both are stable from the start, so 1.0 freezes them.
+
 ### Upgrading from 0.21
 - **Schema 12** adds two nullable columns to `api_keys` (`previous_hash`, `previous_expires_at`) and an index; nothing
   existing changes. A 0.21 instance still running keeps working against the upgraded store, but doesn't know a
@@ -71,6 +77,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   each key. Until the old keys are removed, startup logs it, Settings shows it, and the
   `encryption_key_rotation_incomplete` alert says what's left. Audited as `rekey`, with counts only. One key behaves
   exactly as before. Guide 22's [Changing the key](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md#changing-the-key).
+
+- **The Console:** API keys → Edit → **Secret** rotates a key (keeping the old secret working for an hour, a day, a
+  week, or not at all), shows the new secret once, and shows an old secret's expiry and last use, with **End now**;
+  a key being rotated is tagged *rotating*. Guide 50,
+  [Rotate an API key without downtime](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/50-rotate-an-api-key-without-downtime.md).
+
+### Fixed
+- **A destination password saved before `QUERYAPIGATE_SECRET_KEY` was set stayed in plaintext.** Startup encrypts
+  literal passwords already in the store, but only connections' were; destinations' are now too.
 
 ### Changed
 - `password_undecryptable` now says that no listed key decrypts the password, and how to fix it. Each key in
@@ -1957,7 +1972,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...v0.20.0

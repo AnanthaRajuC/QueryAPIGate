@@ -173,6 +173,56 @@ describe('API keys', () => {
     expect(await screen.findByText('Updated partner')).toBeInTheDocument();
   });
 
+  it('rotates the secret, keeping the old one working for the chosen time, and shows the new one once', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/api-keys/partner/rotate': () =>
+        jsonResponse(
+          { ...apiKey('partner', { previous_expires_at: '2026-10-12 18:00:00' }), secret: 'sk_new456' },
+          200,
+          { 'Cache-Control': 'no-store' },
+        ),
+    });
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('partner')).not.toBeNull());
+    await userEvent.click(within(row('partner')).getByRole('button', { name: 'Edit' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.selectOptions(await within(drawer).findByLabelText('Secret'), '1440');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Rotate secret' }));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith('/rotate'))).toBe(true));
+    expect(calls.find((c) => c.path.endsWith('/rotate'))!.body).toEqual({ grace_minutes: 1440 });
+    expect(await within(drawer).findByLabelText('New secret')).toHaveValue('sk_new456');
+    expect(document.getElementById('drawer-title')).toHaveTextContent('Secret rotated');
+    expect(drawer).toHaveTextContent('The old secret keeps working until');
+  });
+
+  it('shows a rotation in progress, and ends the old secret after confirming', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const rotating = apiKey('partner', {
+      previous_expires_at: '2026-10-12 18:00:00',
+      previous_last_used_at: '2026-10-11 17:58:00',
+    });
+    const { calls } = fakeBackend({
+      ...routes(),
+      'GET /api/v1/api-keys': () => ({ items: [rotating] }),
+      'GET /api/v1/api-keys/partner': () => jsonResponse(rotating, 200, { ETag: '"k2"' }),
+      'DELETE /api/v1/api-keys/partner/previous': () => jsonResponse(apiKey('partner')),
+    });
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('partner')).not.toBeNull());
+    expect(within(row('partner')).getByText('rotating')).toBeInTheDocument();
+    await userEvent.click(within(row('partner')).getByRole('button', { name: 'Edit' }));
+    const drawer = document.getElementById('drawer')!;
+    await waitFor(() => expect(drawer).toHaveTextContent('The old secret works until'));
+    expect(within(drawer).queryByRole('button', { name: 'Rotate secret' })).toBeNull();
+    await userEvent.click(within(drawer).getByRole('button', { name: 'End now' }));
+    expect(confirm).toHaveBeenCalledWith(
+      "Stop the old secret of 'partner' now? Anything still using it fails.",
+    );
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText('The old secret of partner stopped working')).toBeInTheDocument();
+  });
+
   it('revokes a key after confirming', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { calls } = fakeBackend({

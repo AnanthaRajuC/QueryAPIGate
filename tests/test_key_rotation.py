@@ -76,8 +76,10 @@ class RotateTests(RotationTestCase):
         just_before = (datetime.strptime(until, stamp) - timedelta(seconds=1)).strftime(stamp)
         with mock.patch.object(store, 'now', return_value=just_before):
             self.assertTrue(self.works(self.old))
+            self.assertEqual(self.key()['previous_expires_at'], until)
         with mock.patch.object(store, 'now', return_value=until):
             self.assertFalse(self.works(self.old))
+            self.assertIsNone(self.key()['previous_expires_at'])  # over: nothing works, so nothing to show
 
     def test_grace_zero_stops_the_old_secret_at_once(self):
         body = self.rotate(grace_minutes=0).get_json()

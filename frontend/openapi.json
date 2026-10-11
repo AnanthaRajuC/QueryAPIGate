@@ -505,7 +505,7 @@
                 "type": "string"
               },
               "previous_expires_at": {
-                "description": "After a rotation: the old secret works until then. Null when there is none, or it was ended.",
+                "description": "After a rotation: the old secret works until then. Null when none works - never rotated, ended, or its grace is over.",
                 "nullable": true,
                 "type": "string"
               },
