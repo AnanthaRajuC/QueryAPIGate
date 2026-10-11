@@ -116,6 +116,23 @@ curl https://api.example.com/health
 - **`/metrics` is private:** `403` from outside the allowed range. It's public by design on QueryAPIGate itself
   (no key), so the proxy is the place to restrict it.
 
+## Headers: what's left to the proxy
+
+QueryAPIGate sets its own security headers on every response (since 0.23) - `nosniff`, a CSP that runs nothing on
+API responses, `no-referrer`, `Cache-Control: no-store` - so the proxy doesn't need to add them
+([the list](../documentation/API.md#security-headers)). What's left is HTTPS itself and, once every client reaches
+the server over HTTPS, HSTS. Either set it at the proxy, or let QueryAPIGate send it:
+
+```bash
+QUERYAPIGATE_TRUST_PROXY=1 QUERYAPIGATE_HSTS_MAX_AGE=31536000 ...
+curl -sD - -o /dev/null http://127.0.0.1:5000/health -H 'X-Forwarded-Proto: https' | grep Strict
+# Strict-Transport-Security: max-age=31536000
+```
+
+It goes only on requests that arrived over HTTPS - the forwarded scheme, behind a trusted proxy - never on plain HTTP,
+where it would lock browsers out of a server without HTTPS. Start with a short `max-age` (an hour, `3600`) and raise
+it once HTTPS is settled: browsers remember it for that long.
+
 ## Mistakes this avoids
 
 | Mistake | What happens |

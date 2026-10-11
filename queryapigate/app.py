@@ -41,6 +41,7 @@ from . import (
     openapi,
     ratelimit,
     schema,
+    secheaders,
     sqltools,
     sso,
     store,
@@ -250,6 +251,7 @@ def create_app():
             response.headers['X-RateLimit-Key-Limit'] = str(limit)
             response.headers['X-RateLimit-Key-Remaining'] = str(remaining)
         response.headers['X-Request-Id'] = g.get('request_id', '-')
+        secheaders.apply(response, request.is_secure)
         rule = request.url_rule.rule if request.url_rule is not None else None
         if rule in deprecations.ROUTES:  # on its way out (deprecations.py): say so, and name its successor
             response.headers['Deprecation'] = deprecations.header_value(rule)
@@ -1121,7 +1123,10 @@ def catalog():
 
 @bp.route('/docs', methods=['GET'])
 def docs():
-    return Response(openapi.DOCS_HTML, mimetype='text/html')
+    response = Response(openapi.DOCS_HTML, mimetype='text/html')
+    response.headers['Content-Security-Policy'] = openapi.DOCS_CSP
+    response.headers['Referrer-Policy'] = 'same-origin'
+    return response
 
 
 @bp.route('/ui', methods=['GET'])

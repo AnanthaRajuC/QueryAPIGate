@@ -41,7 +41,7 @@ def _serve(args):
             'Listening on %s without QUERYAPIGATE_API_KEY set: anyone who can reach this port can run SQL '
             'on your active connections.', args.host)
     logging.getLogger('queryapigate').info('Using %s (metadata: %s)', config.home(), db.describe())
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    app.run(host=args.host, port=args.port, debug=args.debug, request_handler=_handler())
     return 0
 
 
@@ -518,6 +518,17 @@ def _describe_keys(found):
     if found['undecryptable']:
         parts.append(f"{len(found['undecryptable'])} under no listed key")
     return f"{found['values']} encrypted password(s), {keys} key(s) listed: " + ', '.join(parts) + '.'
+
+
+def _handler():
+    """Werkzeug's request handler, without its version banner (`Server: Werkzeug/3.x Python/3.12`, ADR 0010)."""
+    from werkzeug.serving import WSGIRequestHandler
+
+    class Handler(WSGIRequestHandler):
+        def version_string(self):
+            return 'QueryAPIGate'
+
+    return Handler
 
 
 def _rekey(args):

@@ -89,3 +89,16 @@ test('/ui, where the admin UI used to be, opens the Console', async ({ page }) =
   await expect(page).toHaveURL(/\/console\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible();
 });
+
+test('/docs renders under its own policy, and "Try it out" reaches this server', async ({ page }) => {
+  // the pinned Swagger UI loads with its integrity hashes, and the CSP blocks nothing it needs (a violation is a
+  // console error, which fails the test)
+  const res = await page.goto('/docs');
+  expect(res?.headers()['content-security-policy']).toContain('swagger-ui-dist@');
+  await expect(page.locator('.swagger-ui .info .title')).toContainText('QueryAPIGate');
+  const health = page.locator('.opblock-get').filter({ hasText: '/health' }).first();
+  await health.locator('.opblock-summary').click();
+  await health.getByRole('button', { name: 'Try it out' }).click();
+  await health.getByRole('button', { name: 'Execute' }).click();
+  await expect(health.locator('.live-responses-table tbody .response-col_status').first()).toHaveText('200');
+});

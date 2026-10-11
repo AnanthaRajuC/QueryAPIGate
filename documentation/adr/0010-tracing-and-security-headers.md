@@ -1,6 +1,6 @@
 # ADR 0010: Distributed tracing with OpenTelemetry, and security headers on every response
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Backlog:** #92 (distributed tracing) and #93 (security headers on every response, not only the Console's).
 

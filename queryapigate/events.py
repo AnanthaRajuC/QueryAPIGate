@@ -32,7 +32,7 @@ import time
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, history, instances, ratelimit
+from . import config, cors, db, history, instances, ratelimit, secheaders
 from .errors import code_for
 
 try:
@@ -314,7 +314,7 @@ class EventServer:
         self.by_key.setdefault(key_name, set()).add(client)  # live events queue up from here on...
         try:
             head = ['HTTP/1.1 200 OK', 'Content-Type: text/event-stream', 'Cache-Control: no-cache',
-                    'X-Accel-Buffering: no', 'Transfer-Encoding: chunked', 'Connection: close']
+                    'X-Accel-Buffering: no', 'Transfer-Encoding: chunked', 'Connection: close', *_SECURITY_HEADERS]
             if allow_origin:
                 head += [f'Access-Control-Allow-Origin: {allow_origin}', 'Vary: Origin']
             writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + _chunk(f'retry: {_RETRY_MS}\n\n'.encode()))
@@ -389,13 +389,18 @@ async def _read_request(reader):
     raise ValueError('too many headers')
 
 
+# secheaders.py's, but Cache-Control: the stream says no-cache, everything else no-store
+_SECURITY_HEADERS = [f'{name}: {value}' for name, value in secheaders.api_headers() if name != 'Cache-Control']
+
+
 async def _respond(writer, status, body, allow_origin, preflight=False, extra=None):
     reasons = {200: 'OK', 204: 'No Content', 401: 'Unauthorized', 404: 'Not Found', 405: 'Method Not Allowed',
                429: 'Too Many Requests', 503: 'Service Unavailable'}
     if body is not None and 'error' in body:  # the same {error, code} every front door answers with (errors.py)
         body = {'error': body['error'], 'code': code_for(status, body.get('code'))}
     payload = b'' if body is None else json.dumps(body).encode()
-    head = [f'HTTP/1.1 {status} {reasons.get(status, "")}', f'Content-Length: {len(payload)}', 'Connection: close']
+    head = [f'HTTP/1.1 {status} {reasons.get(status, "")}', f'Content-Length: {len(payload)}', 'Connection: close',
+            *_SECURITY_HEADERS, 'Cache-Control: no-store']
     if body is not None:
         head.append('Content-Type: application/json')
     if allow_origin:

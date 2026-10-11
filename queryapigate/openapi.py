@@ -306,13 +306,55 @@ def build_spec(version, saved_queries=None, jwt=None):
     return spec
 
 
-DOCS_HTML = """<!doctype html>
+# /docs is where people type their API key, so what it loads is pinned (ADR 0010): one exact Swagger UI release, each
+# file with its Subresource Integrity hash - a changed file is refused by the browser - and a CSP naming exactly those.
+# Change the version and the hashes together; tests/test_security_headers.py checks the hashes against the CDN.
+# 5.33.0's files are identical to the npm package's (checked when pinned, 2026-10-11).
+SWAGGER_UI_VERSION = '5.33.0'
+SWAGGER_UI_BASE = f'https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}/'
+SWAGGER_UI_FILES = {
+    'swagger-ui.css': 'sha384-Ov4/wv3j2bmct8cDc5X4ngJZohVPzEmc6uDPH8WeljUxO5vtoykvMEfbu9Vh6RaW',
+    'swagger-ui-bundle.js': 'sha384-YDALVcy8kj8yltLBVi1vBiBAUqdxvus673gM8XKwiy6aDUJFXivF/KCufekjYbVf',
+}
+
+_DOCS_SCRIPT = """
+  var stored = '';
+  try { stored = sessionStorage.getItem('queryapigate-key') || ''; } catch (e) {}
+  document.getElementById('key').value = stored;
+  document.getElementById('save-key').onclick = function () {
+    try { sessionStorage.setItem('queryapigate-key', document.getElementById('key').value); } catch (e) {}
+    location.reload();
+  };
+  SwaggerUIBundle({
+    url: 'openapi.json', dom_id: '#ui', validatorUrl: null,
+    requestInterceptor: function (req) { if (stored) { req.headers['X-API-Key'] = stored; } return req; }
+  });
+"""
+
+
+def _sri(name):
+    return f'integrity="{SWAGGER_UI_FILES[name]}" crossorigin="anonymous"'
+
+
+def _script_hash(text):
+    import base64
+    import hashlib
+    return "'sha256-" + base64.b64encode(hashlib.sha256(text.encode()).digest()).decode() + "'"
+
+
+# Swagger UI sets inline style attributes, so styles need 'unsafe-inline'; scripts are only the pinned bundle and
+# this page's own script, by hash. Requests ("Try it out", openapi.json) go to this server only.
+DOCS_CSP = (f"default-src 'none'; script-src {SWAGGER_UI_BASE}swagger-ui-bundle.js {_script_hash(_DOCS_SCRIPT)}; "
+            f"style-src {SWAGGER_UI_BASE}swagger-ui.css 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+DOCS_HTML = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>QueryAPIGate docs</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+<link rel="stylesheet" href="{SWAGGER_UI_BASE}swagger-ui.css" {_sri('swagger-ui.css')}>
 <style>
-  body { margin: 0; font-family: sans-serif; }
-  #key-bar { padding: 8px 16px; background: #f4f4f4; border-bottom: 1px solid #ddd; font-size: 14px; }
-  #key-bar input { width: 260px; padding: 4px; }
+  body {{ margin: 0; font-family: sans-serif; }}
+  #key-bar {{ padding: 8px 16px; background: #f4f4f4; border-bottom: 1px solid #ddd; font-size: 14px; }}
+  #key-bar input {{ width: 260px; padding: 4px; }}
 </style></head>
 <body>
 <div id="key-bar">
@@ -323,20 +365,8 @@ DOCS_HTML = """<!doctype html>
   <button id="save-key">Apply</button>
 </div>
 <div id="ui"></div>
-<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-<script>
-  var stored = '';
-  try { stored = sessionStorage.getItem('queryapigate-key') || ''; } catch (e) {}
-  document.getElementById('key').value = stored;
-  document.getElementById('save-key').onclick = function () {
-    try { sessionStorage.setItem('queryapigate-key', document.getElementById('key').value); } catch (e) {}
-    location.reload();
-  };
-  SwaggerUIBundle({
-    url: 'openapi.json', dom_id: '#ui',
-    requestInterceptor: function (req) { if (stored) { req.headers['X-API-Key'] = stored; } return req; }
-  });
-</script></body></html>
+<script src="{SWAGGER_UI_BASE}swagger-ui-bundle.js" {_sri('swagger-ui-bundle.js')}></script>
+<script>{_DOCS_SCRIPT}</script></body></html>
 """
 
 

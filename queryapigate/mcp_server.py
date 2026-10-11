@@ -643,11 +643,12 @@ def build_asgi_app(flask_app):
         paths = {'/.well-known/oauth-protected-resource',
                  urllib.parse.urlsplit(resource_metadata_url()).path}
         routes += [Route(path, protected_resource, methods=['GET']) for path in sorted(paths)]
-    return Starlette(routes=routes, lifespan=lifespan)
+    from . import secheaders
+    return secheaders.asgi(Starlette(routes=routes, lifespan=lifespan))
 
 
 def run(flask_app, host, port):
     """Serves build_asgi_app() until interrupted."""
     import uvicorn
 
-    uvicorn.run(build_asgi_app(flask_app), host=host, port=port)
+    uvicorn.run(build_asgi_app(flask_app), host=host, port=port, server_header=False)  # no version banner

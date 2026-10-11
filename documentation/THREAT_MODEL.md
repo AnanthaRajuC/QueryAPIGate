@@ -271,6 +271,13 @@ Traefik; see [DEPLOYMENT.md](DEPLOYMENT.md)). An API key travels in a request he
 plain HTTP means the key is recoverable by anyone who can observe the traffic - TLS termination in front
 of QueryAPIGate is not optional once a key exists.
 
+Response headers don't depend on that proxy (ADR 0010): every response sets `nosniff`, `Cache-Control: no-store`
+(a cached saved query `private`, never shareable: callers authenticate with `X-API-Key`, which HTTP's shared-cache
+rule doesn't cover - the 0.22.1 fix) and, on API responses, a CSP that runs nothing and a `no-referrer` policy. HSTS
+is the deployer's choice (`QUERYAPIGATE_HSTS_MAX_AGE`), sent only over HTTPS. `/docs`, where people type an API key,
+loads one exact Swagger UI release with Subresource Integrity hashes and a CSP allowing only those files: a compromised
+CDN, or a bad release of the library, can't run script there. The Console bundles everything it runs.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without

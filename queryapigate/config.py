@@ -282,6 +282,17 @@ def proxy_hops():
         return 0
 
 
+MAX_HSTS_SECONDS = 2 * 365 * 24 * 3600
+
+
+def hsts_max_age():
+    """QUERYAPIGATE_HSTS_MAX_AGE: seconds browsers should insist on HTTPS for this host (Strict-Transport-Security,
+    ADR 0010), or None - the default, so a server without HTTPS never locks browsers out. Sent only on requests that
+    arrived over HTTPS (secheaders.py). Validated at startup by check_settings()."""
+    raw = os.environ.get('QUERYAPIGATE_HSTS_MAX_AGE', '').strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else None
+
+
 _SERVICE_LINK_RE = re.compile(r'^tcp://[^:/]+:\d+$')
 PORT_SETTINGS = ('QUERYAPIGATE_PORT', 'QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_MCP_PORT')
 
@@ -384,6 +395,10 @@ def check_settings():
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
     check_secret_keys()
+    raw = os.environ.get('QUERYAPIGATE_HSTS_MAX_AGE', '').strip()
+    if raw and not (raw.isdigit() and 0 < int(raw) <= MAX_HSTS_SECONDS):
+        raise ValueError('QUERYAPIGATE_HSTS_MAX_AGE must be a whole number of seconds from 1 to '
+                         f'{MAX_HSTS_SECONDS} (two years) - 31536000 is a year')
     check_database_url()
     check_jwt_settings()
     check_mcp_oauth_settings()
@@ -993,7 +1008,10 @@ def describe_settings():
             row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',
                 'QUERYAPIGATE_EXPORT_DIRS', ', '.join(export_dirs()) or 'object storage only'),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',
-                'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops()))]},
+                'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops())),
+            row('HTTPS only (HSTS)', 'Seconds browsers should use only HTTPS for this host; sent only on requests '
+                'that arrived over HTTPS. Unset: not sent.', 'QUERYAPIGATE_HSTS_MAX_AGE',
+                f'{hsts_max_age()} seconds' if hsts_max_age() else 'off')]},
         {'id': 'jwt', 'title': 'Signed-in users (JWT)',
          'description': 'Accept `Authorization: Bearer` tokens from your own login or identity provider, so each '
              'app user calls the API as themselves - no API key per user. Off unless a secret or JWKS URL is set.',

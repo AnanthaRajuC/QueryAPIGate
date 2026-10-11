@@ -1142,6 +1142,24 @@ can only ever see the caller's data - there is nothing in the request to change:
 A JWT can't be revoked before it expires, so keep token lifetimes short (minutes, refreshed by your app) - as
 identity providers do by default. Disabling a user's access at once means taking the query or the role away.
 
+## Security headers
+
+Every response sets these itself, so none depends on a reverse proxy to add them ([ADR 0010](adr/0010-tracing-and-security-headers.md)):
+
+| Header | Value | On |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | every response |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` | API responses (JSON, CSV, Parquet, ...): rendered by a browser, they run nothing and can't be framed. The Console and `/docs` have their own policy |
+| `Referrer-Policy` | `no-referrer` (`same-origin` on the Console and `/docs`) | every response |
+| `Cache-Control` | `no-store`, unless the route says otherwise: `private, max-age=<cache_ttl>` for a cached saved query, `no-cache` for live events, the Console's assets their own | every response |
+| `Strict-Transport-Security` | `max-age=<QUERYAPIGATE_HSTS_MAX_AGE>` | only when that is set, and only on a request that arrived over HTTPS - behind a proxy, as `QUERYAPIGATE_TRUST_PROXY` lets the server tell |
+
+The MCP server and `queryapigate events` send the same, but HSTS. `Server` carries no version
+(`QueryAPIGate` from `queryapigate serve`; gunicorn's is `gunicorn`; the MCP server sends none). `/docs` loads one
+exact Swagger UI release, each file with its Subresource Integrity hash, and its CSP allows exactly those files and
+its own script - a changed file on the CDN is refused by the browser, rather than run on the page where people type
+their API key.
+
 ## Observability
 
 Every response carries `X-Request-Id` (12 hex characters by default); log lines written while handling that request

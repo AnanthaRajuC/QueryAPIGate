@@ -51,6 +51,23 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Security headers on every response** (BACKLOG #93, [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)):
+  `X-Content-Type-Options: nosniff`; on API responses `Content-Security-Policy: default-src 'none'; frame-ancestors
+  'none'` and `Referrer-Policy: no-referrer`; `Cache-Control: no-store` unless the route says otherwise - on the main
+  server, the MCP server and `queryapigate events`, so none relies on a proxy to add them. HSTS when
+  `QUERYAPIGATE_HSTS_MAX_AGE` is set, only on requests that arrived over HTTPS. See
+  [Security headers](documentation/API.md#security-headers).
+
+### Changed
+- **`/docs` loads one exact Swagger UI release (5.33.0), with Subresource Integrity hashes** and a CSP that allows
+  only those files and the page's own script - it loaded the newest 5.x from the CDN, unchecked, on the page where
+  people type their API key.
+- **Responses are `Cache-Control: no-store`** unless they say otherwise (a cached saved query's
+  `private, max-age=N`, the Console's assets). A client that kept API responses in its HTTP cache no longer may.
+- **No version banner:** `queryapigate serve` answers `Server: QueryAPIGate` (was Werkzeug's and Python's versions);
+  the MCP server sends no `Server` header.
+
 ## [0.22.1] - 2026-10-11
 
 ### Security

@@ -75,7 +75,8 @@ QUERYAPIGATE_API_KEY=change-me gunicorn --bind 127.0.0.1:5000 --workers 1 --work
 ~~~
 
 Behind a reverse proxy or load balancer, also set `QUERYAPIGATE_TRUST_PROXY=1` (the number of proxies) so rate limits and
-redirects use the real client address and scheme.
+redirects use the real client address and scheme. Once every client reaches it over HTTPS, `QUERYAPIGATE_HSTS_MAX_AGE` (seconds) adds HSTS -
+only to requests that arrived over HTTPS.
 
 Or use the published Docker image (`ghcr.io/anantharajuc/queryapigate`, with a `-h2` variant that includes Java) or the
 [Dockerfile](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/Dockerfile) - see the README. The image sets

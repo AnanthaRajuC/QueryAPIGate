@@ -162,6 +162,14 @@ class RequestTests(EventServerTestCase):
         self.assertEqual(stream.headers['content-type'], 'text/event-stream')
         self.assertEqual(stream.headers['cache-control'], 'no-cache')
 
+    def test_security_headers_on_the_stream_and_every_answer(self):  # ADR 0010
+        for stream, cache in ((self.open('admin'), 'no-cache'), (self.open(), 'no-store'),
+                              (Stream(self.server.port, path='/health'), 'no-store')):
+            self.assertEqual(stream.headers['x-content-type-options'], 'nosniff')
+            self.assertEqual(stream.headers['content-security-policy'], "default-src 'none'; frame-ancestors 'none'")
+            self.assertEqual(stream.headers['referrer-policy'], 'no-referrer')
+            self.assertEqual(stream.headers['cache-control'], cache)
+
     def test_the_stream_is_chunked_so_each_event_can_be_read_as_it_arrives(self):
         # Delimited only by the connection closing, some clients (Python's requests) hand over nothing until it does.
         stream = self.open('admin')
