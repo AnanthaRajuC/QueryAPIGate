@@ -110,3 +110,20 @@ About a week, in slices:
 3. The `mask` field on keys and roles (API, validation, audit) and on exports.
 4. Console: rules in the key and role forms; masked columns shown in the catalog and the Access map.
 5. A how-to guide ("Hide personal data from a partner or an AI agent"), the threat model, changelog.
+
+## Amendment (2026-10-11): what building it changed
+
+- **A fifth action, `keep`** - "left as is, on purpose". Lineage stops at a view, so a rule on `customers.email` can't
+  tell whether `customer_view.email` is that column; such a query is refused until a rule names the view, and `keep`
+  is how to say the view's column is fine. (Section 3 said a view column is refused; this is how it gets un-refused.)
+- **What counts as untraceable** became concrete, all refused: a table alias that renames columns, `SELECT *` over a
+  `NATURAL`/`USING` join, `LATERAL`, recursive CTEs, whole-row references, DuckDB's `COLUMNS(...)`, and any lineage
+  leaf that isn't a table column or a constant - where a constant is literals, plain operators, `count(*)` and ranking
+  functions over no column. Functions sqlglot can't see into, such as `version()`, are refused too: stricter than
+  needed, for a first release. And the column count the database returns must match what was traced.
+- **MongoDB is refused for a caller with rules** rather than matched by field name, for now.
+- **Errors:** a caller with rules never gets the database's own error text, on any route - it can quote a value.
+- **The catalog** shows a caller which result columns it gets masked and how, but not their source tables, which the
+  caller may not otherwise see.
+- **Exports:** rules are traced when the export is saved, and masking its incremental column is refused.
+

@@ -297,6 +297,12 @@ const DOCS = [
     path: 'how-to/44-deliver-a-daily-file-to-a-partners-bucket.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-45',
+    title: 'Hide personal data from a partner or an AI agent',
+    path: 'how-to/45-hide-personal-data-from-a-partner-or-an-ai-agent.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

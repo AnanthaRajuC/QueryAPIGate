@@ -396,6 +396,12 @@ def check_settings():
                              'run `pip install "queryapigate[redis]"`') from None
 
 
+def mask_key():
+    """QUERYAPIGATE_MASK_KEY: the key column masking's `hash` action is keyed with (masking.py), or None - then the
+    store makes one once and every instance shares it."""
+    return os.environ.get('QUERYAPIGATE_MASK_KEY', '').strip() or None
+
+
 def secret_key():
     """The server-side key used to encrypt connection passwords at rest (QUERYAPIGATE_SECRET_KEY), or None when
     unset - encryption at rest is opt-in; without it, a connection's password is stored exactly as given,
@@ -706,6 +712,8 @@ def describe_settings():
                 'QUERYAPIGATE_ALLOW_WRITES', on_off(allow_writes())),
             row('Encryption at rest', 'Fernet key used to encrypt connection passwords on disk.',
                 'QUERYAPIGATE_SECRET_KEY', 'enabled' if secret_key() else 'off', secret=True),
+            row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
+                'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',
                 'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops()))]},
         {'id': 'jwt', 'title': 'Signed-in users (JWT)',

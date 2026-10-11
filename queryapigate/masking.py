@@ -32,13 +32,12 @@ import fnmatch
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import threading
 import time
 
-from . import db, sqltools, store
+from . import config, db, sqltools, store
 from .errors import ApiError
 
 ACTIONS = ('drop', 'null', 'mask', 'hash', 'keep')  # strictest first
@@ -130,6 +129,9 @@ def _outermost_select(expression):
     return expression if isinstance(expression, exp.Select) else None
 
 
+_RANKING = {'rank', 'dense_rank', 'ntile', 'percent_rank', 'cume_dist'}
+
+
 def _is_constant(expression):
     """Whether a lineage leaf that isn't a table column holds no column's values: literals, NULL, plain operators and
     casts over them, count(*). Anything else - a function sqlglot can't see into, such as DuckDB's COLUMNS('e.*'),
@@ -137,8 +139,12 @@ def _is_constant(expression):
     from sqlglot import exp
     allowed = (exp.Alias, exp.Literal, exp.Null, exp.Boolean, exp.Paren, exp.Neg, exp.Not, exp.Binary, exp.Cast,
                exp.TryCast, exp.DataType, exp.DataTypeParam, exp.Identifier, exp.Interval, exp.Var, exp.CurrentDate,
-               exp.CurrentTimestamp, exp.CurrentTime, exp.Tuple)
+               exp.CurrentTimestamp, exp.CurrentTime, exp.Tuple,
+               # a ranking over no column - RANK() OVER (ORDER BY COUNT(*) DESC); a column inside is still refused
+               exp.Window, exp.Order, exp.Ordered, exp.RowNumber)
     for node in expression.walk():
+        if isinstance(node, exp.Anonymous) and node.name.lower() in _RANKING:
+            continue
         if isinstance(node, exp.Count) and isinstance(node.this, (exp.Star, exp.Literal)):
             continue
         if isinstance(node, exp.Star) and isinstance(node.parent, exp.Count):
@@ -290,7 +296,7 @@ def plan(rules, traced):
 
 def hash_key():
     """The key `hash` uses: QUERYAPIGATE_MASK_KEY, or one the store makes once and every instance shares."""
-    configured = os.environ.get('QUERYAPIGATE_MASK_KEY', '').strip()
+    configured = config.mask_key()
     if configured:
         return configured.encode()
     conn = db.connection()

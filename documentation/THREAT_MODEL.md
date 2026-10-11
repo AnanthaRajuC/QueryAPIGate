@@ -136,6 +136,29 @@ What this buys, and what it doesn't:
 - **Residual risks**: tokens are bearer secrets with day-granularity expiry; there is no MFA or SSO yet (BACKLOG
   #84 Phase 2), so a token is only as safe as where it's kept.
 
+### Column masking: which values leave
+
+A `mask` grant on a key, role or export (ADR 0005, experimental) hashes, masks, nulls or drops the values of named
+source columns in everything that caller receives. The design choice that matters: **result columns are traced to
+their sources through the SQL** (sqlglot lineage, by position, with the connection's schema for `SELECT *`), not
+matched by name - so `SELECT email AS e`, `lower(email)`, a CTE or a `UNION` is still masked - and **anything that
+can't be traced is refused before it runs**, never served unmasked. Probing during the build found, and the tests now
+hold against, the ways tracing could be led astray: DuckDB's `COLUMNS('regex')` (columns picked by pattern), a table
+alias that renames columns (`customer AS c(a, e)`), `SELECT *` over a `NATURAL`/`USING` join (fewer columns than
+parsed, which would shift every mask), whole-row references (`row_to_json(c)`), and a `VALUES` row holding a
+subquery. The database's error text, which can quote a value, is never returned to a caller with rules. The cache is
+keyed per set of rules, and run history records what was masked.
+
+What remains:
+- **Inference.** A caller that writes SQL can filter and group on a masked column (`WHERE email LIKE 'a%'`, `GROUP BY
+  email`) - masking hides values in results, not answers about them. For callers near sensitive data, especially AI
+  agents, grant saved queries only, or `allowed_tables` on a view that leaves the column out.
+- **Hashes show equality.** `hash` is keyed (HMAC; the key never leaves the server), so a guessed value can't be
+  hashed and compared, but equal values give equal codes - by design, for grouping and joining.
+- **Tracing is only as good as the parser.** A construct sqlglot reads wrongly, rather than not at all, could trace a
+  column to the wrong source. The refusal rules are deliberately broad, and the feature is experimental for that
+  reason; database-level column privileges remain the backstop for a column that must never leave.
+
 ### Query execution: what actually stops a bad statement
 
 This is the part worth being the most precise about, because it's also the part with the sharpest edges.

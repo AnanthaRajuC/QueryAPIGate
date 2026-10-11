@@ -69,6 +69,9 @@ class TraceTests(unittest.TestCase):
                 [('v', ['customers.email', 'customers.id', 'customers.phone'])],
             'SELECT 1 AS one, count(*) AS n, NULL AS nothing FROM customers': [('one', []), ('n', []), ('nothing', [])],
             "SELECT * FROM (VALUES (1, 'a')) AS v(a, b)": [('a', []), ('b', [])],
+            'SELECT customer_id, RANK() OVER (ORDER BY COUNT(*) DESC) AS r, ROW_NUMBER() OVER () AS n '
+            'FROM orders GROUP BY customer_id': [('customer_id', ['orders.customer_id']), ('r', []), ('n', [])],
+            'SELECT RANK() OVER (ORDER BY email) AS r FROM customers': [('r', ['customers.email'])],
             'SELECT phone FROM customers WHERE email = :e AND id > {min}': [('phone', ['customers.phone'])],
         }
         for sql, expected in cases.items():

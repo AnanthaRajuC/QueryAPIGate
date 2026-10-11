@@ -2013,7 +2013,14 @@ week, and with which key?" can't be answered from QueryAPIGate itself.
 
 ## 63. Column masking and PII redaction for query results, starting with agent-facing results
 
-**Status: open, needs design.** The question enterprise buyers ask first about letting AI agents near data.
+**Status: shipped (experimental, for 0.17).** [ADR 0005](documentation/adr/0005-column-masking.md) and its amendment:
+`masking.py` - rules on source columns (`hash`, `mask`, `null`, `drop`, `keep`) on keys, roles and exports, result
+columns traced through the SQL with sqlglot lineage, refused before running when they can't be; applied on every route
+and format, streams, MCP and exports; the cache keyed per rules; `masked` in run history; `/catalog`'s `masking`; the
+Console's rules fields and "masked" tags. Guide 45. Open: MongoDB (field-name matching; refused for now), exceptions
+for a signed-in user's own row (`from_claim`), suggesting rules from column names, and rules declared on saved queries.
+
+**Was: open, needs design.** The question enterprise buyers ask first about letting AI agents near data.
 
 **Impact:** QueryAPIGate controls *which* connections, tables and saved queries a caller can reach
 (`connections`, `allowed_tables`, `queries`) and, for signed-in users, which rows (`from_claim`). It doesn't

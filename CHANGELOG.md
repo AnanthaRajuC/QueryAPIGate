@@ -23,7 +23,7 @@ callout in its documentation, `x-experimental: true` on its operations in `/open
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
 `gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
-(`/api/v1/destinations`, `/api/v1/exports`), and alerts (`GET /api/v1/alerts`). The
+(`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), and alerts (`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -64,7 +64,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   before anything is written. One run at a time per export (`409 export_running`, a lease that a crashed run can't
   hold for ever). Runs are in history, and the `export_failing` alert fires while an export's newest run failed.
   Owners and admins define exports (`exports.write`); developers may run them (`exports.run`).
-- **Column masking** (BACKLOG #63, [ADR 0005](documentation/adr/0005-column-masking.md), experimental, in progress): a
+- **Column masking** (BACKLOG #63, [ADR 0005](documentation/adr/0005-column-masking.md),
+  [guide 45](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/45-hide-personal-data-from-a-partner-or-an-ai-agent.md),
+  experimental): a
   `mask` grant on API keys and roles, and on exports - rules on source columns (`customers.email`, `*.phone`) that
   `hash`, `mask`, `null` or `drop` their values in everything that caller receives: `/q/<name>`, `/execute_sql`, every
   format, streamed exports, MCP tools and exports. Each result column is traced through the SQL to the table columns it

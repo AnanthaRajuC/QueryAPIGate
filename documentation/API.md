@@ -906,6 +906,44 @@ Omitted (or `null`) means no restriction, exactly today's behaviour. `PATCH /api
 explicit `{"allowed_tables": null}` clears an existing restriction, the same pattern the other grant fields
 use.
 
+### Column masking
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.17, which queries can be traced, and the
+> rules and their actions, may change as it is used.
+
+A `mask` grant - on an API key, a role (copied to keys made from it, and applied to signed-in users mapped to it), or
+an export - hides the values of named **source** columns in everything that caller receives
+([ADR 0005](adr/0005-column-masking.md)):
+
+~~~json
+{"mask": [{"column": "customer.email", "action": "hash"}, {"column": "*.phone", "action": "mask"}]}
+~~~
+
+- `column` is `table.column` or `schema.table.column`, with `*` wildcards.
+- `action`: `hash` (HMAC-SHA256, 16 hex characters - equal values give equal codes; keyed with
+  `QUERYAPIGATE_MASK_KEY`, or a key the store makes once), `mask` (text keeps its first character, an email its
+  domain: `j***@example.com`; other values become null), `null`, `drop` (the column is removed), or `keep` (left as is
+  on purpose - for a view, below). The strictest that applies wins.
+
+**Traced, not matched by name.** Each result column is traced through the SQL to the table columns it is computed
+from - aliases, expressions, CTEs, subqueries, unions, joins, window functions - with the connection's schema to
+expand `SELECT *`; one computed from a masked column is masked as a whole (`lower(email)` is hashed). Applied on
+`/q/<name>` and `/execute_sql` in every format, paged or streamed, MCP tools and exports; a cached response is kept per
+set of rules.
+
+**Refused, never served unmasked** (`403 mask_unresolvable`, before the query runs): a result column that can't be
+traced - table functions, whole-row references (`SELECT c FROM customer c`), a table alias that renames columns,
+`SELECT *` over a `NATURAL` or `USING` join, `LATERAL`, recursive CTEs, DuckDB's `COLUMNS(...)`, functions masking
+can't see into - and a view column a rule might mean, until a rule names the view (`*.email`, `view.email`, or
+`view.email` with `keep`). A caller with rules is refused on H2, JDBC and MongoDB connections, and never gets the
+database's own error text. Needs `sqlglot` (`queryapigate[flow]`; `masking_unavailable` otherwise).
+
+Each run's history entry lists what was masked (`masked`: column, action, source); `GET /catalog` shows a caller with
+rules which of each query's columns it gets masked (`masking`), without the source tables. Masking hides values in
+results - it doesn't stop a caller that writes SQL from filtering or grouping on a masked column; for that, give it
+saved queries only. The step by step: [hide personal data from a partner or an AI agent](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/45-hide-personal-data-from-a-partner-or-an-ai-agent.md).
+
 ### Permission roles (templates)
 
 Creating several keys with the same shape of grants - the same connections, the same curated queries, the

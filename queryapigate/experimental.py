@@ -44,6 +44,12 @@ FEATURES: dict[str, dict[str, Any]] = {
             ('/api/v1/exports/{name}/runs', ('get', 'post'))) for method in methods),
         'docs': ('documentation/API.md', 'Exports to object storage'),
     },
+    'masking': {
+        'name': 'Column masking',
+        'why': 'new in 0.17 - which queries can be traced, and the rules and their actions, may change as it is used',
+        'settings': ('QUERYAPIGATE_MASK_KEY',),
+        'docs': ('documentation/API.md', 'Column masking'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',

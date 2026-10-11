@@ -56,6 +56,8 @@ guide covers one scenario end to end, and every command and response in it was r
     verified.
 43. [**Give your team their own admin access**](43-give-your-team-their-own-admin-access.md) - named administrators
     with roles, their own tokens, and the shared key retired.
+45. [**Hide personal data from a partner or an AI agent**](45-hide-personal-data-from-a-partner-or-an-ai-agent.md)
+    (experimental) - column masking: hash, mask or drop values, whatever the SQL calls them.
 
 ## MCP (AI agent access)
 
