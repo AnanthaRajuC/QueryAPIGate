@@ -1393,7 +1393,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.19.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.19.1",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}
@@ -1715,7 +1715,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |
 | `rate_limited` | 429 | Over `QUERYAPIGATE_RATE_LIMIT` or the key's own `rate_limit`; retry after `retry_after` seconds |
 | `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
-| `driver_missing` | 500 | The database driver isn't installed on the server |
+| `driver_missing` | 500 | The database driver isn't installed on the server, or is too old (DuckDB before 1.2) |
 | `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |
 | `secret_key_required`, `password_undecryptable` | 500 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset or has changed |
 | `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |

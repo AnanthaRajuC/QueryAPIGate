@@ -172,7 +172,22 @@ def lock_down(conn, details):
                            code='connection_misconfigured') from None
 
 
+MIN_DUCKDB = (1, 2)  # allowed_directories / allowed_paths, which every connection is locked with, arrived in 1.2
+
+
+def require_supported_duckdb():
+    """Refuse a DuckDB too old to be locked down - with what to do, not DuckDB's own 'unrecognized configuration
+    parameter'. pyproject.toml asks for it too; this is for an install whose DuckDB was pinned by something else."""
+    import duckdb
+    found = tuple(int(part) for part in re.findall(r'\d+', duckdb.__version__)[:2])
+    if found < MIN_DUCKDB:
+        raise ApiError(f"DuckDB connections need DuckDB {'.'.join(map(str, MIN_DUCKDB))} or later, and "
+                       f"{duckdb.__version__} is installed - run `pip install -U 'duckdb>=1.2'`", 500,
+                       code='driver_missing')
+
+
 def _configure(conn, details):
+    require_supported_duckdb()
     paths = [_resolve_local(p) for p in details.get('allowed_paths') or []]
     conn.execute('SET allow_persistent_secrets = false')  # never the host's own ~/.duckdb secrets
     if is_remote(details):

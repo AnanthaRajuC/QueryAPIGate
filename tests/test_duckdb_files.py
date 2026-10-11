@@ -3,8 +3,10 @@ files, and http(s) files - and nothing else, however the SQL asks; views give fi
 grant. The S3 part is checked against a real S3-compatible server only when QUERYAPIGATE_TEST_S3 is set."""
 import functools
 import http.server
+import io
 import logging
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -198,8 +200,32 @@ class AutoViewTests(FilesTestCase):
 
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):
+    """A static file server that answers byte ranges, as real web servers and object stores do - DuckDB reads Parquet
+    by range, and before 1.5 it gives up on a server that ignores them rather than downloading the whole file."""
+
     def log_message(self, *args):
         pass
+
+    def send_head(self):
+        wanted = re.fullmatch(r'bytes=(\d+)-(\d*)', self.headers.get('Range', ''))
+        path = self.translate_path(self.path)
+        if not wanted or not os.path.isfile(path):
+            return super().send_head()
+        size = os.path.getsize(path)
+        start, end = int(wanted.group(1)), min(int(wanted.group(2) or size - 1), size - 1)
+        if start > end:
+            self.send_error(416)
+            return None
+        with open(path, 'rb') as handle:
+            handle.seek(start)
+            body = handle.read(end - start + 1)
+        self.send_response(206)
+        self.send_header('Content-Type', self.guess_type(path))
+        self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+        self.send_header('Content-Length', str(end - start + 1))
+        self.send_header('Accept-Ranges', 'bytes')
+        self.end_headers()
+        return io.BytesIO(body)  # what do_GET copies out, and closes
 
 
 @unittest.skipUnless(httpfs_available(), "DuckDB's httpfs extension isn't installed and can't be downloaded here")
@@ -255,6 +281,24 @@ class S3FilesTests(FilesTestCase):
             self.assertEqual(res.get_json(), [{'a': 7, 'b': 1}])
         detail = self.client.get('/api/v1/connections/files', headers=ADMIN).get_json()
         self.assertEqual(detail['password'], '${TEST_S3_SECRET}')
+
+
+class DuckDbVersionTests(unittest.TestCase):
+    def test_a_duckdb_too_old_to_lock_down_says_so(self):
+        """Every DuckDB connection is locked with allowed_directories/allowed_paths, which arrived in DuckDB 1.2; on
+        1.0 and 1.1 they don't exist, and the connection must say what to do rather than fail obscurely."""
+        from queryapigate import duckfiles
+        from queryapigate.errors import ApiError
+        for version, refused in (('1.1.3', True), ('1.0.0', True), ('1.2.0', False), ('1.5.5', False),
+                                 ('2.0.0.dev12', False)):
+            with self.subTest(version=version), mock.patch.object(duckdb, '__version__', version):
+                if refused:
+                    with self.assertRaises(ApiError) as caught:
+                        duckfiles.require_supported_duckdb()
+                    self.assertEqual(caught.exception.code, 'driver_missing')
+                    self.assertIn("duckdb>=1.2", caught.exception.message)
+                else:
+                    duckfiles.require_supported_duckdb()
 
 
 if __name__ == '__main__':

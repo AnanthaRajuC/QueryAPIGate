@@ -67,7 +67,8 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
    letting AI agents near your data, governed ([ADR 0006](documentation/adr/0006-ai-agents.md)). (Released as 0.18.0
    on 2026-10-11.)
 7. **0.19: #84 Phase 2**, Console sign-in through the organisation's identity provider, experimental
-   ([ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md)). (Released as 0.19.0 on 2026-10-11.)
+   ([ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md)). (Released as 0.19.0 on 2026-10-11; 0.19.1 fixed
+   the DuckDB minimum.)
 8. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 9. **1.0.0.**
 

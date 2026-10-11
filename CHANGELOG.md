@@ -46,6 +46,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-11
+
+### Fixed
+- **DuckDB connections need DuckDB 1.2 or later - and now say so.** `queryapigate[duckdb]` asked for DuckDB 1.0, but
+  since 0.15 every DuckDB connection is locked to its `allowed_paths` with settings that arrived in DuckDB 1.2: on 1.0
+  and 1.1 every DuckDB connection - files, exports and plain databases alike - failed with *unrecognized
+  configuration parameter "allowed_directories"*. It never opened one unlocked. `queryapigate[duckdb]` now requires
+  1.2, and an older DuckDB pinned by something else gets `driver_missing`, saying which version is installed and how to
+  upgrade. Verified on DuckDB 1.2.0 and 1.5.5, files and exports on S3 included. The Docker image ships a current
+  DuckDB and was never affected.
+
 ## [0.19.0] - 2026-10-11
 
 The people who govern QueryAPIGate sign in the way agents already do: administrators sign in to the Console through
@@ -1845,7 +1856,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.17.0
