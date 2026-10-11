@@ -20,7 +20,7 @@ POLICIES = ('fail', 'skip', 'new-version')
 # ignores is a field whose loss nobody notices.
 ENTRY_FIELDS = {'name', 'sql_query', 'query_type', 'mongo_collection', 'mongo_filter', 'mongo_projection',
                 'mongo_sort', 'author', 'description', 'tags', 'query_parameters', 'connection_name',
-                'cache_ttl'}
+                'cache_ttl', 'column_descriptions'}
 
 
 def export_bundle(collection):

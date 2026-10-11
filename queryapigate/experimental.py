@@ -58,6 +58,14 @@ FEATURES: dict[str, dict[str, Any]] = {
                      'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM'),
         'docs': ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
     },
+    'descriptions': {
+        'name': 'Descriptions',
+        'why': 'new in 0.18 - their shape, and where they are served to agents, may change as they are used (ADR 0006)',
+        'operations': (('get', '/api/v1/connections/{name}/descriptions'),
+                       ('patch', '/api/v1/connections/{name}/descriptions'),
+                       ('post', '/api/v1/connections/{name}/descriptions/import')),
+        'docs': ('documentation/API.md', 'Descriptions'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',

@@ -6,7 +6,7 @@ Tier 1 types are covered by the compatibility promise and run against a real ser
 experimental (experimental.py): they work, with the gaps the matrix shows, and graduate on the terms GRADUATION
 gives.
 """
-from . import engine, experimental, schema, sqlflow, tableguard
+from . import descriptions, engine, experimental, schema, sqlflow, tableguard
 from .runners import RUNNERS, STREAM_RUNNERS
 
 TYPES = ('postgres', 'mysql', 'sqlite', 'duckdb', 'clickhouse', 'h2', 'jdbc', 'mongo')
@@ -54,6 +54,9 @@ def matrix():
                                              (NA if t in ('sqlite', 'duckdb') else NO)  # one file: nothing to switch to
                                              for t in TYPES}),
         ('Table DDL', {t: YES if t in schema._DDL_DIALECTS else (NO if _sql(t) else NA) for t in TYPES}),
+        ('Descriptions from database comments', {t: YES if t in descriptions.IMPORTABLE else
+                                                 (NA if t in ('sqlite', 'mongo') else NO)  # no comments to read
+                                                 for t in TYPES}),
         ('Streaming exports', {t: YES if t in STREAM_RUNNERS else NO for t in TYPES}),
         ('Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP', {t: 'yes (remote: experimental)' if t == 'duckdb'
                                                                     else NO for t in TYPES}),  # duckfiles.py

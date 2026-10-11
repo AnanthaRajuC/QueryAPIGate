@@ -60,6 +60,7 @@ work, with the gaps below, and may change in a minor release.
 | Primary and foreign keys in the schema | yes | yes | yes | yes | no | no | no | n/a |
 | Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
 | Table DDL | no | yes | yes | no | yes | no | no | n/a |
+| Descriptions from database comments | yes | yes | n/a | yes | yes | no | no | n/a |
 | Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
 | Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes (remote: experimental) | no | no | no | no |
 | Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |

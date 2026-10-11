@@ -16,10 +16,23 @@ Routes here translate HTTP to services/ calls and back; the meaning of each oper
 """
 from flask import Blueprint, Response, current_app, g, jsonify, request
 
-from . import adminroles, alerts, collection_admin, config, exports, history, instances, schema, sqlflow, store
+from . import (
+    adminroles,
+    alerts,
+    collection_admin,
+    config,
+    descriptions,
+    exports,
+    history,
+    instances,
+    schema,
+    sqlflow,
+    store,
+)
 from .app import caller_key_name, get_int, get_json_body
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
+from .services import descriptions as description_service
 from .services import destinations as destination_service
 from .services import exports as export_service
 
@@ -288,9 +301,29 @@ def delete_connection(name):
 
 @bp.route('/connections/<name>/schema', methods=['GET'])
 def connection_schema(name):
-    """`?database=` browses another database on the same server (the API Designer's Database picker)."""
+    """`?database=` browses another database on the same server (the API Designer's Database picker). Tables and
+    columns carry their descriptions - the connection's own database's only."""
     connections.load(name)
-    return jsonify(schema.fetch_schema(name, database=request.args.get('database') or None)), 200
+    database = request.args.get('database') or None
+    result = schema.fetch_schema(name, database=database)
+    return jsonify(result if database else descriptions.annotate(result, name)), 200
+
+
+@bp.route('/connections/<name>/descriptions', methods=['GET'])
+def list_descriptions(name):
+    return jsonify(description_service.list_for(name)), 200
+
+
+@bp.route('/connections/<name>/descriptions', methods=['PATCH'])
+def update_descriptions(name):
+    """Set or remove descriptions: {"items": [{"table", "column", "description"}]} - a null description removes one."""
+    return jsonify(description_service.update(name, get_json_body(), caller_key_name())), 200
+
+
+@bp.route('/connections/<name>/descriptions/import', methods=['POST'])
+def import_descriptions(name):
+    """The database's own table and column comments, as descriptions."""
+    return jsonify(description_service.import_comments(name, get_json_body(required=False), caller_key_name())), 200
 
 
 # --------------------------------------------------------------------------------------

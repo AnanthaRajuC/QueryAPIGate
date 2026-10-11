@@ -948,6 +948,90 @@
         ],
         "type": "object"
       },
+      "Description": {
+        "properties": {
+          "column": {
+            "description": "null: the table's own description.",
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "source": {
+            "description": "written by a person, or imported from the database's comments",
+            "enum": [
+              "written",
+              "database"
+            ],
+            "type": "string"
+          },
+          "table": {
+            "description": "null: the connection's own notes.",
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "updated_by": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "column",
+          "description",
+          "source",
+          "updated_at",
+          "updated_by"
+        ],
+        "type": "object"
+      },
+      "DescriptionImport": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DescriptionList"
+          },
+          {
+            "properties": {
+              "found": {
+                "description": "Comments found in the database.",
+                "type": "integer"
+              },
+              "imported": {
+                "description": "Descriptions added or changed.",
+                "type": "integer"
+              },
+              "kept": {
+                "description": "Left as they were - unchanged, or written by a person.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "found",
+              "imported",
+              "kept"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DescriptionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Description"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "Destination": {
         "properties": {
           "account_id": {
@@ -2205,6 +2289,13 @@
             "nullable": true,
             "type": "integer"
           },
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What its result columns mean, by name - in its MCP tool's output schema.",
+            "type": "object"
+          },
           "connection_name": {
             "nullable": true,
             "type": "string"
@@ -2304,6 +2395,13 @@
           "cache_ttl": {
             "nullable": true,
             "type": "integer"
+          },
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What each result column means, by name: {\"amt\": \"Net revenue in EUR\"}.",
+            "type": "object"
           },
           "connection_name": {
             "type": "string"
@@ -2458,16 +2556,28 @@
       },
       "Schema": {
         "properties": {
+          "notes": {
+            "description": "The connection's own notes - joins, metric definitions.",
+            "type": "string"
+          },
           "tables": {
             "items": {
               "properties": {
                 "columns": {
                   "items": {
                     "properties": {
+                      "description": {
+                        "description": "What the column means, when described.",
+                        "type": "string"
+                      },
                       "foreign_key": {
                         "additionalProperties": true,
                         "nullable": true,
                         "type": "object"
+                      },
+                      "masked": {
+                        "description": "Over REST and MCP: what the caller's masking rules do to it (hash, mask, null, drop, or refused).",
+                        "type": "string"
                       },
                       "name": {
                         "type": "string"
@@ -2493,6 +2603,10 @@
                     "type": "object"
                   },
                   "type": "array"
+                },
+                "description": {
+                  "description": "What the table holds, when described.",
+                  "type": "string"
                 },
                 "name": {
                   "type": "string"
@@ -5041,6 +5155,277 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/connections/{name}/descriptions": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DescriptionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What a connection's tables and columns mean",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "patch": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. `table` null is the connection's own notes (up to 20,000 characters); `column` null the table's description; a column's or table's is up to 2,000.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "items": {
+                    "items": {
+                      "properties": {
+                        "column": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "description": {
+                          "description": "null or empty removes it.",
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "table": {
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "table",
+                        "description"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "items"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DescriptionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Set or remove descriptions",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/connections/{name}/descriptions/import": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. PostgreSQL, MySQL, ClickHouse and DuckDB. A description written by a person is kept unless overwrite is true.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "overwrite": {
+                    "default": false,
+                    "description": "Replace descriptions written by a person too.",
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DescriptionImport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Import the database's own table and column comments",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/connections/{name}/schema": {

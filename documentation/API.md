@@ -363,7 +363,10 @@ curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-K
 | `GET /api/v1/connections/deleted` | Deleted connections, newest first, with who deleted them, when and why. |
 | `POST /api/v1/connections/test` | Try to connect with the given fields (an unsaved form), or a saved connection's own by `name`. Nothing is saved. A connection that can't be reached is a 502 `connection_failed` with the driver's message in `detail` (any password in it is redacted). |
 | `POST /api/v1/connections/databases` | The databases on that server, for the same two kinds of body. |
-| `GET /api/v1/connections/{name}/schema` | Its tables and columns; `?database=` reads another database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). |
+| `GET /api/v1/connections/{name}/schema` | Its tables and columns, with their [descriptions](#descriptions); `?database=` reads another database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). |
+| `GET /api/v1/connections/{name}/descriptions` | What its tables and columns mean, and its notes - see [Descriptions](#descriptions). |
+| `PATCH /api/v1/connections/{name}/descriptions` | Set or remove some: `{"items": [{"table", "column", "description"}]}`. |
+| `POST /api/v1/connections/{name}/descriptions/import` | Its database's own table and column comments, as descriptions. |
 
 Every change is audited exactly as the legacy routes audit theirs. A password appears in an audit entry only as
 `"changed"`, never its value.
@@ -672,6 +675,44 @@ without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhe
 
 `truncated` is `true` only if the connection has more than 5000 columns across all its tables and views combined,
 in which case the list was cut off.
+
+## Descriptions
+
+> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); the shape and where descriptions are served
+> may change in any minor release, always noted in the changelog.
+
+An AI agent - or a new colleague - sees `orders.amt` and `cust_tier`; it writes the right SQL only if it's told "net
+revenue in EUR, refunds excluded". A connection keeps a description for each table and column, and its own
+**notes** (which joins to use, how a metric is worked out):
+
+```bash
+curl -X PATCH http://127.0.0.1:5000/api/v1/connections/shop/descriptions -H "X-API-Key: $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"items": [
+    {"table": "orders", "column": null, "description": "One row per order"},
+    {"table": "orders", "column": "amt", "description": "Net revenue in EUR, refunds excluded"},
+    {"table": null, "description": "Join orders to customer on customer_id. Revenue is SUM(amt) over paid orders."}
+  ]}'
+```
+
+- `table` null is the connection's notes (up to 20,000 characters); `column` null a table's own description; a
+  table's or column's is up to 2,000. A null or empty `description` removes one. Names match case-insensitively.
+- **Import what's already there:** `POST /api/v1/connections/{name}/descriptions/import` reads the database's own
+  comments - `COMMENT ON` in PostgreSQL and DuckDB, table and column comments in MySQL and ClickHouse - as
+  descriptions with `"source": "database"`. One written by a person (`"source": "written"`) is kept unless the body
+  says `{"overwrite": true}`. It answers how many it `found`, `imported` and `kept`.
+- **Served with the schema:** `description` on each table and column of `GET /connections/{name}/schema` (and
+  `/api/v1`'s), and `notes`; MCP's `list_tables`; and the [data dictionary](MCP.md#descriptions-and-the-data-dictionary)
+  resource. Only for the tables a caller can reach (`allowed_tables`), and a column the caller gets masked says so:
+  `"masked": "hash"` (or `mask`, `null`, `drop`, or `refused` for a view column a rule may mean) - so an agent doesn't
+  plan around a value it will never see. Another database browsed with `?database=` is shown without them.
+- **A saved query's own result columns** are described in its definition: `"columns": {"amt": "Net revenue in EUR"}`
+  on `POST /api/v1/queries` (and its versions), carried in its MCP tool's output schema.
+- Who may: reading with `connections.read`, changing and importing with `connections.write` (owners and admins).
+  Every change is in the audit log - `update_descriptions` or `import_descriptions`, with what each one said before
+  and after.
+
+In the Console: the schema browser's **✎** beside a table describes it and its columns; **✎ Describe connection**
+holds the notes and **Import comments**.
 
 ## Administrators and admin roles
 

@@ -3,10 +3,11 @@ import { useState, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router';
 
 import { api, apiJson, unwrap } from '@/api/client';
-import { useAllQueries, useApiKeys, useRoles } from '@/app/data';
+import { useAllQueries, useApiKeys, useCan, useRoles } from '@/app/data';
 import { copyText, Field, Loading, useFeedback } from '@/app/feedback';
 import { presetTable } from '@/features/accessmap/state';
 import { CodeBox } from '@/components/CodeBox';
+import { DescribeConnection, DescribeTable } from '@/components/Descriptions';
 import { fetchFlow } from '@/features/repository/api';
 import { AccessPill, ReachDot, queryReach, type Reach } from '@/features/repository/reach';
 import { formatSql, PARSEABLE_DIALECTS } from '@/lib/sql';
@@ -24,12 +25,14 @@ type SchemaTable = {
   name: string;
   schema?: string | null;
   type: string;
+  description?: string;
   columns: {
     name: string;
     type?: string | null;
     nullable?: boolean;
     primary_key?: boolean;
     foreign_key?: unknown;
+    description?: string;
   }[];
 };
 
@@ -100,6 +103,9 @@ function SchemaBrowser({
   const keys = useApiKeys();
   const roles = useRoles();
   const queries = useAllQueries();
+  const can = useCan();
+  // Descriptions belong to the connection's own database; another one on the server is browsed as it is.
+  const canDescribe = can('connections.write') && !database && !isMongo;
 
   let content: ReactNode;
   if (!connection) content = <div className="hint">Pick a connection to browse its schema.</div>;
@@ -110,6 +116,30 @@ function SchemaBrowser({
     const ddl = showDdl && dialect && DDL_DIALECTS.includes(dialect);
     content = (
       <>
+        {canDescribe && (
+          <div className="schema-describe-bar">
+            <button
+              type="button"
+              className="btn ghost sm"
+              title="Notes for everyone writing SQL here, and importing the database's own comments"
+              onClick={() =>
+                openDrawer({
+                  title: 'Describe ' + connection,
+                  kicker: 'Notes and descriptions',
+                  content: (
+                    <DescribeConnection
+                      connection={connection}
+                      dialect={dialect}
+                      notes={schema.data?.notes}
+                    />
+                  ),
+                })
+              }
+            >
+              ✎ Describe connection
+            </button>
+          </div>
+        )}
         <div className="minitabs">
           <button
             type="button"
@@ -128,6 +158,9 @@ function SchemaBrowser({
           </button>
         </div>
         <div className="schema-content">
+          {view === 'columns' && active?.description ? (
+            <div className="hint schema-table-description">{active.description}</div>
+          ) : null}
           {view === 'columns' && active ? (
             active.columns.length ? (
               active.columns.map((c) => {
@@ -135,6 +168,7 @@ function SchemaBrowser({
                 if (c.primary_key) title += ' · primary key';
                 const fk = c.foreign_key as { table: string; column: string } | null | undefined;
                 if (fk) title += ` · FK → ${fk.table}.${fk.column}`;
+                if (c.description) title += '\n' + c.description;
                 return (
                   <button
                     key={c.name}
@@ -194,7 +228,7 @@ function SchemaBrowser({
                   <button
                     type="button"
                     className="schema-table"
-                    title={'Columns of ' + t.name}
+                    title={'Columns of ' + t.name + (t.description ? '\n' + t.description : '')}
                     onClick={() => {
                       setTable(t.name);
                       setView('columns');
@@ -246,6 +280,25 @@ function SchemaBrowser({
                       }
                     >
                       ⌸
+                    </button>
+                  )}
+                  {canDescribe && (
+                    <button
+                      type="button"
+                      className="schema-describe"
+                      title={
+                        (t.description ? 'Change' : 'Write') + ' what ' + t.name + ' and its columns mean'
+                      }
+                      aria-label={'Describe ' + t.name}
+                      onClick={() =>
+                        openDrawer({
+                          title: 'Describe ' + t.name,
+                          kicker: connection,
+                          content: <DescribeTable connection={connection} table={t} />,
+                        })
+                      }
+                    >
+                      ✎
                     </button>
                   )}
                   {badge}

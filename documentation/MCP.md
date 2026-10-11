@@ -137,6 +137,20 @@ startup. Then:
 
 The step by step, with Keycloak: [let AI clients sign in through your identity provider](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/46-let-ai-clients-sign-in-through-your-identity-provider.md).
 
+## Descriptions and the data dictionary
+
+> **Experimental** - new in 0.18, with [descriptions](API.md#descriptions) themselves.
+
+What an agent is told the data means:
+
+- **`list_tables`** carries each table's and column's `description`, the connection's `notes`, and `masked` on each
+  column the caller gets masked.
+- **A saved-query tool's output schema** describes its result columns, from the query's `columns`.
+- **The data dictionary** is an MCP resource per connection the caller may use -
+  `queryapigate://connections/<name>/dictionary`, Markdown: the notes, then every table it can reach, each column
+  with its type, its description and whether it's masked for this caller. `resources/list` lists them;
+  `resources/read` returns one. Callers with saved queries only (no `connections` grant) have none.
+
 ## Governance: the same rules as REST
 
 Every tool call passes through the same checks a REST request does, in the same order, by calling the same code

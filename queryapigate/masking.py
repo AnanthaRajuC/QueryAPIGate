@@ -99,6 +99,20 @@ def _column_part_matches(pattern, column):
     return fnmatch.fnmatchcase(column, pattern.split('.')[-1])
 
 
+def action_for(rules, schema, table, column, view=False):
+    """What reading one table column gets a caller with these rules: the strictest action that applies (never
+    `keep`), None, or `refused` for a view column plan() couldn't tell apart from a masked one. For describing a
+    schema to its caller (descriptions.annotate()); plan() is what masks a result."""
+    schema, table, column = (schema or '').lower(), table.lower(), column.lower()
+    matching = [rule['action'] for rule in rules or () if _matches(rule['column'], schema, table, column)]
+    if matching:
+        chosen = min(matching, key=_STRICTNESS.get)
+        return None if chosen == 'keep' else chosen
+    if view and any(_column_part_matches(rule['column'], column) for rule in rules or ()):
+        return 'refused'
+    return None
+
+
 # --------------------------------------------------------------------------------------
 # Tracing
 # --------------------------------------------------------------------------------------

@@ -35,6 +35,15 @@ INSERT = {
 }
 INSERT['jdbc'] = INSERT['h2']
 INSERT['duckdb'] = INSERT['postgres']
+COMMENTS = {  # a table comment and a column comment, as each database writes them
+    'postgres': ["COMMENT ON TABLE queryapigate_it IS 'Items for sale'",
+                 "COMMENT ON COLUMN queryapigate_it.price IS 'Price in EUR, VAT included'"],
+    'mysql': ["ALTER TABLE queryapigate_it COMMENT = 'Items for sale'",
+              "ALTER TABLE queryapigate_it MODIFY price DECIMAL(8, 2) COMMENT 'Price in EUR, VAT included'"],
+    'clickhouse': ["ALTER TABLE queryapigate_it MODIFY COMMENT 'Items for sale'",
+                   "ALTER TABLE queryapigate_it COMMENT COLUMN price 'Price in EUR, VAT included'"],
+}
+COMMENTS['duckdb'] = COMMENTS['postgres']
 
 
 class IntegrationBase:
@@ -214,6 +223,26 @@ class IntegrationBase:
         self.assertEqual(tables['queryapigate_it']['type'], 'table')
         columns = {c['name'].lower() for c in tables['queryapigate_it']['columns']}
         self.assertEqual(columns, {'id', 'name', 'price', 'added'})
+
+
+    def test_comments_are_imported_as_descriptions(self):
+        """The database's own comments become descriptions (BACKLOG #86) - where it has a way to read them."""
+        if self.db not in COMMENTS:
+            res = self.client.post('/api/v1/connections/it/descriptions/import')
+            self.assertEqual((res.status_code, res.get_json()['code']), (400, 'unsupported_operation'))
+            return
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ALLOW_WRITES': '1'}):
+            for sql in COMMENTS[self.db]:
+                self.write(sql)
+        res = self.client.post('/api/v1/connections/it/descriptions/import')
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        found = {(d['table'], d['column']): (d['description'], d['source']) for d in res.get_json()['items']}
+        self.assertEqual(found[('queryapigate_it', None)], ('Items for sale', 'database'))
+        self.assertEqual(found[('queryapigate_it', 'price')], ('Price in EUR, VAT included', 'database'))
+        tables = {t['name'].lower(): t for t in self.client.get('/connections/it/schema').get_json()['tables']}
+        self.assertEqual(tables['queryapigate_it']['description'], 'Items for sale')
+        price = next(c for c in tables['queryapigate_it']['columns'] if c['name'].lower() == 'price')
+        self.assertEqual(price['description'], 'Price in EUR, VAT included')
 
 
 class DriverReadOnlyMixin:

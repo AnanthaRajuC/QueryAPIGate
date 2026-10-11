@@ -93,6 +93,8 @@ SCHEMAS = {
             'placeholders': {'type': 'array', 'items': {'type': 'string'},
                              'description': 'Every parameter the query uses, in order of first use.'},
             'cache_ttl': {'type': 'integer', 'nullable': True},
+            'columns': {'type': 'object', 'additionalProperties': {'type': 'string'},
+                        'description': 'What its result columns mean, by name - in its MCP tool\'s output schema.'},
             'created_at': _NULLABLE_STRING,
             'last_modified_at': _NULLABLE_STRING,
             'run_count': {'type': 'integer', 'description': "Runs of this version stored in history - in a "
@@ -147,6 +149,8 @@ SCHEMAS = {
             'connection_name': {'type': 'string'},
             'parameters': {'type': 'object', 'additionalProperties': _ref('ParameterRule')},
             'cache_ttl': {'type': 'integer', 'nullable': True},
+            'columns': {'type': 'object', 'additionalProperties': {'type': 'string'},
+                        'description': 'What each result column means, by name: {"amt": "Net revenue in EUR"}.'},
             'mongo_collection': {'type': 'string'}, 'mongo_filter': {'type': 'object'},
             'mongo_projection': {'type': 'object'}, 'mongo_sort': {'type': 'object'},
             'publish': {'type': 'boolean', 'default': False,
@@ -739,15 +743,46 @@ SCHEMAS = {
                 'properties': {
                     'name': {'type': 'string'}, 'schema': {'type': 'string', 'nullable': True},
                     'type': {'type': 'string'},
+                    'description': {'type': 'string', 'description': 'What the table holds, when described.'},
                     'columns': {'type': 'array', 'items': {
                         'type': 'object', 'required': ['name', 'type'],
                         'properties': {'name': {'type': 'string'}, 'type': {'type': 'string', 'nullable': True},
                                        'nullable': {'type': 'boolean'}, 'position': {'type': 'integer'},
                                        'primary_key': {'type': 'boolean'},
                                        'foreign_key': {'type': 'object', 'nullable': True,
-                                                       'additionalProperties': True}}}},
+                                                       'additionalProperties': True},
+                                       'description': {'type': 'string',
+                                                       'description': 'What the column means, when described.'},
+                                       'masked': {'type': 'string', 'description': "Over REST and MCP: what the "
+                                                  "caller's masking rules do to it (hash, mask, null, drop, or "
+                                                  "refused)."}}}},
                 }}},
+            'notes': {'type': 'string', 'description': "The connection's own notes - joins, metric definitions."},
         },
+    },
+    'Description': {
+        'type': 'object', 'required': ['table', 'column', 'description', 'source', 'updated_at', 'updated_by'],
+        'properties': {
+            'table': {'type': 'string', 'nullable': True, 'description': "null: the connection's own notes."},
+            'column': {'type': 'string', 'nullable': True, 'description': "null: the table's own description."},
+            'description': {'type': 'string'},
+            'source': {'type': 'string', 'enum': ['written', 'database'],
+                       'description': "written by a person, or imported from the database's comments"},
+            'updated_at': {'type': 'string'}, 'updated_by': _NULLABLE_STRING,
+        },
+    },
+    'DescriptionList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Description')}},
+    },
+    'DescriptionImport': {
+        'allOf': [_ref('DescriptionList'), {
+            'type': 'object', 'required': ['found', 'imported', 'kept'],
+            'properties': {'found': {'type': 'integer', 'description': 'Comments found in the database.'},
+                           'imported': {'type': 'integer', 'description': 'Descriptions added or changed.'},
+                           'kept': {'type': 'integer',
+                                    'description': 'Left as they were - unchanged, or written by a person.'}},
+        }],
     },
 }
 
@@ -1026,4 +1061,27 @@ PATHS = {
             _NAME, {'name': 'database', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
                     'description': "Another database on the same server than the connection's own."}]),
     },
+    '/api/v1/connections/{name}/descriptions': {
+        'get': _op("What a connection's tables and columns mean", {'200': _ok(_ref('DescriptionList'))},
+                   parameters=[_NAME]),
+        'patch': _op('Set or remove descriptions', {'200': _ok(_ref('DescriptionList'))}, parameters=[_NAME],
+                     body={'type': 'object', 'required': ['items'], 'properties': {'items': {
+                         'type': 'array', 'items': {
+                             'type': 'object', 'required': ['table', 'description'],
+                             'properties': {'table': _NULLABLE_STRING, 'column': _NULLABLE_STRING,
+                                            'description': {'type': 'string', 'nullable': True,
+                                                            'description': 'null or empty removes it.'}}}}}},
+                     description="`table` null is the connection's own notes (up to 20,000 characters); `column` "
+                                 "null the table's description; a column's or table's is up to 2,000."),
+    },
+    '/api/v1/connections/{name}/descriptions/import': {
+        'post': _op("Import the database's own table and column comments", {'200': _ok(_ref('DescriptionImport'))},
+                    parameters=[_NAME],
+                    body={'type': 'object', 'properties': {'overwrite': {
+                        'type': 'boolean', 'default': False,
+                        'description': 'Replace descriptions written by a person too.'}}},
+                    description='PostgreSQL, MySQL, ClickHouse and DuckDB. A description written by a person is kept '
+                                'unless overwrite is true.'),
+    },
 }
+PATHS['/api/v1/connections/{name}/descriptions/import']['post']['requestBody']['required'] = False

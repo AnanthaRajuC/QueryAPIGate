@@ -22,7 +22,7 @@ import logging
 import time
 import urllib.parse
 
-from . import apikeys, config, definitions, engine, history, metrics, params, schema, sqltools, store
+from . import apikeys, config, definitions, descriptions, engine, history, metrics, params, schema, sqltools, store
 from .errors import ApiError, code_for
 
 # A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
@@ -83,6 +83,17 @@ def input_schema(data):
     return {'type': 'object', 'properties': properties, 'required': required}
 
 
+def output_schema(data):
+    """ROWS_OUTPUT_SCHEMA, with each row's columns described when the saved query describes them
+    (`column_descriptions`, BACKLOG #86) - what an agent reads to know what `amt` means."""
+    described = data.get('column_descriptions') or {}
+    if not described:
+        return ROWS_OUTPUT_SCHEMA
+    row = {'type': 'object', 'properties': {column: {'description': text} for column, text in described.items()}}
+    return {**ROWS_OUTPUT_SCHEMA,
+            'properties': {**ROWS_OUTPUT_SCHEMA['properties'], 'rows': {'type': 'array', 'items': row}}}
+
+
 def list_tools_for(permission):
     """Every read-only saved query ``permission`` may run, as plain dicts shaped like an MCP Tool - the same
     apikeys.can_run_saved() scoping GET /catalog already enforces (its own docstring: "the single rule...
@@ -100,7 +111,7 @@ def list_tools_for(permission):
             'name': name,
             'description': data.get('description') or name,
             'inputSchema': input_schema(data),
-            'outputSchema': ROWS_OUTPUT_SCHEMA,
+            'outputSchema': output_schema(data),
             'readOnlyHint': True,
             'idempotentHint': True,
         })
@@ -238,7 +249,39 @@ def list_tables_tool(permission, arguments):
         result = schema.fetch_schema(connection_name, database=database, allowed_tables=permission.allowed_tables)
     except ApiError as error:
         return _error(error.message, error.status, error.code)
+    if not database:  # descriptions are the connection's own database's
+        result = descriptions.annotate(result, connection_name, mask=permission.mask)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
+
+
+DICTIONARY_URI = 'queryapigate://connections/{}/dictionary'
+
+
+def list_resources_for(permission):
+    """One data dictionary per active connection the caller may use: its notes, tables, columns and what they mean,
+    as one Markdown document (BACKLOG #86). Callers with saved queries only have none."""
+    if not (permission.admin or permission.connections):
+        return []
+    found = []
+    for name, details in sorted(store.read_connections().items()):
+        if not details.get('active', True) or not apikeys.can_use(permission, name):
+            continue
+        found.append({'uri': DICTIONARY_URI.format(urllib.parse.quote(name, safe='')),
+                      'name': f'{name} data dictionary',
+                      'description': f"What the tables and columns on '{name}' mean - read before writing SQL.",
+                      'mimeType': 'text/markdown'})
+    return found
+
+
+def read_resource_for(permission, uri):
+    """A data dictionary's text, for a caller who may use that connection - its reachable tables only, with what it
+    gets masked. Raises ApiError otherwise, never saying whether the connection exists."""
+    prefix, _, rest = str(uri).partition('queryapigate://connections/')
+    name = urllib.parse.unquote(rest[:-len('/dictionary')]) if not prefix and rest.endswith('/dictionary') else None
+    if not name or not apikeys.can_use(permission, name):
+        raise ApiError(f'No such resource: {uri}', 404, code='not_found')
+    result = schema.fetch_schema(name, allowed_tables=permission.allowed_tables)
+    return descriptions.dictionary(name, descriptions.annotate(result, name, mask=permission.mask))
 
 
 def execute_sql_tool(permission, arguments):
@@ -460,6 +503,26 @@ def build_server(flask_app):
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
                                     structuredContent=result.get('structuredContent'),
                                     isError=result.get('isError', False))
+
+    @server.list_resources()
+    async def list_resources():
+        permission = caller()
+        if permission is None:
+            return []
+        return [types.Resource(uri=r['uri'], name=r['name'], description=r['description'], mimeType=r['mimeType'])
+                for r in list_resources_for(permission)]
+
+    @server.read_resource()
+    async def read_resource(uri):
+        from mcp.server.lowlevel.helper_types import ReadResourceContents
+        permission = caller()
+        if permission is None:
+            raise ValueError('Unauthorized')
+        try:
+            text = read_resource_for(permission, uri)
+        except ApiError as error:
+            raise ValueError(error.message) from None
+        return [ReadResourceContents(content=text, mime_type='text/markdown')]
 
     return server
 

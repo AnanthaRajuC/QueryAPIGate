@@ -189,4 +189,83 @@ describe('Parameterize', () => {
     ).toEqual(['status', 'min']);
     expect(mongoDocParams('not json')).toEqual([]);
   });
+
+  it('describes a table and its columns from the schema browser, for agents too', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'GET /api/v1/connections/lite/schema': () => ({
+        truncated: false,
+        notes: 'Every film has one title.',
+        tables: [
+          {
+            name: 'film',
+            type: 'table',
+            description: 'One row per film',
+            columns: [
+              { name: 'film_id', type: 'INTEGER' },
+              { name: 'title', type: 'TEXT', description: 'As released' },
+            ],
+          },
+        ],
+      }),
+      'PATCH /api/v1/connections/lite/descriptions': () => ({ items: [] }),
+    });
+    renderAt('/designer');
+    await userEvent.click(document.querySelector('.side-tab[data-side-tab="schema"]')!);
+    await userEvent.click(await screen.findByRole('button', { name: 'Describe film' }));
+    expect(screen.getByLabelText('film')).toHaveValue('One row per film');
+    expect(screen.getByLabelText('title')).toHaveValue('As released');
+    await userEvent.type(screen.getByLabelText('film_id'), 'The film');
+    await userEvent.clear(screen.getByLabelText('title'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toEqual({
+      items: [
+        { table: 'film', column: 'film_id', description: 'The film' },
+        { table: 'film', column: 'title', description: null },
+      ],
+    });
+  });
+
+  it('keeps the describe buttons from a role that cannot change connections', async () => {
+    fakeBackend({
+      ...routes(),
+      'GET /api/v1/me': () => ({
+        name: 'dev-1',
+        role: 'developer',
+        via: 'token',
+        capabilities: ['connections.read', 'queries.read', 'queries.write', 'self'],
+        data_access: true,
+      }),
+    });
+    renderAt('/designer');
+    await userEvent.click(document.querySelector('.side-tab[data-side-tab="schema"]')!);
+    expect(await screen.findByText('film')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Describe film' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Describe connection/ })).not.toBeInTheDocument();
+  });
+
+  it("imports the database's comments from the connection's notes", async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'GET /api/v1/connections/warehouse/schema': () => ({
+        truncated: false,
+        tables: [{ name: 'orders', type: 'table', columns: [{ name: 'amt', type: 'numeric' }] }],
+      }),
+      'POST /api/v1/connections/warehouse/descriptions/import': () => ({
+        found: 3,
+        imported: 2,
+        kept: 1,
+        items: [],
+      }),
+    });
+    renderAt('/designer');
+    await waitFor(() => expect(screen.getByLabelText('Connection')).toHaveValue('lite'));
+    await userEvent.selectOptions(screen.getByLabelText('Database type'), 'postgres');
+    await userEvent.click(document.querySelector('.side-tab[data-side-tab="schema"]')!);
+    await userEvent.click(await screen.findByRole('button', { name: /Describe connection/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import comments' }));
+    expect(await screen.findByText('Found 3 comments: 2 imported, 1 kept as they were')).toBeInTheDocument();
+    expect(calls.find((c) => c.path.endsWith('/descriptions/import'))!.body).toEqual({ overwrite: false });
+  });
 });

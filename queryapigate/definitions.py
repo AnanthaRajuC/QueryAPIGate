@@ -22,6 +22,25 @@ def validate_cache_ttl(cache_ttl):
         raise ApiError('cache_ttl must be a non-negative integer number of seconds', code='invalid_body')
 
 
+MAX_COLUMN_DESCRIPTIONS = 500
+
+
+def validate_column_descriptions(value):
+    """What a saved query's result columns mean (BACKLOG #86), {"column": "description"} - served to agents in its MCP
+    tool's output schema."""
+    value = as_object(value, 'columns')
+    if len(value) > MAX_COLUMN_DESCRIPTIONS:
+        raise ApiError(f'At most {MAX_COLUMN_DESCRIPTIONS} column descriptions', code='invalid_body')
+    out = {}
+    for column, text in value.items():
+        if not column or len(column) > 128 or not isinstance(text, str) or len(text) > 2000:
+            raise ApiError('columns maps each result column (up to 128 characters) to its description (text, up to '
+                           '2000 characters)', code='invalid_body')
+        if text.strip():
+            out[column] = text.strip()
+    return out
+
+
 def validate_definition(data):
     """Check ``data`` (a decoded request body or bundle entry) and return ``(fields, collection)``: the fields
     to store on the new version, and the collection to file the query under - ``NO_COLLECTION_GIVEN`` when
@@ -61,6 +80,7 @@ def validate_definition(data):
         raise ApiError('connection_name must be a string', code='invalid_body')
     cache_ttl = data.get('cache_ttl')
     validate_cache_ttl(cache_ttl)
+    column_descriptions = validate_column_descriptions(data.get('column_descriptions'))
     collection = NO_COLLECTION_GIVEN
     if 'collection' in data:
         collection = data['collection']
@@ -74,6 +94,7 @@ def validate_definition(data):
         'query_parameters': query_parameters,
         **({'connection_name': connection_name} if connection_name else {}),
         **({'cache_ttl': cache_ttl} if cache_ttl else {}),
+        **({'column_descriptions': column_descriptions} if column_descriptions else {}),
     }
     if query_type == 'mongo':
         # No 'query_type' field at all for a plain SQL query (query_type's own default) - every saved query

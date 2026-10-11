@@ -58,6 +58,8 @@ OPERATIONS = {
     'v1.create_connection': 'connections.write', 'v1.update_connection': 'connections.write',
     'v1.delete_connection': 'connections.write', 'v1.test_connection': 'connections.write',
     'v1.connection_databases': 'connections.write',
+    'v1.list_descriptions': 'connections.read', 'v1.update_descriptions': 'connections.write',
+    'v1.import_descriptions': 'connections.write',
     'v1.list_api_keys': 'access.read', 'v1.get_api_key': 'access.read', 'v1.list_roles': 'access.read',
     'v1.get_role': 'access.read',
     'v1.create_api_key': 'access.write', 'v1.update_api_key': 'access.write', 'v1.delete_api_key': 'access.write',

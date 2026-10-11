@@ -26,6 +26,7 @@ from . import (
     db,
     definitions,
     deprecations,
+    descriptions,
     engine,
     examples,
     experimental,
@@ -862,7 +863,8 @@ def connection_schema(name):
     database = request.args.get('database') or None
     if database and not g.permission.admin:
         raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
-    return jsonify(schema.fetch_schema(name, database=database, allowed_tables=g.permission.allowed_tables)), 200
+    result = schema.fetch_schema(name, database=database, allowed_tables=g.permission.allowed_tables)
+    return jsonify(result if database else descriptions.annotate(result, name, mask=g.permission.mask)), 200
 
 
 @bp.route('/connections/<name>/table_ddl', methods=['GET'])

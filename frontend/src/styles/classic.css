@@ -359,6 +359,10 @@
   .schema-preview:hover { color: var(--accent); }
   .schema-ddl { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; cursor: pointer; }
   .schema-ddl:hover { color: var(--accent); }
+  .schema-describe { flex: none; width: 20px; height: 26px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; cursor: pointer; }
+  .schema-describe:hover { color: var(--accent); }
+  .schema-describe-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  .schema-table-description { padding: 2px 8px 6px; white-space: pre-wrap; }
   .schema-usage { flex: none; width: 26px; height: 26px; padding: 0; border: 0; background: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
   .schema-usage:hover .amap-dot { filter: brightness(1.15); }
   .schema-table .name { font: 600 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

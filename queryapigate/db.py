@@ -26,9 +26,10 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 8  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 9  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
-#                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets - see _upgrade()
+#                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
+#                    9: descriptions - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -167,6 +168,19 @@ CREATE TABLE IF NOT EXISTS server_secrets (
   value TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- What tables and columns mean (descriptions.py, ADR 0006): one row per connection (table_name and column_name
+-- empty: its notes), table (column_name empty) or column, names lower case.
+CREATE TABLE IF NOT EXISTS descriptions (
+  connection_name TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  column_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  source TEXT NOT NULL,        -- written (by a person) or database (imported from its comments)
+  updated_at TEXT NOT NULL,
+  updated_by TEXT,
+  PRIMARY KEY (connection_name, table_name, column_name)
+);
 """
 
 
@@ -295,6 +309,19 @@ CREATE TABLE IF NOT EXISTS server_secrets (
   name TEXT COLLATE "C" PRIMARY KEY,
   value TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+-- What tables and columns mean (descriptions.py, ADR 0006): one row per connection (table_name and column_name
+-- empty: its notes), table (column_name empty) or column, names lower case.
+CREATE TABLE IF NOT EXISTS descriptions (
+  connection_name TEXT COLLATE "C" NOT NULL,
+  table_name TEXT COLLATE "C" NOT NULL,
+  column_name TEXT COLLATE "C" NOT NULL,
+  description TEXT NOT NULL,
+  source TEXT NOT NULL,        -- written (by a person) or database (imported from its comments)
+  updated_at TEXT NOT NULL,
+  updated_by TEXT,
+  PRIMARY KEY (connection_name, table_name, column_name)
 );
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
@@ -505,7 +532,8 @@ def _upgrade(conn, postgres):
        every change within a minor line must be (see DEPLOYMENT.md, Rolling upgrades): a 0.14 process still
        running against the upgraded store keeps working.
     7: administrators and admin_tokens (ADR 0003) - new tables, made by CREATE TABLE IF NOT EXISTS; additive.
-    8: destinations and exports (ADR 0004), server_secrets (ADR 0005) - new tables, likewise."""
+    8: destinations and exports (ADR 0004), server_secrets (ADR 0005) - new tables, likewise.
+    9: descriptions (ADR 0006) - a new table, likewise."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -677,6 +705,8 @@ _MIGRATED_TABLES = (
     ('destinations', ('name', 'created_at', 'updated_at', 'details_json'), 'name'),
     ('exports', ('name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
     ('server_secrets', ('name', 'value', 'created_at'), 'name'),
+    ('descriptions', ('connection_name', 'table_name', 'column_name', 'description', 'source', 'updated_at',
+                      'updated_by'), 'connection_name, table_name, column_name'),
 )
 
 

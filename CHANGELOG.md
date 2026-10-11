@@ -24,7 +24,8 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
 `gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
 (`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), OAuth for the MCP server
-(`QUERYAPIGATE_MCP_RESOURCE_URL`), and alerts (`GET /api/v1/alerts`). The
+(`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), and alerts
+(`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -46,6 +47,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Upgrading from 0.17
+- **Schema 9** adds one table (`descriptions`); nothing existing changes. A 0.17 instance still running keeps working
+  against the upgraded store, but can't be restarted on it - upgrade every instance.
 - **The MCP server answers a missing or wrong credential with HTTP `401`**, not a tool error inside a `200` - and
   a rate-limited client with `429`. A client with a valid key or token sees no change.
 
@@ -59,6 +62,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `QUERYAPIGATE_MCP_AUTH_SERVER`, with a scope and a role (`QUERYAPIGATE_MCP_SCOPE`, `QUERYAPIGATE_MCP_ROLE`,
   `QUERYAPIGATE_MCP_ROLE_CLAIM`). The role's grants and masking rules apply to the agent. REST and MCP tokens are kept
   apart: neither is accepted by the other. See [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth).
+- **Descriptions** (BACKLOG #86, [ADR 0006](documentation/adr/0006-ai-agents.md), experimental): what each table
+  and column means, and a connection's notes (the joins to use, how a metric is worked out) -
+  `/api/v1/connections/{name}/descriptions`, written in the Console's schema browser or imported from the database's
+  own comments (PostgreSQL, MySQL, ClickHouse, DuckDB). Served with the schema, in MCP's `list_tables` and as a data
+  dictionary MCP resource per connection - only for the tables a caller can reach, marking the columns it gets
+  masked. A saved query describes its result columns (`columns`), in its MCP tool's output schema.
+  See [Descriptions](documentation/API.md#descriptions).
 
 ## [0.17.0] - 2026-10-12
 
