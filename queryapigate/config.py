@@ -392,6 +392,7 @@ def check_settings():
     check_database_url()
     check_jwt_settings()
     check_mcp_oauth_settings()
+    check_sso_settings()
     raw = os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip()
     if raw:
         if not _REDIS_SCHEME_RE.match(raw):
@@ -681,6 +682,123 @@ def check_mcp_oauth_settings():
                          'MCP server and for the REST API are kept apart')
 
 
+_SSO_VARS = ('QUERYAPIGATE_SSO_ISSUER', 'QUERYAPIGATE_SSO_CLIENT_ID', 'QUERYAPIGATE_SSO_CLIENT_SECRET',
+             'QUERYAPIGATE_SSO_REDIRECT_URL', 'QUERYAPIGATE_SSO_ROLES', 'QUERYAPIGATE_SSO_GROUPS_CLAIM',
+             'QUERYAPIGATE_SSO_SESSION_HOURS', 'QUERYAPIGATE_SSO_ONLY', 'QUERYAPIGATE_SSO_DEFAULT_ROLE',
+             'QUERYAPIGATE_SSO_ALLOWED_DOMAINS')
+# Most capable first: a person in several mapped groups gets the first of these they qualify for. The same names as
+# adminroles.ROLES (tests/test_sso_settings.py says so) - kept here so config needn't import the role table.
+SSO_ROLE_ORDER = ('owner', 'admin', 'developer', 'auditor')
+SSO_CALLBACK_PATH = '/auth/sso/callback'
+DEFAULT_SSO_SESSION_HOURS = 8
+MAX_SSO_SESSION_HOURS = 24 * 7
+
+
+def sso_issuer():
+    """QUERYAPIGATE_SSO_ISSUER: the identity provider administrators sign in to the Console through (ADR 0007)."""
+    return _env('QUERYAPIGATE_SSO_ISSUER')
+
+
+def sso_client_id():
+    return _env('QUERYAPIGATE_SSO_CLIENT_ID')
+
+
+def sso_client_secret():
+    return _env('QUERYAPIGATE_SSO_CLIENT_SECRET')
+
+
+def sso_redirect_url():
+    """QUERYAPIGATE_SSO_REDIRECT_URL: the sign-in callback as the provider calls it -
+    https://data.example.com/auth/sso/callback."""
+    return _env('QUERYAPIGATE_SSO_REDIRECT_URL')
+
+
+def sso_enabled():
+    return all((sso_issuer(), sso_client_id(), sso_client_secret(), sso_redirect_url()))
+
+
+def sso_roles():
+    """QUERYAPIGATE_SSO_ROLES as [(role, group)]: `owner=qag-owners,admin=qag-admins` - a role may be named more than
+    once, for several groups."""
+    raw = _env('QUERYAPIGATE_SSO_ROLES')
+    out = []
+    for part in (raw or '').split(','):
+        if not part.strip():
+            continue
+        role, sep, group = part.partition('=')
+        if not sep or role.strip() not in SSO_ROLE_ORDER or not group.strip():
+            raise ValueError(f"QUERYAPIGATE_SSO_ROLES entries are role=group, the role one of "
+                             f"{', '.join(SSO_ROLE_ORDER)} - not '{part.strip()}'")
+        out.append((role.strip(), group.strip()))
+    return out
+
+
+def sso_groups_claim():
+    return _env('QUERYAPIGATE_SSO_GROUPS_CLAIM') or 'groups'
+
+
+def sso_session_hours():
+    raw = _env('QUERYAPIGATE_SSO_SESSION_HOURS')
+    return int(raw) if raw else DEFAULT_SSO_SESSION_HOURS
+
+
+def sso_only():
+    """QUERYAPIGATE_SSO_ONLY: administrators who sign in through SSO can't use a personal token in the Console."""
+    return env_flag('QUERYAPIGATE_SSO_ONLY')
+
+
+def sso_default_role():
+    """QUERYAPIGATE_SSO_DEFAULT_ROLE: the role for someone in no mapped group - for providers whose ID tokens carry
+    no groups. Only with QUERYAPIGATE_SSO_ALLOWED_DOMAINS."""
+    return _env('QUERYAPIGATE_SSO_DEFAULT_ROLE')
+
+
+def sso_allowed_domains():
+    raw = _env('QUERYAPIGATE_SSO_ALLOWED_DOMAINS')
+    return [d.strip().lower().lstrip('@') for d in (raw or '').split(',') if d.strip()]
+
+
+def check_sso_settings():
+    """Part of check_settings(): Console sign-in through SSO is set up completely and safely, or not at all."""
+    if not any(_env(name) for name in _SSO_VARS):
+        return
+    missing = [name for name in _SSO_VARS[:4] if not _env(name)]
+    if missing:
+        raise ValueError(f"Console sign-in through SSO needs {', '.join(_SSO_VARS[:4])} - missing: "
+                         f"{', '.join(missing)}")
+    for name, url in (('QUERYAPIGATE_SSO_ISSUER', sso_issuer()), ('QUERYAPIGATE_SSO_REDIRECT_URL', sso_redirect_url())):
+        parts = urllib.parse.urlsplit(url)
+        if not _secure_url(url) or not parts.netloc or parts.query or parts.fragment:
+            raise ValueError(f'{name} must be an https:// URL with no query string or fragment')
+    if not urllib.parse.urlsplit(sso_redirect_url()).path.endswith(SSO_CALLBACK_PATH):
+        raise ValueError(f'QUERYAPIGATE_SSO_REDIRECT_URL must end with {SSO_CALLBACK_PATH} - the address the provider '
+                         'sends people back to')
+    try:
+        import jwt  # noqa: F401
+    except ImportError:
+        raise ValueError('Console sign-in through SSO needs the "PyJWT" package - run `pip install '
+                         '"queryapigate[jwt]"`') from None
+    roles, default = sso_roles(), sso_default_role()
+    if not roles and not default:
+        raise ValueError('Console sign-in through SSO needs QUERYAPIGATE_SSO_ROLES (groups to roles) - or '
+                         'QUERYAPIGATE_SSO_DEFAULT_ROLE with QUERYAPIGATE_SSO_ALLOWED_DOMAINS')
+    if default is not None:
+        if default not in SSO_ROLE_ORDER or default == 'owner':
+            raise ValueError('QUERYAPIGATE_SSO_DEFAULT_ROLE must be admin, developer or auditor - owners come from a '
+                             'group, never by default')
+        if not sso_allowed_domains():
+            # A provider such as Google signs in anyone with an account: a role for everyone means everyone on earth.
+            raise ValueError('QUERYAPIGATE_SSO_DEFAULT_ROLE needs QUERYAPIGATE_SSO_ALLOWED_DOMAINS, so only people '
+                             'with a verified email at your domains get it')
+    raw = _env('QUERYAPIGATE_SSO_SESSION_HOURS')
+    if raw and (not raw.isdigit() or not 1 <= int(raw) <= MAX_SSO_SESSION_HOURS):
+        raise ValueError(f'QUERYAPIGATE_SSO_SESSION_HOURS must be a whole number of hours from 1 to '
+                         f'{MAX_SSO_SESSION_HOURS}')
+    raw = os.environ.get('QUERYAPIGATE_SSO_ONLY', '').strip().lower()
+    if raw not in _FLAG_WORDS:
+        raise ValueError(f"QUERYAPIGATE_SSO_ONLY must be yes or no, not '{raw}'")
+
+
 def events_port():
     """Bind port for `queryapigate events` (QUERYAPIGATE_EVENTS_PORT), default 5002 - see events.py."""
     return port_setting('QUERYAPIGATE_EVENTS_PORT', DEFAULT_EVENTS_PORT)
@@ -915,6 +1033,30 @@ def describe_settings():
             row('Agent volume', 'Rows an AI agent may read over MCP in an hour before a sudden rise is an alert. 0 '
                 'turns the check off.', 'QUERYAPIGATE_ALERT_AGENT_ROWS',
                 f'{alert_agent_rows():,} rows' if alert_agent_rows() else 'off')]},
+        {'id': 'sso', 'title': 'Console sign-in (SSO)',
+         'description': 'Administrators sign in to the Console through your identity provider (OpenID Connect), '
+             'with roles from their groups. Off unless the first four are set.', 'rows': [
+            row('Issuer', 'The identity provider administrators sign in through.', 'QUERYAPIGATE_SSO_ISSUER',
+                sso_issuer() or 'off'),
+            row('Client ID', 'This server, as registered at the provider.', 'QUERYAPIGATE_SSO_CLIENT_ID',
+                sso_client_id() or 'not set'),
+            row('Client secret', 'The client\'s secret at the provider.', 'QUERYAPIGATE_SSO_CLIENT_SECRET',
+                'configured' if sso_client_secret() else 'not set', secret=True),
+            row('Redirect URL', 'Where the provider sends people back to: ends with /auth/sso/callback.',
+                'QUERYAPIGATE_SSO_REDIRECT_URL', sso_redirect_url() or 'not set'),
+            row('Roles', 'Groups to roles, e.g. owner=qag-owners,admin=qag-admins.', 'QUERYAPIGATE_SSO_ROLES',
+                _env('QUERYAPIGATE_SSO_ROLES') or 'not set'),
+            row('Groups claim', 'The ID token claim holding a person\'s groups.', 'QUERYAPIGATE_SSO_GROUPS_CLAIM',
+                sso_groups_claim()),
+            row('Session length', 'How long a Console session lasts.', 'QUERYAPIGATE_SSO_SESSION_HOURS',
+                f'{sso_session_hours()} hours' if _env('QUERYAPIGATE_SSO_SESSION_HOURS') is None
+                or _env('QUERYAPIGATE_SSO_SESSION_HOURS').isdigit() else 'invalid'),
+            row('SSO only', 'Administrators who sign in through SSO can\'t use a token in the Console instead.',
+                'QUERYAPIGATE_SSO_ONLY', on_off(sso_only())),
+            row('Default role', 'The role for someone in no mapped group - only with allowed domains.',
+                'QUERYAPIGATE_SSO_DEFAULT_ROLE', sso_default_role() or 'none'),
+            row('Allowed domains', 'Verified email domains a default role is given to.',
+                'QUERYAPIGATE_SSO_ALLOWED_DOMAINS', ', '.join(sso_allowed_domains()) or 'any')]},
         {'id': 'mcp', 'title': 'MCP server',
          'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process this one doesn\'t '
              'start. "Check now" tries its port on this host.', 'rows': [

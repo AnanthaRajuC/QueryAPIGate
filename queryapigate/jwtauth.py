@@ -36,15 +36,11 @@ carry QUERYAPIGATE_MCP_SCOPE. The role comes from QUERYAPIGATE_MCP_ROLE / QUERYA
 `sub`. Unlike REST's plain 401 for everything, a valid token that may not do this gets a 403 saying so - an OAuth
 client would otherwise sign the user in again, and again.
 """
-import json
 import logging
 import threading
-import time
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 
-from . import apikeys, config
+from . import apikeys, config, oidc
 
 log = logging.getLogger('queryapigate')
 
@@ -165,11 +161,6 @@ def authenticate(authorization, client_ip=None):
 
 # --- The MCP server (ADR 0006) -----------------------------------------------------------------------------------
 
-_DISCOVERY_RETRY = 30   # seconds before metadata that couldn't be fetched is tried again
-_discovered: dict = {}  # issuer -> (jwks_uri or None, fetched at)
-_discovery_lock = threading.Lock()
-
-
 @dataclass(frozen=True)
 class McpRefusal:
     """Why a bearer token isn't let in to the MCP server: `invalid_token` (401 - sign in again), or
@@ -177,51 +168,6 @@ class McpRefusal:
     status: int
     code: str
     message: str
-
-
-def discovery_urls(issuer):
-    """Where an issuer's metadata may be, in the MCP specification's order: RFC 8414's oauth-authorization-server and
-    OpenID Connect's openid-configuration, both inserted before an issuer's path, then OIDC's appended to it."""
-    parts = urllib.parse.urlsplit(issuer)
-    origin = f'{parts.scheme}://{parts.netloc}'
-    path = parts.path.rstrip('/')
-    if not path:
-        return [f'{origin}/.well-known/oauth-authorization-server', f'{origin}/.well-known/openid-configuration']
-    return [f'{origin}/.well-known/oauth-authorization-server{path}',
-            f'{origin}/.well-known/openid-configuration{path}', f'{origin}{path}/.well-known/openid-configuration']
-
-
-def _fetch_json(url):
-    request = urllib.request.Request(url, headers={'Accept': 'application/json'})
-    with urllib.request.urlopen(request, timeout=config.CONNECT_TIMEOUT) as response:  # noqa: S310 - an operator's URL
-        if not config._secure_url(response.geturl()):  # redirected off https: what it says could be anyone's
-            raise ValueError(f'{url} redirected to {response.geturl()}')
-        return json.loads(response.read(1024 * 1024))
-
-
-def jwks_uri(issuer):
-    """The issuer's `jwks_uri`, from the first metadata document that answers and names this issuer as its own
-    (RFC 8414: a document naming another issuer must not be used). Cached for the process; when none answers, tried
-    again after _DISCOVERY_RETRY seconds rather than on every request."""
-    with _discovery_lock:
-        cached = _discovered.get(issuer)
-        if cached is not None and (cached[0] is not None or time.monotonic() - cached[1] < _DISCOVERY_RETRY):
-            return cached[0]
-        found = None
-        for url in discovery_urls(issuer):
-            try:
-                metadata = _fetch_json(url)
-            except (OSError, ValueError):
-                continue
-            if isinstance(metadata, dict) and metadata.get('issuer') == issuer and isinstance(
-                    metadata.get('jwks_uri'), str) and config._secure_url(metadata['jwks_uri']):
-                found = metadata['jwks_uri']
-                break
-        if found is None:
-            log.warning("Could not find the signing keys of the MCP server's authorization server %s - tried %s",
-                        issuer, ', '.join(discovery_urls(issuer)))
-        _discovered[issuer] = (found, time.monotonic())
-        return found
 
 
 def _scopes(claims):
@@ -248,7 +194,7 @@ def verify_mcp(token):
     required."""
     import jwt
     issuer, resource = config.mcp_auth_server(), config.mcp_resource_url()
-    keys_url = jwks_uri(issuer)
+    keys_url = oidc.jwks_uri(issuer)
     if keys_url is None:
         return None
     try:

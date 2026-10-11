@@ -20,7 +20,7 @@ from unittest import mock
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from queryapigate import apikeys, config, create_app, governance, jwtauth, masking, mcp_server
+from queryapigate import apikeys, config, create_app, governance, jwtauth, masking, mcp_server, oidc
 from tests.helpers import save_query, write_connections
 
 try:
@@ -109,9 +109,10 @@ class McpOAuthTestCase(unittest.TestCase):
             'QUERYAPIGATE_MCP_ROLE': 'agents', 'QUERYAPIGATE_MCP_ROLE_CLAIM': 'qag_role'})
         patcher.start()
         self.addCleanup(patcher.stop)
-        for cache in (jwtauth._jwks_clients, jwtauth._discovered):
-            cache.clear()
-            self.addCleanup(cache.clear)
+        jwtauth._jwks_clients.clear()
+        self.addCleanup(jwtauth._jwks_clients.clear)
+        oidc.forget()
+        self.addCleanup(oidc.forget)
         write_connections({'shop': {'db': 'sqlite', 'database': data, 'active': True}})
         masking.forget_schema()  # another test's 'shop' may still be cached
         self.app = create_app()
@@ -236,9 +237,9 @@ class TokenTests(McpOAuthTestCase):
         self.assertEqual(self.provider.metadata_fetches - before, 1)
 
     def test_metadata_naming_another_issuer_is_not_used(self):
-        with mock.patch.object(jwtauth, '_fetch_json', return_value={'issuer': 'https://evil.example.com',
+        with mock.patch.object(oidc, 'fetch_json', return_value={'issuer': 'https://evil.example.com',
                                                                      'jwks_uri': 'https://evil.example.com/k'}):
-            self.assertIsNone(jwtauth.jwks_uri(self.provider.issuer))
+            self.assertIsNone(oidc.jwks_uri(self.provider.issuer))
             self.assertEqual(self.authenticate(self.provider.token())[1].status, 401)
 
     def test_a_tool_call_runs_as_the_agent_masked_by_its_role(self):
@@ -257,16 +258,16 @@ class RedirectTests(unittest.TestCase):
         response.geturl.return_value = 'http://evil.example.com/.well-known/openid-configuration'
         response.read.return_value = b'{}'
         with mock.patch('urllib.request.urlopen', return_value=response), self.assertRaises(ValueError):
-            jwtauth._fetch_json('https://idp.example.com/.well-known/openid-configuration')
+            oidc.fetch_json('https://idp.example.com/.well-known/openid-configuration')
 
 
 class DiscoveryTests(unittest.TestCase):
     def test_where_metadata_is_looked_for(self):
-        self.assertEqual(jwtauth.discovery_urls('https://idp.example.com/realms/qag'), [
+        self.assertEqual(oidc.discovery_urls('https://idp.example.com/realms/qag'), [
             'https://idp.example.com/.well-known/oauth-authorization-server/realms/qag',
             'https://idp.example.com/.well-known/openid-configuration/realms/qag',
             'https://idp.example.com/realms/qag/.well-known/openid-configuration'])
-        self.assertEqual(jwtauth.discovery_urls('https://tenant.auth0.com/'), [
+        self.assertEqual(oidc.discovery_urls('https://tenant.auth0.com/'), [
             'https://tenant.auth0.com/.well-known/oauth-authorization-server',
             'https://tenant.auth0.com/.well-known/openid-configuration'])
 

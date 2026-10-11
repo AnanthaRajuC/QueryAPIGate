@@ -1,6 +1,6 @@
 # ADR 0007: Console sign-in through the organisation's identity provider (OpenID Connect)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Backlog:** #84 Phase 2 (SSO for the Console). Builds on [ADR 0003](0003-named-administrators.md) (named
   administrators, roles, tokens) and shares its identity-provider plumbing with
@@ -121,7 +121,7 @@ how owners get in.
 ## Consequences
 
 - **New:** schema 10 (`admin_sessions`, `sso_logins`, and an SSO link on administrators); `/auth/sso/login`,
-  `/auth/sso/callback`, `/auth/sso/logout`, `/auth/session`; eight settings; `via: sso`; the Console's sign-in screen
+  `/auth/sso/callback`, `/auth/sso/logout`, `/auth/session`; ten settings; `via: sso`; the Console's sign-in screen
   and SSO-managed administrators; one alert. Experimental in its first release.
 - **Not breaking:** tokens and the break-glass key work as before; nothing changes until SSO is configured.
 - **New attack surface, treated as such:** the callback (state, nonce, PKCE, single use, ID-token checks), the

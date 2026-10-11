@@ -15,7 +15,7 @@ one it supersedes.
 | [0004](0004-exports-to-object-storage.md) | Exports to object storage - destinations, saved exports, incremental runs | Accepted |
 | [0005](0005-column-masking.md) | Column masking - rules on keys, roles and exports, traced to source columns, failing closed | Accepted |
 | [0006](0006-ai-agents.md) | AI agents - the MCP server as an OAuth resource server, descriptions agents read, a per-agent usage view | Accepted |
-| [0007](0007-console-sign-in-through-sso.md) | Console sign-in through the organisation's identity provider (OpenID Connect) | Proposed |
+| [0007](0007-console-sign-in-through-sso.md) | Console sign-in through the organisation's identity provider (OpenID Connect) | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
