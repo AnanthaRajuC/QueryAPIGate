@@ -3642,7 +3642,6 @@
     },
     "/api/v1/alerts": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -3698,8 +3697,7 @@
         "summary": "What needs attention now - expiring keys, failing connections, slow or failing queries, rate limits being hit - most severe first",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/api-keys": {
@@ -5676,7 +5674,6 @@
     },
     "/api/v1/destinations": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -5732,11 +5729,9 @@
         "summary": "List destinations - where exports may write (secrets masked)",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5820,13 +5815,11 @@
         "summary": "Create a destination: a bucket prefix or folder, and the credentials to write there",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/destinations/test": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5892,13 +5885,11 @@
         "summary": "Write a probe object with fields not saved yet",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/destinations/{name}": {
       "delete": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -5986,11 +5977,9 @@
         "summary": "Remove it - refused while an export writes there",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6064,11 +6053,9 @@
         "summary": "Get a destination",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "patch": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6171,13 +6158,11 @@
         "summary": "Change some of its fields",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/destinations/{name}/test": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6243,8 +6228,7 @@
         "summary": "Write a probe object under its prefix: url, credentials and permission at once",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/examples": {
@@ -6435,7 +6419,6 @@
     },
     "/api/v1/exports": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -6491,11 +6474,9 @@
         "summary": "List exports - saved queries delivered to destinations",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6579,13 +6560,11 @@
         "summary": "Create an export",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/exports/{name}": {
       "delete": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6663,11 +6642,9 @@
         "summary": "Remove it",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6741,11 +6718,9 @@
         "summary": "Get an export, with its watermark",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "patch": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6848,13 +6823,11 @@
         "summary": "Change some of its fields, or set or reset its watermark",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/exports/{name}/runs": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6928,11 +6901,9 @@
         "summary": "Its newest runs, from run history",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -7018,8 +6989,7 @@
         "summary": "Run it now; answers once the object is written",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/history": {

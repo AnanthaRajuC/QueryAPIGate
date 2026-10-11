@@ -62,7 +62,7 @@ work, with the gaps below, and may change in a minor release.
 | Table DDL | no | yes | yes | no | yes | no | no | n/a |
 | Descriptions from database comments | yes | yes | n/a | yes | yes | no | no | n/a |
 | Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
-| Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes (remote: experimental) | no | no | no | no |
+| Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes | no | no | no | no |
 | Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
 | MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
 | Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
@@ -278,8 +278,9 @@ read-only and read-write connections separately would trip constantly):
 
 ## Files on S3, GCS, R2 and the web
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** since 0.20, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). New storage types and connection fields may
+> still be added. Limits: GCS and R2 are read through their S3-compatible APIs (tested against an S3-compatible
+> store, not GCS or R2 themselves), and credentials are given - AWS instance roles aren't used.
 
 `allowed_paths` also takes object-storage prefixes and web addresses, read through DuckDB's `httpfs` extension (in the
 Docker image; elsewhere it's downloaded on first use, or install it ahead with

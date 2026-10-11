@@ -107,9 +107,8 @@ format_unavailable`. Column types come from the values: integers `BIGINT` (`DECI
 
 ## Exports to object storage
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.17, destinations, exports and their
-> runs may change as they are used.
+> **Stable** since 0.20, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Formats, path placeholders and fields on
+> destinations, exports and runs may still be added. Limit: credentials are given - AWS instance roles aren't used.
 
 A saved query's full result, delivered as a file to a bucket or a folder - Parquet, CSV or NDJSON, written by
 DuckDB in steady memory ([ADR 0004](adr/0004-exports-to-object-storage.md)). Two resources:
@@ -990,9 +989,10 @@ use.
 
 ### Column masking
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.17, which queries can be traced, and the
-> rules and their actions, may change as it is used.
+> **Stable** since 0.20, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Actions, and query shapes masking can
+> follow, may still be added - a query refused today may be served masked later. A query served masked today is only
+> ever refused instead by a security fix, if serving it could let a value out. Limits: callers with rules are refused
+> on H2, JDBC and MongoDB connections, and masking hides values, not answers about them (below).
 
 A `mask` grant - on an API key, a role (copied to keys made from it, and applied to signed-in users mapped to it), or
 an export - hides the values of named **source** columns in everything that caller receives
@@ -1299,9 +1299,9 @@ disconnects frees its slot at the next keepalive, within 15 seconds.
 
 ## Alerts
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new in 0.13, its checks, thresholds and alert shape may change as it is
-> used.
+> **Stable** since 0.20, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). New kinds and fields may still be added - a
+> client should show, or ignore, a `kind` it doesn't know; none is removed or renamed except through the deprecation
+> process.
 
 `GET /api/v1/alerts` (admin only) lists what needs attention now, most severe first. The Console shows the same
 list on its Alerts screen, as a count on the bell in its header, and in Home's System health. Every alert is a live

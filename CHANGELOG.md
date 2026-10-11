@@ -21,12 +21,17 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
-(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
-`gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
-(`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), OAuth for the MCP server
+(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
-(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), and alerts (`GET /api/v1/alerts`).
-The list is `queryapigate/experimental.py`.
+(`GET /api/v1/usage/agents`), and Console sign-in through SSO (`QUERYAPIGATE_SSO_*`). The list is
+`queryapigate/experimental.py`.
+
+**Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
+what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
+no change planned; has its known gaps closed or written down as limits; is tested on the oldest dependency versions
+it allows; and its documentation says what may still be added (fields, kinds, options - never removals, which go
+through deprecation). The terms are `experimental.GRADUATION`; connection types have their own
+(`databases.GRADUATION`).
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
 take that license casually. A patch release (`0.10.0` -> `0.10.1`) never breaks a covered surface. A minor
@@ -45,6 +50,28 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Changed
+- **Alerts, remote files through DuckDB, exports to object storage and column masking are stable** - under the
+  compatibility promise, no longer experimental: each met the graduation terms now written into the versioning policy
+  above (tested for real in CI, security-reviewed, unchanged for a release, gaps closed or stated, tested on the oldest
+  dependencies allowed). Each one's documentation says what may still be added: new alert kinds and fields (a client
+  should ignore a `kind` it doesn't know); storage types and connection fields; export formats, path placeholders
+  and fields; masking actions, and query shapes masking can follow. Their startup warnings, `x-experimental` marks
+  and Console tags are gone.
+- **Column masking needs sqlglot 25.2 or later**, the first its tracing works on - `queryapigate[flow]` asked for 23,
+  and on 23.0 to 25.1 a masked caller's query failed inside the parser (refused, never unmasked). An older sqlglot
+  pinned by something else now gets `masking_unavailable`, naming the version and the upgrade.
+
+### Fixed
+- **A table function run by a table-restricted key** answered `500` instead of `table_not_allowed` on older sqlglot
+  releases (25.2 among them): the check looked for an expression class they don't have. Refused either way.
+
+### Added
+- **CI tests against real services and the oldest dependencies:** the integration job runs exports, files on S3, the
+  MCP server's OAuth and Console sign-in against SeaweedFS and Keycloak, none allowed to skip; a new job runs the
+  DuckDB, masking and table-check tests on Python 3.11 with DuckDB 1.2.0 and sqlglot 25.2.0, the lowest versions
+  allowed. Column masking is tested against real PostgreSQL, MySQL and ClickHouse - in their own SQL - on every push.
 
 ## [0.19.1] - 2026-10-11
 

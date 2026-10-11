@@ -3,9 +3,6 @@
 **Time:** 15 minutes. **You'll end up with:** files in a bucket - or on a web server, or a local disk - served as
 governed REST endpoints and MCP tools, with no database to load them into: DuckDB reads them where they are.
 
-> **Experimental** - reading `s3://`, `gs://`, `r2://` and `http(s)://` files may change in any minor release, always
-> noted in the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
-
 Every command and response below was run against an S3-compatible server (SeaweedFS) holding
 `s3://sales/2026/orders.parquet` - 5,000 orders - and a second bucket, `hrdata`, that the API must never reach.
 
@@ -132,7 +129,6 @@ stop `https://data.example.com/public/../private/...`.
   DuckDB's `duckdb_secrets()` - never the secret. Another reason to give partners saved queries, not SQL.
 - **Costs**: on a cloud bucket, each read is requests and egress you pay for. Cache, rate-limit, and prefer Parquet -
   DuckDB reads only the columns and row groups a query needs.
-- **Startup says it's experimental**: *Experimental: Remote files through DuckDB (connection lake) ...*.
 
 ## Next steps
 

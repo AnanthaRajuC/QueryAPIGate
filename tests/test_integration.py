@@ -44,6 +44,29 @@ COMMENTS = {  # a table comment and a column comment, as each database writes th
                    "ALTER TABLE queryapigate_it COMMENT COLUMN price 'Price in EUR, VAT included'"],
 }
 COMMENTS['duckdb'] = COMMENTS['postgres']
+# Column masking (ADR 0005) traces SQL with each database's own grammar: statements that read queryapigate_it.name -
+# which holds 'Item 1'..'Item 7' - in that database's own ways, on top of MASKED_SHAPES below.
+MASKED_DIALECT = {
+    'postgres': ['SELECT name::text AS c FROM queryapigate_it', "SELECT name || '!' AS c FROM queryapigate_it",
+                 'SELECT CAST(name AS varchar(80)) AS c FROM queryapigate_it',
+                 'SELECT "name" FROM "queryapigate_it"', 'SELECT coalesce(name, \'-\') AS c FROM queryapigate_it'],
+    'mysql': ["SELECT CONCAT(name, '!') AS c FROM queryapigate_it", 'SELECT `name` FROM `queryapigate_it`',
+              'SELECT CAST(name AS CHAR) AS c FROM queryapigate_it',
+              'SELECT IFNULL(name, \'-\') AS c FROM queryapigate_it'],
+    'clickhouse': ["SELECT concat(name, '!') AS c FROM queryapigate_it", 'SELECT lower(name) AS c FROM queryapigate_it',
+                   'SELECT toString(name) AS c FROM queryapigate_it', 'SELECT `name` FROM queryapigate_it'],
+}
+MASKED_DIALECT['duckdb'] = MASKED_DIALECT['postgres']
+MASKED_SHAPES = [  # every one of these must come back masked - not refused
+    'SELECT name FROM queryapigate_it',
+    'SELECT name AS n FROM queryapigate_it',
+    'SELECT upper(name) AS u FROM queryapigate_it',
+    'WITH x AS (SELECT name AS nm FROM queryapigate_it) SELECT nm FROM x',
+    'SELECT name FROM queryapigate_it UNION ALL SELECT name FROM queryapigate_it',
+    'SELECT a.name FROM queryapigate_it a JOIN queryapigate_it b ON a.id = b.id',
+    'SELECT t.name FROM (SELECT id, name FROM queryapigate_it) t',
+    'SELECT * FROM queryapigate_it',
+]
 
 
 class IntegrationBase:
@@ -243,6 +266,42 @@ class IntegrationBase:
         self.assertEqual(tables['queryapigate_it']['description'], 'Items for sale')
         price = next(c for c in tables['queryapigate_it']['columns'] if c['name'].lower() == 'price')
         self.assertEqual(price['description'], 'Price in EUR, VAT included')
+
+
+    def test_masking_holds_in_this_database_s_own_sql(self):
+        """A masked column never leaves raw, however this database's SQL reads it (ADR 0005): masked, or refused."""
+        if self.db not in MASKED_DIALECT:
+            self.skipTest(f'masking refuses {self.db} connections')
+        res = self.client.post('/api/v1/api-keys', json={
+            'name': 'masked', 'connections': ['it'], 'mask': [{'column': 'queryapigate_it.name', 'action': 'hash'}]})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        headers = {'X-API-Key': res.get_json()['secret']}
+
+        def run(sql):
+            return self.client.post('/execute_sql', headers=headers, json={'sql': sql, 'connection_name': 'it'})
+
+        def leaked(rows):
+            return [v for row in rows for v in row.values() if isinstance(v, str) and 'Item' in v]
+
+        for sql in MASKED_SHAPES:
+            with self.subTest(sql=sql):
+                res = run(sql)
+                self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+                self.assertEqual(leaked(res.get_json()), [])
+                self.assertTrue(res.get_json())
+        star = run('SELECT * FROM queryapigate_it ORDER BY id').get_json()
+        # the other columns as they are
+        self.assertEqual([{k.lower(): v for k, v in r.items()}['id'] for r in star], list(range(1, 8)))
+        for sql in MASKED_DIALECT[self.db]:
+            with self.subTest(sql=sql):
+                res = run(sql)
+                if res.status_code == 403:
+                    self.assertEqual(res.get_json()['code'], 'mask_unresolvable')  # refused is fine; raw never
+                else:
+                    self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+                    self.assertEqual(leaked(res.get_json()), [])
+        hashed = {r['name'] for r in run('SELECT name FROM queryapigate_it').get_json()}
+        self.assertEqual(len(hashed), 7)  # equal values stay equal and distinct ones distinct - what hash is for
 
 
 class DriverReadOnlyMixin:

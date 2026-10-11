@@ -115,6 +115,24 @@ jobs:
             2>&1 | tee /tmp/services.log
           ! grep -E "skipped '(set QUERYAPIGATE_TEST|DuckDB's httpfs)" /tmp/services.log
 
+  oldest-dependencies:
+    # The lowest versions pyproject.toml allows, so a minimum can't quietly stop being true again: DuckDB 1.2 is the
+    # first that can lock a connection to its paths, sqlglot 25.2 the first masking's tracing works on.
+    # tests/test_dependency_floors.py keeps these pins equal to pyproject.toml's minimums.
+    name: Tests (oldest supported DuckDB and sqlglot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]" "duckdb==1.2.0" "sqlglot==25.2.0"
+      - run: >-
+          python -m unittest -v tests.test_duckdb_files tests.test_destinations tests.test_exports tests.test_exporting
+          tests.test_export_security tests.test_masking tests.test_masking_requests tests.test_sqlflow
+          tests.test_descriptions tests.test_tableguard tests.test_integration.DuckDBTests tests.test_dependency_floors
+
   postgres-metadata:
     # The whole suite again, with the metadata store (connections, saved queries, keys, roles, history, audit
     # log) on PostgreSQL instead of SQLite - tests/__init__.py gives every test its own schema.

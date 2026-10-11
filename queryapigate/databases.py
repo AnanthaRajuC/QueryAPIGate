@@ -58,7 +58,7 @@ def matrix():
                                                  (NA if t in ('sqlite', 'mongo') else NO)  # no comments to read
                                                  for t in TYPES}),
         ('Streaming exports', {t: YES if t in STREAM_RUNNERS else NO for t in TYPES}),
-        ('Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP', {t: 'yes (remote: experimental)' if t == 'duckdb'
+        ('Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP', {t: YES if t == 'duckdb'
                                                                     else NO for t in TYPES}),  # duckfiles.py
         ('Response caching (`cache_ttl`)', {t: YES if _sql(t) else NO for t in TYPES}),  # app.run_saved_mongo
         ('MCP `execute_sql`', {t: YES if _sql(t) else NO for t in TYPES}),

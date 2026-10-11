@@ -59,7 +59,7 @@ guide covers one scenario end to end, and every command and response in it was r
 48. [**Sign in to the Console through your identity provider**](48-sign-in-to-the-console-through-your-identity-provider.md)
     (experimental) - SSO for administrators: roles from groups, people who had tokens linked, SSO only.
 45. [**Hide personal data from a partner or an AI agent**](45-hide-personal-data-from-a-partner-or-an-ai-agent.md)
-    (experimental) - column masking: hash, mask or drop values, whatever the SQL calls them.
+    - column masking: hash, mask or drop values, whatever the SQL calls them.
 
 ## MCP (AI agent access)
 
@@ -90,7 +90,7 @@ guide covers one scenario end to end, and every command and response in it was r
     `queryapigate export`, and how failures are reported.
 31. [**Get the exact CLI command for a saved query**](31-get-the-cli-command-for-a-query.md) - the API Repository's
     CLI tab.
-44. [**Deliver a daily file to a partner's bucket**](44-deliver-a-daily-file-to-a-partners-bucket.md) (experimental) -
+44. [**Deliver a daily file to a partner's bucket**](44-deliver-a-daily-file-to-a-partners-bucket.md) -
     a destination, an incremental export, a schedule, and what happens when a run fails.
 
 ## Operating in production
@@ -117,7 +117,7 @@ guide covers one scenario end to end, and every command and response in it was r
 
 ## Files and data lakes
 
-41. [**Publish Parquet, CSV or JSON files in S3 as an API**](41-publish-files-in-s3-as-an-api.md) (experimental) -
+41. [**Publish Parquet, CSV or JSON files in S3 as an API**](41-publish-files-in-s3-as-an-api.md) -
     DuckDB reads them where they are; `allowed_paths`, credentials, views.
 
 ## Scaling out

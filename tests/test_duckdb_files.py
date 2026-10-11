@@ -246,12 +246,12 @@ class HttpFilesTests(FilesTestCase):
         # the web server would resolve this one - the reason an http(s) entry can't be a prefix
         self.assert_refused(self.run_sql(f"SELECT * FROM read_csv('{self.base}/public/../private/secret.csv')"))
 
-    def test_a_remote_source_is_flagged_experimental_at_startup(self):
+    def test_a_remote_source_is_no_longer_flagged_experimental(self):  # graduated in 0.20
         self.connect(allowed_paths=[f'{self.base}/public/products.parquet'])
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
+            logging.getLogger('queryapigate').warning('marker')  # assertLogs needs at least one line
             create_app()
-        self.assertTrue(any('Experimental: Remote files through DuckDB (connection files)' in line
-                            for line in logs.output), logs.output)
+        self.assertFalse(any('Experimental:' in line for line in logs.output), logs.output)
 
 
 @unittest.skipUnless(os.environ.get('QUERYAPIGATE_TEST_S3'), 'set QUERYAPIGATE_TEST_S3=endpoint,key,secret,bucket')

@@ -26,9 +26,7 @@ export function MaskRulesField({
     onChange(rules.map((rule, j) => (j === i ? { ...rule, ...change } : rule)));
   return (
     <fieldset className="duck-files" id={id}>
-      <legend>
-        Column masking <span className="tag">experimental</span>
-      </legend>
+      <legend>Column masking</legend>
       <div className="hint">
         Values of these source columns are hidden in everything {who} receives - whatever the SQL calls them.
         A query masking can&apos;t trace is refused, never served unmasked. Table and column, with * as a

@@ -4,9 +4,6 @@
 partner reads from - only the rows that are new since the last delivery, with every run on record, an alert when one
 fails, and nothing ever written outside the prefix you allowed.
 
-> **Experimental** - exports and destinations are new in 0.17 and may change in any minor release, always noted in the
-> changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
-
 Every command and response below was run against a real server and an S3-compatible bucket (SeaweedFS), with the
 [example APIs](05-try-the-built-in-example-apis.md) loaded. `$TOKEN` is an owner's or admin's
 [admin token](43-give-your-team-their-own-admin-access.md) (the shared key works too).
@@ -170,8 +167,8 @@ With the bucket unreachable:
   parts grow a little with the file).
 - **Who may do what.** Owners and admins define destinations and exports - that decides who receives data. Developers
   may run them; auditors may read them. Scoped API keys can't touch them.
-- **What's in the files** is what the query returns. To hide columns from a partner - email addresses, say - column
-  masking (BACKLOG #63) is coming next; until then, leave them out of the query.
+- **What's in the files** is what the query returns. To hide columns from a partner - email addresses, say - give the
+  export [masking rules](45-hide-personal-data-from-a-partner-or-an-ai-agent.md#step-5-files-for-the-partner-masked-too).
 - **One-off files**, without saving an export: `queryapigate export rentals_after --param after=0 --to acme --format
   csv --out 'adhoc/{date}.csv'`.
 

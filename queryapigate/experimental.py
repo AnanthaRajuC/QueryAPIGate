@@ -4,9 +4,24 @@ compatibility" - it may change or be removed in any minor release, always noted 
 This is the one list. Everything that marks a feature experimental reads it: the OpenAPI document (`x-experimental`
 on its operations, openapi.py), the Settings rows for its environment variables (config.describe_settings()), a
 warning logged at startup while one is in use (create_app(), `queryapigate events`), and the tests that check the
-docs say so at each feature's own section. Graduating a feature is deleting its entry here, and its docs callout.
+docs say so at each feature's own section.
+
+A feature graduates - its entry deleted here, its callout replaced by a note that it's stable and what may still be
+added - when it meets every one of GRADUATION. Alerts, remote files through DuckDB, exports and column masking did in
+0.20. The connection types have their own terms (databases.GRADUATION).
 """
 from typing import Any
+
+GRADUATION = (
+    'it is tested for real in CI - against the real database, store or provider it works with, not only in tests that '
+    'run when someone opts in;',
+    'if it guards access or data, it has had a security review;',
+    'its shape has not changed for a release, and no change to it is planned;',
+    'its known gaps are closed, or written down as limits where its documentation describes it;',
+    'the versions of what it depends on that pyproject.toml allows are the ones tested (CI tests the oldest);',
+    'its documentation says what may still be added - fields, kinds, options - since nothing is removed or renamed '
+    'except through the deprecation process.',
+)
 
 FEATURES: dict[str, dict[str, Any]] = {
     'live_events': {
@@ -23,32 +38,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                'schema browsing, streaming)',
         'db_types': ('h2', 'jdbc', 'mongo'),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and mongo'),
-    },
-    'remote_files': {
-        'name': 'Remote files through DuckDB',
-        'why': 'new in 0.15 - reading s3://, gs://, r2:// and http(s):// files, and its connection fields, may change '
-               'as it is used',
-        'detect': lambda details: details.get('db') == 'duckdb' and any(
-            isinstance(p, str) and p.startswith(('s3://', 'gs://', 'gcs://', 'r2://', 'http://', 'https://'))
-            for p in details.get('allowed_paths') or []),
-        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Files on S3, GCS, R2 and the web'),
-    },
-    'exports': {
-        'name': 'Exports to object storage',
-        'why': 'new in 0.17 - destinations, exports and their runs may change as they are used',
-        'operations': tuple((method, path) for path, methods in (
-            ('/api/v1/destinations', ('get', 'post')), ('/api/v1/destinations/test', ('post',)),
-            ('/api/v1/destinations/{name}', ('get', 'patch', 'delete')),
-            ('/api/v1/destinations/{name}/test', ('post',)),
-            ('/api/v1/exports', ('get', 'post')), ('/api/v1/exports/{name}', ('get', 'patch', 'delete')),
-            ('/api/v1/exports/{name}/runs', ('get', 'post'))) for method in methods),
-        'docs': ('documentation/API.md', 'Exports to object storage'),
-    },
-    'masking': {
-        'name': 'Column masking',
-        'why': 'new in 0.17 - which queries can be traced, and the rules and their actions, may change as it is used',
-        'settings': ('QUERYAPIGATE_MASK_KEY',),
-        'docs': ('documentation/API.md', 'Column masking'),
     },
     'mcp_oauth': {
         'name': 'OAuth for the MCP server',
@@ -80,14 +69,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                      'QUERYAPIGATE_SSO_SESSION_HOURS', 'QUERYAPIGATE_SSO_ONLY', 'QUERYAPIGATE_SSO_DEFAULT_ROLE',
                      'QUERYAPIGATE_SSO_ALLOWED_DOMAINS'),
         'docs': ('documentation/API.md', 'Console sign-in through SSO'),
-    },
-    'alerts': {
-        'name': 'Alerts',
-        'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',
-        'operations': (('get', '/api/v1/alerts'),),
-        'settings': ('QUERYAPIGATE_ALERT_ERROR_RATE', 'QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS',
-                     'QUERYAPIGATE_ALERT_AGENT_ROWS'),
-        'docs': ('documentation/API.md', 'Alerts'),
     },
 }
 

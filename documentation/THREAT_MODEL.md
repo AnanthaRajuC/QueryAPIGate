@@ -162,7 +162,7 @@ the authorization code flow with PKCE as a confidential client, so the browser n
 
 ### Column masking: which values leave
 
-A `mask` grant on a key, role or export (ADR 0005, experimental) hashes, masks, nulls or drops the values of named
+A `mask` grant on a key, role or export (ADR 0005) hashes, masks, nulls or drops the values of named
 source columns in everything that caller receives. The design choice that matters: **result columns are traced to
 their sources through the SQL** (sqlglot lineage, by position, with the connection's schema for `SELECT *`), not
 matched by name - so `SELECT email AS e`, `lower(email)`, a CTE or a `UNION` is still masked - and **anything that

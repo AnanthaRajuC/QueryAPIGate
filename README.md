@@ -243,8 +243,8 @@ What each supports - read-only enforcement, time limits, `allowed_tables`, schem
 [support matrix](documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 
 **Files as a source** - through DuckDB, Parquet, CSV and JSON files on local disk, S3, GCS, R2 or the web are queried
-where they are and published like any table, limited to the paths each connection lists (remote files are
-experimental - see [publishing a bucket as an API](how-to/41-publish-files-in-s3-as-an-api.md)).
+where they are and published like any table, limited to the paths each connection lists (see
+[publishing a bucket as an API](how-to/41-publish-files-in-s3-as-an-api.md)).
 
 ### Security and access control
 
@@ -582,7 +582,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
 | `QUERYAPIGATE_API_KEY` | unset | The shared admin key, with the owner role. When set (or once a scoped key or a [named administrator](documentation/API.md#administrators-and-admin-roles) exists), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs an `X-API-Key` header. Once named owners exist it is the break-glass key: every use is logged and alerted, and it can be removed. |
 | `QUERYAPIGATE_EXPORT_DIRS` | unset | Comma-separated absolute folders a local-folder export destination may write under. Unset: only object-storage destinations (`s3://`, `gs://`, `r2://`) are allowed. Never the server's own home. |
-| `QUERYAPIGATE_MASK_KEY` | unset | The key column masking's `hash` action uses (experimental). Unset: one is made once in the store and shared by every instance. Changing it changes every hashed value. |
+| `QUERYAPIGATE_MASK_KEY` | unset | The key column masking's `hash` action uses. Unset: one is made once in the store and shared by every instance. Changing it changes every hashed value. |
 | `QUERYAPIGATE_REDIS_URL` | unset | A `redis://` URL: share rate limits and the response cache across every instance and process (`serve`, `mcp`, `events`). Needs `queryapigate[redis]`. Without it, each process counts and caches on its own. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
 | `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |

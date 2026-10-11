@@ -196,6 +196,19 @@ def check_columns(traced, result_columns):
                       'name the columns in the select list')
 
 
+MIN_SQLGLOT = (25, 2)  # exp.SetOperation and the lineage the tracing below relies on; verified from here up to <26
+
+
+def require_supported_sqlglot(sqlglot):
+    """Refuse - with what to do - a sqlglot older than the tracing was verified on, rather than failing inside it.
+    pyproject.toml asks for it too; this is for an install whose sqlglot was pinned by something else."""
+    found = tuple(int(part) for part in re.findall(r'\d+', sqlglot.__version__)[:2])
+    if found < MIN_SQLGLOT:
+        raise ApiError(f"Column masking needs sqlglot {'.'.join(map(str, MIN_SQLGLOT))} or later, and "
+                       f"{sqlglot.__version__} is installed - run `pip install -U 'sqlglot>=25.2,<26'`", 500,
+                       code='masking_unavailable')
+
+
 def trace(sql, dialect, tables):
     """[(result column, {Source, ...}), ...] in the result's order, or None for a statement that returns no table data
     (SHOW, DESCRIBE, EXPLAIN). `tables` is schema.fetch_schema()'s list. Raises mask_unresolvable when any result
@@ -213,6 +226,7 @@ def trace(sql, dialect, tables):
     except ImportError:
         raise ApiError('Column masking needs the "sqlglot" package - run `pip install "queryapigate[flow]"`', 500,
                        code='masking_unavailable') from None
+    require_supported_sqlglot(sqlglot)
     read = _DIALECT_MAP[dialect]
     schema = {}
     views = set()

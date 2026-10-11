@@ -58,6 +58,9 @@ _GENERATORS = {'numbers', 'range', 'generate_series', 'system_range', 'unnest', 
 
 def _is_generator(function):
     from sqlglot import exp
-    if isinstance(function, (exp.GenerateSeries, exp.ExplodingGenerateSeries, exp.Unnest)):
+    # ExplodingGenerateSeries is newer than the oldest sqlglot supported (25.2) - looked up, not assumed
+    generators = tuple(getattr(exp, name) for name in ('GenerateSeries', 'ExplodingGenerateSeries', 'Unnest')
+                       if hasattr(exp, name))
+    if isinstance(function, generators):
         return True
     return isinstance(function, exp.Anonymous) and function.name.lower() in _GENERATORS

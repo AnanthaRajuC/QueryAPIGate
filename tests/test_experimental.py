@@ -53,6 +53,18 @@ class MarkedEverywhereTests(unittest.TestCase):
                 self.assertIsNotNone(match, f'{path} has no "{heading}" heading')
                 self.assertTrue(match.group(1).startswith('> **Experimental**'), match.group(1))
 
+    def test_graduated_features_say_they_are_stable_and_what_may_be_added(self):
+        """Graduated in 0.20 (experimental.GRADUATION): each section opens with that, not an experimental callout."""
+        connections = 'documentation/DATABASE_CONNECTION_CONFIGURATION.md'
+        for path, heading in (('documentation/API.md', 'Alerts'), ('documentation/API.md', 'Exports to object storage'),
+                              ('documentation/API.md', 'Column masking'),
+                              (connections, 'Files on S3, GCS, R2 and the web')):
+            with self.subTest(heading=heading):
+                match = re.search(rf'^#+ {re.escape(heading)}\n+(.+)', read(path), re.M)
+                self.assertTrue(match.group(1).startswith('> **Stable** since 0.20'), match.group(1))
+                note = read(path)[match.start():match.start() + 900].replace('\n>', ' ')
+                self.assertIn('may still be added', ' '.join(note.split()))
+
     def test_the_changelog_definition_lists_each_one(self):
         definition = read('CHANGELOG.md').split('**Experimental** features are outside that promise', 1)[1]
         definition = definition.split('\n\n', 1)[0].lower()
@@ -84,8 +96,9 @@ class StartupWarningTests(unittest.TestCase):
         self.assertEqual(self.warnings(), [])
 
     def test_a_setting_of_one_names_it(self):
-        [line] = self.warnings(QUERYAPIGATE_ALERT_ERROR_RATE='30')
-        self.assertIn('Experimental: Alerts (QUERYAPIGATE_ALERT_ERROR_RATE)', line)
+        [line] = self.warnings(QUERYAPIGATE_EVENTS_MAX_STREAMS='2')
+        self.assertIn('Experimental: Live events (QUERYAPIGATE_EVENTS_MAX_STREAMS)', line)
+        self.assertEqual(self.warnings(QUERYAPIGATE_ALERT_ERROR_RATE='30'), [])  # graduated in 0.20
 
     def test_a_connection_of_an_experimental_type_names_it(self):
         write_connections({'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})

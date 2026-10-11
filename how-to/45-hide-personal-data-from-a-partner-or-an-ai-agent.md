@@ -4,9 +4,6 @@
 against - where the email addresses come back as stable codes and names as `I***`, whatever the SQL calls the
 columns; queries that masking can't follow refused rather than served; and a record of what was masked, for whom.
 
-> **Experimental** - column masking is new in 0.17 and may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
-
 Every command and response below was run against a real server with the
 [example APIs](05-try-the-built-in-example-apis.md) loaded (`demo-key` is an admin).
 

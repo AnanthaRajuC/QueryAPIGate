@@ -6,7 +6,6 @@ import { useCan } from '@/app/data';
 import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 
-import { ExperimentalNote } from './ExperimentalNote';
 import { useDestinations, useReport } from './shared';
 
 // Where exports may write (ADR 0004), on /api/v1/destinations: a bucket prefix or a folder, and its credentials.
@@ -143,7 +142,6 @@ export function DestinationsPage() {
           </button>
         )}
       </div>
-      <ExperimentalNote />
       <div id="destinations-table" className="panel">
         {body}
       </div>

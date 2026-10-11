@@ -7,7 +7,6 @@ import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
 
-import { ExperimentalNote } from './ExperimentalNote';
 import { useDestinations, useExports, useReport } from './shared';
 import { MaskRulesField } from '@/features/access/MaskRules';
 import { maskPayload, type MaskRule } from '@/features/access/maskRules';
@@ -184,7 +183,6 @@ export function ExportsPage() {
           </button>
         )}
       </div>
-      <ExperimentalNote />
       <div id="exports-table" className="panel">
         {body}
       </div>

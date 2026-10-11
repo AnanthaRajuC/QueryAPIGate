@@ -11,7 +11,8 @@ From the changelog's [versioning policy](../CHANGELOG.md#versioning-and-compatib
   the store, grant fields, the MCP tool contract, error `code`s.
 - **A minor release** (`0.14.x` → `0.15.0`) may - before 1.0 it's this project's equivalent of a major release - but
   only with a **Breaking** note in its changelog entry. Never by surprise.
-- **Experimental** features (live events, alerts, H2/JDBC/MongoDB connections) may change in any minor release.
+- **Experimental** features may change in any minor release - the list is in the changelog's
+  [versioning policy](../CHANGELOG.md#versioning-and-compatibility).
 - **Deprecated** things keep working until at least the next minor release (before 1.0) or the next major (from
   1.0), and say so while you use them - see below.
 

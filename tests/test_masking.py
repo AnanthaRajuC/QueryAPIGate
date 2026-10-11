@@ -276,5 +276,22 @@ class RealSchemaTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'mask_unresolvable')
 
 
+class SqlglotVersionTests(unittest.TestCase):
+    def test_a_sqlglot_too_old_to_trace_with_says_so(self):
+        """Tracing was verified on sqlglot 25.2 to <26; older ones lack what it uses (exp.SetOperation), and a masked
+        caller must be told what's wrong rather than get a 500 from inside the parser."""
+        import types
+        for version, refused in (('25.1.0', True), ('23.0.0', True), ('25.2.0', False), ('25.34.1', False)):
+            with self.subTest(version=version):
+                fake = types.SimpleNamespace(__version__=version)
+                if refused:
+                    with self.assertRaises(masking.ApiError) as caught:
+                        masking.require_supported_sqlglot(fake)
+                    self.assertEqual(caught.exception.code, 'masking_unavailable')
+                    self.assertIn('sqlglot>=25.2', caught.exception.message)
+                else:
+                    masking.require_supported_sqlglot(fake)
+
+
 if __name__ == '__main__':
     unittest.main()
