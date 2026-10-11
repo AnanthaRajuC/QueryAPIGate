@@ -30,6 +30,7 @@ import urllib.parse
 from flask import Blueprint, jsonify, redirect, request
 
 from . import admins, config, db, jwtauth, oidc, store
+from .errors import ApiError
 
 log = logging.getLogger('queryapigate')
 
@@ -204,13 +205,20 @@ def finish(code, state, browser, error=None):
     role = role_for(claims)
     wanted = claims.get('preferred_username') if isinstance(claims.get('preferred_username'), str) else None
     email = _verified_email(claims)
-    admin, change = admins.sign_in_sso(claims['iss'], claims['sub'], role,
-                                       wanted or (email.split('@')[0] if email else 'sso-' + claims['sub'][:8]), email)
+    try:
+        admin, change = admins.sign_in_sso(claims['iss'], claims['sub'], role,
+                                           wanted or (email.split('@')[0] if email else 'sso-' + claims['sub'][:8]),
+                                           email)
+    except ApiError as error:
+        raise Refused(error.code or 'sso_refused', error.message) from None
     if not admin['active']:
         raise Refused('sso_inactive', 'Your administrator account is switched off here - ask an owner')
     if change == 'created':
         store.record_audit(admin['name'], 'create_admin', admin['name'], {'role': role, 'email': admin['email'],
                                                                           'issuer': claims['iss']}, via='sso')
+    elif change in ('linked', 'linked_role'):
+        store.record_audit(admin['name'], 'link_admin_sso', admin['name'], {'issuer': claims['iss'], 'role': role},
+                           via='sso')
     elif change == 'role':
         store.record_audit(admin['name'], 'update_admin', admin['name'], {'role': role, 'from': 'sso groups'},
                            via='sso')

@@ -140,14 +140,19 @@ def update_admin(name, role=None, email=_UNSET, active=None):
         admin = _get(conn, name)
         if admin is None:
             raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
-        if role is not None:
-            admin['role'] = _validate_role(role)
+        if role is not None and _validate_role(role) != admin['role']:
+            if linked(admin):
+                raise ApiError(f"{name} signs in through SSO: their role comes from their groups at the identity "
+                               'provider - change it there', 409, code='sso_managed')
+            admin['role'] = role
         if email is not _UNSET:
             admin['email'] = _validate_email(email)
         if active is not None:
             if not isinstance(active, bool):
                 raise ApiError('active must be true or false', code='invalid_body')
             admin['active'] = active
+            if not active:
+                _end_sessions(conn, name)  # switched off: out of the Console now, not when a session expires
         _write_admin(conn, admin)
         _refuse_ownerless(conn)
     return admin
@@ -159,6 +164,7 @@ def delete_admin(name):
         if _get(conn, name) is None:
             raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
         conn.execute('DELETE FROM admin_tokens WHERE admin_name = ?', (name,))
+        _end_sessions(conn, name)
         conn.execute('DELETE FROM administrators WHERE name = ?', (name,))
         _refuse_ownerless(conn)
 
@@ -193,8 +199,12 @@ def issue_token(admin_name, label=None, expires_at=None):
     secret = TOKEN_PREFIX + secrets.token_urlsafe(32)
     token_id = 'tok_' + secrets.token_hex(6)
     with db.transaction() as conn:
-        if _get(conn, admin_name) is None:
+        admin = _get(conn, admin_name)
+        if admin is None:
             raise ApiError(f"No administrator named '{admin_name}'", 404, code='admin_not_found')
+        if config.sso_only() and linked(admin):
+            raise ApiError(f'{admin_name} signs in through SSO, and QUERYAPIGATE_SSO_ONLY is on: no personal tokens',
+                           409, code='sso_only')
         conn.execute(f'INSERT INTO admin_tokens ({_TOKEN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)',
                      (token_id, admin_name, _hash(secret), expires_at, store.now(),
                       json.dumps({'label': label, 'last_used_at': None})))
@@ -234,7 +244,7 @@ def authenticate(supplied):
             or apikeys.is_expired({'expires_at': row['expires_at']}):
         return None
     admin = _get(conn, row['admin_name'])
-    if admin is None or not admin['active']:
+    if admin is None or not admin['active'] or (config.sso_only() and linked(admin)):
         return None
     _record_use(row['id'], admin['name'])
     return permission_for(admin, 'token')
@@ -312,6 +322,45 @@ def last_break_glass_use(since):
 # Signed in through SSO (sso.py, ADR 0007)
 # --------------------------------------------------------------------------------------
 
+def linked(admin):
+    """Whether this administrator signs in through SSO - bound to a person at the provider."""
+    return bool((admin.get('sso') or {}).get('subject'))
+
+
+def sso_status(admin):
+    """How the Management API shows an administrator's SSO: None, pending (bound at their next SSO sign-in) or
+    linked, with the provider's issuer - never the subject."""
+    link = admin.get('sso') or {}
+    if link.get('subject'):
+        return {'status': 'linked', 'issuer': link.get('issuer')}
+    return {'status': 'pending'} if link.get('pending') else None
+
+
+def set_sso_pending(name, pending):
+    """Mark an existing administrator to be bound at their next SSO sign-in - by a verified email matching theirs -
+    or undo that. A linked one is unlinked by False: their next SSO sign-in makes a new administrator."""
+    with db.transaction() as conn:
+        admin = _get(conn, name)
+        if admin is None:
+            raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
+        if pending:
+            if linked(admin):
+                return admin
+            if not admin['email']:
+                raise ApiError(f'{name} needs an email first: their SSO sign-in is matched to it, once', 409,
+                               code='email_required')
+            admin['sso'] = {'pending': True}
+        else:
+            admin['sso'] = None
+            _end_sessions(conn, name)
+        _write_admin(conn, admin)
+    return admin
+
+
+def _end_sessions(conn, name):
+    conn.execute('DELETE FROM admin_sessions WHERE admin_name = ?', (name,))
+
+
 def find_by_sso(issuer, subject):
     """The administrator bound to this provider's person, or None. The binding is (issuer, subject) - never an
     email, which a provider may reassign or not have verified."""
@@ -336,11 +385,25 @@ def _free_name(conn, wanted):
 
 
 def sign_in_sso(issuer, subject, role, wanted_name, email):
-    """The administrator for someone who just signed in through SSO, created on first sign-in - (admin, change) where
-    change is 'created', 'role' (their groups gave a new role) or None. The provider decides the role: one moved out
-    of the owners' group is no longer an owner, last one or not - owners come from that group."""
+    """The administrator for someone who just signed in through SSO, created on first sign-in - (admin, change)
+    where change is 'created', 'linked' (an administrator waiting for this verified email, now bound - 'linked_role'
+    when their groups also gave them a new role), 'role' (their groups gave a new role) or None. The provider decides
+    the role: one moved out of the owners' group is no longer an owner, last one or not - owners come from that
+    group."""
     with db.transaction() as conn:
         found = find_by_sso(issuer, subject)
+        if found is None and email:
+            waiting = [a for a in list_admins() if (a.get('sso') or {}).get('pending')
+                       and (a['email'] or '').lower() == email.lower()]
+            if len(waiting) > 1:
+                raise ApiError(f'More than one administrator waits for an SSO sign-in as {email}', 409,
+                               code='sso_ambiguous')
+            if waiting:
+                found = {**waiting[0], 'sso': {'issuer': issuer, 'subject': subject}}
+                change = 'linked' if found['role'] == role else 'linked_role'
+                found['role'] = role
+                _write_admin(conn, found)
+                return found, change
         if found is not None:
             if found['role'] == role:
                 return found, None

@@ -81,8 +81,10 @@ XML signature handling is a well-known source of vulnerabilities.
 - **Existing administrators can be linked**: an owner marks `alice` as "signs in through SSO"; her next SSO sign-in
   with a verified email matching hers binds her `sub` - once, audited - so teams moving from tokens keep their
   administrators and their history.
-- **Personal admin tokens stay**, for automation and as a fallback; an owner can turn off token sign-in to the Console
-  for SSO administrators (`QUERYAPIGATE_SSO_ONLY=yes`) so people can't route around the provider's policies. The
+- **Personal admin tokens stay**, for automation and as a fallback. With `QUERYAPIGATE_SSO_ONLY=yes`, an
+  administrator who signs in through SSO has no personal tokens - theirs stop working and none can be issued - so
+  people can't route around the provider's policies; a token can't be told apart in the Console from one in a
+  script, so the rule is per person, not per screen. Automation accounts, linked to no one, keep theirs. The
   break-glass key keeps working as before: audited and alerted.
 
 **Providers without group claims** (Google Workspace's ID tokens carry none): `QUERYAPIGATE_SSO_DEFAULT_ROLE` gives

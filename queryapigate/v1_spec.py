@@ -326,6 +326,11 @@ SCHEMAS = {
             'last_seen_at': {'type': 'string', 'nullable': True,
                              'description': 'Last signed in with one of their tokens (to the minute).'},
             'tokens': {'type': 'integer', 'description': 'Tokens they hold, expired ones included.'},
+            'sso': {'type': 'object', 'nullable': True, 'required': ['status'], 'properties': {
+                'status': {'type': 'string', 'enum': ['pending', 'linked'],
+                           'description': 'pending: bound at their next SSO sign-in, by a verified email matching '
+                                          'theirs; linked: signs in through SSO, their role from their groups'},
+                'issuer': {'type': 'string', 'description': 'linked: the identity provider.'}}},
         },
     },
     'AdministratorList': {
@@ -338,7 +343,10 @@ SCHEMAS = {
             'name': {'type': 'string', 'description': "Create only. Not an API key's name; not 'admin' or 'cli'."},
             'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
             'email': _NULLABLE_STRING,
-            'active': {'type': 'boolean', 'description': 'Update only; false stops all their tokens at once.'},
+            'active': {'type': 'boolean', 'description': 'Update only; false stops all their tokens and sessions '
+                                                         'at once.'},
+            'sso': {'type': 'string', 'enum': ['pending'], 'nullable': True,
+                    'description': 'Update only: "pending" binds them at their next SSO sign-in; null unlinks them.'},
         },
     },
     'AdminToken': {

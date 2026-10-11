@@ -321,6 +321,82 @@ class SessionTests(SsoTestCase):
         self.assertEqual((entry['actor'], entry['via']), ('alice', 'sso'))
 
 
+class LinkingTests(SsoTestCase):
+    """Administrators who had tokens before SSO keep their name, history and tokens' audit trail (ADR 0007, 2)."""
+    ADMIN = {'X-API-Key': 'admin-key'}
+
+    def patch(self, name, **body):
+        return self.browser.patch(f'/api/v1/administrators/{name}', headers=self.ADMIN, json=body)
+
+    def test_a_pending_administrator_is_bound_at_their_sign_in_by_verified_email(self):
+        admins.create_admin('alice.ito', 'developer', email='Alice@Example.com')
+        self.assertEqual(self.patch('alice.ito', sso='pending').get_json()['sso'], {'status': 'pending'})
+        self.assertEqual(self.sign_in(email_verified=False).headers['Location'], '/console/')  # unverified: a new one
+        self.assertEqual(sorted(a['name'] for a in admins.list_admins()), ['alice', 'alice.ito'])
+        admins.delete_admin('alice')
+        self.browser.post('/auth/sso/logout', headers={sso.CSRF_HEADER: self.csrf()})
+        self.sign_in(sub='u-alice-2')
+        linked = self.browser.get('/api/v1/administrators/alice.ito', headers=self.ADMIN).get_json()
+        self.assertEqual((linked['sso']['status'], linked['role']), ('linked', 'admin'))  # role: now their groups'
+        self.assertEqual(linked['sso']['issuer'], self.provider.issuer)
+        self.assertNotIn('subject', linked['sso'])
+        self.assertIn('link_admin_sso', [e['action'] for e in store.read_audit_log()])
+
+    def test_marking_needs_an_email_and_two_waiting_for_one_email_is_refused(self):
+        admins.create_admin('noemail', 'admin')
+        self.assertEqual(self.patch('noemail', sso='pending').get_json()['code'], 'email_required')
+        for name in ('a1', 'a2'):
+            admins.create_admin(name, 'admin', email='alice@example.com')
+            self.patch(name, sso='pending')
+        self.assertEqual(self.refused(self.sign_in()), 'sso_ambiguous')
+        self.assertEqual(self.patch('a1', sso='maybe').status_code, 400)
+
+    def test_a_linked_administrator_s_role_is_their_groups(self):
+        self.sign_in()
+        res = self.patch('alice', role='owner')
+        self.assertEqual((res.status_code, res.get_json()['code']), (409, 'sso_managed'))
+        self.assertEqual(self.patch('alice', email='a@example.com').status_code, 200)  # the rest can change
+
+    def test_unlinking_ends_their_sessions(self):
+        self.sign_in()
+        csrf = self.csrf()
+        self.assertEqual(self.patch('alice', sso=None).get_json()['sso'], None)
+        self.assertEqual(self.me(**{sso.CSRF_HEADER: csrf}).status_code, 401)
+
+    def test_switching_off_or_removing_ends_their_sessions_at_once(self):
+        from queryapigate import db
+        self.sign_in()
+        self.patch('alice', active=False)
+        self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM admin_sessions').fetchone()[0], 0)
+        self.patch('alice', active=True)
+        self.sign_in()
+        self.browser.delete('/api/v1/administrators/alice', headers=self.ADMIN)
+        self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM admin_sessions').fetchone()[0], 0)
+
+    def test_a_session_manages_its_own_tokens(self):
+        self.sign_in()
+        res = self.browser.post('/api/v1/administrators/alice/tokens', json={'label': 'laptop'},
+                                headers={sso.CSRF_HEADER: self.csrf()})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+
+
+class SsoOnlyTests(SsoTestCase):
+    def test_an_sso_administrator_has_no_personal_tokens(self):
+        self.sign_in()
+        _, secret = admins.issue_token('alice')
+        self.assertEqual(self.app.test_client().get('/api/v1/me', headers={'X-API-Key': secret}).status_code, 200)
+        admins.create_admin('ci-deploy', 'developer')
+        _, ci_secret = admins.issue_token('ci-deploy')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SSO_ONLY': 'yes'}):
+            plain = self.app.test_client()
+            self.assertEqual(plain.get('/api/v1/me', headers={'X-API-Key': secret}).status_code, 401)
+            self.assertEqual(plain.get('/api/v1/me', headers={'X-API-Key': ci_secret}).status_code, 200)  # automation
+            res = self.browser.post('/api/v1/administrators/alice/tokens', json={},
+                                    headers={sso.CSRF_HEADER: self.csrf()})
+            self.assertEqual((res.status_code, res.get_json()['code']), (409, 'sso_only'))
+            self.assertTrue(self.browser.get('/auth/session').get_json()['sso_only'])
+
+
 class OffTests(unittest.TestCase):
     def test_without_the_settings_there_is_no_sign_in(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):

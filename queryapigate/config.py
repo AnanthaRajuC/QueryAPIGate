@@ -743,7 +743,7 @@ def sso_session_hours():
 
 
 def sso_only():
-    """QUERYAPIGATE_SSO_ONLY: administrators who sign in through SSO can't use a personal token in the Console."""
+    """QUERYAPIGATE_SSO_ONLY: administrators who sign in through SSO have no personal tokens (admins.py)."""
     return env_flag('QUERYAPIGATE_SSO_ONLY')
 
 
@@ -1051,7 +1051,7 @@ def describe_settings():
             row('Session length', 'How long a Console session lasts.', 'QUERYAPIGATE_SSO_SESSION_HOURS',
                 f'{sso_session_hours()} hours' if _env('QUERYAPIGATE_SSO_SESSION_HOURS') is None
                 or _env('QUERYAPIGATE_SSO_SESSION_HOURS').isdigit() else 'invalid'),
-            row('SSO only', 'Administrators who sign in through SSO can\'t use a token in the Console instead.',
+            row('SSO only', 'Administrators who sign in through SSO have no personal tokens; automation keeps its.',
                 'QUERYAPIGATE_SSO_ONLY', on_off(sso_only())),
             row('Default role', 'The role for someone in no mapped group - only with allowed domains.',
                 'QUERYAPIGATE_SSO_DEFAULT_ROLE', sso_default_role() or 'none'),

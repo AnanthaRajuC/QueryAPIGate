@@ -132,6 +132,27 @@
             ],
             "type": "string"
           },
+          "sso": {
+            "nullable": true,
+            "properties": {
+              "issuer": {
+                "description": "linked: the identity provider.",
+                "type": "string"
+              },
+              "status": {
+                "description": "pending: bound at their next SSO sign-in, by a verified email matching theirs; linked: signs in through SSO, their role from their groups",
+                "enum": [
+                  "pending",
+                  "linked"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
+          },
           "tokens": {
             "description": "Tokens they hold, expired ones included.",
             "type": "integer"
@@ -152,7 +173,7 @@
       "AdministratorInput": {
         "properties": {
           "active": {
-            "description": "Update only; false stops all their tokens at once.",
+            "description": "Update only; false stops all their tokens and sessions at once.",
             "type": "boolean"
           },
           "email": {
@@ -170,6 +191,14 @@
               "developer",
               "auditor"
             ],
+            "type": "string"
+          },
+          "sso": {
+            "description": "Update only: \"pending\" binds them at their next SSO sign-in; null unlinks them.",
+            "enum": [
+              "pending"
+            ],
+            "nullable": true,
             "type": "string"
           }
         },

@@ -784,6 +784,16 @@ policies apply, and their role comes from their groups:
 - **The session** is an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, and a request is authenticated by it only
   together with the session's CSRF token in `X-QAG-CSRF` - which the Console reads from `GET /auth/session`. Sent
   with an `X-API-Key` or `Authorization` header, the header is judged instead. `POST /auth/sso/logout` ends it.
+- **Administrators who had tokens before** keep their name and history: `PATCH /api/v1/administrators/alice` with
+  `{"sso": "pending"}` binds her at her next SSO sign-in, by a verified email matching hers - once. From then on her
+  role is her groups' (changing it here is `409 sso_managed`); `{"sso": null}` unlinks her. Switching an
+  administrator off, or removing one, ends their sessions at once.
+- **`QUERYAPIGATE_SSO_ONLY=yes`**: an administrator who signs in through SSO has no personal tokens - theirs stop
+  working and none can be issued (`sso_only`), so the provider's MFA and policies can't be routed around. Automation
+  accounts, not linked to anyone, keep theirs.
+- **A refused sign-in** lands on the Console with `sso_error`: `sso_no_role` (no group with a role), `sso_state`
+  (expired, used, or started in another browser), `sso_id_token` (the provider's answer didn't verify),
+  `sso_inactive`, `sso_denied` (the provider ended it), `sso_unreachable`, `sso_ambiguous`.
 - Every sign-in, refusal and sign-out is in the audit log, and every action in a session says `via: sso`.
 
 ## Authentication and permissions
@@ -1695,6 +1705,10 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `export_running` | 409 | Another run of the export holds its lease; retry after `retry_after` seconds |
 | `destination_in_use` | 409 | An export still writes to the destination |
 | `name_taken` | 409 | An administrator and an API key can't share a name |
+| `sso_managed` | 409 | Changing the role of an administrator who signs in through SSO - their groups decide it |
+| `sso_only` | 409 | A personal token for an administrator who signs in through SSO, with `QUERYAPIGATE_SSO_ONLY` on |
+| `email_required` | 409 | Marking an administrator for SSO before they have an email to match |
+| `sso_ambiguous` | 409 | Two administrators wait for an SSO sign-in with the same email |
 | `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |

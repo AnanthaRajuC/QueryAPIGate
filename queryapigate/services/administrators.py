@@ -14,7 +14,7 @@ from .access import _diff, _refuse_unknown, etag  # noqa: F401 - etag re-exporte
 
 def require_self_or(permission, name, capability):
     """Allow `permission` to act on `name`'s tokens: it is that administrator, or its role holds `capability`."""
-    if permission.via == 'token' and permission.name == name:
+    if permission.via in ('token', 'sso') and permission.name == name:
         return
     if capability not in ROLES.get(permission.role, ()):
         raise ApiError("Only an owner may manage another administrator's tokens", 403, code='role_forbidden',
@@ -22,7 +22,7 @@ def require_self_or(permission, name, capability):
 
 
 def to_admin(admin):
-    return {**admin, 'tokens': len(admins.list_tokens(admin['name']))}
+    return {**admin, 'sso': admins.sso_status(admin), 'tokens': len(admins.list_tokens(admin['name']))}
 
 
 def list_admins():
@@ -41,9 +41,18 @@ def create(data, actor):
 
 
 def update(name, data, actor):
-    """Change the role, email or `active` (false stops every token of theirs at once)."""
-    _refuse_unknown(data, ('role', 'email', 'active'))
+    """Change the role, email or `active` (false stops every token and session of theirs at once), or `sso`:
+    "pending" binds them at their next SSO sign-in, null unlinks them."""
+    _refuse_unknown(data, ('role', 'email', 'active', 'sso'))
     before = admins.get_admin(name)
+    if 'sso' in data:
+        if data['sso'] not in ('pending', None):
+            raise ApiError('sso is "pending" (bind them at their next SSO sign-in) or null (unlink)',
+                           code='invalid_body')
+        after = admins.set_sso_pending(name, data['sso'] == 'pending')
+        if admins.sso_status(before) != admins.sso_status(after):
+            store.record_audit(actor, 'update_admin', name, {'sso': {'from': admins.sso_status(before),
+                                                                     'to': admins.sso_status(after)}})
     after = admins.update_admin(name, role=data.get('role'), active=data.get('active'),
                                 **({'email': data['email']} if 'email' in data else {}))
     fields = ('role', 'email', 'active')
