@@ -108,6 +108,8 @@ guide covers one scenario end to end, and every command and response in it was r
     alert rules.
 36. [**Read the logs and trace one request end to end**](36-trace-a-request-in-the-logs.md) - `X-Request-Id`, JSON
     logs, slow queries.
+51. [**See QueryAPIGate in your traces**](51-see-queryapigate-in-your-traces.md) (experimental) - OpenTelemetry: one
+    trace from your app through QueryAPIGate to the database, in Jaeger; what it costs.
 37. [**Diagnose and tune the connection pool**](37-tune-the-connection-pool.md) - measured, with symptoms and fixes.
 38. [**Allow a browser-based frontend to call the API directly**](38-allow-a-browser-frontend-cors.md) - CORS, and
     why it isn't authentication.

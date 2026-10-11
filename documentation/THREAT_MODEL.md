@@ -284,7 +284,10 @@ the row count - never a parameter value, row, statement, header or credential, a
 carry values; a test enforces it on every front door. A caller's `traceparent` is accepted, which also lets it ask
 for its trace to be sampled: with the SDK's default sampler, a caller can raise how much is exported. Deployers who
 care set `OTEL_TRACES_SAMPLER=traceidratio`. The OTLP endpoint's headers (`OTEL_EXPORTER_OTLP_HEADERS`, often a
-token) are never shown in Settings.
+token) are never shown in Settings. Spans do carry two things that can be personal data, as run history does: the
+caller's address (`client.address`) and who called (`queryapigate.caller` - for a signed-in user `jwt:<subject>`,
+which may be an email address) - keep the collector's retention to what that allows. An MCP client's tool name is
+recorded only if it has the shape a saved query's name can have; anything else is `(invalid)`.
 
 ### Rate limiting and abuse prevention
 

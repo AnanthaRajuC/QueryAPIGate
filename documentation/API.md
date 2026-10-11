@@ -1474,7 +1474,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.22.1",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.23.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

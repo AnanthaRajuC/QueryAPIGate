@@ -82,7 +82,8 @@ documentation. #99 workspaces only if asked for.
 10. **0.22: #90 rotating the encryption key and #91 reissuing an API key's secret**
     ([ADR 0009](documentation/adr/0009-key-rotation.md)). (Released as 0.22.0 on 2026-10-11.)
 11. **0.23: #92 OpenTelemetry tracing and #93 security headers**
-    ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
+    ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)). (Released as 0.23.0 on 2026-10-11; 0.22.1
+    before it made cached responses private.)
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas.**
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
@@ -2930,9 +2931,13 @@ drift from the old one's, and run history and audit split across two names.
 
 ## 92. Distributed tracing (OpenTelemetry)
 
-**Status: open; planned for 0.23** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
+**Status: shipped (0.23, experimental).** [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md):
+`tracing.py` (the `otel` extra, the standard `OTEL_*` variables, a provider started lazily per process), spans on
+REST, saved queries, database calls, serialisation, MCP, live streams and exports, `traceparent` continued
+(`TRACEPARENT` for exports), `trace_id` in run history, error bodies and JSON logs. Guide 51, with the overhead
+measured. Not done: OpenTelemetry metrics and logs export; trace context to databases (sqlcommenter).
 
-**Impact:** there are request ids and Prometheus metrics, but nothing reads an incoming W3C `traceparent` header or
+**Was:** there are request ids and Prometheus metrics, but nothing reads an incoming W3C `traceparent` header or
 exports spans - so in Datadog, Tempo or Honeycomb the gateway is a gap between the caller's span and the database's.
 
 **Notes:** an optional extra (`queryapigate[otel]`), off unless an OTLP endpoint is configured; spans for the request,
@@ -2942,9 +2947,11 @@ to its trace.
 
 ## 93. Security headers on every response, not only the Console's
 
-**Status: open; planned for 0.23** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)).
+**Status: shipped (0.23).** [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md): `secheaders.py` on
+the main server, the MCP server and the events server; `/docs`'s Swagger UI pinned with integrity hashes;
+`QUERYAPIGATE_HSTS_MAX_AGE`; no version banner. Found on the way and fixed in 0.22.1: cached responses were shareable.
 
-**Impact:** the Console's responses carry a Content-Security-Policy and `X-Content-Type-Options` (`console.py`); the API
+**Was:** the Console's responses carry a Content-Security-Policy and `X-Content-Type-Options` (`console.py`); the API
 and docs routes carry none and rely on the reverse proxy. A scanner flags it, and a deployment without a proxy that adds
 them has none.
 

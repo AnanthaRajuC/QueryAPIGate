@@ -52,14 +52,23 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-11
+
+Seeing inside, and hardened at the edge: QueryAPIGate's spans in your traces - from the app's request through the
+saved query to the database - without a parameter value, row or secret ever leaving in one; and security headers on
+every response, so none depends on a proxy to add them. Tracing is experimental; the headers are stable.
+
 ### Added
 - **Tracing with OpenTelemetry** (BACKLOG #92, [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md),
   experimental): `pip install "queryapigate[otel]"` and set `OTEL_EXPORTER_OTLP_ENDPOINT` - every other `OTEL_*`
   variable works as usual. Spans for each request (by route rule), saved query, database call, serialisation, MCP tool
   call, live stream opened and export, continuing a caller's `traceparent` (and `TRACEPARENT` for
   `queryapigate export`). `trace_id` in run history, error bodies and JSON log lines. Spans never hold parameter
-  values, rows, statements, headers or secrets - a test fails if one does. See
-  [Tracing](documentation/API.md#tracing-opentelemetry).
+  values, rows, statements, headers or secrets - a test fails if one does; an MCP client's tool name only when it is
+  well formed. Measured: about 1 ms a request with every request traced, nothing measurable at 10% sampling. Guide 51,
+  [See QueryAPIGate in your traces](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/51-see-queryapigate-in-your-traces.md).
+  See [Tracing](documentation/API.md#tracing-opentelemetry). The Docker image includes the extra: set the endpoint to
+  turn it on.
 - **Security headers on every response** (BACKLOG #93, [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)):
   `X-Content-Type-Options: nosniff`; on API responses `Content-Security-Policy: default-src 'none'; frame-ancestors
   'none'` and `Referrer-Policy: no-referrer`; `Cache-Control: no-store` unless the route says otherwise - on the main
@@ -2010,7 +2019,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...v0.21.0

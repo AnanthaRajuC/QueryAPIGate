@@ -19,6 +19,7 @@ unit-tested without the optional ``queryapigate[mcp]`` extra installed) can be i
 package isn't."""
 import json
 import logging
+import re
 import time
 import urllib.parse
 
@@ -434,6 +435,9 @@ def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
     return call_as(flask_app, permission, name, arguments, started)
 
 
+_TOOL_NAME_RE = re.compile(r'[\w .\-]{1,100}')
+
+
 def call_as(flask_app, permission, name, arguments, started=None, headers=None):
     """One tools/call by an authenticated caller: its own rate limit, the tool, and a request in /metrics (method
     MCP, endpoint mcp.<tool kind>) - in a span (tracing.py) continuing the trace a `traceparent` in `headers` names."""
@@ -441,8 +445,11 @@ def call_as(flask_app, permission, name, arguments, started=None, headers=None):
     if started is None:
         instances.heartbeat()
         started = time.monotonic()
-    with tracing.span(f'tools/call {name}', 'server', {
-            'mcp.method.name': 'tools/call', 'gen_ai.tool.name': name, 'gen_ai.operation.name': 'execute_tool',
+    # The tool name is whatever the client sent - any string, for a tool that may not exist - so a span records it
+    # only in the shape a saved query's name can have.
+    shown = name if isinstance(name, str) and _TOOL_NAME_RE.fullmatch(name) else '(invalid)'
+    with tracing.span(f'tools/call {shown}', 'server', {
+            'mcp.method.name': 'tools/call', 'gen_ai.tool.name': shown, 'gen_ai.operation.name': 'execute_tool',
             'queryapigate.caller': permission.name or '-'}, parent=tracing.extract(headers)) as span:
         verdict = governance.check_key_limit(flask_app, permission)
         if verdict is not None and not verdict.allowed:

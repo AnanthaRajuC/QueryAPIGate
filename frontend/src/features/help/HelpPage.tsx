@@ -333,6 +333,12 @@ const DOCS = [
     path: 'how-to/50-rotate-an-api-key-without-downtime.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-51',
+    title: 'See QueryAPIGate in your traces',
+    path: 'how-to/51-see-queryapigate-in-your-traces.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

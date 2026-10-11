@@ -25,11 +25,11 @@ From the changelog's [versioning policy](../CHANGELOG.md#versioning-and-compatib
 3. **Pin the target version** - never upgrade by accident:
 
    ```bash
-   pip install "queryapigate[server,postgres]==0.22.1"      # not just "queryapigate"
+   pip install "queryapigate[server,postgres]==0.23.0"      # not just "queryapigate"
    ```
 
    ```yaml
-   image: ghcr.io/anantharajuc/queryapigate:0.22.1           # not :latest
+   image: ghcr.io/anantharajuc/queryapigate:0.23.0           # not :latest
    ```
 
 ## During: just start it

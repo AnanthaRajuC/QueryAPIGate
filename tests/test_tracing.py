@@ -141,6 +141,10 @@ class SpanTests(TracingTestCase):
         self.assertEqual((call.attributes['gen_ai.tool.name'], call.attributes['queryapigate.caller']),
                          ('people_named', 'partner'))
 
+    def test_a_tool_name_that_couldnt_be_one_isnt_recorded(self):
+        mcp_server.call_as(self.app, apikeys.authenticate(self.secret), f'x" OR {PARAM}\n' * 20, {})
+        self.assertEqual(self.named('tools/call (invalid)').attributes['gen_ai.tool.name'], '(invalid)')
+
     def test_a_cli_export_continues_its_schedulers_traceparent(self):
         out = os.path.join(self.tmp.name, 'people.csv')
         with mock.patch.dict(os.environ, {'TRACEPARENT': TRACEPARENT}), contextlib.redirect_stdout(io.StringIO()), \
