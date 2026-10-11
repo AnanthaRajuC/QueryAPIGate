@@ -126,6 +126,23 @@ class ListToolsForTests(McpTestCase):
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
         self.assertEqual(tool_names, {'reader', 'list_tables', 'execute_sql'})
 
+    def test_a_write_query_called_by_name_is_refused_whatever_the_grant(self):
+        """Unlisted isn't enough: a key allowed to run a write over REST must still not run it as a tool, nor reach an
+        older version that writes through `version` (fixed in 0.20.1)."""
+        import sqlite3
+        self.save('wipe', sql='DELETE FROM t')
+        secret = self.create_scoped_key(queries=[{'name': 'wipe', 'allow_writes': True}])
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ALLOW_WRITES': '1'}):
+            result = mcp_server.handle_call(self.app, secret, '', '10.0.0.1', 'wipe', {})
+            self.assertTrue(result.get('isError'))
+            self.assertEqual(result['structuredContent']['code'], 'read_only')
+            self.save('wipe', sql='SELECT COUNT(*) AS n FROM t')  # version 2 reads; version 1 still deletes
+            res = self.client.post('/api/v1/queries/wipe/publish', json={'version': 2}, headers=self.admin_headers)
+            self.assertLess(res.status_code, 300, res.get_data(as_text=True))
+            older = mcp_server.handle_call(self.app, secret, '', '10.0.0.1', 'wipe', {'version': 1})
+            self.assertEqual(older['structuredContent']['code'], 'read_only')
+        self.assertEqual(sqlite3.connect(self.db_path).execute('SELECT COUNT(*) FROM t').fetchone()[0], 5)
+
     def test_an_unauthenticated_caller_via_the_server_sees_nothing(self):
         # tools/list's own resolution: a missing or wrong key, with a server key configured, is no caller at all
         self.assertIsNone(mcp_server.permission_for_listing(self.app, 'wrong-key', '', '10.0.0.1'))

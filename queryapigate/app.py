@@ -707,6 +707,12 @@ def run_saved(ref, body, url_params):
 
     if not isinstance(saved.get('sql_query'), str):
         raise ApiError('Saved query has no SQL', 500)
+    if g.get('transport') == 'mcp' and not sqltools.is_read_only(saved['sql_query'],
+                                                                  store.get_connection(connection_name)['db']):
+        # Agents read only (mcp_server.py): a write isn't listed as a tool, and isn't run when called by name - any
+        # version of it, whatever the caller's grant would allow over REST.
+        raise ApiError('Over MCP, saved queries only read - this one writes, so it is not run here', 403,
+                       code='read_only')
     # Per-query write curation (apikeys.can_write_query()) only ever adds write reach for this one named
     # query on top of whatever the key's blanket allow_writes already grants - never the other way round.
     effective_allow_writes = g.permission.allow_writes or apikeys.can_write_query(g.permission, query_name)

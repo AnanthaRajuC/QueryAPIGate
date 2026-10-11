@@ -51,6 +51,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-11
+
+### Security
+- **A saved query that writes could be run over MCP by calling it by name** (0.11.0 to 0.20.0). The MCP server lists
+  only read-only saved queries as tools, but a call naming one that writes wasn't refused - so an agent holding a key
+  whose grant allowed that write (`{"name": "...", "allow_writes": true}`, with `QUERYAPIGATE_ALLOW_WRITES` on) could
+  run it unsupervised, including an older version that writes through `version`. It reached nothing the same key
+  couldn't do over REST, but it broke the promise that agents only read. Now a saved query whose SQL writes is refused
+  over MCP before it runs (`read_only`), whatever the version and the grant. To check whether it happened: run history
+  entries with `"transport": "mcp"` for a saved query that writes.
+
 ## [0.20.0] - 2026-10-11
 
 A consolidation release: four features leave the experimental list and come under the compatibility promise -
@@ -1896,7 +1907,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...v0.19.0

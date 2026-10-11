@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0008-mcp-write-tools-with-approval.md"

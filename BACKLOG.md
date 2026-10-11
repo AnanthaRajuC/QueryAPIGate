@@ -71,7 +71,7 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
    the DuckDB minimum.)
 8. **0.20: consolidation** - alerts, remote files, exports and column masking graduate, on terms written into the
    versioning policy (`experimental.GRADUATION`); CI against real S3, Keycloak and the oldest dependencies allowed.
-   (Released as 0.20.0 on 2026-10-11.)
+   (Released as 0.20.0 on 2026-10-11; 0.20.1 refused writes over MCP called by name.)
 9. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 10. **1.0.0.**
 
