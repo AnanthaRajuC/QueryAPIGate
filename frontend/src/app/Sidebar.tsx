@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { getApiKey, setApiKey } from '@/auth/apiKey';
 import { signInUrl, signOut, useSession } from '@/auth/session';
 
+import { usePendingWrites } from './approvals';
 import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 import { useAlertFeed } from './alerts';
@@ -23,6 +24,7 @@ function useCounts() {
   const keys = useApiKeys();
   const roles = useRoles();
   const alerts = useAlertFeed();
+  const pending = usePendingWrites();
   const n = (value: number | undefined) => (value ? String(value) : '');
   return {
     connections: n(connections.data?.length),
@@ -30,6 +32,7 @@ function useCounts() {
     apikeys: n(keys.data ? Object.keys(keys.data).length : undefined),
     roles: n(roles.data ? Object.keys(roles.data).length : undefined),
     alerts: n(alerts.urgent),
+    approvals: n(pending.data?.length),
   };
 }
 

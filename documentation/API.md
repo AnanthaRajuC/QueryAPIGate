@@ -1337,6 +1337,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
+| `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |
 | `sso_unreachable` | critical | Console sign-in through SSO is on, but the identity provider's metadata can't be fetched - nobody can sign in that way; open sessions keep working |
 | `agent_unusual_volume` | warning | An AI agent read at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows over MCP in the last hour, and ten times its own average hour - see [Agent usage](#agent-usage) |
 
@@ -1377,6 +1378,9 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
   the last 24 hours.
 - **`refusals`** counts failures by [error code](#errors): `table_not_allowed`, `mask_unresolvable` or `read_only`
   are an agent trying what its grant doesn't allow. **`masked_calls`** are the calls masking changed.
+- **`writes`** counts its write requests over MCP ([write tools](MCP.md#write-tools-agents-that-write-approved-by-a-person))
+  by how they ended - pending, approved, done, failed, rejected, expired; an agent with requests and no runs is
+  listed too.
 - **`top_statements`** are its most frequent ad-hoc statements, whitespace aside - by text, or by `sql_sha256` when
   `QUERYAPIGATE_HISTORY_ADHOC_SQL` is `hash` (none with `none`).
 - It's worked out from [run history](#run-history), so it holds what history holds: calls refused before they ran

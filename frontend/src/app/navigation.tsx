@@ -11,7 +11,7 @@ export interface NavItem {
   icon: ReactNode;
   /** Console route. */
   path: string;
-  count?: 'connections' | 'queries' | 'apikeys' | 'roles' | 'alerts';
+  count?: 'connections' | 'queries' | 'apikeys' | 'roles' | 'alerts' | 'approvals';
   /** The capability (adminroles.py) a role needs for this screen; hidden without it. 'data': may run SQL. */
   needs?: string;
 }
@@ -244,6 +244,20 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
             <path d="M12 4v4" />
             <circle cx="9.5" cy="13" r="1" />
             <circle cx="14.5" cy="13" r="1" />
+          </>,
+        ),
+      },
+      {
+        tab: 'approvals',
+        needs: 'writes.approve',
+        path: '/approvals',
+        group: 'Observability',
+        label: 'Approvals',
+        count: 'approvals',
+        icon: svg(
+          <>
+            <path d="M9 12l2 2 4-4" />
+            <rect x="4" y="4" width="16" height="16" rx="3" />
           </>,
         ),
       },

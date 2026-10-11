@@ -35,11 +35,22 @@ function Refusals({ refusals }: { refusals: Agent['refusals'] }) {
   );
 }
 
+function Writes({ writes }: { writes: Agent['writes'] }) {
+  const parts = Object.entries(writes ?? {})
+    .filter(([, count]) => count)
+    .map(([outcome, count]) => `${count} ${outcome}`);
+  return <div className="hint">{parts.length ? parts.join(' · ') : 'None.'}</div>;
+}
+
 function Detail({ agent }: { agent: Agent }) {
   const queries = Object.entries(agent.queries);
   return (
     <div className="agent-detail">
-      <p className="sub-h">Saved queries</p>
+      <p className="sub-h">Writes asked for</p>
+      <Writes writes={agent.writes} />
+      <p className="sub-h" style={{ marginTop: 12 }}>
+        Saved queries
+      </p>
       {queries.length ? (
         <div className="hint">{queries.map(([name, count]) => `${name} × ${count}`).join(' · ')}</div>
       ) : (

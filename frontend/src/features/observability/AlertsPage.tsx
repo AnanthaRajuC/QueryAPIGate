@@ -24,6 +24,7 @@ const OPEN_LABEL: Record<string, string> = {
   settings: 'Open settings',
   export: 'Open exports',
   agent: 'Open agents',
+  approvals: 'Open approvals',
 };
 
 function useOpen() {
@@ -34,6 +35,7 @@ function useOpen() {
     else if (target.type === 'connection') navigate('/connections');
     else if (target.type === 'export') navigate('/exports');
     else if (target.type === 'agent') navigate('/agents');
+    else if (target.type === 'approvals') navigate('/approvals');
     else {
       rememberSection(target.name);
       navigate('/settings');

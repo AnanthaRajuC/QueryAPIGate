@@ -181,6 +181,10 @@ listed as a tool with `readOnlyHint: false` and `destructiveHint: true`. `execut
   the run is in history with `request` and `approved_by`; approvals and rejections are in the audit log.
 - `QUERYAPIGATE_CONSOLE_URL` (`https://data.example.com`) makes `approve_at` a full link; without it, it's the Console
   path.
+- **In the Console:** **Observability → Approvals**, with a count of the writes waiting in the sidebar; the link an
+  agent is given opens its request there - the agent, the SQL, the exact arguments, the row ceiling, when it
+  expires - with **Approve** and **Reject** (and a reason). The `writes_awaiting_approval` alert says when writes are
+  waiting, and the Agents screen counts each agent's write requests by how they ended.
 
 ## Governance: the same rules as REST
 

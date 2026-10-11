@@ -57,7 +57,7 @@ def note_rate_limited(kind, who):
 KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
-         'agent_unusual_volume', 'sso_unreachable')
+         'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -74,7 +74,7 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
+    found = [*_server(now), *_sso(), *_writes(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
@@ -96,6 +96,19 @@ def _sso():
                    'in through it - sessions already open keep working. Check the provider is up and '
                    'QUERYAPIGATE_SSO_ISSUER is right; until then, sign in with an admin token or the break-glass key.',
                    {'type': 'settings', 'name': 'sso'})]
+
+
+def _writes():
+    """AI agents' writes waiting for a person to approve them (ADR 0008) - each expires unapproved otherwise."""
+    from . import agentwrites
+    count, oldest = agentwrites.pending_count()
+    if not count:
+        return []
+    return [_alert('warning', 'writes_awaiting_approval', 'writes',
+                   f"{_plural(count, 'write')} by AI agents {'is' if count == 1 else 'are'} waiting for approval",
+                   f'The oldest was asked for at {oldest}. Each expires unapproved after '
+                   f'{config.write_approval_minutes()} minutes - approve or reject them on the Approvals screen.',
+                   {'type': 'approvals', 'name': 'pending'}, oldest)]
 
 
 def _break_glass(now):

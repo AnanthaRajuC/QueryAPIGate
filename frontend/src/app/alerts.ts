@@ -150,10 +150,10 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
   {
     id: 'agents',
     label: 'Agents',
-    kinds: ['agent_unusual_volume'],
+    kinds: ['agent_unusual_volume', 'writes_awaiting_approval'],
     about:
       'AI agents that read at least QUERYAPIGATE_ALERT_AGENT_ROWS rows (default 10,000) over MCP in the last hour, ' +
-      'ten times their own usual hour.',
+      'ten times their own usual hour - and writes they asked to make, waiting for a person to approve them.',
   },
   {
     id: 'sign-in',

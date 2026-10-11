@@ -37,6 +37,7 @@ describe('Console shell - the classic frame', () => {
       'Alerts',
       'Metrics',
       'Agents',
+      'Approvals',
       'Audit log',
     ]);
     await waitFor(() =>

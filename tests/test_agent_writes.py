@@ -21,6 +21,8 @@ class AgentWriteTestCase(V1TestCase):
         conn.execute('CREATE TABLE tickets (id INTEGER PRIMARY KEY, title TEXT, status TEXT)')
         conn.commit()
         conn.close()
+        from queryapigate import masking
+        masking.forget_schema()  # another test's 'lite' may still be cached
 
     def save(self, name, sql, status=201, **fields):
         res = self.client.post('/api/v1/queries', headers=ADMIN, json={
@@ -258,6 +260,19 @@ class FlowTests(AgentWriteTestCase):
         token = {'X-API-Key': admins.issue_token('admin-1')[1]}
         decided = self.decide(request_id, 'approve', headers=token)
         self.assertEqual((decided['decided_by'], decided['decided_via']), ('admin-1', 'token'))
+
+    def test_waiting_writes_are_an_alert_and_every_request_is_in_agent_usage(self):
+        from queryapigate import alerts
+        request_id = self.call('close_ticket', status='done', id=1)['structuredContent']['request']
+        found = [a for a in alerts.collect() if a['kind'] == 'writes_awaiting_approval']
+        self.assertEqual([(a['title'], a['target']) for a in found],
+                         [('1 write by AI agents is waiting for approval', {'type': 'approvals', 'name': 'pending'})])
+        usage = {i['agent']: i for i in self.call_api('get', '/api/v1/usage/agents', 200)['items']}
+        self.assertEqual(usage['agent']['writes']['pending'], 1)
+        self.decide(request_id, 'reject')
+        self.assertNotIn('writes_awaiting_approval', [a['kind'] for a in alerts.collect()])
+        usage = {i['agent']: i for i in self.call_api('get', '/api/v1/usage/agents', 200)['items']}
+        self.assertEqual((usage['agent']['writes']['rejected'], usage['agent']['writes']['pending']), (1, 0))
 
     def test_the_link_names_the_console_and_the_server_ceiling_still_holds(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_CONSOLE_URL': 'https://data.example.com'}):

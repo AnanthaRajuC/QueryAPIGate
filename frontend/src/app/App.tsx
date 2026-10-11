@@ -27,6 +27,9 @@ const MetricsPage = lazy(() =>
   import('@/features/observability/MetricsPage').then((m) => ({ default: m.MetricsPage })),
 );
 
+const ApprovalsPage = lazy(() =>
+  import('@/features/observability/ApprovalsPage').then((m) => ({ default: m.ApprovalsPage })),
+);
 const AgentsPage = lazy(() =>
   import('@/features/observability/AgentsPage').then((m) => ({ default: m.AgentsPage })),
 );
@@ -155,6 +158,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <MetricsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="approvals/:id?"
+          element={
+            <Suspense fallback={<Loading />}>
+              <ApprovalsPage />
             </Suspense>
           }
         />

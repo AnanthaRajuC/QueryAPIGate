@@ -62,7 +62,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   With `"approval"` the first call asks, an administrator with `writes.approve` approves it
   (`/api/v1/write-requests`), and the second call runs it once, with exactly the approved arguments; `"insert"` runs
   an INSERT at once, with an idempotency key. Every agent write runs in a transaction, rolled back past its
-  `max_affected_rows`. On PostgreSQL, MySQL, SQLite and DuckDB. See
+  `max_affected_rows`. On PostgreSQL, MySQL, SQLite and DuckDB. The Console's **Approvals** screen (and the link each
+  agent is given) shows the SQL and the exact arguments to approve or reject; a `writes_awaiting_approval` alert and
+  the Agents screen's write counts follow them. See
   [Write tools](documentation/MCP.md#write-tools-agents-that-write-approved-by-a-person).
 
 ## [0.20.1] - 2026-10-11

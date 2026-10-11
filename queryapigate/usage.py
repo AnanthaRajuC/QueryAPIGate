@@ -120,8 +120,32 @@ def agents(since=None, until=None, hours=None, now=None):
             runs.append((row['query_name'], row['executed_at'], json.loads(row['entry_json'])))
         except ValueError:
             continue
+    items = summarise(runs)
+    _add_writes(items, since, until)
     return {'since': since, 'until': until, 'sample_rate': config.history_sample_rate(),
-            'truncated': len(rows) > MAX_SCAN, 'items': summarise(runs)}
+            'truncated': len(rows) > MAX_SCAN, 'items': items}
+
+
+WRITE_OUTCOMES = ('pending', 'approved', 'done', 'failed', 'rejected', 'expired')
+
+
+def _add_writes(items, since, until):
+    """Each agent's write requests (ADR 0008) in the window, by how they ended - an agent with requests and no runs
+    is listed too, so a write asked for and rejected isn't invisible."""
+    from . import agentwrites
+    by_agent = {}
+    for request in agentwrites.list_requests(limit=1000):
+        if since <= request['created_at'] < until:
+            outcome = 'pending' if request['status'] == 'running' else request['status']
+            counts = by_agent.setdefault(request['caller'], dict.fromkeys(WRITE_OUTCOMES, 0))
+            counts[outcome] = counts.get(outcome, 0) + 1
+    known = {item['agent'] for item in items}
+    for agent in sorted(set(by_agent) - known):
+        items.append({'agent': agent, 'calls': 0, 'rows': 0, 'errors': 0, 'masked_calls': 0, 'first_seen': None,
+                      'last_seen': None, 'connections': [], 'queries': {}, 'adhoc_calls': 0, 'refusals': {},
+                      'top_statements': []})
+    for item in items:
+        item['writes'] = by_agent.get(item['agent'], dict.fromkeys(WRITE_OUTCOMES, 0))
 
 
 # --- The agent_unusual_volume alert (alerts.py) ------------------------------------------------------------------

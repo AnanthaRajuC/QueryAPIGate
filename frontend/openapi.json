@@ -242,9 +242,11 @@
             "type": "integer"
           },
           "first_seen": {
+            "nullable": true,
             "type": "string"
           },
           "last_seen": {
+            "nullable": true,
             "type": "string"
           },
           "masked_calls": {
@@ -301,6 +303,13 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "writes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Its write requests (ADR 0008) by how they ended: pending, approved, done, failed, rejected, expired.",
+            "type": "object"
           }
         },
         "required": [
@@ -315,7 +324,8 @@
           "queries",
           "adhoc_calls",
           "refusals",
-          "top_statements"
+          "top_statements",
+          "writes"
         ],
         "type": "object"
       },
@@ -380,7 +390,8 @@
               "export_failing",
               "key_unused",
               "agent_unusual_volume",
-              "sso_unreachable"
+              "sso_unreachable",
+              "writes_awaiting_approval"
             ],
             "type": "string"
           },
@@ -410,7 +421,8 @@
                   "connection",
                   "settings",
                   "export",
-                  "agent"
+                  "agent",
+                  "approvals"
                 ],
                 "type": "string"
               }

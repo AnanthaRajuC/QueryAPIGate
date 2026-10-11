@@ -226,7 +226,8 @@ SCHEMAS = {
             'since': {'type': 'string', 'nullable': True,
                       'description': 'When the condition began or will begin, where known (server time).'},
             'target': {'type': 'object', 'nullable': True, 'required': ['type', 'name'], 'properties': {
-                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export', 'agent']},
+                'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export', 'agent',
+                                                    'approvals']},
                 'name': {'type': 'string'}}},
         },
     },
@@ -260,13 +261,13 @@ SCHEMAS = {
     'AgentUsage': {
         'type': 'object',
         'required': ['agent', 'calls', 'rows', 'errors', 'masked_calls', 'first_seen', 'last_seen', 'connections',
-                     'queries', 'adhoc_calls', 'refusals', 'top_statements'],
+                     'queries', 'adhoc_calls', 'refusals', 'top_statements', 'writes'],
         'properties': {
             'agent': {'type': 'string', 'description': 'The caller on the MCP server: a key name, or jwt:<user>.'},
             'calls': {'type': 'integer'}, 'rows': {'type': 'integer', 'description': 'Rows returned, all calls.'},
             'errors': {'type': 'integer', 'description': 'Calls that failed or were refused.'},
             'masked_calls': {'type': 'integer', 'description': 'Calls whose result masking changed.'},
-            'first_seen': {'type': 'string'}, 'last_seen': {'type': 'string'},
+            'first_seen': _NULLABLE_STRING, 'last_seen': _NULLABLE_STRING,
             'connections': {'type': 'array', 'items': {'type': 'string'}},
             'queries': {'type': 'object', 'additionalProperties': {'type': 'integer'},
                         'description': 'Saved queries run, with how many times, most first.'},
@@ -281,6 +282,9 @@ SCHEMAS = {
                                'errors': {'type': 'integer'}}},
                 'description': 'Its most frequent ad-hoc statements - by text, or by hash when history keeps only '
                                'a hash.'},
+            'writes': {'type': 'object', 'additionalProperties': {'type': 'integer'},
+                       'description': 'Its write requests (ADR 0008) by how they ended: pending, approved, done, '
+                                      'failed, rejected, expired.'},
         },
     },
     'AgentUsageList': {
