@@ -3003,6 +3003,119 @@
           "tables"
         ],
         "type": "object"
+      },
+      "WriteRequest": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "description": "Exactly what it runs with - an approval is for these alone.",
+            "type": "object"
+          },
+          "caller": {
+            "description": "The agent: an API key, or jwt:<user>.",
+            "type": "string"
+          },
+          "connection": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "decided_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "decided_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "decided_via": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "Approve by then - and, once approved, run by then.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_affected_rows": {
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "approval",
+              "insert"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "description": "done: rows_affected and any RETURNING rows; failed: error and code.",
+            "nullable": true,
+            "type": "object"
+          },
+          "sql": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "running",
+              "done",
+              "failed",
+              "rejected",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "query",
+          "version",
+          "caller",
+          "status",
+          "created_at",
+          "expires_at",
+          "mode",
+          "connection",
+          "sql",
+          "arguments",
+          "max_affected_rows",
+          "decided_by",
+          "decided_via",
+          "decided_at",
+          "reason",
+          "result"
+        ],
+        "type": "object"
+      },
+      "WriteRequestList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WriteRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -9293,6 +9406,311 @@
           }
         },
         "summary": "What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/write-requests": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "description": "pending, approved, running, done, failed, rejected or expired.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequestList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Writes AI agents asked to make over MCP, newest first (ADR 0008)",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/write-requests/{id}": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "One write request: who asked, the SQL, the exact arguments, what happened",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/write-requests/{id}/approve": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Approve a pending write: the agent may run it once, with these arguments, before it expires",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/write-requests/{id}/reject": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {
+                    "maxLength": 500,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Reject a pending write, with an optional reason the agent is told",
         "tags": [
           "Management API v1"
         ],

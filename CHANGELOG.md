@@ -23,8 +23,8 @@ callout in its documentation, `x-experimental: true` on its operations in `/open
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
-(`GET /api/v1/usage/agents`), and Console sign-in through SSO (`QUERYAPIGATE_SSO_*`). The list is
-`queryapigate/experimental.py`.
+(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), and write tools over MCP
+(`agent_writes`, `/api/v1/write-requests`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -50,6 +50,20 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Upgrading from 0.20
+- **Schema 11** adds one table (`write_requests`); nothing existing changes. A 0.20 instance still running keeps
+  working against the upgraded store, but can't be restarted on it - upgrade every instance.
+
+### Added
+- **Write tools over MCP, each write approved by a person** (BACKLOG #88,
+  [ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md), experimental): a saved query its author marks
+  `agent_writes` - one INSERT, UPDATE or DELETE, never DDL - is a write tool for callers whose grant allows the write.
+  With `"approval"` the first call asks, an administrator with `writes.approve` approves it
+  (`/api/v1/write-requests`), and the second call runs it once, with exactly the approved arguments; `"insert"` runs
+  an INSERT at once, with an idempotency key. Every agent write runs in a transaction, rolled back past its
+  `max_affected_rows`. On PostgreSQL, MySQL, SQLite and DuckDB. See
+  [Write tools](documentation/MCP.md#write-tools-agents-that-write-approved-by-a-person).
 
 ## [0.20.1] - 2026-10-11
 

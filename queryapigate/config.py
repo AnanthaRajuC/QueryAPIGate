@@ -347,6 +347,13 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS must be a whole number of days (0 turns the check off)')
+    raw = os.environ.get('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', '').strip()
+    if raw and (not raw.isdigit() or not 1 <= int(raw) <= 1440):
+        raise ValueError('QUERYAPIGATE_WRITE_APPROVAL_MINUTES must be a whole number of minutes from 1 to 1440')
+    raw = _env('QUERYAPIGATE_CONSOLE_URL')
+    if raw and (not _secure_url(raw) or urllib.parse.urlsplit(raw).path not in ('', '/')):
+        raise ValueError('QUERYAPIGATE_CONSOLE_URL is the https:// address the Console is reached at, with no path - '
+                         'https://data.example.com')
     raw = os.environ.get('QUERYAPIGATE_ALERT_AGENT_ROWS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_AGENT_ROWS must be a whole number of rows (0 turns the check off)')
@@ -850,6 +857,29 @@ def alert_error_rate():
     return int(raw) if raw else DEFAULT_ALERT_ERROR_RATE
 
 
+DEFAULT_WRITE_APPROVAL_MINUTES = 15
+
+
+def write_approval_minutes():
+    """QUERYAPIGATE_WRITE_APPROVAL_MINUTES: how long an agent's write waits for a person to approve it - and, once
+    approved, for the agent to run it (ADR 0008). Default 15."""
+    raw = os.environ.get('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', '').strip()
+    return int(raw) if raw else DEFAULT_WRITE_APPROVAL_MINUTES
+
+
+def console_url():
+    """QUERYAPIGATE_CONSOLE_URL: where people reach the Console - https://data.example.com - for the links this server
+    hands out (an agent's write to approve). Unset, the origin of QUERYAPIGATE_SSO_REDIRECT_URL, or none."""
+    raw = _env('QUERYAPIGATE_CONSOLE_URL')
+    if raw:
+        return raw.rstrip('/')
+    redirect = sso_redirect_url()
+    if redirect:
+        parts = urllib.parse.urlsplit(redirect)
+        return f'{parts.scheme}://{parts.netloc}'
+    return None
+
+
 DEFAULT_ALERT_AGENT_ROWS = 10_000
 
 
@@ -1063,6 +1093,10 @@ def describe_settings():
             row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
             row('MCP max rows', 'Row cap for a tools/call result - an LLM\'s context can\'t hold a huge one.',
                 'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows'),
+            row('Write approval window', 'Minutes an agent\'s write waits for a person to approve it, and then to run.',
+                'QUERYAPIGATE_WRITE_APPROVAL_MINUTES', f'{write_approval_minutes()} minutes'),
+            row('Console URL', 'Where people reach the Console - for the approval links agents are given.',
+                'QUERYAPIGATE_CONSOLE_URL', console_url() or 'not set (links are a path)'),
             row('Resource URL', 'The MCP server\'s own URL - the audience an agent\'s OAuth token must name. With '
                 'the next one, turns on sign-in through your identity provider for AI clients.',
                 'QUERYAPIGATE_MCP_RESOURCE_URL', mcp_resource_url() or 'off'),

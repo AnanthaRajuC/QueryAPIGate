@@ -26,10 +26,10 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 10  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 11  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
-#                    9: descriptions; 10: admin_sessions, sso_logins - see _upgrade()
+#                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -201,6 +201,22 @@ CREATE TABLE IF NOT EXISTS sso_logins (
   return_to TEXT NOT NULL,
   created_at REAL NOT NULL     -- epoch seconds
 );
+
+-- Agents' writes over MCP (agentwrites.py, ADR 0008): each one asked for, who approved or rejected it, and what it did.
+-- Kept 30 days; the run's history entry and the audit entries outlive it.
+CREATE TABLE IF NOT EXISTS write_requests (
+  id TEXT PRIMARY KEY,
+  query_name TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  caller TEXT NOT NULL,
+  status TEXT NOT NULL,        -- pending, approved, running, done, failed, rejected, expired
+  created_at TEXT NOT NULL,
+  expires_at REAL NOT NULL,    -- epoch seconds: approve by then, and once approved, run by then
+  idempotency_hash TEXT,       -- an insert-only write's idempotency key, hashed with its caller and query
+  details_json TEXT NOT NULL   -- mode, connection, sql, arguments and their hash, the decision, the result
+);
+CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
+CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
 """
 
 
@@ -363,6 +379,22 @@ CREATE TABLE IF NOT EXISTS sso_logins (
   return_to TEXT NOT NULL,
   created_at DOUBLE PRECISION NOT NULL     -- epoch seconds
 );
+
+-- Agents' writes over MCP (agentwrites.py, ADR 0008): each one asked for, who approved or rejected it, and what it did.
+-- Kept 30 days; the run's history entry and the audit entries outlive it.
+CREATE TABLE IF NOT EXISTS write_requests (
+  id TEXT COLLATE "C" PRIMARY KEY,
+  query_name TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  caller TEXT NOT NULL,
+  status TEXT NOT NULL,        -- pending, approved, running, done, failed, rejected, expired
+  created_at TEXT NOT NULL,
+  expires_at DOUBLE PRECISION NOT NULL,    -- epoch seconds: approve by then, and once approved, run by then
+  idempotency_hash TEXT,       -- an insert-only write's idempotency key, hashed with its caller and query
+  details_json TEXT NOT NULL   -- mode, connection, sql, arguments and their hash, the decision, the result
+);
+CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
+CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -575,7 +607,8 @@ def _upgrade(conn, postgres):
     8: destinations and exports (ADR 0004), server_secrets (ADR 0005) - new tables, likewise.
     9: descriptions (ADR 0006) - a new table, likewise.
     10: admin_sessions and sso_logins (ADR 0007) - new tables, likewise; an administrator's SSO link lives in its
-        details_json, so nothing existing changes."""
+        details_json, so nothing existing changes.
+    11: write_requests (ADR 0008) - a new table, likewise."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -750,6 +783,8 @@ _MIGRATED_TABLES = (
     ('server_secrets', ('name', 'value', 'created_at'), 'name'),
     ('descriptions', ('connection_name', 'table_name', 'column_name', 'description', 'source', 'updated_at',
                       'updated_by'), 'connection_name, table_name, column_name'),
+    ('write_requests', ('id', 'query_name', 'version', 'caller', 'status', 'created_at', 'expires_at',
+                        'idempotency_hash', 'details_json'), 'created_at, id'),
 )
 
 

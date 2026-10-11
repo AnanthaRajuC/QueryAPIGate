@@ -45,6 +45,21 @@ ROWS_OUTPUT_SCHEMA = {
     },
     'required': ['rows', 'truncated'],
 }
+# A write tool's answer (ADR 0008): approval_required - with where a person approves it - or done, with what it changed.
+WRITE_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'status': {'type': 'string', 'enum': ['approval_required', 'done']},
+        'request': {'type': 'string', 'description': 'The write request - pass it back as `approval` once approved.'},
+        'approve_at': {'type': 'string', 'description': 'Where a person approves it.'},
+        'expires_at': {'type': 'string'},
+        'message': {'type': 'string'},
+        'rows_affected': {'type': 'integer'},
+        'rows': {'type': 'array', 'items': {'type': 'object'}, 'description': "A RETURNING clause's rows."},
+        'truncated': {'type': 'boolean'},
+    },
+    'required': ['status', 'request', 'rows', 'truncated'],
+}
 TABLES_OUTPUT_SCHEMA = {
     'type': 'object',
     'properties': {
@@ -162,7 +177,7 @@ def write_tool(name, data):
         'description': f"{data.get('description') or name}\n\nThis tool writes. {how} It changes at most "
                        f"{ceiling} row{'' if ceiling == 1 else 's'}.",
         'inputSchema': schema,
-        'outputSchema': ROWS_OUTPUT_SCHEMA,
+        'outputSchema': WRITE_OUTPUT_SCHEMA,
         'readOnlyHint': False,
         'destructiveHint': not insert_only,
         'idempotentHint': False,
@@ -242,6 +257,9 @@ def call_tool_for(flask_app, permission, name, arguments):
 
     arguments = dict(arguments or {})
     requested_page_size = arguments.pop('page_size', None)
+    # A write tool's own arguments (ADR 0008) - what a person approved, or an insert's idempotency key - are not the
+    # query's parameters, and never reach its SQL.
+    write_args = {key: arguments.pop(key) for key in (APPROVAL_ARGUMENT, IDEMPOTENCY_ARGUMENT) if key in arguments}
     try:
         page_size = min(int(requested_page_size), config.mcp_max_rows()) if requested_page_size is not None \
             else config.mcp_max_rows()
@@ -254,10 +272,15 @@ def call_tool_for(flask_app, permission, name, arguments):
         g.request_id = app_module.new_request_id(None)                       # module's pure helpers need
         g.permission = permission
         g.transport = 'mcp'  # recorded on the run's history entry
+        g.agent_write_args = write_args
         try:
             response = app_module.run_saved(name, {}, arguments)
         except ApiError as error:
             return _error(error.message, error.status, error.code)
+        if g.get('agent_write_result') is not None:  # a write tool's answer - see app.run_agent_write()
+            structured = g.agent_write_result
+            return {'content': [{'type': 'text', 'text': json.dumps(structured, default=str)}],
+                    'structuredContent': structured}
         structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
         return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 

@@ -230,6 +230,33 @@ SCHEMAS = {
                 'name': {'type': 'string'}}},
         },
     },
+    'WriteRequest': {
+        'type': 'object',
+        'required': ['id', 'query', 'version', 'caller', 'status', 'created_at', 'expires_at', 'mode', 'connection',
+                     'sql', 'arguments', 'max_affected_rows', 'decided_by', 'decided_via', 'decided_at', 'reason',
+                     'result'],
+        'properties': {
+            'id': {'type': 'string'}, 'query': {'type': 'string'}, 'version': {'type': 'integer'},
+            'caller': {'type': 'string', 'description': 'The agent: an API key, or jwt:<user>.'},
+            'status': {'type': 'string', 'enum': ['pending', 'approved', 'running', 'done', 'failed', 'rejected',
+                                                  'expired']},
+            'created_at': {'type': 'string'},
+            'expires_at': {'type': 'string', 'description': 'Approve by then - and, once approved, run by then.'},
+            'mode': {'type': 'string', 'enum': ['approval', 'insert']},
+            'connection': {'type': 'string'}, 'sql': {'type': 'string'},
+            'arguments': {'type': 'object', 'additionalProperties': True,
+                          'description': 'Exactly what it runs with - an approval is for these alone.'},
+            'max_affected_rows': {'type': 'integer'},
+            'decided_by': _NULLABLE_STRING, 'decided_via': _NULLABLE_STRING, 'decided_at': _NULLABLE_STRING,
+            'reason': _NULLABLE_STRING,
+            'result': {'type': 'object', 'nullable': True, 'additionalProperties': True,
+                       'description': 'done: rows_affected and any RETURNING rows; failed: error and code.'},
+        },
+    },
+    'WriteRequestList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('WriteRequest')}},
+    },
     'AgentUsage': {
         'type': 'object',
         'required': ['agent', 'calls', 'rows', 'errors', 'masked_calls', 'first_seen', 'last_seen', 'connections',
@@ -853,6 +880,7 @@ def _op(summary, responses, parameters=(), body=None, description=None):
     return op
 
 
+_ID = {'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}
 _QUERY = _ok(_ref('Query'), etag=True)
 _CONNECTION = _ok(_ref('ConnectionDetail'), etag=True)
 _UNREACHABLE = {'502': {'description': "Couldn't reach the database (code connection_failed)",
@@ -937,6 +965,25 @@ PATHS = {
     '/api/v1/alerts': {
         'get': _op('What needs attention now - expiring keys, failing connections, slow or failing queries, '
                    'rate limits being hit - most severe first', {'200': _ok(_ref('AlertList'))}),
+    },
+    '/api/v1/write-requests': {
+        'get': _op('Writes AI agents asked to make over MCP, newest first (ADR 0008)',
+                   {'200': _ok(_ref('WriteRequestList'))}, parameters=[
+                       {'name': 'status', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                        'description': 'pending, approved, running, done, failed, rejected or expired.'}]),
+    },
+    '/api/v1/write-requests/{id}': {
+        'get': _op('One write request: who asked, the SQL, the exact arguments, what happened',
+                   {'200': _ok(_ref('WriteRequest'))}, parameters=[_ID]),
+    },
+    '/api/v1/write-requests/{id}/approve': {
+        'post': _op('Approve a pending write: the agent may run it once, with these arguments, before it expires',
+                    {'200': _ok(_ref('WriteRequest'))}, parameters=[_ID]),
+    },
+    '/api/v1/write-requests/{id}/reject': {
+        'post': _op('Reject a pending write, with an optional reason the agent is told',
+                    {'200': _ok(_ref('WriteRequest'))}, parameters=[_ID],
+                    body={'type': 'object', 'properties': {'reason': {'type': 'string', 'maxLength': 500}}}),
     },
     '/api/v1/usage/agents': {
         'get': _op('What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements',
@@ -1150,3 +1197,4 @@ PATHS = {
     },
 }
 PATHS['/api/v1/connections/{name}/descriptions/import']['post']['requestBody']['required'] = False
+PATHS['/api/v1/write-requests/{id}/reject']['post']['requestBody']['required'] = False

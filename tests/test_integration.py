@@ -304,6 +304,47 @@ class IntegrationBase:
         self.assertEqual(len(hashed), 7)  # equal values stay equal and distinct ones distinct - what hash is for
 
 
+    def test_an_agent_write_is_approved_runs_once_and_stops_at_its_ceiling(self):
+        """An AI agent's write (ADR 0008) on this database: in a transaction, counted, committed once approved - and
+        rolled back, changing nothing, when it would change more rows than its query allows."""
+        from queryapigate import definitions, mcp_server
+
+        def save(name, sql, **fields):
+            return self.client.post('/api/v1/queries', json={'name': name, 'description': 'd', 'sql': sql,
+                                                             'connection_name': 'it', 'publish': True, **fields})
+
+        def call(tool, **arguments):
+            return mcp_server.handle_call(self.client.application, '', '', '10.0.0.1', tool,
+                                          arguments)['structuredContent']
+
+        def names():
+            rows = self.query('SELECT id, name FROM queryapigate_it ORDER BY id', '?page_size=100').get_json()
+            return [list(r.values())[1] for r in rows]
+
+        res = save('it_rename', 'UPDATE queryapigate_it SET name = :name WHERE id = :id', agent_writes='approval')
+        if self.db not in definitions.AGENT_WRITE_DIALECTS:
+            self.assertEqual(res.status_code, 400)  # not where a write can't be counted and rolled back
+            return
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        self.assertEqual(save('it_rename_all', 'UPDATE queryapigate_it SET name = :name', agent_writes='approval',
+                              max_affected_rows=3).status_code, 201)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ALLOW_WRITES': '1'}):
+            asked = call('it_rename', name='Renamed', id=2)
+            self.assertEqual(asked['status'], 'approval_required')
+            self.assertEqual(names()[1], 'Item 2')
+            self.client.post(f"/api/v1/write-requests/{asked['request']}/approve")
+            done = call('it_rename', name='Renamed', id=2, approval=asked['request'])
+            self.assertEqual((done['status'], done['rows_affected']), ('done', 1), done)
+            self.assertEqual(names()[1], 'Renamed')
+            call('it_rename', name='Renamed', id=2, approval=asked['request'])  # a retry: the stored result
+            everything = call('it_rename_all', name='All')
+            self.client.post(f"/api/v1/write-requests/{everything['request']}/approve")
+            stopped = call('it_rename_all', name='All', approval=everything['request'])
+        self.assertEqual(stopped['code'], 'too_many_rows_affected', stopped)
+        self.assertNotIn('All', names())  # rolled back: not one of the seven rows changed
+        self.assertEqual(names()[1], 'Renamed')
+
+
 class DriverReadOnlyMixin:
     """Databases whose driver enforces read-only sessions should refuse writes even if the SQL guard is bypassed."""
 

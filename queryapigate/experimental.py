@@ -61,6 +61,16 @@ FEATURES: dict[str, dict[str, Any]] = {
         'operations': (('get', '/api/v1/usage/agents'),),
         'docs': ('documentation/API.md', 'Agent usage'),
     },
+    'agent_writes': {
+        'name': 'Write tools over MCP',
+        'why': 'new in 0.21 - how agents ask for writes, and how people approve them, may change as it is used '
+               '(ADR 0008)',
+        'operations': (('get', '/api/v1/write-requests'), ('get', '/api/v1/write-requests/{id}'),
+                       ('post', '/api/v1/write-requests/{id}/approve'),
+                       ('post', '/api/v1/write-requests/{id}/reject')),
+        'settings': ('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', 'QUERYAPIGATE_CONSOLE_URL'),
+        'docs': ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
+    },
     'sso': {
         'name': 'Console sign-in through SSO',
         'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',

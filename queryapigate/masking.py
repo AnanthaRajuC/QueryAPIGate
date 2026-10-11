@@ -457,6 +457,33 @@ def describe(rules, sql, connection_name, dialect):
     return {'masked': [{'column': f['column'], 'action': f['action']} for f in plan_.fired], 'refused': None}
 
 
+def returning_as_select(sql, dialect):
+    """A data change's RETURNING clause, as the SELECT that returns the same columns - `SELECT <its expressions> FROM
+    <the table written>` - so tracing reads it like any read (an agent's write, ADR 0008). Only for a change to one
+    table: an UPDATE ... FROM or DELETE ... USING could return another table's columns, and is refused. Any other
+    statement comes back as it is."""
+    if sqltools.first_keyword(sql, dialect) not in ('insert', 'update', 'delete'):
+        return sql
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError:
+        return sql  # trace() says what's missing
+    try:
+        parsed = sqlglot.parse_one(sqltools.substitute_placeholders(sql, dialect), read=_DIALECT_MAP.get(dialect))
+    except Exception:
+        raise _refuse("This statement can't be read to mask what it returns") from None
+    returning = parsed.args.get('returning')
+    if returning is None:
+        return sql
+    target = parsed.this if not isinstance(parsed.this, exp.Schema) else parsed.this.this  # INSERT INTO t (cols)
+    if not isinstance(target, exp.Table) or parsed.args.get('from') or parsed.args.get('using') \
+            or parsed.args.get('joins'):
+        raise _refuse('Masking can follow what a change to one table returns - not one that joins others in')
+    select = exp.select(*returning.expressions).from_(target.copy())
+    return select.sql(dialect=_DIALECT_MAP.get(dialect))
+
+
 def prepare(rules, sql, connection_name, dialect, database=None):
     """The Plan for running `sql` for a caller with `rules`, or None when there is nothing to mask (no rules, or a
     statement with no table data). Raises mask_unresolvable - before the query runs - when it can't be traced."""
@@ -465,6 +492,7 @@ def prepare(rules, sql, connection_name, dialect, database=None):
     if dialect == 'mongo':
         raise _refuse("Column masking isn't supported for MongoDB connections yet, so a caller with mask rules is "
                       'refused on them')
+    sql = returning_as_select(sql, dialect)
     traced = trace(sql, dialect, _tables(connection_name, database) if dialect in _DIALECT_MAP else [])
     if traced is None:
         return None

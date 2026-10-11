@@ -1710,6 +1710,15 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `sso_only` | 409 | A personal token for an administrator who signs in through SSO, with `QUERYAPIGATE_SSO_ONLY` on |
 | `email_required` | 409 | Marking an administrator for SSO before they have an email to match |
 | `sso_ambiguous` | 409 | Two administrators wait for an SSO sign-in with the same email |
+| `write_request_not_found` | 404 | No agent write request by that id - or not this caller's, for this tool |
+| `approval_pending` | 409 | An agent's write isn't approved yet |
+| `approval_rejected` | 403 | A person rejected the agent's write; the message gives their reason |
+| `approval_expired` | 409 | The agent's write wasn't approved, or run once approved, in time - ask again |
+| `approval_mismatch` | 403 | The arguments aren't the ones a person approved - an approval is for exactly one write |
+| `write_request_closed` | 409 | Approving or rejecting a write request that isn't pending |
+| `write_running` | 409 | That approved write is running now |
+| `idempotency_conflict` | 409 | An insert's idempotency key was used before with other arguments |
+| `too_many_rows_affected` | 409 | An agent's write would have changed more rows than its query's `max_affected_rows` - rolled back, nothing changed |
 | `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |

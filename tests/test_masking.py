@@ -276,6 +276,31 @@ class RealSchemaTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'mask_unresolvable')
 
 
+class ReturningTests(unittest.TestCase):
+    """What an agent's write returns (ADR 0008) is masked like a read: its RETURNING clause traced as the SELECT that
+    returns the same columns from the table written - and refused when the change joins other tables in."""
+
+    def test_returning_reads_like_a_select_of_the_table_written(self):
+        for sql, expected in (
+                ("INSERT INTO tickets (title) VALUES ('x') RETURNING id, title", 'SELECT id, title FROM tickets'),
+                ('UPDATE tickets SET status = :s WHERE id = :id RETURNING upper(title) AS t',
+                 'SELECT UPPER(title) AS t FROM tickets'),
+                ('DELETE FROM tickets WHERE id = 1 RETURNING *', 'SELECT * FROM tickets')):
+            with self.subTest(sql=sql):
+                self.assertEqual(masking.returning_as_select(sql, 'postgres'), expected)
+
+    def test_without_returning_or_for_a_read_nothing_changes(self):
+        for sql in ('UPDATE tickets SET status = 1', 'SELECT * FROM tickets'):
+            self.assertEqual(masking.returning_as_select(sql, 'postgres'), sql)
+
+    def test_a_change_that_joins_other_tables_in_is_refused(self):
+        for sql in ('UPDATE tickets SET status = u.s FROM users u WHERE u.id = tickets.owner RETURNING u.email',
+                    'DELETE FROM tickets USING users u WHERE u.id = tickets.owner RETURNING u.email'):
+            with self.subTest(sql=sql), self.assertRaises(masking.ApiError) as caught:
+                masking.returning_as_select(sql, 'postgres')
+            self.assertEqual(caught.exception.code, 'mask_unresolvable')
+
+
 class SqlglotVersionTests(unittest.TestCase):
     def test_a_sqlglot_too_old_to_trace_with_says_so(self):
         """Tracing was verified on sqlglot 25.2 to <26; older ones lack what it uses (exp.SetOperation), and a masked

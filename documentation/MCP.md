@@ -156,6 +156,32 @@ What an agent is told the data means:
 
 The step by step: [tell AI agents what your data means, and see what they did](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/47-tell-agents-what-your-data-means-and-see-what-they-did.md).
 
+## Write tools: agents that write, approved by a person
+
+> **Experimental** - new in 0.21 ([ADR 0008](adr/0008-mcp-write-tools-with-approval.md)); how agents ask for writes
+> and how people approve them may change in any minor release, always noted in the changelog.
+
+Agents read only - except through a saved query whose author marked it **`agent_writes`**, for a caller whose grant
+allows that write (`{"name": "close_ticket", "allow_writes": true}`, as over REST), with `QUERYAPIGATE_ALLOW_WRITES`
+on, on PostgreSQL, MySQL, SQLite or DuckDB. Such a query is one `INSERT`, `UPDATE` or `DELETE` - never DDL - and is
+listed as a tool with `readOnlyHint: false` and `destructiveHint: true`. `execute_sql` never writes.
+
+- **`"agent_writes": "approval"`** - the first call writes nothing: it answers `{"status": "approval_required",
+  "request": "wr_...", "approve_at": ".../console/approvals/wr_..."}`. An administrator whose role has
+  `writes.approve` (owners, admins) approves or rejects it - `POST /api/v1/write-requests/{id}/approve` or `/reject`
+  with a `reason`. The agent then calls again with the same arguments and `approval: "wr_..."`: it runs if approved,
+  for this caller, with exactly these arguments, before it expires (`QUERYAPIGATE_WRITE_APPROVAL_MINUTES`, default
+  15) - and once: another call with the same approval returns the first one's result.
+- **`"agent_writes": "insert"`** - a single `INSERT` runs at once, with an optional `idempotency_key` so a retry
+  within a day returns the first call's result instead of inserting again.
+- **`max_affected_rows`** (default 1) - the write runs in a transaction, rolled back when it changed more rows
+  (`too_many_rows_affected`, nothing changed). On MySQL, keep these queries on InnoDB tables: a MyISAM table can't be
+  rolled back.
+- What it returns (`RETURNING`) is masked like any read. Every request is kept 30 days (`GET /api/v1/write-requests`);
+  the run is in history with `request` and `approved_by`; approvals and rejections are in the audit log.
+- `QUERYAPIGATE_CONSOLE_URL` (`https://data.example.com`) makes `approve_at` a full link; without it, it's the Console
+  path.
+
 ## Governance: the same rules as REST
 
 Every tool call passes through the same checks a REST request does, in the same order, by calling the same code

@@ -707,12 +707,18 @@ def run_saved(ref, body, url_params):
 
     if not isinstance(saved.get('sql_query'), str):
         raise ApiError('Saved query has no SQL', 500)
+    agent_write = False
     if g.get('transport') == 'mcp' and not sqltools.is_read_only(saved['sql_query'],
                                                                   store.get_connection(connection_name)['db']):
-        # Agents read only (mcp_server.py): a write isn't listed as a tool, and isn't run when called by name - any
-        # version of it, whatever the caller's grant would allow over REST.
-        raise ApiError('Over MCP, saved queries only read - this one writes, so it is not run here', 403,
-                       code='read_only')
+        # Over MCP a saved query that writes runs only as an agent write (ADR 0008): its author marked it, the
+        # caller's grant allows it, on its own connection - and then through agentwrites.py, approved or insert-only.
+        # Otherwise it isn't run, called by name or by version, whatever the caller's grant would allow over REST.
+        from . import mcp_server
+        if not (mcp_server.agent_may_write(g.permission, query_name, saved)
+                and connection_name == saved.get('connection_name')):
+            raise ApiError('Over MCP, saved queries only read - this one writes, so it is not run here', 403,
+                           code='read_only')
+        agent_write = True
     # Per-query write curation (apikeys.can_write_query()) only ever adds write reach for this one named
     # query on top of whatever the key's blanket allow_writes already grants - never the other way round.
     effective_allow_writes = g.permission.allow_writes or apikeys.can_write_query(g.permission, query_name)
@@ -720,6 +726,8 @@ def run_saved(ref, body, url_params):
     used = set(sqltools.placeholder_names(saved['sql_query']))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     sql = sqltools.fill_placeholders(saved['sql_query'], values)
+    if agent_write:
+        return run_agent_write(saved, path, number, query_name, connection_name, values, sql, timeout)
 
     if get_stream_flag():
         # No caching for a streamed export - caching would require materialising the whole body anyway,
@@ -765,6 +773,80 @@ def run_saved(ref, body, url_params):
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl, cache_meta)
     return response
+
+
+def run_agent_write(saved, path, number, name, connection_name, values, sql, timeout):
+    """An AI agent's write through a saved query (agentwrites.py): asked for, run once approved - or, insert-only, run
+    at once. Answers with the tool's structured result in g.agent_write_result, which mcp_server.call_tool_for() passes
+    on as it is."""
+    from . import agentwrites
+    args = g.get('agent_write_args') or {}
+    caller = caller_key_name()
+    if saved['agent_writes'] == 'insert':
+        hashed = None
+        if args.get('idempotency_key') is not None:
+            hashed, earlier = agentwrites.idempotent(caller, name, args['idempotency_key'])
+            if earlier is not None:
+                if earlier['_arguments_hash'] != agentwrites.arguments_hash(name, number, values):
+                    raise ApiError('This idempotency_key was used with other arguments - use a new one', 409,
+                                   code='idempotency_conflict')
+                return _agent_write_answer(earlier)
+        request = agentwrites.create(caller, name, number, saved, connection_name, values, status='running',
+                                     idempotency=hashed)
+        return _execute_agent_write(request, saved, path, number, connection_name, values, sql, timeout)
+    approval = args.get('approval')
+    if not approval:
+        request = agentwrites.create(caller, name, number, saved, connection_name, values)
+        url = agentwrites.approval_url(request['id'])
+        return _agent_write_answer({**request, 'status': 'approval_required'}, approve_at=url, message=(
+            f"A person must approve this write before it runs. Ask them to open {url} - then call this tool again with "
+            f"the same arguments and approval: \"{request['id']}\". It expires at {request['expires_at']}."))
+    state, request = agentwrites.claim(approval, caller, name, number, values)
+    if state == 'finished':
+        return _agent_write_answer(request)
+    return _execute_agent_write(request, saved, path, number, connection_name, values, sql, timeout)
+
+
+def _execute_agent_write(request, saved, path, number, connection_name, values, sql, timeout):
+    from . import agentwrites
+    entry = {**run_entry(connection_name), 'request': request['id'],
+             **({'approved_by': request['decided_by']} if request['decided_by'] else {})}
+    try:
+        result, affected = engine.execute_agent_write(sql, connection_name, values, saved.get('max_affected_rows') or 1,
+                                                      timeout, key_name=caller_key_name(),
+                                                      allowed_write_ops=g.permission.allowed_write_ops,
+                                                      allowed_tables=g.permission.allowed_tables,
+                                                      mask=g.permission.mask)
+    except ApiError as error:
+        agentwrites.finish(request['id'], error={'error': error.message, 'code': error.code or 'internal_error'})
+        _record_and_broadcast(path, number, connection_name,
+                              {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
+        raise
+    limit = config.mcp_max_rows()
+    rows = [dict(zip(result.columns, row, strict=False)) for row in result.rows[:limit]]
+    done = agentwrites.finish(request['id'], result={'rows_affected': affected, 'rows': rows,
+                                                     'truncated': len(result.rows) > limit})
+    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': affected,
+                                                          **masked_entry(result.masked)})
+    return _agent_write_answer(done)
+
+
+def _agent_write_answer(request, **extra):
+    """The write tool's structured result: approval_required (with where to approve), done (what it changed), or - for
+    a request that ran and failed - the error it failed with, raised again."""
+    if request['status'] == 'failed':
+        failure = request['result'] or {}
+        # what it failed with the first time - finish() always stores a code
+        raise ApiError(failure.get('error') or 'This write failed', 409, code=failure.get('code') or 'internal_error')
+    if request['status'] == 'done':
+        result = request['result'] or {}
+        payload = {'status': 'done', 'request': request['id'], 'rows_affected': result.get('rows_affected', 0),
+                   'rows': result.get('rows') or [], 'truncated': bool(result.get('truncated'))}
+    else:
+        payload = {'status': request['status'], 'request': request['id'], 'expires_at': request['expires_at'],
+                   'rows': [], 'truncated': False, **extra}
+    g.agent_write_result = payload
+    return jsonify(payload)
 
 
 def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_format, timeout):

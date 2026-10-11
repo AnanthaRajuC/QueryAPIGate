@@ -638,6 +638,38 @@ def list_alerts():
     return jsonify({'items': alerts.collect(), 'checked_at': store.now()}), 200
 
 
+@bp.route('/write-requests', methods=['GET'])
+def list_write_requests():
+    """Writes AI agents asked to make over MCP (agentwrites.py), newest first; `?status=pending` for those
+    waiting."""
+    from . import agentwrites
+    found = agentwrites.list_requests(request.args.get('status'))
+    return jsonify({'items': [agentwrites.public(r) for r in found]}), 200
+
+
+@bp.route('/write-requests/<request_id>', methods=['GET'])
+def get_write_request(request_id):
+    from . import agentwrites
+    return jsonify(agentwrites.public(agentwrites.get(request_id))), 200
+
+
+@bp.route('/write-requests/<request_id>/approve', methods=['POST'])
+def approve_write_request(request_id):
+    """Let it run: the agent may now call the tool again, with the same arguments, before it expires."""
+    from . import agentwrites
+    decided = agentwrites.decide(request_id, True, caller_key_name(), g.permission.via)
+    return jsonify(agentwrites.public(decided)), 200
+
+
+@bp.route('/write-requests/<request_id>/reject', methods=['POST'])
+def reject_write_request(request_id):
+    """Refuse it, with an optional `reason` the agent is told."""
+    from . import agentwrites
+    data = get_json_body(required=False) or {}
+    decided = agentwrites.decide(request_id, False, caller_key_name(), g.permission.via, reason=data.get('reason'))
+    return jsonify(agentwrites.public(decided)), 200
+
+
 @bp.route('/usage/agents', methods=['GET'])
 def agent_usage():
     """What each AI agent did over MCP (usage.py), from run history."""

@@ -1,13 +1,23 @@
 """Ties the pieces together: look up the connection, validate the SQL, run it, wrap the page."""
 import hashlib
 import logging
+import re
 import time
 
 from . import config, masking, metrics, mongotools, store
 from .errors import ApiError
 from .formats import ResultSetDTO
 from .pool import get_pool
-from .runners import RUNNERS, STREAM_RUNNERS, mongo_find, mongo_list_collections, mongo_list_databases, mongo_ping
+from .runners import (
+    RUNNERS,
+    STREAM_RUNNERS,
+    WRITE_RUNNERS,
+    TooManyRowsAffected,
+    mongo_find,
+    mongo_list_collections,
+    mongo_list_databases,
+    mongo_ping,
+)
 from .sqltools import validate_sql
 
 log = logging.getLogger('queryapigate')
@@ -278,6 +288,50 @@ def list_collections(details):
     except Exception as error:
         detail = _redact_password(str(error), details.get('password'))
         raise ApiError('Could not list collections', 502, detail=detail, code='connection_failed') from error
+
+
+def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout=None, key_name='-',
+                        allowed_write_ops=None, allowed_tables=None, mask=None):
+    """An AI agent's write through a saved query (ADR 0008): checked as every statement is - the server's write
+    ceiling, the caller's allowed_write_ops and allowed_tables, masking on what a RETURNING clause gives back - then run
+    in a transaction that is committed only if it changed at most `max_affected_rows` rows. Returns (ResultSetDTO,
+    rows changed); more rows, and it is rolled back and refused with too_many_rows_affected."""
+    details = _sql_connection(connection_name)
+    if details['db'] not in WRITE_RUNNERS:
+        raise ApiError(f"Agents can't write on '{details['db']}' connections", 403, code='read_only')
+    sql = validate_sql(sql, dialect=details['db'], allow_writes=config.allow_writes(),
+                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables)
+    # Only rows a RETURNING clause gives back can carry a masked value; a write without one returns none.
+    returns_rows = re.search(r'\bRETURNING\b', sql, re.IGNORECASE) is not None
+    masked = masking.prepare(mask, sql, connection_name, details['db'], None) if mask and returns_rows else None
+    log.info('Agent write on %s (%s), at most %s rows: %s', connection_name, details['db'], max_affected_rows, sql,
+             extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
+    started = time.monotonic()
+    status = 'error'
+    metrics.inc_active_query()
+    try:
+        columns, rows, affected = WRITE_RUNNERS[details['db']](details, sql, params, max_affected_rows, timeout,
+                                                               get_pool())
+        status = 'success'
+    except TooManyRowsAffected as error:
+        raise ApiError(f'This write would have changed {error.affected} rows, and this query may change at most '
+                       f'{error.ceiling} - nothing was changed', 409, code='too_many_rows_affected') from None
+    except ApiError:
+        raise
+    except ImportError as error:
+        raise ApiError(f"The driver for '{details['db']}' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
+    except Exception as error:
+        log.exception('Agent write on %s failed', connection_name)
+        raise _failure(error, 'An error occurred while executing the SQL query', details) from error
+    finally:
+        metrics.dec_active_query()
+        metrics.observe_query(connection_name, details['db'], status, time.monotonic() - started, key_name)
+    if masked is not None:
+        columns, rows = masked.apply(columns, list(rows))
+    result = ResultSetDTO(list(rows), columns, has_more=False)
+    result.masked = masked.fired if masked is not None else []
+    return result, affected
 
 
 def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None, mask=None):

@@ -890,3 +890,156 @@ def mongo_list_collections(details, pool=None):
         return sorted(_mongo_database(details, session.conn).list_collection_names())
 
     return _with_mongo_session(details, pool, True, body)
+
+
+# --------------------------------------------------------------------------------------
+# Agent writes (ADR 0008): one statement in a transaction, committed only when it changed no more rows than the
+# saved query's max_affected_rows - otherwise rolled back, so the ceiling is the rows actually changed when it ran,
+# not an estimate made beforehand. Only on the databases that can do both (definitions.AGENT_WRITE_DIALECTS).
+# Each returns (columns, rows, affected); rows are a RETURNING clause's, if the statement has one.
+# --------------------------------------------------------------------------------------
+
+class TooManyRowsAffected(Exception):
+    def __init__(self, affected, ceiling):
+        super().__init__(f'{affected} rows')
+        self.affected, self.ceiling = affected, ceiling
+
+
+def _write(cursor, sql, params, style, dialect, count_row=False):
+    """Execute and report: (columns, rows, affected). `count_row`: the database answers a data change with one
+    "Count" row instead of a rowcount (DuckDB) - unless the statement returns rows of its own."""
+    import re
+    statement, args = bind_parameters(sql, params or {}, style, dialect)
+    if args is None:
+        cursor.execute(statement)
+    else:
+        cursor.execute(statement, args)
+    columns = [d[0] for d in cursor.description] if cursor.description else []
+    rows = cursor.fetchall() if cursor.description else []
+    returning = re.search(r'\bRETURNING\b', sql, re.IGNORECASE) is not None
+    if count_row and not returning:
+        affected = int(rows[0][0]) if rows else 0
+        return [], [], affected
+    if returning:
+        affected = len(rows)
+    else:
+        affected = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else len(rows)
+    return columns, rows, affected
+
+
+def _write_with_ceiling(conn, write, ceiling):
+    """Run `write()` -> (columns, rows, affected); commit, or roll back and raise when it changed too many rows."""
+    try:
+        columns, rows, affected = write()
+    except BaseException:
+        conn.rollback()
+        raise
+    if affected > ceiling:
+        conn.rollback()
+        raise TooManyRowsAffected(affected, ceiling)
+    conn.commit()
+    return columns, rows, affected
+
+
+def _write_postgres(details, sql, params, ceiling, timeout=None, pool=None):
+    import psycopg2.errors
+    driver = _Postgres()
+
+    def run(session):
+        def write():
+            with session.conn.cursor() as cursor:
+                if timeout:
+                    cursor.execute(f'SET LOCAL statement_timeout = {_millis(timeout)}')
+                try:
+                    return _write(cursor, sql, params, 'format', 'postgres')
+                except psycopg2.errors.QueryCanceled:
+                    raise _timed_out(timeout) from None
+        return _write_with_ceiling(session.conn, write, ceiling)
+    return _with_session(driver, details, pool, run)
+
+
+def _write_mysql(details, sql, params, ceiling, timeout=None, pool=None):
+    import mysql.connector
+    driver = _MySQL()
+
+    def run(session):
+        def write():
+            cursor = session.conn.cursor()
+            try:
+                _set_mysql_timeout(cursor, session, timeout)
+                try:
+                    return _write(cursor, sql, params, 'format', 'mysql')
+                except mysql.connector.Error as error:
+                    if getattr(error, 'errno', None) in _MYSQL_TIMEOUT_ERRNOS:
+                        raise _timed_out(timeout) from None
+                    raise
+            finally:
+                cursor.close()
+        return _write_with_ceiling(session.conn, write, ceiling)
+    return _with_session(driver, details, pool, run)
+
+
+def _write_duckdb(details, sql, params, ceiling, timeout=None, pool=None):
+    import duckdb
+    driver = _DuckDB()
+
+    def run(session):
+        conn = session.conn
+        conn.begin()  # DuckDB commits each statement by itself otherwise - nothing would be left to roll back
+
+        def write():
+            timer = threading.Timer(timeout, conn.interrupt) if timeout else None
+            if timer:
+                timer.daemon = True
+                timer.start()
+            try:
+                return _write(conn, sql, params, 'qmark', 'duckdb', count_row=True)
+            except duckdb.InterruptException:
+                raise _timed_out(timeout) from None
+            except duckdb.PermissionException as error:
+                raise duckfiles.not_allowed(error) from None
+            finally:
+                if timer:
+                    timer.cancel()
+        return _write_with_ceiling(conn, write, ceiling)
+    return _with_session(driver, details, pool, run)
+
+
+def _write_sqlite(details, sql, params, ceiling, timeout=None, pool=None):
+    conn = sqlite3.connect(_resolve_db_file(details, 'SQLite'), timeout=config.CONNECT_TIMEOUT)
+    try:
+        expired = []
+        if timeout:
+            deadline = time.monotonic() + timeout
+
+            def check_deadline():
+                if time.monotonic() > deadline:
+                    expired.append(True)
+                    return 1
+                return 0
+            conn.set_progress_handler(check_deadline, 10000)
+
+        def write():
+            try:
+                return _write(conn.cursor(), sql, params, 'qmark', 'sqlite')
+            except sqlite3.OperationalError:
+                if expired:
+                    raise _timed_out(timeout) from None
+                raise
+        return _write_with_ceiling(conn, write, ceiling)
+    finally:
+        conn.close()
+
+
+def _with_session(driver, details, pool, run):
+    if pool is None:
+        session = Session(driver.connect(details, False), driver)
+        try:
+            return run(session)
+        finally:
+            session.close()
+    with pool.checkout(driver, details, False) as session:
+        return run(session)
+
+
+WRITE_RUNNERS = {'postgres': _write_postgres, 'mysql': _write_mysql, 'sqlite': _write_sqlite, 'duckdb': _write_duckdb}
