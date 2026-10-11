@@ -96,7 +96,7 @@ import time
 from collections import namedtuple
 from datetime import datetime, timedelta
 
-from . import admins, config, db, masking, store
+from . import admins, config, db, masking, quotas, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -111,14 +111,14 @@ DEFAULT_GRACE_MINUTES = 60
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
                                        'allowed_write_ops', 'collections', 'allowed_tables', 'claims', 'role',
-                                       'via', 'mask', 'max_concurrent', 'query_timeout', 'max_rows'],
-                        defaults=(frozenset(), None, None, None, None, None, None, None, None))
+                                       'via', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota'],
+                        defaults=(frozenset(), None, None, None, None, None, None, None, None, None))
 # `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
 # `role`: the administrator role (adminroles.py) - 'owner' for the shared key and an open server, an administrator's
 # own role for an admin token, None for a scoped key or a signed-in app user (they can't manage anything).
 # `mask`: column-masking rules (masking.py, ADR 0005) applied to everything this caller receives - None for none.
 # `max_concurrent`, `query_timeout`, `max_rows`: this caller's own limits (limits.py, ADR 0011) - each narrows the
-# server's, never widens it; None for none.
+# server's, never widens it; None for none. `quota`: calls and rows per day or month (quotas.py) - None for none.
 # `via`: how an administrator authenticated - 'break-glass' (QUERYAPIGATE_API_KEY), 'token' or 'open'; it goes into
 # the audit log next to the actor's name.
 
@@ -478,7 +478,7 @@ def list_keys():
 
 def create_key(name, connections=None, allow_writes=None, queries=None, expires_at=None, rate_limit=None,
                allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None,
-               example=False, mask=None, max_concurrent=None, query_timeout=None, max_rows=None):
+               example=False, mask=None, max_concurrent=None, query_timeout=None, max_rows=None, quota=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     admins.refuse_taken_name(name)
@@ -493,7 +493,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                                             ('allowed_write_ops', allowed_write_ops),
                                             ('allowed_tables', allowed_tables), ('mask', mask),
                                             ('max_concurrent', max_concurrent), ('query_timeout', query_timeout),
-                                            ('max_rows', max_rows)) if value is not None]
+                                            ('max_rows', max_rows), ('quota', quota)) if value is not None]
         if given:
             raise ApiError(f"Cannot combine 'role' with explicit {', '.join(given)} - create the key from "
                            "the role, then update it afterward to customize.", code='invalid_body')
@@ -510,6 +510,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
         max_concurrent = role_entry.get('max_concurrent')
         query_timeout = role_entry.get('query_timeout')
         max_rows = role_entry.get('max_rows')
+        quota = role_entry.get('quota')
     secret = 'sk_' + secrets.token_urlsafe(32)
     with db.transaction() as conn:
         if conn.execute('SELECT 1 FROM api_keys WHERE name = ?', (name,)).fetchone() is not None:
@@ -529,6 +530,7 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
             'max_concurrent': _validate_limit('max_concurrent', max_concurrent),
             'query_timeout': _validate_limit('query_timeout', query_timeout),
             'max_rows': _validate_limit('max_rows', max_rows),
+            'quota': quotas.validate(quota),
             'created_from_role': role,
             'active': True,
             'created_at': store.now(),
@@ -540,7 +542,8 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
 
 def update_key(name, connections=None, allow_writes=None, active=None, queries=None, expires_at=_UNSET,
                rate_limit=_UNSET, allowed_ips=_UNSET, allowed_write_ops=_UNSET, collections=None,
-               allowed_tables=_UNSET, mask=_UNSET, max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET):
+               allowed_tables=_UNSET, mask=_UNSET, max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET,
+               quota=_UNSET):
     with db.transaction() as conn:
         row = conn.execute(
             'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
@@ -576,6 +579,8 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
                              ('max_rows', max_rows)):
             if value is not _UNSET:
                 entry[field] = _validate_limit(field, value)
+        if quota is not _UNSET:
+            entry['quota'] = quotas.validate(quota)
         _upsert(conn, name, entry)
 
 
@@ -671,7 +676,7 @@ def list_roles():
 
 def create_role(name, connections=None, allow_writes=False, queries=None, rate_limit=None, allowed_ips=None,
                 allowed_write_ops=None, collections=None, example=False, allowed_tables=None, mask=None,
-                max_concurrent=None, query_timeout=None, max_rows=None):
+                max_concurrent=None, query_timeout=None, max_rows=None, quota=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
     collections = _normalize_collections(collections)
@@ -692,6 +697,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
             'max_concurrent': _validate_limit('max_concurrent', max_concurrent),
             'query_timeout': _validate_limit('query_timeout', query_timeout),
             'max_rows': _validate_limit('max_rows', max_rows),
+            'quota': quotas.validate(quota),
             'created_at': store.now(),
             **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
         }
@@ -700,7 +706,7 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
 
 def update_role(name, connections=None, allow_writes=None, queries=None, rate_limit=_UNSET, allowed_ips=_UNSET,
                 allowed_write_ops=_UNSET, collections=None, allowed_tables=_UNSET, mask=_UNSET,
-                max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET):
+                max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET, quota=_UNSET):
     with db.transaction() as conn:
         row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
         if row is None:
@@ -730,6 +736,8 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
                              ('max_rows', max_rows)):
             if value is not _UNSET:
                 entry[field] = _validate_limit(field, value)
+        if quota is not _UNSET:
+            entry['quota'] = quotas.validate(quota)
         _upsert_role(conn, name, entry)
 
 
@@ -846,7 +854,8 @@ def permission_from_grants(name, entry, claims=None):
                       allowed_tables=frozenset(entry['allowed_tables'])
                       if entry.get('allowed_tables') is not None else None,
                       claims=claims, mask=entry.get('mask') or None, max_concurrent=entry.get('max_concurrent'),
-                      query_timeout=entry.get('query_timeout'), max_rows=entry.get('max_rows'))
+                      query_timeout=entry.get('query_timeout'), max_rows=entry.get('max_rows'),
+                      quota=entry.get('quota'))
 
 
 def ip_allowed(entry, client_ip):

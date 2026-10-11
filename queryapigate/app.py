@@ -40,6 +40,7 @@ from . import (
     metrics,
     mongotools,
     openapi,
+    quotas,
     ratelimit,
     schema,
     secheaders,
@@ -66,6 +67,8 @@ PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.o
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
 ACCESS_LOG_QUIET = {'api.health', 'api.metrics_endpoint'}  # polled too often to log every hit
 SAVED_QUERY_ENDPOINTS = {'api.run_named_query'}  # where run_saved() is reached
+# Where a call returns data - what a caller's usage quota counts (quotas.py, ADR 0011)
+QUOTA_ENDPOINTS = SAVED_QUERY_ENDPOINTS | {'api.execute_sql_endpoint', 'api.execute_mongo_endpoint'}
 # A stable `code` for /api/v1 errors raised without their own (BACKLOG #69) - by HTTP status.
 # A caller-supplied X-Request-Id is accepted only in this shape. Everything that reaches a log line or a history
 # entry is therefore plain identifier characters - no whitespace, quotes or control characters to forge a log line
@@ -249,6 +252,8 @@ def create_app():
         limited = check_key_rate_limit()
         if limited is not None:
             return limited
+        if request.endpoint in QUOTA_ENDPOINTS:  # before the cache too: a cached response is data delivered
+            quotas.check(g.permission)
 
     @app.after_request
     def decorate(response):
@@ -264,6 +269,13 @@ def create_app():
             response.headers['X-RateLimit-Key-Remaining'] = str(remaining)
         response.headers['X-Request-Id'] = g.get('request_id', '-')
         secheaders.apply(response, request.is_secure)
+        permission = g.get('permission')
+        if getattr(permission, 'quota', None):
+            if request.endpoint in QUOTA_ENDPOINTS and response.status_code == 200:
+                # A stream's rows are counted as it finishes (_record_stream_history); a page's are in X-Row-Count,
+                # which a cached response carries too.
+                quotas.count(permission, 0 if response.is_streamed else response.headers.get('X-Row-Count'))
+            response.headers.update(quotas.headers(permission))
         if g.get('trace') is not None:
             span = g.trace[0]
             tracing.set_attributes(span, http__response__status_code=response.status_code,
@@ -454,6 +466,7 @@ def render(result, output_format, page, page_size):
     g.serialization_ms = round(elapsed * 1000, 1)
     response.headers['X-Page'] = str(page)
     response.headers['X-Page-Size'] = str(page_size)
+    response.headers['X-Row-Count'] = str(len(result.rows) if result else 0)
     response.headers['X-Has-More'] = 'true' if result.has_more else 'false'
     return response
 
@@ -496,7 +509,8 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
         def record(finished):
             _record_adhoc_and_broadcast(sql, params, connection_name, finished, broadcaster)
     opened = rows
-    response = stream_response(output_format, columns, _record_stream_history(rows, entry, record), filename)
+    response = stream_response(output_format, columns,
+                               _record_stream_history(rows, entry, record, g.get('permission')), filename)
     # A response closed before its first chunk - the client gone at once - closes a generator that never started,
     # which runs none of its code: the rows' own close() is what ends the query, returns its connection and frees
     # its slot in the caller's max_concurrent. Idempotent, so a stream read to its end is unaffected.
@@ -543,10 +557,11 @@ def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None
                         'connection_name': connection_name, 'entry': entry}, entry['key_name'])
 
 
-def _record_stream_history(rows, entry, record):
+def _record_stream_history(rows, entry, record, permission=None):
     """Records a streamed run, through ``record``, once fully drained or failed partway through (not on a client
     disconnect, GeneratorExit) - counting rows as they pass through, since the total is not known up front, the
-    same trade-off engine._drain() makes for the streaming metric."""
+    same trade-off engine._drain() makes for the streaming metric. However it ends, the rows that left count against
+    the caller's usage quota (``permission``, captured while still in the request)."""
     count = 0
     try:
         for row in rows:
@@ -562,6 +577,8 @@ def _record_stream_history(rows, entry, record):
         raise
     else:
         record({**entry, 'status': 'success', 'rows': count})
+    finally:
+        quotas.count_rows(permission, count)
 
 
 # --------------------------------------------------------------------------------------

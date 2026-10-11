@@ -24,8 +24,8 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
 (`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
-(`agent_writes`, `/api/v1/write-requests`), and tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`). The list
-is `queryapigate/experimental.py`.
+(`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and
+usage quotas (`quota`, `/api/v1/usage/quotas`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -60,6 +60,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   instances through Redis, with leases so a dead process's slots free themselves; over it, `429
   too_many_concurrent`. A key shows its `effective_limits`. See
   [Per-key limits](documentation/API.md#per-key-limits-concurrency-time-and-rows).
+
+- **Usage quotas** (BACKLOG #95, ADR 0011, experimental): `"quota": {"calls": 100000, "rows": 10000000, "per":
+  "month"}` on keys and roles - calendar days or months, per caller (per user for signed-in users). Successful data
+  calls and their rows count, cached responses included; used up, `429 quota_exceeded` with `resets_at`.
+  `X-Quota-Remaining-Calls`, `X-Quota-Remaining-Rows` and `X-Quota-Reset` on every response to a caller with one; a
+  key's `usage_this_period`, `GET /api/v1/usage/quotas` and the `quota_nearly_used` alert. Counted in the store
+  (schema 13, `usage_counters`) through the run-history batch, not a write per call. See
+  [Usage quotas](documentation/API.md#usage-quotas).
+- **`X-Row-Count`** on every paged data response: the rows in it.
+
+### Upgrading from 0.23
+- **Schema 13** adds one table (`usage_counters`); nothing existing changes. A 0.23 instance still running keeps
+  working against the upgraded store, but doesn't count or enforce quotas - upgrade every instance before giving a
+  key one.
 
 ### Fixed
 - **A streamed response closed before its first chunk** - the client gone at once - left its query counted as

@@ -26,11 +26,11 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 12  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 13  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
-#                    12: api_keys.previous_hash/previous_expires_at - see _upgrade()
+#                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -220,6 +220,15 @@ CREATE TABLE IF NOT EXISTS write_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
 CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
+-- Usage quotas (quotas.py, ADR 0011): calls and rows per caller per day or month, added to in batches.
+CREATE TABLE IF NOT EXISTS usage_counters (
+  caller TEXT NOT NULL,        -- a key's name, or jwt:<subject>
+  period TEXT NOT NULL,        -- day:YYYY-MM-DD or month:YYYY-MM, in the server's time zone
+  calls INTEGER NOT NULL DEFAULT 0,
+  rows INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (caller, period)
+);
 """
 
 
@@ -400,6 +409,14 @@ CREATE TABLE IF NOT EXISTS write_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
 CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
+CREATE TABLE IF NOT EXISTS usage_counters (
+  caller TEXT COLLATE "C" NOT NULL,
+  period TEXT COLLATE "C" NOT NULL,
+  calls BIGINT NOT NULL DEFAULT 0,
+  rows BIGINT NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (caller, period)
+);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -617,7 +634,8 @@ def _upgrade(conn, postgres):
     12: api_keys.previous_hash and previous_expires_at (ADR 0009), nullable - a key never rotated has neither - and an
         index on previous_hash, made here rather than in the schema so it can follow the column on an older store.
         Additive: a 0.21 process still running ignores them (so an old secret in its grace period doesn't
-        authenticate there - upgrade every instance before rotating a key)."""
+        authenticate there - upgrade every instance before rotating a key).
+    13: usage_counters (ADR 0011) - a new table, made by CREATE TABLE IF NOT EXISTS; additive."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -799,6 +817,7 @@ _MIGRATED_TABLES = (
                       'updated_by'), 'connection_name, table_name, column_name'),
     ('write_requests', ('id', 'query_name', 'version', 'caller', 'status', 'created_at', 'expires_at',
                         'idempotency_hash', 'details_json'), 'created_at, id'),
+    ('usage_counters', ('caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
 )
 
 

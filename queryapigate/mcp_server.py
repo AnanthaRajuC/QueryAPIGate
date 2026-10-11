@@ -441,7 +441,7 @@ _TOOL_NAME_RE = re.compile(r'[\w .\-]{1,100}')
 def call_as(flask_app, permission, name, arguments, started=None, headers=None):
     """One tools/call by an authenticated caller: its own rate limit, the tool, and a request in /metrics (method
     MCP, endpoint mcp.<tool kind>) - in a span (tracing.py) continuing the trace a `traceparent` in `headers` names."""
-    from . import governance, instances, tracing
+    from . import governance, instances, quotas, tracing
     if started is None:
         instances.heartbeat()
         started = time.monotonic()
@@ -456,7 +456,14 @@ def call_as(flask_app, permission, name, arguments, started=None, headers=None):
             result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
                             retry_after=verdict.retry_after)
         else:
-            result = dispatch_tool_call(flask_app, permission, name, arguments)
+            try:
+                quotas.check(permission)  # usage quotas (ADR 0011): an agent's calls count like any other
+            except ApiError as error:
+                result = _error(error.message, error.status, error.code, **error.extra)
+            else:
+                result = dispatch_tool_call(flask_app, permission, name, arguments)
+                if not result.get('isError') and name != 'list_tables':  # table names aren't data delivered
+                    quotas.count(permission, len((result.get('structuredContent') or {}).get('rows') or []))
         if span is not None and result.get('isError'):
             code = (result.get('structuredContent') or {}).get('code')
             span.set_attribute('error.type', code if isinstance(code, str) else 'tool_error')

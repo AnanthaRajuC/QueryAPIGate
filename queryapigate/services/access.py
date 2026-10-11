@@ -10,16 +10,16 @@ import hashlib
 import json
 from datetime import date
 
-from .. import apikeys, limits, metrics, store
+from .. import apikeys, limits, metrics, quotas, store
 from ..errors import ApiError
 
 # A grant's fields, shared by keys and roles.
 GRANT_FIELDS = ('connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
-                'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows')
+                'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota')
 LIMIT_FIELDS = ('max_concurrent', 'query_timeout', 'max_rows')  # ADR 0011
 # Fields where an explicit null means "clear it" (apikeys' _UNSET sentinel), so presence matters, not just value.
 _CLEARABLE = ('expires_at', 'rate_limit', 'allowed_ips', 'allowed_write_ops', 'allowed_tables', 'mask',
-              *LIMIT_FIELDS)
+              *LIMIT_FIELDS, 'quota')
 
 
 def _diff(before, after):
@@ -40,6 +40,7 @@ def _grants(entry):
         'allowed_ips': entry.get('allowed_ips'),
         'mask': entry.get('mask'),
         **{field: entry.get(field) for field in LIMIT_FIELDS},
+        'quota': entry.get('quota'),
     }
 
 
@@ -84,6 +85,7 @@ def to_key(name, entry):
         'example': entry.get('example') is True,
         'usage': {'queries': usage.get('queries', 0), 'errors': usage.get('errors', 0), 'rows': usage.get('rows', 0)},
         'effective_limits': limits.effective(entry),
+        'usage_this_period': quotas.usage(name, entry.get('quota')),
     }
 
 
@@ -187,7 +189,8 @@ def create_role(data, actor):
                         queries=data.get('queries'), rate_limit=data.get('rate_limit'),
                         allowed_ips=data.get('allowed_ips'), allowed_write_ops=data.get('allowed_write_ops'),
                         collections=data.get('collections'), allowed_tables=data.get('allowed_tables'),
-                        mask=data.get('mask'), **{field: data.get(field) for field in LIMIT_FIELDS})
+                        mask=data.get('mask'), quota=data.get('quota'),
+                        **{field: data.get(field) for field in LIMIT_FIELDS})
     store.record_audit(actor, 'create_role', name, apikeys.list_roles().get(name))
     return name
 

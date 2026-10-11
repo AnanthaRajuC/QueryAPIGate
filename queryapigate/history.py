@@ -129,6 +129,8 @@ class _Writer:
         try:
             for target, rows in by_target.items():
                 write(rows, target)
+            from . import quotas
+            quotas.write()  # usage quotas' counts ride on the same batch (quotas.py)
         finally:
             with self.cond:
                 self.written += len(batch)
@@ -156,6 +158,12 @@ def _writer():
                 _writer_instance = _Writer()
             writer = _writer_instance
     return writer
+
+
+def ensure_writer():
+    """Start this process's writer thread if it isn't running - for counts other than runs that its batches write
+    (quotas.py)."""
+    _writer()._ensure_thread()
 
 
 def record(name, version, entry, sample=True):

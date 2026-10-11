@@ -71,6 +71,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', 'QUERYAPIGATE_CONSOLE_URL'),
         'docs': ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
     },
+    'quotas': {
+        'name': 'Usage quotas',
+        'why': 'new in 0.24 - what counts as a call, and how precisely, may change once quotas meet real contracts '
+               '(ADR 0011)',
+        'operations': (('get', '/api/v1/usage/quotas'),),
+        'docs': ('documentation/API.md', 'Usage quotas'),
+    },
     'tracing': {
         'name': 'Tracing with OpenTelemetry',
         'why': 'new in 0.23 - span names and attributes may change as the OpenTelemetry conventions for databases and '

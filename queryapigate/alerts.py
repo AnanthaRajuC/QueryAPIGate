@@ -57,7 +57,8 @@ def note_rate_limited(kind, who):
 KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
-         'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete')
+         'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete',
+         'quota_nearly_used')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -74,7 +75,8 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_encryption(), *_writes(), *_keys(now), *_runs(now), *_rate_limited(),
+    found = [*_server(now), *_sso(), *_encryption(), *_writes(), *_quotas(), *_keys(now), *_runs(now),
+             *_rate_limited(),
              *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
@@ -117,6 +119,28 @@ def _encryption():
                    'Every password is under the new encryption key - remove the old ones',
                    f"QUERYAPIGATE_SECRET_KEY still lists {found['keys']} keys, but nothing is encrypted with any but "
                    'the first. Remove the others from every instance to finish the rotation.', target)]
+
+
+def _quotas():
+    """Keys that have used 80% of a usage quota this period (warning), or all of it (critical) - ADR 0011."""
+    from . import quotas
+    found = []
+    for name, key in apikeys.list_keys().items():
+        usage = quotas.usage(name, key.get('quota')) if key.get('active', True) else None
+        if usage is None:
+            continue
+        for what in ('calls', 'rows'):
+            limit = usage[f'{what}_limit']
+            if limit is None or usage[what] < 0.8 * limit:
+                continue
+            used_up = usage[what] >= limit
+            found.append(_alert('critical' if used_up else 'warning', 'quota_nearly_used', f'{name}:{what}',
+                                f"API key '{name}' has used {'all' if used_up else f'{usage[what] * 100 // limit}%'} "
+                                f"of its {quotas.ADJECTIVE[usage['per']]} quota of {what}",
+                                f"{usage[what]:,} of {limit:,} {what} this {usage['per']}. "
+                                + ('Its calls are refused (quota_exceeded) until ' if used_up else 'It resets at ')
+                                + f"{usage['resets_at']}.", {'type': 'key', 'name': name}, usage['period_start']))
+    return found
 
 
 def _writes():

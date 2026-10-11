@@ -375,7 +375,7 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`, `max_concurrent`, `query_timeout`, `max_rows`), `effective_limits` (each against the server's now), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
+| `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`, `max_concurrent`, `query_timeout`, `max_rows`, `quota`), `effective_limits` (each against the server's now), `usage_this_period` (with a quota), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
 | `POST /api/v1/api-keys` | Create one, from explicit grants or from a `role` (whose grants are copied once; no grant fields then). The response's `secret` is the only time it is ever shown, and is sent with `Cache-Control: no-store`. 409 `key_exists`, 404 `role_not_found`. |
 | `GET /api/v1/api-keys/{name}` | One key. |
 | `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. Honours `If-Match`. |
@@ -437,6 +437,7 @@ Clearing the cache is housekeeping, not a change, so it is not audited.
 
 | Method and path | What it does |
 |---|---|
+| `GET /api/v1/usage/quotas` | Every caller's `calls` and `rows` for this day and this month - what [usage quotas](#usage-quotas) count (experimental). |
 | `GET /api/v1/settings` | The server's effective configuration, as sections (`id`, `title`, `description`, `rows`). Each row has the `env` variable, its displayed `value`, its `source` (`env` or `default`) and `env_value`, the raw value for a `.env` export. A secret's `value` only says whether it is configured, and its `env_value` is always null. Read-only: change settings in the environment and restart. |
 | `POST /api/v1/settings/rekey` | Re-encrypt every stored password (connections and destinations) under the first key in `QUERYAPIGATE_SECRET_KEY`, so the others can be removed - all in one transaction, or nothing when one can't be decrypted. `{"check": true}` only reports: `keys`, `values`, `by_key` (how many under each listed key, in order), `under_old_keys`, `undecryptable`; a rekey adds `rekeyed`. Owners only (`secrets.rotate`); audited as `rekey`, counts only. See [Rotating the key](#rotating-the-key). |
 | `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
@@ -961,6 +962,36 @@ give one caller less than the server allows - each **narrows** the server's own 
 - **Signed-in users** get their role's, counted per user. Administrators and the break-glass key have none.
 - `null` clears one (`PATCH /api/v1/api-keys/{name}` with `{"max_rows": null}`), as for `rate_limit`.
 
+### Usage quotas
+
+> **Experimental** - new in 0.24 ([ADR 0011](adr/0011-per-key-limits-and-quotas.md)); what counts as a call, and how
+> precisely, may change in any minor release, always noted in the changelog.
+
+Partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates. A key or
+role can carry one:
+
+~~~json
+{"name": "acme-corp", "queries": ["monthly_revenue"], "quota": {"calls": 100000, "rows": 10000000, "per": "month"}}
+~~~
+
+- **Per caller, per calendar period:** `per` is `day` or `month`, in the server's time zone. A key has its own
+  counter; signed-in users get their role's quota **each**, counted per user. Either count may be left out, not both.
+- **What counts:** successful calls that return data - saved queries, ad-hoc SQL, MCP tool calls (not `list_tables`),
+  cached responses - and the rows they return (a page's `X-Row-Count`; a stream's rows as they leave, however it
+  ends). Refused calls don't: unauthorised, invalid, over a limit, or a database error.
+- **Used up:** `429 quota_exceeded`, naming which (`quota`: `calls` or `rows`), the `limit` and `resets_at`, with
+  `Retry-After` until then. A cached response is refused too.
+- **Every response to a caller with a quota** carries `X-Quota-Remaining-Calls` and/or `X-Quota-Remaining-Rows`, and
+  `X-Quota-Reset` - so a client can slow down before it's refused.
+- **Precision:** checked before a call, counted after it. The call that crosses the row quota completes (its rows
+  aren't known before it runs - `max_rows` bounds it). Counts are kept in the store, shared by every instance, and
+  written in the run-history batch (`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, 1 second by default) rather than one write
+  per call - so a caller spread over several instances can overshoot by about one interval's calls. One instance
+  always counts its own calls exactly.
+- **Watching it:** a key's `usage_this_period` (`calls`, `rows`, their limits, `period_start`, `resets_at`);
+  `GET /api/v1/usage/quotas` lists every caller's counts for this day and this month, for metering of your own (it's
+  not billing); the `quota_nearly_used` alert fires at 80% and when used up. `null` clears a quota.
+
 ### IP allowlisting
 
 A key can also be pinned to `allowed_ips`, a list of IP addresses or CIDR ranges (IPv4 or IPv6, mixed
@@ -1439,6 +1470,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 | `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
+| `quota_nearly_used` | warning, critical | An API key has used 80% of a usage quota this period (warning), or all of it - its calls are refused until it resets (critical) |
 | `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |
 | `sso_unreachable` | critical | Console sign-in through SSO is on, but the identity provider's metadata can't be fetched - nobody can sign in that way; open sessions keep working |
 | `agent_unusual_volume` | warning | An AI agent read at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows over MCP in the last hour, and ten times its own average hour - see [Agent usage](#agent-usage) |
@@ -1833,6 +1865,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `examples_conflict` | 409 | Loading the examples would overwrite things that aren't examples |
 | `precondition_failed` | 412 | `If-Match` names a version of the resource that is no longer current |
 | `rate_limited` | 429 | Over `QUERYAPIGATE_RATE_LIMIT` or the key's own `rate_limit`; retry after `retry_after` seconds |
+| `quota_exceeded` | 429 | The caller's usage quota for this period is used up; `quota` says which (`calls`, `rows`), `resets_at` when it resets |
 | `too_many_concurrent` | 429 | The caller already has `max_concurrent` queries running; retry when one finishes (`Retry-After: 1`) |
 | `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
 | `driver_missing` | 500 | The database driver isn't installed on the server, or is too old (DuckDB before 1.2) |

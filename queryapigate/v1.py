@@ -730,6 +730,14 @@ def get_settings():
     return jsonify({'items': config.describe_settings()}), 200
 
 
+@bp.route('/usage/quotas', methods=['GET'])
+def quota_usage():
+    """Every caller's calls and rows this day and this month - what their usage quotas count (ADR 0011), for metering
+    of your own."""
+    from . import quotas
+    return jsonify({'items': quotas.current_counters()}), 200
+
+
 @bp.route('/settings/rekey', methods=['POST'])
 def rekey():
     """Re-encrypt every stored password under QUERYAPIGATE_SECRET_KEY's first key (ADR 0009) - or, with `check`,

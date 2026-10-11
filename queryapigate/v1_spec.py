@@ -750,7 +750,7 @@ SCHEMAS = {
     'Grants': {
         'type': 'object',
         'required': ['connections', 'queries', 'collections', 'allow_writes', 'allowed_write_ops', 'allowed_tables',
-                     'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows'],
+                     'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota'],
         'properties': {
             'mask': {'type': 'array', 'nullable': True, 'items': _ref('MaskRule'),
                      'description': 'Column-masking rules applied to everything this caller receives (experimental).'},
@@ -780,14 +780,38 @@ SCHEMAS = {
             'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000,
                          'description': "Rows one call may return (a page, a stream, an MCP result) - narrows the "
                                         "server's limit for that kind of call."},
+            'quota': _ref('Quota'),
         },
+    },
+    'Quota': {
+        'type': 'object', 'nullable': True, 'required': ['per'],
+        'description': 'Calls and/or rows per calendar day or month, per caller (experimental, ADR 0011).',
+        'properties': {'calls': {'type': 'integer', 'minimum': 1}, 'rows': {'type': 'integer', 'minimum': 1},
+                       'per': {'type': 'string', 'enum': ['day', 'month']}},
+    },
+    'QuotaUsage': {
+        'type': 'object', 'nullable': True,
+        'required': ['per', 'period_start', 'resets_at', 'calls', 'rows', 'calls_limit', 'rows_limit'],
+        'properties': {'per': {'type': 'string', 'enum': ['day', 'month']}, 'period_start': {'type': 'string'},
+                       'resets_at': {'type': 'string'}, 'calls': {'type': 'integer'}, 'rows': {'type': 'integer'},
+                       'calls_limit': {'type': 'integer', 'nullable': True},
+                       'rows_limit': {'type': 'integer', 'nullable': True}},
+    },
+    'QuotaCounterList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': {
+            'type': 'object', 'required': ['caller', 'per', 'period', 'calls', 'rows', 'updated_at'],
+            'properties': {'caller': {'type': 'string'}, 'per': {'type': 'string', 'enum': ['day', 'month']},
+                           'period': {'type': 'string', 'description': 'YYYY-MM-DD or YYYY-MM'},
+                           'calls': {'type': 'integer'}, 'rows': {'type': 'integer'},
+                           'updated_at': {'type': 'string', 'nullable': True}}}}},
     },
     'ApiKey': {
         'allOf': [_ref('Grants'), {
             'type': 'object',
             'required': ['name', 'active', 'expires_at', 'expired', 'created_at', 'created_from_role',
                          'last_used_at', 'previous_expires_at', 'previous_last_used_at', 'example', 'usage',
-                         'effective_limits'],
+                         'effective_limits', 'usage_this_period'],
             'properties': {
                 'name': {'type': 'string'}, 'active': {'type': 'boolean'},
                 'expires_at': {'type': 'string', 'nullable': True,
@@ -810,6 +834,7 @@ SCHEMAS = {
                         'max_rows': {'type': 'object', 'required': ['page', 'stream', 'mcp'], 'properties': {
                             'page': {'type': 'integer'}, 'stream': {'type': 'integer', 'nullable': True},
                             'mcp': {'type': 'integer'}}}}},
+                'usage_this_period': _ref('QuotaUsage'),
                 'usage': {'type': 'object', 'required': ['queries', 'errors', 'rows'],
                           'properties': {'queries': {'type': 'integer'}, 'errors': {'type': 'integer'},
                                          'rows': {'type': 'integer'}}},
@@ -838,6 +863,7 @@ SCHEMAS = {
             'max_concurrent': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 1000},
             'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400},
             'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000},
+            'quota': _ref('Quota'),
         },
     },
     'ApiKeyList': {
@@ -865,6 +891,7 @@ SCHEMAS = {
             'max_concurrent': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 1000},
             'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400},
             'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000},
+            'quota': _ref('Quota'),
         },
     },
     'RoleList': {
@@ -1097,6 +1124,10 @@ PATHS = {
     '/api/v1/settings': {
         'get': _op("The server's effective configuration, by section (read-only)",
                    {'200': _ok(_ref('SettingsList'))}),
+    },
+    '/api/v1/usage/quotas': {
+        'get': _op("Every caller's calls and rows this day and this month - what usage quotas count",
+                   {'200': _ok(_ref('QuotaCounterList'))}),
     },
     '/api/v1/settings/rekey': {
         'post': _op('Re-encrypt every stored password under the first key in QUERYAPIGATE_SECRET_KEY, so the others '

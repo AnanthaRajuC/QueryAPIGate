@@ -392,7 +392,8 @@
               "agent_unusual_volume",
               "sso_unreachable",
               "writes_awaiting_approval",
-              "encryption_key_rotation_incomplete"
+              "encryption_key_rotation_incomplete",
+              "quota_nearly_used"
             ],
             "type": "string"
           },
@@ -571,6 +572,9 @@
                   "rows"
                 ],
                 "type": "object"
+              },
+              "usage_this_period": {
+                "$ref": "#/components/schemas/QuotaUsage"
               }
             },
             "required": [
@@ -585,7 +589,8 @@
               "previous_last_used_at",
               "example",
               "usage",
-              "effective_limits"
+              "effective_limits",
+              "usage_this_period"
             ],
             "type": "object"
           }
@@ -680,6 +685,9 @@
             "minimum": 0.1,
             "nullable": true,
             "type": "number"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/Quota"
           },
           "rate_limit": {
             "nullable": true,
@@ -1992,6 +2000,9 @@
             "nullable": true,
             "type": "number"
           },
+          "quota": {
+            "$ref": "#/components/schemas/Quota"
+          },
           "rate_limit": {
             "description": "e.g. 100/minute.",
             "nullable": true,
@@ -2010,7 +2021,8 @@
           "mask",
           "max_concurrent",
           "query_timeout",
-          "max_rows"
+          "max_rows",
+          "quota"
         ],
         "type": "object"
       },
@@ -2821,6 +2833,121 @@
         ],
         "type": "object"
       },
+      "Quota": {
+        "description": "Calls and/or rows per calendar day or month, per caller (experimental, ADR 0011).",
+        "nullable": true,
+        "properties": {
+          "calls": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "per": {
+            "enum": [
+              "day",
+              "month"
+            ],
+            "type": "string"
+          },
+          "rows": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "per"
+        ],
+        "type": "object"
+      },
+      "QuotaCounterList": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "caller": {
+                  "type": "string"
+                },
+                "calls": {
+                  "type": "integer"
+                },
+                "per": {
+                  "enum": [
+                    "day",
+                    "month"
+                  ],
+                  "type": "string"
+                },
+                "period": {
+                  "description": "YYYY-MM-DD or YYYY-MM",
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "nullable": true,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "caller",
+                "per",
+                "period",
+                "calls",
+                "rows",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "QuotaUsage": {
+        "nullable": true,
+        "properties": {
+          "calls": {
+            "type": "integer"
+          },
+          "calls_limit": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "per": {
+            "enum": [
+              "day",
+              "month"
+            ],
+            "type": "string"
+          },
+          "period_start": {
+            "type": "string"
+          },
+          "resets_at": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "integer"
+          },
+          "rows_limit": {
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "per",
+          "period_start",
+          "resets_at",
+          "calls",
+          "rows",
+          "calls_limit",
+          "rows_limit"
+        ],
+        "type": "object"
+      },
       "Role": {
         "allOf": [
           {
@@ -2915,6 +3042,9 @@
             "minimum": 0.1,
             "nullable": true,
             "type": "number"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/Quota"
           },
           "rate_limit": {
             "nullable": true,
@@ -9872,6 +10002,68 @@
           }
         },
         "summary": "What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/usage/quotas": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaCounterList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Every caller's calls and rows this day and this month - what usage quotas count",
         "tags": [
           "Management API v1"
         ],
