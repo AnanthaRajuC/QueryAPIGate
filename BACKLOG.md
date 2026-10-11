@@ -40,7 +40,7 @@ by accident.
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 | ~~#84 Admin identity, Phase 1~~ (shipped) | Named administrators, admin roles and audit by person change the management API's permission model and the audit record - cheap now, breaking after |
 
-**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, a Helm chart
+**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #100 a Helm chart
 (plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
 
 **More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (shipped),
@@ -53,6 +53,11 @@ systemd or Kubernetes.
 
 **AI agents:** #85 OAuth 2.1 for the MCP server (first - it opens hosted AI clients), #63 column masking, #86
 descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
+
+**Enterprise operations:** #90 rotating the encryption key and #91 reissuing API keys (first - both add to the store
+format and the API, cheaper before the freeze), #92 tracing, #93 security headers, #94 per-key limits, #95 quotas, #96 a
+tamper-evident audit stream, #97 configuration as code, #98 secrets managers; #100 a Helm chart and #101 compliance
+documentation. #99 workspaces only if asked for.
 
 **Suggested sequence:**
 1. **0.13:** #61, #62, #69, #65, plus the #59 storage decision. (Released as 0.13.0 on 2026-10-04.)
@@ -74,8 +79,15 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
    (Released as 0.20.0 on 2026-10-11; 0.20.1 refused writes over MCP called by name.)
 9. **0.21: #88 write tools over MCP, each write approved by a person**, experimental
    ([ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md)). (Released as 0.21.0 on 2026-10-11.)
-10. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-11. **1.0.0.**
+10. **0.22: #90 rotating the encryption key and #91 reissuing an API key's secret**
+    ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+11. **0.23: #92 OpenTelemetry tracing and #93 security headers.**
+12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas.**
+13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
+14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
+    compliance documentation; #99 workspaces only on demand.
+15. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+16. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2877,3 +2889,155 @@ export of a growing table reads the whole table every day.
   Airflow), with the run in history and a failure in Alerts.
 - **Not in scope:** scheduling itself (see "A general job scheduler" under Not recommended), and SFTP/FTP/WebDAV.
 - Pairs with #63 column masking for partner exports, and #82 snapshots (a scheduled copy served instead of exported).
+
+## 90. Rotating the key stored passwords are encrypted with
+
+**Status: open; planned for 0.22** ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+
+**Impact:** `QUERYAPIGATE_SECRET_KEY` is one key. Change it and every stored password encrypted under the old one fails
+with `password_undecryptable` (`store._decrypt_password()`), and nothing re-encrypts them - so the key can't be rotated
+without re-entering every connection's and destination's password. Most compliance regimes require periodic rotation,
+and a leaked key must be replaceable at once.
+
+**Notes:**
+- `QUERYAPIGATE_SECRET_KEY` takes several keys, comma-separated: the first encrypts, every one decrypts
+  (`cryptography`'s `MultiFernet`). One key stays exactly today's behaviour.
+- `queryapigate rekey` re-encrypts every stored value under the first key, in one transaction, and refuses - changing
+  nothing - when a value can't be decrypted by any key; `--check` only reports which values are under an old key.
+- What it covers: connection passwords (active and deleted connections) and destination passwords - every value the
+  store marks `enc:`. Hashed secrets (API keys, admin tokens) aren't encrypted, so aren't affected.
+
+## 91. Reissuing an API key's secret, with the old one working for a while
+
+**Status: open; planned for 0.22** ([ADR 0009](documentation/adr/0009-key-rotation.md)).
+
+**Impact:** a key's secret can't be changed. Rotating it means a new key, its grants copied by hand, then revoking the
+old one - so the partner using it has an outage unless both are coordinated to the minute, the new key's grants can
+drift from the old one's, and run history and audit split across two names.
+
+**Notes:**
+- `POST /api/v1/api-keys/{name}/rotate`: a new secret, shown once; the old one keeps working for a grace period the
+  caller chooses (0 for a leaked secret). Same name, same grants, the same history.
+- When the old secret was last used, so an administrator sees whether the partner has switched; ending the grace early.
+- Admin tokens already rotate (issue another, revoke the old one). The break-glass `QUERYAPIGATE_API_KEY` stays one
+  value from the environment.
+
+## 92. Distributed tracing (OpenTelemetry)
+
+**Status: open; planned for 0.23.**
+
+**Impact:** there are request ids and Prometheus metrics, but nothing reads an incoming W3C `traceparent` header or
+exports spans - so in Datadog, Tempo or Honeycomb the gateway is a gap between the caller's span and the database's.
+
+**Notes:** an optional extra (`queryapigate[otel]`), off unless an OTLP endpoint is configured; spans for the request,
+authentication, the query (connection, saved-query name - never its parameter values or rows) and delivery; the
+incoming trace continued; MCP calls and exports traced the same way. The trace id in run history, so a slow run links
+to its trace.
+
+## 93. Security headers on every response, not only the Console's
+
+**Status: open; planned for 0.23.**
+
+**Impact:** the Console's responses carry a Content-Security-Policy and `X-Content-Type-Options` (`console.py`); the API
+and docs routes carry none and rely on the reverse proxy. A scanner flags it, and a deployment without a proxy that adds
+them has none.
+
+**Notes:** `X-Content-Type-Options: nosniff` and `Referrer-Policy` on every response; `Cache-Control: no-store` on
+responses with data unless the saved query caches; HSTS only when the deployer says the server is behind HTTPS (a
+setting - HSTS on plain HTTP locks browsers out). Documented in DEPLOYMENT.md next to what the proxy should add.
+
+## 94. Per-key limits on simultaneous queries, time and rows
+
+**Status: open; planned for 0.24.**
+
+**Impact:** a key's rate limit counts calls, not their cost: one key can fill a connection's pool with slow queries while
+staying under its limit, and everyone else sharing that connection waits. The time limit
+(`QUERYAPIGATE_QUERY_TIMEOUT`) and the row ceiling apply to the whole server, so a partner's key can't be given less
+than an internal service's.
+
+**Notes:** grant fields on keys and roles - `max_concurrent` (in-flight queries, counted in Redis when it's set, so
+across instances), `query_timeout` and `max_rows` - each narrowing the server's own, never widening it. A call over
+`max_concurrent` gets 429 with `Retry-After`. Applied by governance.py, so REST, MCP and exports all honour them.
+
+## 95. Usage quotas: calls, rows and bytes per day or month
+
+**Status: open; planned for 0.24, after #94.**
+
+**Impact:** partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates.
+Today the only limits are token buckets per minute or hour.
+
+**Notes:** a `quota` grant field (`{"calls": 100000, "rows": 10000000, "per": "month"}`) counted in the store (or
+Redis), reset on calendar boundaries in the server's time zone; 429 `quota_exceeded` with when it resets; usage so far
+in `/api/v1/api-keys/{name}` and the Console; an alert at 80%. Builds on run history's counts.
+
+## 96. A tamper-evident audit log, streamed to a SIEM
+
+**Status: open; planned for 0.25.**
+
+**Impact:** the audit log can be appended to a file (`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`, #30), but an entry can be
+edited or removed without trace, and there's no stream a SIEM (Splunk, Sentinel, Elastic) reads. SOC 2 and ISO 27001
+auditors ask for both.
+
+**Notes:** each entry carries the hash of the one before it (a chain, verified by `queryapigate audit verify`, which says
+where it breaks); syslog (RFC 5424, TLS) and OTLP logs as outputs alongside the file; delivery that survives the SIEM
+being down (a cursor in the store, not an in-memory queue). Several instances write one chain, so the hash is computed
+in the store's transaction.
+
+## 97. Configuration as code: export, diff and apply
+
+**Status: open.**
+
+**Impact:** collections of saved queries move between environments as bundles (`queryapigate collection export|import`),
+but roles, API keys' grants, connections and destinations don't - so dev → staging → prod is done by hand, or by scripts
+against `/api/v1`. Teams on GitOps or Terraform expect to declare it.
+
+**Notes:** one file for a server's configuration - connections with credentials as `${VAR}` references, never values;
+roles; keys' grants (never secrets); destinations; saved queries - with `queryapigate config export`, `config diff`
+(what would change) and `config apply` (all or nothing). A Terraform provider over `/api/v1` comes after, if asked
+for; it would use the same diff.
+
+## 98. Secrets from a secrets manager, and short-lived database credentials
+
+**Status: open.**
+
+**Impact:** a connection's password is stored (encrypted, #90) or read from `${VAR}` at startup - so a secret that changes
+needs a restart, and short-lived credentials (Vault's database secrets engine, IAM authentication to RDS, Cloud SQL or
+Azure Database) can't be used at all. #24 left Vault and cloud secret managers out because `${VAR}` covered the static
+case.
+
+**Notes:** a per-connection credential source - `vault`, `aws-secrets-manager`, `gcp-secret-manager`, `aws-rds-iam` -
+fetched when a connection is opened and cached until it nears expiry; each an optional extra. Fails closed with
+`connection_misconfigured` and the source's own error, never a stale secret past its lease.
+
+## 99. Workspaces: delegated administration for teams
+
+**Status: open; only if larger organisations ask for it.**
+
+**Impact:** there's one namespace: every administrator's role applies to every connection, key and query on the server.
+"Team A manages its own connections and keys, and can't see team B's" needs a server per team today.
+
+**Notes:** the largest item here - it touches every store table, every `/api/v1` route and the Console. A workspace
+would own connections, queries, keys, roles and destinations; administrators' roles would be per workspace, with
+server-wide owners above them. Decide with an ADR before any code, and only with a real deployment asking.
+
+## 100. A Helm chart
+
+**Status: open; after 1.0, unless asked for sooner.**
+
+**Impact:** plain manifests are in `deploy/kubernetes/`; most teams running Kubernetes install through Helm, with values
+for the image, the store, Redis, ingress and secrets.
+
+**Notes:** a chart in `deploy/helm/`, published to ghcr as an OCI artifact on each release; values for several instances
+on a PostgreSQL store and Redis (DEPLOYMENT.md's scale-out shape); CI installs it on kind and runs the smoke test.
+
+## 101. Compliance documentation: data flows, and FIPS-validated cryptography
+
+**Status: open.**
+
+**Impact:** security questionnaires ask where personal data flows and is kept, for how long, and whether cryptography is
+FIPS 140 validated. Answering means reading the code today.
+
+**Notes:** mostly documentation - a data-flow page (what is stored, where, for how long, who can read it: run history's
+parameter names, never values; masked results; write requests' arguments for 30 days) for GDPR records of processing.
+FIPS: the server's own cryptography is `cryptography` (OpenSSL) and `hashlib`; document running on a FIPS-mode OpenSSL,
+and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIPS-approved algorithms).

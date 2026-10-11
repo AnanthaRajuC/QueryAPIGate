@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0009-key-rotation.md"

@@ -17,6 +17,7 @@ one it supersedes.
 | [0006](0006-ai-agents.md) | AI agents - the MCP server as an OAuth resource server, descriptions agents read, a per-agent usage view | Accepted |
 | [0007](0007-console-sign-in-through-sso.md) | Console sign-in through the organisation's identity provider (OpenID Connect) | Accepted |
 | [0008](0008-mcp-write-tools-with-approval.md) | Write tools over MCP, each write approved by a person before it runs | Accepted |
+| [0009](0009-key-rotation.md) | Rotating the encryption key, and reissuing an API key's secret | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

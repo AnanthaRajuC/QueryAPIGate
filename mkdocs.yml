@@ -36,6 +36,7 @@ nav:
       - 0006 AI agents: documentation/adr/0006-ai-agents.md
       - 0007 Console sign-in through SSO: documentation/adr/0007-console-sign-in-through-sso.md
       - 0008 MCP write tools with approval: documentation/adr/0008-mcp-write-tools-with-approval.md
+      - 0009 Key rotation: documentation/adr/0009-key-rotation.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md
