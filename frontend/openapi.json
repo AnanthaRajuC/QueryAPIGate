@@ -8682,6 +8682,14 @@
                           "nullable": true,
                           "type": "array"
                         },
+                        "mask": {
+                          "description": "This caller's column-masking rules, or null for none.",
+                          "items": {
+                            "type": "object"
+                          },
+                          "nullable": true,
+                          "type": "array"
+                        },
                         "name": {
                           "nullable": true,
                           "type": "string"
@@ -8716,6 +8724,30 @@
                           },
                           "description": {
                             "type": "string"
+                          },
+                          "masking": {
+                            "description": "Only for a caller with column-masking rules: the result columns it gets masked, and how - or, in refused, why its rules would refuse this query (experimental).",
+                            "properties": {
+                              "masked": {
+                                "items": {
+                                  "properties": {
+                                    "action": {
+                                      "type": "string"
+                                    },
+                                    "column": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "refused": {
+                                "nullable": true,
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
                           },
                           "name": {
                             "type": "string"

@@ -133,6 +133,22 @@ class SavedAndAdhocTests(MaskingTestCase):
         self.assertIn([{'column': 'email', 'action': 'hash', 'source': 'customers.email'}], masked)
         self.assertIn({'column': 'contact', 'action': 'hash', 'source': 'customers.email'}, masked[-1])
 
+    def test_the_catalog_tells_the_caller_what_it_gets_masked(self):
+        save_query(self.client, headers=ADMIN, body={'filename': 'whole_rows', 'description': 'd',
+                                                     'connection_name': 'shop',
+                                                     'sql_query': 'SELECT c FROM customers c'})
+        catalog = self.client.get('/catalog', headers=self.partner).get_json()
+        by_name = {q['name']: q for q in catalog['queries']}
+        self.assertEqual(by_name['customer_list']['masking'], {
+            'masked': [{'column': 'contact', 'action': 'hash'}, {'column': 'phone', 'action': 'mask'},
+                       {'column': 'secret', 'action': 'drop'}], 'refused': None})
+        self.assertIn("can't be traced", by_name['whole_rows']['masking']['refused'])
+        self.assertNotIn('customers', str(by_name['customer_list']['masking']))  # columns and actions, no sources
+        self.assertEqual(catalog['caller']['mask'], RULES)
+        admin = self.client.get('/catalog', headers=ADMIN).get_json()
+        self.assertNotIn('masking', admin['queries'][0])
+        self.assertIsNone(admin['caller']['mask'])
+
     def test_a_key_from_a_role_copies_its_rules(self):
         apikeys.create_role('partners', connections=['shop'], mask=RULES[:1])
         key = {'X-API-Key': apikeys.create_key('from-role', role='partners')}

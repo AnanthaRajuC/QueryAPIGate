@@ -9,6 +9,8 @@ import { Time } from '@/components/Time';
 
 import { ExperimentalNote } from './ExperimentalNote';
 import { useDestinations, useExports, useReport } from './shared';
+import { MaskRulesField } from '@/features/access/MaskRules';
+import { maskPayload, type MaskRule } from '@/features/access/maskRules';
 
 // Saved exports (ADR 0004), on /api/v1/exports: a saved query delivered to a destination, run by a scheduler or here.
 
@@ -271,6 +273,9 @@ function ExportFields({ name, existing, etag }: { name?: string; existing?: Expo
   const [parameter, setParameter] = useState(existing?.incremental?.parameter ?? '');
   const [start, setStart] = useState(String(existing?.incremental?.start ?? ''));
   const [skipEmpty, setSkipEmpty] = useState(existing ? existing.skip_empty : true);
+  const [mask, setMask] = useState<MaskRule[]>(
+    (existing?.mask ?? []).map((r) => ({ column: r.column, action: r.action })),
+  );
   const [description, setDescription] = useState(existing?.description ?? '');
 
   const changeFormat = (next: Format) => {
@@ -295,6 +300,7 @@ function ExportFields({ name, existing, etag }: { name?: string; existing?: Expo
         path: path.trim(),
         params: parsed,
         skip_empty: skipEmpty,
+        mask: maskPayload(mask, isEdit ? null : undefined),
         description: description.trim() || (isEdit ? null : undefined),
         incremental: incremental
           ? {
@@ -440,6 +446,7 @@ function ExportFields({ name, existing, etag }: { name?: string; existing?: Expo
           </Field>
         </div>
       )}
+      <MaskRulesField id="x-mask" rules={mask} onChange={setMask} who="this export writes" />
       <label className="switch">
         <input
           id="x-skip-empty"

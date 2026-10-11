@@ -73,6 +73,29 @@ describe('API keys', () => {
     expect(row('old').querySelector('.dot.off')).toHaveAttribute('title', 'Revoked');
   });
 
+  it('sends column-masking rules - complete rows only', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/api-keys': () => jsonResponse({ ...apiKey('partner'), secret: 'sk_1' }, 201),
+    });
+    renderAt('/api-keys');
+    await userEvent.click(await screen.findByRole('button', { name: 'New API key' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.type(within(drawer).getByLabelText('Name'), 'partner');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Add a masking rule' }));
+    await userEvent.type(within(drawer).getByLabelText('Masked column 1'), 'customers.email');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Add a masking rule' }));
+    await userEvent.type(within(drawer).getByLabelText('Masked column 2'), '*.phone');
+    await userEvent.selectOptions(within(drawer).getByLabelText('Masking action 2'), 'mask');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Add a masking rule' })); // left empty
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Create key' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect((calls.find((c) => c.method === 'POST')!.body as { mask: unknown }).mask).toEqual([
+      { column: 'customers.email', action: 'hash' },
+      { column: '*.phone', action: 'mask' },
+    ]);
+  });
+
   it('creates a key with explicit grants, then shows its secret once', async () => {
     const { calls } = fakeBackend({
       ...routes(),
@@ -101,6 +124,7 @@ describe('API keys', () => {
       allowed_ips: ['10.0.0.1', '10.0.0.2'],
       allowed_write_ops: null,
       allowed_tables: null,
+      mask: null,
       expires_at: null,
     });
     expect(await within(drawer).findByLabelText('Secret key')).toHaveValue('sk_secret123');

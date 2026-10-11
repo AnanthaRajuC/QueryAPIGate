@@ -101,6 +101,14 @@ export function ApiKeysPage() {
                       >
                         {name}
                       </span>
+                      {k.mask?.length ? (
+                        <span
+                          className="tag"
+                          title={k.mask.map((r) => `${r.column}: ${r.action}`).join(', ')}
+                        >
+                          masked
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td>

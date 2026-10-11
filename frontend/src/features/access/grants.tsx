@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 
 import { useAllQueries, useCollections, useConnections, type RoleEntry } from '@/app/data';
 import { Field } from '@/app/feedback';
+import { MaskRulesField } from './MaskRules';
+import { maskPayload, type MaskRule } from './maskRules';
 
 // What a key and a role share (ui.py scopeNode, queryGrantTags, collectionGrantField and the grant fields of
 // openApiKeyForm / openRoleForm): their tags in a table row, and the form fields that edit them.
@@ -87,6 +89,7 @@ export interface GrantState {
   tables: string;
   rateLimit: string;
   ips: string;
+  mask: MaskRule[];
 }
 
 export function initialGrants(existing?: RoleEntry): GrantState {
@@ -108,6 +111,7 @@ export function initialGrants(existing?: RoleEntry): GrantState {
     tables: (existing?.allowed_tables ?? []).join(', '),
     rateLimit: existing?.rate_limit ?? '',
     ips: (existing?.allowed_ips ?? []).join(', '),
+    mask: (existing?.mask ?? []).map((r) => ({ column: r.column, action: r.action })),
   };
 }
 
@@ -134,6 +138,7 @@ export function grantsPayload(state: GrantState, connectionNames: string[], quer
     allowed_ips: list(state.ips),
     allowed_write_ops: list(state.writeOps, true),
     allowed_tables: list(state.tables, true),
+    mask: maskPayload(state.mask, null),
   };
 }
 
@@ -323,6 +328,12 @@ export function GrantFields({
           onChange={(e) => set({ tables: e.target.value })}
         />
       </Field>
+      <MaskRulesField
+        id={`${prefix}-mask`}
+        rules={state.mask}
+        onChange={(mask) => set({ mask })}
+        who={prefix === 'k' ? 'this key' : 'a key created from this role'}
+      />
       <Field id={`${prefix}-rate-limit`} label="Rate limit" hint={hints.rateLimit}>
         <input
           id={`${prefix}-rate-limit`}

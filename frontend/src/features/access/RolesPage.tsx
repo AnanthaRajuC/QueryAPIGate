@@ -71,6 +71,14 @@ export function RolesPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="name">{name}</span>
                       {r.example && <ExampleBadge />}
+                      {r.mask?.length ? (
+                        <span
+                          className="tag"
+                          title={r.mask.map((m) => `${m.column}: ${m.action}`).join(', ')}
+                        >
+                          masked
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td className="dim">{conns}</td>

@@ -374,6 +374,11 @@ function Matrix({
       </span>
       <span className="amap-key-sub">
         {(entry.allow_writes ? 'Read/write' : 'Read-only') + ' · ' + (entry.rate_limit || 'server default')}
+        {entry.mask?.length ? (
+          <span className="tag" title={entry.mask.map((r) => `${r.column}: ${r.action}`).join(', ')}>
+            masked
+          </span>
+        ) : null}
       </span>
     </th>
   );

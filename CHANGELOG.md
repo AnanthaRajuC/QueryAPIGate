@@ -70,7 +70,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   format, streamed exports, MCP tools and exports. Each result column is traced through the SQL to the table columns it
   comes from - aliases, expressions, CTEs, unions and joins don't get around it - and a query that can't be traced is
   refused (`403 mask_unresolvable`) before it runs, never served unmasked. Cached responses are kept per set of rules;
-  run history records what was masked; a caller with rules never sees the database's own error text.
+  run history records what was masked; a caller with rules never sees the database's own error text. `GET /catalog`
+  tells such a caller which of each query's columns it gets masked, and how. In the Console: rules in the API key, role
+  and export forms, and a "masked" tag on keys and roles - and on the Access map - that carry them.
 - **Exports and Destinations in the Console** (a new Delivery group): define a destination and test it before saving;
   define an export - query, destination, format, file path, parameters, incremental column - run it with **Run now**,
   and see its runs. Each role sees what it may do: owners and admins everything, developers the Run button, auditors

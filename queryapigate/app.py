@@ -960,10 +960,18 @@ def describe_catalog(permission):
         if not apikeys.can_run_saved(permission, name, collection, connection_name):
             continue
         parameters = definitions.effective_parameters(data)
-        catalog.append({'name': name, 'version': number, 'description': data.get('description'),
-                        'tags': data.get('tags'), 'collection': collection, 'connection_name': connection_name,
-                        'parameters': parameters, 'cache_ttl': data.get('cache_ttl') or None,
-                        'can_write': apikeys.can_write_query(permission, name)})
+        entry = {'name': name, 'version': number, 'description': data.get('description'),
+                 'tags': data.get('tags'), 'collection': collection, 'connection_name': connection_name,
+                 'parameters': parameters, 'cache_ttl': data.get('cache_ttl') or None,
+                 'can_write': apikeys.can_write_query(permission, name)}
+        if permission.mask:  # what this caller's masking rules do to it - or that they'd refuse it
+            try:
+                dialect = store.get_connection(connection_name)['db'] if data.get('query_type') != 'mongo' else 'mongo'
+                entry['masking'] = masking.describe(permission.mask, data.get('sql_query') or '', connection_name,
+                                                    dialect)
+            except ApiError as error:  # an inactive or missing connection: it can't be run either
+                entry['masking'] = {'masked': [], 'refused': error.message}
+        catalog.append(entry)
     return catalog
 
 
@@ -983,6 +991,7 @@ def catalog():
             'allow_writes': permission.allow_writes,
             'allowed_write_ops': permission.allowed_write_ops,
             'allowed_tables': sorted(permission.allowed_tables) if permission.allowed_tables is not None else None,
+            'mask': permission.mask,
             'rate_limit': config.format_rate_limit(permission.rate_limit),
             'server_rate_limit': config.format_rate_limit(config.rate_limit()),
         },

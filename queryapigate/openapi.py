@@ -211,11 +211,20 @@ def build_spec(version, saved_queries=None, jwt=None):
                             'cache_ttl': {'type': 'integer', 'nullable': True, 'description':
                                 'Seconds a response may be served from cache, or null when uncached.'},
                             'can_write': {'type': 'boolean', 'description':
-                                'Whether this caller specifically can write through this query.'}}}},
+                                'Whether this caller specifically can write through this query.'},
+                            'masking': {'type': 'object', 'description':
+                                'Only for a caller with column-masking rules: the result columns it gets masked, and '
+                                'how - or, in refused, why its rules would refuse this query (experimental).',
+                                'properties': {
+                                    'masked': {'type': 'array', 'items': {'type': 'object', 'properties': {
+                                        'column': {'type': 'string'}, 'action': {'type': 'string'}}}},
+                                    'refused': {'type': 'string', 'nullable': True}}}}}},
                         'caller': {'type': 'object', 'properties': {
                             'name': {'type': 'string', 'nullable': True},
                             'admin': {'type': 'boolean'}, 'allow_writes': {'type': 'boolean'},
                             'allowed_write_ops': {'type': 'array', 'items': {'type': 'string'}, 'nullable': True},
+                            'mask': {'type': 'array', 'nullable': True, 'items': {'type': 'object'},
+                                     'description': "This caller's column-masking rules, or null for none."},
                             'rate_limit': {'type': 'string', 'nullable': True, 'description':
                                 'This caller\'s own additional limit, e.g. "100/minute", or null when it has '
                                 'none of its own.'},

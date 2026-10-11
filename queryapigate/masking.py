@@ -408,6 +408,21 @@ class Plan:
         return apply(list(columns), rows, self.actions)
 
 
+def describe(rules, sql, connection_name, dialect):
+    """For GET /catalog: what a caller with `rules` gets from a saved query - {'masked': [{column, action}]}, or
+    {'refused': why} when masking can't follow it. The result column and the action only: where it was traced from
+    names tables the caller may not otherwise see."""
+    try:
+        plan_ = prepare(rules, sql, connection_name, dialect)
+    except ApiError as error:
+        if error.code != 'mask_unresolvable':
+            raise
+        return {'masked': [], 'refused': error.message}
+    if plan_ is None:
+        return {'masked': [], 'refused': None}
+    return {'masked': [{'column': f['column'], 'action': f['action']} for f in plan_.fired], 'refused': None}
+
+
 def prepare(rules, sql, connection_name, dialect, database=None):
     """The Plan for running `sql` for a caller with `rules`, or None when there is nothing to mask (no rules, or a
     statement with no table data). Raises mask_unresolvable - before the query runs - when it can't be traced."""
