@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0006-ai-agents.md"

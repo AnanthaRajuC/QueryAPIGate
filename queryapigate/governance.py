@@ -42,6 +42,20 @@ def authenticate(api_key, authorization, client_ip):
     return None if apikeys.auth_required() else apikeys.OPEN
 
 
+def authenticate_mcp(api_key, authorization, client_ip):
+    """(Permission, None) for a caller the MCP server lets in, else (None, refusal) - a jwtauth.McpRefusal saying
+    401 or 403 and why. An API key is judged as everywhere. A bearer token, with OAuth on for the MCP server
+    (ADR 0006), must be one issued for it - a REST token isn't, however valid; with OAuth off, REST's JWT settings
+    apply, as before."""
+    if api_key or not authorization or not config.mcp_oauth_enabled():
+        permission = authenticate(api_key, authorization, client_ip)
+        if permission is not None:
+            return permission, None
+        return None, jwtauth.McpRefusal(401, 'unauthorized', 'Unauthorized: missing or invalid X-API-Key or bearer '
+                                                             'token')
+    return jwtauth.authenticate_mcp(authorization, client_ip=client_ip)
+
+
 def check_client_limit(flask_app, client_ip):
     """Count one call against its client address's share of QUERYAPIGATE_RATE_LIMIT; None when there is no limit.
     Checked before authentication, so guessing keys is throttled too."""

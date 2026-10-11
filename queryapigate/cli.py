@@ -65,6 +65,13 @@ def _mcp(args):
     args.port = args.port or config.mcp_port()
     logging.getLogger('queryapigate').info('Serving MCP tools for %s at http://%s:%s/mcp',
                                            config.home(), args.host, args.port)
+    if config.mcp_oauth_enabled():
+        from . import jwtauth
+        log = logging.getLogger('queryapigate')
+        log.info('MCP sign-in through %s, for tokens issued to %s (scope %s)', config.mcp_auth_server(),
+                 config.mcp_resource_url(), config.mcp_scope())
+        if jwtauth.jwks_uri(config.mcp_auth_server()) is None:
+            log.warning('The MCP server will refuse every access token until that metadata can be fetched')
     run(app, host=args.host, port=args.port)
     return 0
 

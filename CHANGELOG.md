@@ -23,7 +23,8 @@ callout in its documentation, `x-experimental: true` on its operations in `/open
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, remote files through DuckDB (`s3://`,
 `gs://`, `r2://` and `http(s)://` in a DuckDB connection's `allowed_paths`), exports to object storage
-(`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), and alerts (`GET /api/v1/alerts`). The
+(`/api/v1/destinations`, `/api/v1/exports`), column masking (`mask` grants), OAuth for the MCP server
+(`QUERYAPIGATE_MCP_RESOURCE_URL`), and alerts (`GET /api/v1/alerts`). The
 list is `queryapigate/experimental.py`.
 
 **Still pre-1.0.** Strict SemVer allows any `0.y.z` release to break compatibility; this project doesn't
@@ -43,6 +44,19 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Upgrading from 0.17
+- **The MCP server answers a missing or wrong credential with HTTP `401`**, not a tool error inside a `200` - and
+  a rate-limited client with `429`. A client with a valid key or token sees no change.
+
+### Added
+- **OAuth for the MCP server** (BACKLOG #85, [ADR 0006](documentation/adr/0006-ai-agents.md), experimental): hosted
+  AI clients sign in through your identity provider. `/mcp` becomes an OAuth 2.1 resource server - Protected Resource
+  Metadata at `/.well-known/oauth-protected-resource`, `401`/`403` with `WWW-Authenticate` - accepting tokens that
+  name its own URL as their audience (`QUERYAPIGATE_MCP_RESOURCE_URL`) from the provider in
+  `QUERYAPIGATE_MCP_AUTH_SERVER`, with a scope and a role (`QUERYAPIGATE_MCP_SCOPE`, `QUERYAPIGATE_MCP_ROLE`,
+  `QUERYAPIGATE_MCP_ROLE_CLAIM`). The role's grants and masking rules apply to the agent. REST and MCP tokens are kept
+  apart: neither is accepted by the other. See [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth).
 
 ## [0.17.0] - 2026-10-12
 

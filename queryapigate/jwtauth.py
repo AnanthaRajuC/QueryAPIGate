@@ -27,9 +27,22 @@ instead of the request (params.py's `from_claim`): `WHERE user_id = :user_id` wi
 
 A JWT can't be revoked before it expires - keep token lifetimes short (minutes, with refresh), as identity
 providers do by default. Disabling the role, or removing the grant from it, takes effect on the next request.
+
+**AI agents on the MCP server** (authenticate_mcp(), ADR 0006) are the same idea with the MCP specification's rules:
+the token comes from QUERYAPIGATE_MCP_AUTH_SERVER, whose keys are found through its published metadata (RFC 8414 or
+OpenID Connect discovery); its `aud` must name QUERYAPIGATE_MCP_RESOURCE_URL - the MCP server's own URL - so a token
+issued for REST, or for anything else, is refused there, and REST refuses one issued for the MCP server; and it must
+carry QUERYAPIGATE_MCP_SCOPE. The role comes from QUERYAPIGATE_MCP_ROLE / QUERYAPIGATE_MCP_ROLE_CLAIM, the user from
+`sub`. Unlike REST's plain 401 for everything, a valid token that may not do this gets a 403 saying so - an OAuth
+client would otherwise sign the user in again, and again.
 """
+import json
 import logging
 import threading
+import time
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
 
 from . import apikeys, config
 
@@ -74,14 +87,22 @@ def verify(token):
         else:
             key = config.jwt_secret()
         audience = config.jwt_audience()
-        return jwt.decode(token, key, algorithms=config.jwt_algorithms(), audience=audience,
-                          issuer=config.jwt_issuer(), leeway=_LEEWAY,
-                          options={'require': ['exp'], 'verify_aud': audience is not None})
+        claims = jwt.decode(token, key, algorithms=config.jwt_algorithms(), audience=audience,
+                            issuer=config.jwt_issuer(), leeway=_LEEWAY,
+                            options={'require': ['exp'], 'verify_aud': audience is not None})
+        if config.mcp_resource_url() is not None and config.mcp_resource_url() in _audiences(claims):
+            return None  # issued for the MCP server, not for REST
+        return claims
     except jwt.PyJWKClientError:
         log.warning('Could not get the signing key for a token from %s', config.jwt_jwks_url(), exc_info=True)
         return None
     except jwt.InvalidTokenError:
         return None
+
+
+def _audiences(claims):
+    aud = claims.get('aud')
+    return [aud] if isinstance(aud, str) else [a for a in aud if isinstance(a, str)] if isinstance(aud, list) else []
 
 
 def claim(claims, name):
@@ -97,18 +118,20 @@ def claim(claims, name):
     return value
 
 
-def _role_for(claims):
-    """The first existing role among those the token's role claim names, then QUERYAPIGATE_JWT_ROLE."""
+def _role_for(claims, mcp=False):
+    """The first existing role among those the token's role claim names, then the fixed role - REST's
+    QUERYAPIGATE_JWT_ROLE_CLAIM / QUERYAPIGATE_JWT_ROLE, or the MCP server's own two."""
     names = []
-    claim_name = config.jwt_role_claim()
+    claim_name, fixed = (config.mcp_role_claim(), config.mcp_role()) if mcp else (config.jwt_role_claim(),
+                                                                                  config.jwt_role())
     if claim_name:
         value = claim(claims, claim_name)
         if isinstance(value, str):
             names.append(value)
         elif isinstance(value, list):
             names += [v for v in value if isinstance(v, str)]
-    if config.jwt_role():
-        names.append(config.jwt_role())
+    if fixed:
+        names.append(fixed)
     for name in names:
         role = apikeys.get_role(name)
         if role is not None:
@@ -137,3 +160,126 @@ def authenticate(authorization, client_ip=None):
     if not apikeys.ip_allowed(role, client_ip):
         return None
     return apikeys.permission_from_grants(f'{NAME_PREFIX}{user}', role, claims=claims)
+
+
+# --- The MCP server (ADR 0006) -----------------------------------------------------------------------------------
+
+_DISCOVERY_RETRY = 30   # seconds before metadata that couldn't be fetched is tried again
+_discovered: dict = {}  # issuer -> (jwks_uri or None, fetched at)
+_discovery_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class McpRefusal:
+    """Why a bearer token isn't let in to the MCP server: `invalid_token` (401 - sign in again), or
+    `insufficient_scope` / `forbidden` (403 - a valid token that may not do this; signing in again won't help)."""
+    status: int
+    code: str
+    message: str
+
+
+def discovery_urls(issuer):
+    """Where an issuer's metadata may be, in the MCP specification's order: RFC 8414's oauth-authorization-server and
+    OpenID Connect's openid-configuration, both inserted before an issuer's path, then OIDC's appended to it."""
+    parts = urllib.parse.urlsplit(issuer)
+    origin = f'{parts.scheme}://{parts.netloc}'
+    path = parts.path.rstrip('/')
+    if not path:
+        return [f'{origin}/.well-known/oauth-authorization-server', f'{origin}/.well-known/openid-configuration']
+    return [f'{origin}/.well-known/oauth-authorization-server{path}',
+            f'{origin}/.well-known/openid-configuration{path}', f'{origin}{path}/.well-known/openid-configuration']
+
+
+def _fetch_json(url):
+    request = urllib.request.Request(url, headers={'Accept': 'application/json'})
+    with urllib.request.urlopen(request, timeout=config.CONNECT_TIMEOUT) as response:  # noqa: S310 - an operator's URL
+        return json.loads(response.read(1024 * 1024))
+
+
+def jwks_uri(issuer):
+    """The issuer's `jwks_uri`, from the first metadata document that answers and names this issuer as its own
+    (RFC 8414: a document naming another issuer must not be used). Cached for the process; when none answers, tried
+    again after _DISCOVERY_RETRY seconds rather than on every request."""
+    with _discovery_lock:
+        cached = _discovered.get(issuer)
+        if cached is not None and (cached[0] is not None or time.monotonic() - cached[1] < _DISCOVERY_RETRY):
+            return cached[0]
+        found = None
+        for url in discovery_urls(issuer):
+            try:
+                metadata = _fetch_json(url)
+            except (OSError, ValueError):
+                continue
+            if isinstance(metadata, dict) and metadata.get('issuer') == issuer and isinstance(
+                    metadata.get('jwks_uri'), str) and config._secure_url(metadata['jwks_uri']):
+                found = metadata['jwks_uri']
+                break
+        if found is None:
+            log.warning("Could not find the signing keys of the MCP server's authorization server %s - tried %s",
+                        issuer, ', '.join(discovery_urls(issuer)))
+        _discovered[issuer] = (found, time.monotonic())
+        return found
+
+
+def _scopes(claims):
+    """The token's scopes - RFC 9068's space-separated `scope`, or `scp` (a string or a list) as some providers send."""
+    found = []
+    for name in ('scope', 'scp'):
+        value = claims.get(name)
+        if isinstance(value, str):
+            found += value.split()
+        elif isinstance(value, list):
+            found += [v for v in value if isinstance(v, str)]
+    return found
+
+
+def has_scope(claims, required):
+    """Whether the token carries `required` - or its last part, which is what providers that name scopes by the API's
+    URI (`api://queryapigate/queryapigate.mcp`) put in the token."""
+    return any(scope == required or required.endswith('/' + scope) for scope in _scopes(claims))
+
+
+def verify_mcp(token):
+    """The claims of a token issued for the MCP server, or None: signed by the authorization server's published keys,
+    with the key's own algorithm only; `iss` the configured issuer; `aud` naming the MCP server's URL; `exp`
+    required."""
+    import jwt
+    issuer, resource = config.mcp_auth_server(), config.mcp_resource_url()
+    keys_url = jwks_uri(issuer)
+    if keys_url is None:
+        return None
+    try:
+        signing_key = _jwks_client(keys_url).get_signing_key_from_jwt(token)
+        algorithm = signing_key.algorithm_name
+        if algorithm not in config.JWT_ASYMMETRIC_ALGORITHMS:
+            return None
+        return jwt.decode(token, signing_key.key, algorithms=[algorithm], audience=resource, issuer=issuer,
+                          leeway=_LEEWAY, options={'require': ['exp', 'iss', 'aud']})
+    except jwt.PyJWKClientError:
+        log.warning('Could not get the signing key for a token from %s', keys_url, exc_info=True)
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def authenticate_mcp(authorization, client_ip=None):
+    """(Permission, None) for a bearer token the MCP server accepts, else (None, McpRefusal) - see the module
+    docstring. Only called with OAuth on (config.mcp_oauth_enabled())."""
+    token = bearer_token(authorization)
+    claims = verify_mcp(token) if token is not None else None
+    if claims is None:
+        return None, McpRefusal(401, 'unauthorized', 'Unauthorized: missing, invalid or expired access token')
+    if not has_scope(claims, config.mcp_scope()):
+        return None, McpRefusal(403, 'insufficient_scope',
+                                f"This access token doesn't carry the '{config.mcp_scope()}' scope")
+    user = claims.get('sub')
+    if not isinstance(user, str) or user == '':
+        return None, McpRefusal(401, 'unauthorized', 'Unauthorized: the access token names no user (sub)')
+    role_name, role = _role_for(claims, mcp=True)
+    if role is None:
+        log.warning('A valid MCP access token for %s names no existing role - refused (QUERYAPIGATE_MCP_ROLE / '
+                    'QUERYAPIGATE_MCP_ROLE_CLAIM)', user)
+        return None, McpRefusal(403, 'forbidden', 'This access token is valid, but its user has no role here')
+    if not apikeys.ip_allowed(role, client_ip):
+        return None, McpRefusal(403, 'forbidden', "This role isn't allowed from this address")
+    return apikeys.permission_from_grants(f'{NAME_PREFIX}{user}', role, claims=claims), None

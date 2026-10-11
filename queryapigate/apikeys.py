@@ -439,8 +439,10 @@ def any_configured():
 
 def auth_required():
     # JWT on means signed-in users only: without this, a server with no API keys would stay open to everyone. And
-    # once an administrator exists, removing QUERYAPIGATE_API_KEY must not reopen the server (ADR 0003).
-    return config.api_key() is not None or any_configured() or config.jwt_enabled() or admins.any_configured()
+    # once an administrator exists, removing QUERYAPIGATE_API_KEY must not reopen the server (ADR 0003). The same
+    # for OAuth on the MCP server (ADR 0006): agents sign in, so nobody else gets in without a credential.
+    return (config.api_key() is not None or any_configured() or config.jwt_enabled() or config.mcp_oauth_enabled()
+            or admins.any_configured())
 
 
 def list_keys():

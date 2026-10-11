@@ -50,6 +50,14 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_MASK_KEY',),
         'docs': ('documentation/API.md', 'Column masking'),
     },
+    'mcp_oauth': {
+        'name': 'OAuth for the MCP server',
+        'why': 'new in 0.18 - its settings, the scope and the answers to refused tokens may change as AI clients use '
+               'it (ADR 0006)',
+        'settings': ('QUERYAPIGATE_MCP_RESOURCE_URL', 'QUERYAPIGATE_MCP_AUTH_SERVER', 'QUERYAPIGATE_MCP_SCOPE',
+                     'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM'),
+        'docs': ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
+    },
     'alerts': {
         'name': 'Alerts',
         'why': 'new in 0.13 - its checks, thresholds and alert shape may change as it is used',

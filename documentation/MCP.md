@@ -89,6 +89,52 @@ that key alone; a wrong key never falls back to the token. Send either as a requ
 HTTP-capable MCP client configuration allows - never as a URL parameter, which would leak it into logs. An unset
 server key means open access, same as the REST API.
 
+Every request to `/mcp` is checked before the MCP session sees it: a missing or wrong credential is an HTTP `401`
+with a `WWW-Authenticate` header (until 0.17 it was a tool error inside a `200`), a refused one a `403`, and
+`QUERYAPIGATE_RATE_LIMIT` a `429` - each with the `{"error", "code", "request_id"}` body REST uses.
+
+## Sign-in for AI clients (OAuth)
+
+> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); its settings and answers may change in any
+> minor release, always noted in the changelog.
+
+A hosted AI client - a connector in an assistant - doesn't take an API key: it follows the MCP specification's
+authorization, OAuth 2.1. The MCP server takes the part the specification gives it, a **resource server**: it checks
+tokens, and your **identity provider** (Keycloak, Okta, Auth0, Entra ID, ...) issues them, signs the user in and
+registers the client. QueryAPIGate never sees a password.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `QUERYAPIGATE_MCP_RESOURCE_URL` | unset | The MCP server's URL as clients reach it, e.g. `https://data.example.com/mcp`. Every token must name it as its audience. |
+| `QUERYAPIGATE_MCP_AUTH_SERVER` | unset | The identity provider's issuer URL, e.g. `https://idp.example.com/realms/acme`. Its keys are found through its metadata (RFC 8414 or OpenID Connect discovery). |
+| `QUERYAPIGATE_MCP_SCOPE` | `queryapigate.mcp` | The scope a token must carry. |
+| `QUERYAPIGATE_MCP_ROLE` | unset | The role every agent signed in this way gets... |
+| `QUERYAPIGATE_MCP_ROLE_CLAIM` | unset | ...or the token claim naming its role (a string or a list; the first existing role wins). |
+
+Set the first two, and a role, to turn it on; anything half-set, or not `https://` (except `localhost`), stops
+startup. Then:
+
+- **Discovery.** `GET /.well-known/oauth-protected-resource` (and `.../mcp`) is the server's Protected Resource
+  Metadata (RFC 9728): its URL, `authorization_servers`, `scopes_supported`. A `401` points at it:
+  `WWW-Authenticate: Bearer resource_metadata="https://data.example.com/.well-known/oauth-protected-resource/mcp",
+  scope="queryapigate.mcp"` - which is how a client knows where to sign the user in.
+- **What a token must be:** signed by the provider's published keys, with the key's own algorithm; `iss` the
+  provider; `aud` the MCP server's URL; not expired; carrying the scope (as `scope`, or `scp`; for a scope named by
+  URI, `api://queryapigate/queryapigate.mcp`, its last part). Anything else is `401` (`error="invalid_token"`). A
+  valid token without the scope is `403 insufficient_scope`; one whose user has no role here, or whose role's
+  `allowed_ips` leave out the address, is `403 forbidden` - signing in again wouldn't help.
+- **Tokens are kept apart.** A token issued for the REST API isn't accepted on `/mcp`, however valid, and REST
+  refuses a token naming the MCP server - so one leaked from either can't be replayed against the other.
+  `QUERYAPIGATE_JWT_AUDIENCE` can't include the MCP server's URL. With OAuth on, a bearer token on `/mcp` must be
+  one issued for it; API keys still work, for SDKs and scripts. No token is ever passed on: databases are reached
+  with the connection's own credentials.
+- **What the agent may do** is its role's: connections, saved queries, `allowed_tables`, its rate limit, and its
+  [masking rules](API.md#column-masking). `from_claim` parameters bind to the token's claims, so an agent acting for
+  a person sees only that person's rows. Its runs are in history as `jwt:<sub>`, with `"transport": "mcp"`.
+- **Registering the client** is between the client and your provider: Client ID Metadata Documents or Dynamic
+  Client Registration where the provider supports them, or an administrator registering it by hand. QueryAPIGate
+  plays no part, and issues no tokens of its own.
+
 ## Governance: the same rules as REST
 
 Every tool call passes through the same checks a REST request does, in the same order, by calling the same code
@@ -99,7 +145,7 @@ Every tool call passes through the same checks a REST request does, in the same 
 3. **The caller's own `rate_limit` grant** (a key's, or a signed-in user's role's).
 4. **Grants** - connections, queries, collections, `allowed_tables`, IP allowlists - then the tool itself.
 
-A refused call is a tool error (`isError: true`) whose text says why, and whose `structuredContent` carries the
+A refused call (past authentication, which is HTTP-level - above) is a tool error (`isError: true`) whose text says why, and whose `structuredContent` carries the
 same `{"error", "code"}` a REST error body does - `rate_limited` (with `retry_after`), `unauthorized`,
 `table_not_allowed`, `read_only`, `param_invalid` and the rest listed under [Errors](API.md#errors) - so an agent
 can branch on the code instead of parsing the message. Every call is counted in `/metrics`'
@@ -131,7 +177,9 @@ is still honored.
 | `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp`. |
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for a tool call's result. Always a positive count; a malformed value stops startup. |
 
-Both show up as a read-only "MCP server" section on the admin UI's Settings screen (BACKLOG #54) - the
+The OAuth settings are under [Sign-in for AI clients](#sign-in-for-ai-clients-oauth).
+
+These show up as a read-only "MCP server" section on the admin UI's Settings screen (BACKLOG #54) - the
 effective value and whether it's the default, same as every other setting there. Below them, **Check now** tries
 a TCP connection to that port on `127.0.0.1` (only when asked - `GET /api/v1/mcp/status`), and **Tools** lists what
 `tools/list` returns for the admin key (`GET /api/v1/mcp/tools`). Both are worked out by the REST server: the check

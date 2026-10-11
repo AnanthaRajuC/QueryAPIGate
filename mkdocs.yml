@@ -33,6 +33,7 @@ nav:
       - 0003 Named administrators: documentation/adr/0003-named-administrators.md
       - 0004 Exports to object storage: documentation/adr/0004-exports-to-object-storage.md
       - 0005 Column masking: documentation/adr/0005-column-masking.md
+      - 0006 AI agents: documentation/adr/0006-ai-agents.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

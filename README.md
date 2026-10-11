@@ -614,6 +614,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_EVENTS_POLL_INTERVAL` | `1` | Seconds between `queryapigate events` checks for new runs (on PostgreSQL a notification usually arrives first). |
 | `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp` - see [documentation/MCP.md](documentation/MCP.md). |
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for an MCP tool call's result. Always a positive count; a malformed value stops startup. |
+| `QUERYAPIGATE_MCP_RESOURCE_URL` / `QUERYAPIGATE_MCP_AUTH_SERVER` | unset | Let hosted AI clients sign in through your identity provider (OAuth) - the MCP server's own URL and the provider's issuer, with `QUERYAPIGATE_MCP_ROLE` / `QUERYAPIGATE_MCP_ROLE_CLAIM` and `QUERYAPIGATE_MCP_SCOPE`. Experimental - see [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth). |
 
 ## Security and production considerations
 

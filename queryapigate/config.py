@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import urllib.parse
 from pathlib import Path
 
 from . import experimental
@@ -387,6 +388,7 @@ def check_settings():
                              'print(Fernet.generate_key().decode())"`') from None
     check_database_url()
     check_jwt_settings()
+    check_mcp_oauth_settings()
     raw = os.environ.get('QUERYAPIGATE_REDIS_URL', '').strip()
     if raw:
         if not _REDIS_SCHEME_RE.match(raw):
@@ -602,6 +604,78 @@ def check_jwt_settings():
     if jwt_role() is None and jwt_role_claim() is None:
         raise ValueError('JWT authentication needs QUERYAPIGATE_JWT_ROLE (the role every token caller gets) and/or '
                          'QUERYAPIGATE_JWT_ROLE_CLAIM (a claim naming one)')
+
+
+_MCP_OAUTH_VARS = ('QUERYAPIGATE_MCP_RESOURCE_URL', 'QUERYAPIGATE_MCP_AUTH_SERVER', 'QUERYAPIGATE_MCP_SCOPE',
+                   'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM')
+DEFAULT_MCP_SCOPE = 'queryapigate.mcp'
+
+
+def mcp_resource_url():
+    """QUERYAPIGATE_MCP_RESOURCE_URL: the MCP server's canonical URI (`https://data.example.com/mcp`) - the audience
+    every OAuth access token on /mcp must name (ADR 0006, mcp_server.py)."""
+    return _env('QUERYAPIGATE_MCP_RESOURCE_URL')
+
+
+def mcp_auth_server():
+    """QUERYAPIGATE_MCP_AUTH_SERVER: the issuer URL of the identity provider that issues tokens for the MCP server;
+    its signing keys are found through its published metadata."""
+    return _env('QUERYAPIGATE_MCP_AUTH_SERVER')
+
+
+def mcp_oauth_enabled():
+    return mcp_resource_url() is not None and mcp_auth_server() is not None
+
+
+def mcp_scope():
+    """QUERYAPIGATE_MCP_SCOPE: the scope a token must carry to use the MCP server - default `queryapigate.mcp`."""
+    return _env('QUERYAPIGATE_MCP_SCOPE') or DEFAULT_MCP_SCOPE
+
+
+def mcp_role():
+    """QUERYAPIGATE_MCP_ROLE: the role whose grants every OAuth caller on /mcp gets, unless the role claim picks
+    another."""
+    return _env('QUERYAPIGATE_MCP_ROLE')
+
+
+def mcp_role_claim():
+    """QUERYAPIGATE_MCP_ROLE_CLAIM: a claim naming an OAuth caller's role on /mcp (a string, or a list - the first
+    that names an existing role wins)."""
+    return _env('QUERYAPIGATE_MCP_ROLE_CLAIM')
+
+
+def _secure_url(url):
+    lowered = url.lower()
+    return lowered.startswith('https://') or lowered.startswith(('http://localhost', 'http://127.0.0.1'))
+
+
+def check_mcp_oauth_settings():
+    """Part of check_settings(): the MCP server's OAuth settings are all there and safe, or not set at all."""
+    if not any(_env(name) for name in _MCP_OAUTH_VARS):
+        return
+    resource, issuer = mcp_resource_url(), mcp_auth_server()
+    if resource is None or issuer is None:
+        raise ValueError('OAuth for the MCP server needs both QUERYAPIGATE_MCP_RESOURCE_URL (its own URL) and '
+                         'QUERYAPIGATE_MCP_AUTH_SERVER (the identity provider that issues its tokens)')
+    for name, url in (('QUERYAPIGATE_MCP_RESOURCE_URL', resource), ('QUERYAPIGATE_MCP_AUTH_SERVER', issuer)):
+        parts = urllib.parse.urlsplit(url)
+        if not _secure_url(url) or not parts.netloc:
+            raise ValueError(f'{name} must be an https:// URL - tokens and signing keys over plain HTTP could be '
+                             'read or swapped in transit')
+        if parts.query or parts.fragment:
+            raise ValueError(f'{name} must not have a query string or a fragment')
+    try:
+        import jwt  # noqa: F401
+    except ImportError:
+        raise ValueError('OAuth for the MCP server needs the "PyJWT" package - run `pip install '
+                         '"queryapigate[jwt]"`') from None
+    if mcp_role() is None and mcp_role_claim() is None:
+        raise ValueError('OAuth for the MCP server needs QUERYAPIGATE_MCP_ROLE (the role every agent gets) and/or '
+                         'QUERYAPIGATE_MCP_ROLE_CLAIM (a claim naming one)')
+    if resource in (jwt_audience() or []):
+        # The point of a separate audience: a token for the MCP server must never be accepted by REST, or the reverse.
+        raise ValueError('QUERYAPIGATE_JWT_AUDIENCE must not include QUERYAPIGATE_MCP_RESOURCE_URL - tokens for the '
+                         'MCP server and for the REST API are kept apart')
 
 
 def events_port():
@@ -830,5 +904,15 @@ def describe_settings():
              'start. "Check now" tries its port on this host.', 'rows': [
             row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
             row('MCP max rows', 'Row cap for a tools/call result - an LLM\'s context can\'t hold a huge one.',
-                'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows')]},
+                'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows'),
+            row('Resource URL', 'The MCP server\'s own URL - the audience an agent\'s OAuth token must name. With '
+                'the next one, turns on sign-in through your identity provider for AI clients.',
+                'QUERYAPIGATE_MCP_RESOURCE_URL', mcp_resource_url() or 'off'),
+            row('Authorization server', 'Issuer URL of the identity provider that signs agents in and issues their '
+                'tokens.', 'QUERYAPIGATE_MCP_AUTH_SERVER', mcp_auth_server() or 'off'),
+            row('Scope', 'Scope a token must carry to use the MCP server.', 'QUERYAPIGATE_MCP_SCOPE', mcp_scope()),
+            row('Role', 'Role whose grants every agent signed in this way gets.', 'QUERYAPIGATE_MCP_ROLE',
+                mcp_role() or 'not set'),
+            row('Role claim', 'Claim naming an agent\'s role instead.', 'QUERYAPIGATE_MCP_ROLE_CLAIM',
+                mcp_role_claim() or 'not set')]},
     ]

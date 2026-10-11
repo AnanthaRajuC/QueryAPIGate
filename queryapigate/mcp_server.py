@@ -298,28 +298,41 @@ def _tool_kind(name):
 
 
 def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
-    """One tools/call, from the caller's credentials to its result - what the SDK handler in build_server() runs, as a
-    plain function so it can be tested without the SDK. It applies exactly what REST's request hooks apply
-    (governance.py): the client's rate limit, authentication by API key or bearer token, the caller's own rate limit,
-    and a request in /metrics (method MCP, endpoint mcp.<tool kind>)."""
+    """One tools/call, from the caller's credentials to its result, as a plain function so it can be tested without
+    the SDK. It applies exactly what REST's request hooks apply (governance.py): the client's rate limit,
+    authentication by API key or bearer token, then call_as(). Over HTTP the first two happen once per request, in
+    build_asgi_app()'s gate, which hands the SDK handler the caller it let in."""
     from . import governance, instances
     instances.heartbeat()
     started = time.monotonic()
-    permission = None
     verdict = governance.check_client_limit(flask_app, client_ip)
     if verdict is not None and not verdict.allowed:
-        result = _error(f'Rate limit exceeded - retry after {verdict.retry_after}s', 429,
+        return _finish(name, None, _error(f'Rate limit exceeded - retry after {verdict.retry_after}s', 429,
+                                          retry_after=verdict.retry_after), started)
+    permission, refusal = governance.authenticate_mcp(api_key, authorization, client_ip)
+    if permission is None:
+        return _finish(name, None, _error(refusal.message, refusal.status, refusal.code), started)
+    return call_as(flask_app, permission, name, arguments, started)
+
+
+def call_as(flask_app, permission, name, arguments, started=None):
+    """One tools/call by an authenticated caller: its own rate limit, the tool, and a request in /metrics (method
+    MCP, endpoint mcp.<tool kind>)."""
+    from . import governance, instances
+    if started is None:
+        instances.heartbeat()
+        started = time.monotonic()
+    verdict = governance.check_key_limit(flask_app, permission)
+    if verdict is not None and not verdict.allowed:
+        result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
                         retry_after=verdict.retry_after)
     else:
-        permission = governance.authenticate(api_key, authorization, client_ip)
-        verdict = governance.check_key_limit(flask_app, permission)
-        if permission is None:
-            result = _error('Unauthorized: missing or invalid X-API-Key or bearer token', 401)
-        elif verdict is not None and not verdict.allowed:
-            result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
-                            retry_after=verdict.retry_after)
-        else:
-            result = dispatch_tool_call(flask_app, permission, name, arguments)
+        result = dispatch_tool_call(flask_app, permission, name, arguments)
+    return _finish(name, permission, result, started)
+
+
+def _finish(name, permission, result, started):
+    from . import governance
     status = result.pop('_status', 200)
     elapsed = time.monotonic() - started
     key = (permission.name if permission else None) or '-'
@@ -337,7 +350,77 @@ def permission_for_listing(flask_app, api_key, authorization, client_ip):
     verdict = governance.check_client_limit(flask_app, client_ip)
     if verdict is not None and not verdict.allowed:
         return None
-    return governance.authenticate(api_key, authorization, client_ip)
+    return governance.authenticate_mcp(api_key, authorization, client_ip)[0]
+
+
+PERMISSION_STATE = 'queryapigate_permission'  # where the gate leaves the caller, in the ASGI scope's state
+
+
+def resource_metadata_url():
+    """Where this server's Protected Resource Metadata is, per RFC 9728: /.well-known/oauth-protected-resource
+    inserted before the resource URL's path."""
+    parts = urllib.parse.urlsplit(config.mcp_resource_url())
+    return f'{parts.scheme}://{parts.netloc}/.well-known/oauth-protected-resource{parts.path.rstrip("/")}'
+
+
+def resource_metadata():
+    """RFC 9728's metadata for the MCP server: what it is, who issues its tokens, and the scope they need."""
+    return {'resource': config.mcp_resource_url(), 'authorization_servers': [config.mcp_auth_server()],
+            'scopes_supported': [config.mcp_scope()], 'bearer_methods_supported': ['header'],
+            'resource_name': 'QueryAPIGate'}
+
+
+def www_authenticate(refusal, presented=True):
+    """The WWW-Authenticate challenge for a refused request (`presented`: whether it carried a credential at all).
+    With OAuth on it points the client at the metadata and names the scope (MCP authorization, 2025-11-25), so an AI
+    client can find where to sign the user in."""
+    if not config.mcp_oauth_enabled():
+        return 'Bearer realm="queryapigate"'
+    parts = [f'resource_metadata="{resource_metadata_url()}"', f'scope="{config.mcp_scope()}"']
+    if refusal.code == 'insufficient_scope':
+        parts.insert(0, 'error="insufficient_scope"')
+    elif refusal.status == 401 and presented:
+        parts.insert(0, 'error="invalid_token"')
+    return 'Bearer ' + ', '.join(parts)
+
+
+def gate(flask_app, inner):
+    """The ASGI app in front of /mcp: the client's rate limit and authentication once per HTTP request, answering
+    429, 401 or 403 at the HTTP level - which is where an MCP client looks for them, and an OAuth client's cue to
+    sign the user in - and otherwise passing the request on with the caller in the scope's state."""
+    from starlette.datastructures import Headers
+    from starlette.responses import JSONResponse
+
+    from . import governance, instances
+
+    async def app(scope, receive, send):
+        if scope['type'] != 'http':
+            return await inner(scope, receive, send)
+        instances.heartbeat()
+        started = time.monotonic()
+        headers = Headers(scope=scope)
+        client_ip = scope['client'][0] if scope.get('client') else None
+        from .app import new_request_id
+        request_id = new_request_id(headers.get('x-request-id'))
+        verdict = governance.check_client_limit(flask_app, client_ip)
+        if verdict is not None and not verdict.allowed:
+            response = JSONResponse({'error': f'Rate limit exceeded - retry after {verdict.retry_after}s',
+                                     'code': 'rate_limited', 'request_id': request_id}, status_code=429,
+                                    headers={'Retry-After': str(verdict.retry_after), 'X-Request-Id': request_id})
+        else:
+            api_key, authorization = headers.get('x-api-key', ''), headers.get('authorization', '')
+            permission, refusal = governance.authenticate_mcp(api_key, authorization, client_ip)
+            if permission is not None:
+                scope.setdefault('state', {})[PERMISSION_STATE] = permission
+                return await inner(scope, receive, send)
+            challenge = www_authenticate(refusal, presented=bool(api_key or authorization))
+            response = JSONResponse({'error': refusal.message, 'code': refusal.code, 'request_id': request_id},
+                                    status_code=refusal.status, headers={'WWW-Authenticate': challenge,
+                                                                         'X-Request-Id': request_id})
+        governance.observe('MCP', 'mcp.http', response.status_code, time.monotonic() - started, '-')
+        await response(scope, receive, send)
+
+    return app
 
 
 def build_server(flask_app):
@@ -350,13 +433,14 @@ def build_server(flask_app):
 
     server = Server('queryapigate')
 
+    def caller():
+        """The caller build_asgi_app()'s gate let in - every request reaching a handler has one."""
+        request = server.request_context.request
+        return getattr(request.state, PERMISSION_STATE, None) if request is not None else None
+
     @server.list_tools()
     async def list_tools():
-        request = server.request_context.request
-        headers = request.headers if request is not None else {}
-        client_ip = request.client.host if request is not None and request.client else None
-        permission = permission_for_listing(flask_app, headers.get('x-api-key', ''), headers.get('authorization', ''),
-                                            client_ip)
+        permission = caller()
         if permission is None:
             return []  # an unauthenticated client sees no tools, the same way an unauthenticated REST
         return [types.Tool(name=t['name'], description=t['description'], inputSchema=t['inputSchema'],
@@ -367,11 +451,12 @@ def build_server(flask_app):
 
     @server.call_tool()
     async def call_tool(name, arguments):
-        request = server.request_context.request
-        headers = request.headers if request is not None else {}
-        client_ip = request.client.host if request is not None and request.client else None
-        result = handle_call(flask_app, headers.get('x-api-key', ''), headers.get('authorization', ''), client_ip,
-                             name, arguments)
+        permission = caller()
+        if permission is None:  # not through the gate: never served
+            result = _error('Unauthorized: missing or invalid X-API-Key or bearer token', 401)
+            result.pop('_status')
+        else:
+            result = call_as(flask_app, permission, name, arguments)
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
                                     structuredContent=result.get('structuredContent'),
                                     isError=result.get('isError', False))
@@ -408,8 +493,17 @@ def build_asgi_app(flask_app):
     async def health(_request):
         return JSONResponse({'status': 'ok', 'version': __version__})
 
-    return Starlette(routes=[Mount('/mcp', app=session_manager.handle_request),
-                             Route('/metrics', metrics_endpoint), Route('/health', health)], lifespan=lifespan)
+    routes = [Mount('/mcp', app=gate(flask_app, session_manager.handle_request)),
+              Route('/metrics', metrics_endpoint), Route('/health', health)]
+    if config.mcp_oauth_enabled():
+        async def protected_resource(_request):
+            # Public by design, and read by browser-based clients too.
+            return JSONResponse(resource_metadata(), headers={'Access-Control-Allow-Origin': '*',
+                                                              'Cache-Control': 'max-age=3600'})
+        paths = {'/.well-known/oauth-protected-resource',
+                 urllib.parse.urlsplit(resource_metadata_url()).path}
+        routes += [Route(path, protected_resource, methods=['GET']) for path in sorted(paths)]
+    return Starlette(routes=routes, lifespan=lifespan)
 
 
 def run(flask_app, host, port):
