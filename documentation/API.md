@@ -1337,6 +1337,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
+| `sso_unreachable` | critical | Console sign-in through SSO is on, but the identity provider's metadata can't be fetched - nobody can sign in that way; open sessions keep working |
 | `agent_unusual_volume` | warning | An AI agent read at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows over MCP in the last hour, and ten times its own average hour - see [Agent usage](#agent-usage) |
 
 | Variable | Default | Effect |
@@ -1392,7 +1393,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.18.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.19.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

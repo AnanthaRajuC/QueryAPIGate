@@ -241,7 +241,7 @@ class RefusedTests(SsoTestCase):
         self.assertEqual(self.refused(self.sign_in(groups=['/everyone'])), 'sso_no_role')
         self.assertEqual(admins.list_admins(), [])
         entry = next(e for e in store.read_audit_log() if e['action'] == 'sign_in_refused')
-        self.assertEqual(entry['changes']['code'], 'sso_no_role')
+        self.assertEqual((entry['changes']['code'], entry['target']), ('sso_no_role', 'alice@example.com'))
 
     def test_the_provider_ending_the_sign_in(self):
         _, state = self.provider.authorize(self.login())
@@ -395,6 +395,68 @@ class SsoOnlyTests(SsoTestCase):
                                     headers={sso.CSRF_HEADER: self.csrf()})
             self.assertEqual((res.status_code, res.get_json()['code']), (409, 'sso_only'))
             self.assertTrue(self.browser.get('/auth/session').get_json()['sso_only'])
+
+
+class ReviewTests(SsoTestCase):
+    """The pre-release security review's findings (ADR 0007)."""
+
+    def test_a_callback_raced_with_itself_signs_in_once(self):
+        from queryapigate import db
+        code, state = self.provider.authorize(self.login())
+        real = db.transaction
+
+        def racing():
+            # Another request's DELETE got there first: this one's reads the row, but removes nothing.
+            import contextlib
+
+            @contextlib.contextmanager
+            def wrapped():
+                with real() as conn:
+                    class Conn:
+                        def execute(self, sql, params=()):
+                            if sql.startswith('DELETE FROM sso_logins WHERE state_hash'):
+                                conn.execute(sql, params)
+                                return conn.execute(sql, params)  # the second DELETE: rowcount 0
+                            return conn.execute(sql, params)
+                    yield Conn()
+            return wrapped()
+        with mock.patch.object(db, 'transaction', racing):
+            res = self.browser.get(f'/auth/sso/callback?code={code}&state={state}')
+        self.assertEqual(self.refused(res), 'sso_state')
+
+    def test_signing_in_again_ends_the_session_this_browser_had(self):
+        from queryapigate import db
+        self.sign_in()
+        self.sign_in()
+        self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM admin_sessions').fetchone()[0], 1)
+
+    def test_started_sign_ins_are_capped(self):
+        with mock.patch.object(sso, 'MAX_PENDING', 2):
+            self.login()
+            self.login()
+            res = self.browser.get('/auth/sso/login')
+        self.assertEqual(self.refused(res), 'sso_busy')
+
+    def test_sign_in_never_answers_cross_origin(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CORS_ORIGINS': '*'}):
+            client = create_app().test_client()
+            client.environ_base['wsgi.url_scheme'] = 'https'
+            res = client.get('/auth/session', headers={'Origin': 'https://evil.example.com'})
+            self.assertNotIn('Access-Control-Allow-Origin', res.headers)
+            res = client.options('/auth/sso/logout', headers={'Origin': 'https://evil.example.com',
+                                                             'Access-Control-Request-Method': 'POST',
+                                                             'Access-Control-Request-Headers': sso.CSRF_HEADER})
+            self.assertNotIn('Access-Control-Allow-Origin', res.headers)
+            self.assertIn('Access-Control-Allow-Origin',  # the rest of the API is as configured
+                          client.get('/health', headers={'Origin': 'https://evil.example.com'}).headers)
+
+    def test_the_provider_unreachable_is_an_alert(self):
+        from queryapigate import alerts
+        self.assertNotIn('sso_unreachable', [a['kind'] for a in alerts.collect()])
+        oidc.forget()
+        with mock.patch.object(oidc, 'fetch_json', side_effect=OSError('down')), self.assertLogs('queryapigate'):
+            found = [a for a in alerts.collect() if a['kind'] == 'sso_unreachable']
+        self.assertEqual((found[0]['severity'], found[0]['target']), ('critical', {'type': 'settings', 'name': 'sso'}))
 
 
 class OffTests(unittest.TestCase):

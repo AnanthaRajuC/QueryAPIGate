@@ -38,6 +38,7 @@ SESSION_COOKIE = '__Host-qag_session'
 STATE_COOKIE = '__Host-qag_sso'
 CSRF_HEADER = 'X-QAG-CSRF'
 LOGIN_TTL = 600                 # seconds a started sign-in may take
+MAX_PENDING = 10_000            # started sign-ins kept at once - past it, new ones wait (starting one adds a row)
 CLOCK_LEEWAY = 30
 CONSOLE = '/console/'
 _SEEN_INTERVAL = 60.0           # seconds between last_seen_at writes per session
@@ -49,9 +50,10 @@ bp = Blueprint('auth', __name__, url_prefix='/auth')
 class Refused(Exception):
     """A sign-in that doesn't go ahead: `code` for the audit log and the Console, `message` for the person."""
 
-    def __init__(self, code, message):
+    def __init__(self, code, message, who=None):
         super().__init__(message)
         self.code, self.message = code, message
+        self.who = who  # once the ID token is verified: who it was, for the audit log
 
 
 def _hash(value):
@@ -92,6 +94,8 @@ def begin(return_to):
     now = time.time()
     with db.transaction() as conn:
         conn.execute('DELETE FROM sso_logins WHERE created_at < ?', (now - LOGIN_TTL,))
+        if conn.execute('SELECT COUNT(*) FROM sso_logins').fetchone()[0] >= MAX_PENDING:
+            raise Refused('sso_busy', 'Too many sign-ins are under way - try again in a few minutes')
         conn.execute('INSERT INTO sso_logins (state_hash, browser_hash, nonce, verifier, return_to, created_at) '
                      'VALUES (?, ?, ?, ?, ?, ?)',
                      (_hash(state), _hash(browser), nonce, verifier, safe_return_to(return_to), now))
@@ -111,8 +115,11 @@ def _take_pending(state, browser):
     with db.transaction() as conn:
         row = conn.execute('SELECT browser_hash, nonce, verifier, return_to, created_at FROM sso_logins '
                            'WHERE state_hash = ?', (_hash(state),)).fetchone()
-        if row is not None:
-            conn.execute('DELETE FROM sso_logins WHERE state_hash = ?', (_hash(state),))
+        # Used once: only the request whose own DELETE removed the row goes on - two callbacks racing with one state
+        # both read it, but on PostgreSQL the second DELETE waits for the first and then removes nothing.
+        if row is not None and conn.execute('DELETE FROM sso_logins WHERE state_hash = ?',
+                                            (_hash(state),)).rowcount != 1:
+            row = None
     if row is None or time.time() - row['created_at'] > LOGIN_TTL \
             or not hmac.compare_digest(row['browser_hash'], _hash(browser)):
         raise Refused('sso_state', 'This sign-in has expired or was started elsewhere - sign in again')
@@ -202,7 +209,11 @@ def finish(code, state, browser, error=None):
         raise Refused('sso_token', 'The identity provider sent no code - sign in again')
     provider = _provider()
     claims = verify_id_token(provider, _exchange(provider, code, pending['verifier']), pending['nonce'])
-    role = role_for(claims)
+    try:
+        role = role_for(claims)
+    except Refused as refused:
+        refused.who = _verified_email(claims) or claims['sub']
+        raise
     wanted = claims.get('preferred_username') if isinstance(claims.get('preferred_username'), str) else None
     email = _verified_email(claims)
     try:
@@ -210,9 +221,10 @@ def finish(code, state, browser, error=None):
                                            wanted or (email.split('@')[0] if email else 'sso-' + claims['sub'][:8]),
                                            email)
     except ApiError as error:
-        raise Refused(error.code or 'sso_refused', error.message) from None
+        raise Refused(error.code or 'sso_refused', error.message, who=email or claims['sub']) from None
     if not admin['active']:
-        raise Refused('sso_inactive', 'Your administrator account is switched off here - ask an owner')
+        raise Refused('sso_inactive', 'Your administrator account is switched off here - ask an owner',
+                      who=admin['name'])
     if change == 'created':
         store.record_audit(admin['name'], 'create_admin', admin['name'], {'role': role, 'email': admin['email'],
                                                                           'issuer': claims['iss']}, via='sso')
@@ -300,7 +312,8 @@ def _off():
 
 
 def _refused_page(refused):
-    store.record_audit('-', 'sign_in_refused', '-', {'code': refused.code, 'reason': refused.message}, via='sso')
+    store.record_audit('-', 'sign_in_refused', refused.who or '-', {'code': refused.code, 'reason': refused.message},
+                       via='sso')
     response = redirect(f'{CONSOLE}?' + urllib.parse.urlencode({'sso_error': refused.code,
                                                                'sso_message': refused.message}))
     response.delete_cookie(STATE_COOKIE, path='/', secure=True, httponly=True, samesite='Lax')
@@ -331,6 +344,9 @@ def callback():
                                               request.args.get('error_description') or request.args.get('error'))
     except Refused as refused:
         return _refused_page(refused)
+    previous = request.cookies.get(SESSION_COOKIE)
+    if previous:  # signed in again in this browser: the session it had ends, not only its cookie
+        end_session(previous)
     response = redirect(return_to)
     _cookie(response, SESSION_COOKIE, session_id, config.sso_session_hours() * 3600, 'Strict')
     response.delete_cookie(STATE_COOKIE, path='/', secure=True, httponly=True, samesite='Lax')

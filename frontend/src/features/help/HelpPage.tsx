@@ -315,6 +315,12 @@ const DOCS = [
     path: 'how-to/47-tell-agents-what-your-data-means-and-see-what-they-did.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-48',
+    title: 'Sign in to the Console through your identity provider',
+    path: 'how-to/48-sign-in-to-the-console-through-your-identity-provider.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

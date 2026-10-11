@@ -214,6 +214,8 @@ def create_app():
         # Order matters: a browser's preflight cannot carry the API key, and rate limiting comes before the key
         # check so that guessing keys is throttled too.
         if cors.is_preflight(request):
+            if request.path.startswith('/auth/'):  # Console sign-in is same-origin only (sso.py)
+                return '', 204
             return cors.preflight_response(request.headers.get('Origin'))
         limited = check_rate_limit()
         if limited is not None:
@@ -227,7 +229,8 @@ def create_app():
 
     @app.after_request
     def decorate(response):
-        cors.add_headers(response, request.headers.get('Origin'))
+        if not request.path.startswith('/auth/'):  # Console sign-in is same-origin only (sso.py)
+            cors.add_headers(response, request.headers.get('Origin'))
         if g.get('rate_limit'):
             limit, remaining = g.rate_limit
             response.headers['X-RateLimit-Limit'] = str(limit)

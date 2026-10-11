@@ -136,6 +136,30 @@ What this buys, and what it doesn't:
 - **Residual risks**: tokens are bearer secrets with day-granularity expiry; there is no MFA or SSO yet (BACKLOG
   #84 Phase 2), so a token is only as safe as where it's kept.
 
+#### Console sign-in through SSO (ADR 0007, experimental)
+
+With `QUERYAPIGATE_SSO_*` set, administrators sign in through the organisation's identity provider; the server runs
+the authorization code flow with PKCE as a confidential client, so the browser never holds a token.
+
+- **The callback can't be forged or replayed.** A sign-in is stored server-side with its state, nonce and PKCE
+  verifier, used once (a racing duplicate is refused), within ten minutes, and only in the browser that started it -
+  so someone can't send you a link that signs you in as them. The ID token's signature (the key's own algorithm),
+  issuer, audience (`azp` too, with several audiences), nonce and expiry are all checked. After sign-in the browser
+  only ever goes to a Console page - never an address from the request.
+- **The session can't be used from elsewhere.** Its cookie is `__Host-`, `HttpOnly`, `Secure`, `SameSite=Strict`,
+  stored only as a hash; and it authenticates a request only together with the session's CSRF token, which only a
+  page on this origin can read. A link, form or image on another site can't act as an administrator, whatever the
+  method. `/auth/*` never answers cross-origin. Signing in again ends the session the browser had.
+- **People are bound by the provider's `sub`**, never by an email. Linking an administrator who had tokens matches
+  a *verified* email, once, and their role becomes their groups' - a pending owner account gives no one owner
+  rights. Started sign-ins are capped, so starting them can't grow the store without bound.
+- **What remains with the provider:** who is in the groups mapped to roles - **whoever controls the owners' group
+  controls QueryAPIGate** - and whether `email_verified` can be trusted for linking. Someone removed there keeps a
+  session already open until it expires (`QUERYAPIGATE_SSO_SESSION_HOURS`, default 8); switching them off in
+  QueryAPIGate ends it at once. `QUERYAPIGATE_SSO_ONLY` takes personal tokens from people who sign in through SSO, so
+  they can't route around the provider's MFA; the break-glass key stays, audited and alerted, for when the provider is
+  down.
+
 ### Column masking: which values leave
 
 A `mask` grant on a key, role or export (ADR 0005, experimental) hashes, masks, nulls or drops the values of named

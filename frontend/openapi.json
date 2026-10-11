@@ -379,7 +379,8 @@
               "rate_limits_not_shared",
               "export_failing",
               "key_unused",
-              "agent_unusual_volume"
+              "agent_unusual_volume",
+              "sso_unreachable"
             ],
             "type": "string"
           },

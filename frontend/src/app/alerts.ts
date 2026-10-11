@@ -156,6 +156,13 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
       'ten times their own usual hour.',
   },
   {
+    id: 'sign-in',
+    label: 'Sign-in',
+    kinds: ['sso_unreachable', 'break_glass_used'],
+    about:
+      'Console sign-in through SSO being down, and the shared break-glass key being used once named owners exist.',
+  },
+  {
     id: 'open-access',
     label: 'Open access',
     kinds: ['open_server'],

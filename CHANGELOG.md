@@ -46,6 +46,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-11
+
+The people who govern QueryAPIGate sign in the way agents already do: administrators sign in to the Console through
+the organisation's identity provider, with its MFA and policies, and their role comes from the groups they're in
+there - someone leaving or moving team changes their access at their next sign-in. Administrators who had tokens keep
+their names and history. Experimental.
+
 ### Upgrading from 0.18
 - **Schema 10** adds two tables (`admin_sessions`, `sso_logins`); nothing existing changes. A 0.18 instance still
   running keeps working against the upgraded store, but can't be restarted on it - upgrade every instance.
@@ -55,8 +62,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   experimental): administrators sign in through the organisation's identity provider (OpenID Connect, the
   authorization code flow with PKCE, run by the server), with their role from their groups at every sign-in
   (`QUERYAPIGATE_SSO_ROLES`) and an administrator created on first sign-in. The session is a `SameSite=Strict`,
-  `HttpOnly` cookie that authenticates only together with its CSRF token. See
-  [Console sign-in through SSO](documentation/API.md#console-sign-in-through-sso).
+  `HttpOnly` cookie that authenticates only together with its CSRF token. Administrators who had tokens are linked at
+  their next SSO sign-in (`{"sso": "pending"}`), their role then their groups'; `QUERYAPIGATE_SSO_ONLY` takes personal
+  tokens from people who sign in through SSO. The Console offers **Sign in with SSO**, and a new alert,
+  `sso_unreachable`, says when sign-in is down. See [Console sign-in through SSO](documentation/API.md#console-sign-in-through-sso)
+  and [guide 48](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/48-sign-in-to-the-console-through-your-identity-provider.md).
+
+### Changed
+- **An identity provider's metadata is checked more strictly**, for the MCP server's OAuth too: a document listing
+  any plain-HTTP endpoint (keys, authorization, token, sign-out) is refused whole, not only one whose keys are. It is
+  fetched again every hour, and the last good one kept while the provider can't be reached.
 
 ## [0.18.0] - 2026-10-11
 
@@ -1830,7 +1845,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.17.0
 [0.16.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.16.0

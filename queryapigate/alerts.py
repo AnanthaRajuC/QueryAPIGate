@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import admins, apikeys, config, db, history, instances, metrics, ratelimit, usage
+from . import admins, apikeys, config, db, history, instances, metrics, oidc, ratelimit, usage
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -57,7 +57,7 @@ def note_rate_limited(kind, who):
 KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired', 'key_expiring', 'query_errors',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
-         'agent_unusual_volume')
+         'agent_unusual_volume', 'sso_unreachable')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -74,7 +74,7 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
+    found = [*_server(now), *_sso(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
@@ -84,6 +84,18 @@ def _server(now):
     return [_alert('critical', 'open_server', 'server', 'Anyone can use this server',
                    'No API key is configured, so every request - including changing connections and keys - is '
                    'allowed. Set QUERYAPIGATE_API_KEY.', {'type': 'settings', 'name': 'security'})]
+
+
+def _sso():
+    """Console sign-in through SSO is on, but the identity provider's metadata can't be had: nobody can sign in that
+    way until it can (sessions already open keep working)."""
+    if not config.sso_enabled() or oidc.metadata(config.sso_issuer()) is not None:
+        return []
+    return [_alert('critical', 'sso_unreachable', 'sso', "Console sign-in through SSO is down",
+                   f"The identity provider's metadata can't be fetched from {config.sso_issuer()}, so nobody can sign "
+                   'in through it - sessions already open keep working. Check the provider is up and '
+                   'QUERYAPIGATE_SSO_ISSUER is right; until then, sign in with an admin token or the break-glass key.',
+                   {'type': 'settings', 'name': 'sso'})]
 
 
 def _break_glass(now):

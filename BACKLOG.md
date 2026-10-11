@@ -66,8 +66,10 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 6. **0.18: #85 OAuth for the MCP server, #86 descriptions for agents and #87 per-agent usage**, all experimental -
    letting AI agents near your data, governed ([ADR 0006](documentation/adr/0006-ai-agents.md)). (Released as 0.18.0
    on 2026-10-11.)
-7. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-8. **1.0.0.**
+7. **0.19: #84 Phase 2**, Console sign-in through the organisation's identity provider, experimental
+   ([ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md)). (Released as 0.19.0 on 2026-10-11.)
+8. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+9. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2666,7 +2668,13 @@ asked for.
 
 ## 84. Admin identity: named administrators, admin roles, SSO for the Console
 
-**Status: Phase 1 shipped (for 0.16); Phase 2 open** - it can follow in rc1 or just after.
+**Status: shipped - Phase 1 in 0.16, Phase 2 (experimental) in 0.19.** Phase 2,
+[ADR 0007](documentation/adr/0007-console-sign-in-through-sso.md): `sso.py` and `oidc.py` - the authorization code flow
+with PKCE run by the server as a confidential client; administrators bound by the provider's `sub`, created on first
+sign-in, their role from their groups at every sign-in; existing administrators linked by a verified email, once;
+`QUERYAPIGATE_SSO_ONLY`; sessions in the store, a `__Host-` `SameSite=Strict` cookie that authenticates only with its
+CSRF token; the Console's "Sign in with SSO"; the `sso_unreachable` alert; guide 48. Tested against a stand-in provider
+and a real Keycloak, in a real browser. Open: back-channel logout, SCIM, custom roles.
 [ADR 0003](documentation/adr/0003-named-administrators.md) records the design: administrators (`admins.py`, schema 7)
 with four fixed roles (`adminroles.py` - a capability for every `/api/v1` operation, enforced before any route runs,
 tested for completeness); personal admin tokens (`qagadm_...`, hashed, expiring, several per person, self-service);
