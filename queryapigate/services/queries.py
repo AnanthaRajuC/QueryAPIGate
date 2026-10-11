@@ -71,6 +71,8 @@ def to_version(content, number, data):
         'placeholders': _placeholders(data),
         'cache_ttl': data.get('cache_ttl') or None,
         'columns': data.get('column_descriptions') or {},
+        'agent_writes': data.get('agent_writes'),
+        'max_affected_rows': data.get('max_affected_rows'),
         'created_at': data.get('created_at'),
         'last_modified_at': data.get('last_modified_at'),
     }
@@ -179,7 +181,8 @@ def _legacy_body(data, name, caller):
     if not isinstance(data, dict):
         raise ApiError('The request body must be a JSON object', code='invalid_body')
     unknown = sorted(set(data) - {'name', 'description', 'author', 'tags', 'query_type', 'sql', 'connection_name',
-                                  'parameters', 'cache_ttl', 'columns', 'collection', 'publish', *_MONGO_FIELDS})
+                                  'parameters', 'cache_ttl', 'columns', 'agent_writes', 'max_affected_rows',
+                                  'collection', 'publish', *_MONGO_FIELDS})
     if unknown:
         raise ApiError(f"Unknown field(s): {', '.join(unknown)}", code='unknown_field')
     # caller_key_name() is '-' on a server with no keys at all - which is the admin acting, so name them that way
@@ -187,7 +190,8 @@ def _legacy_body(data, name, caller):
             'description': data.get('description'), 'tags': data.get('tags', []),
             'query_type': data.get('query_type', 'sql'), 'query_parameters': data.get('parameters') or {},
             'connection_name': data.get('connection_name'), 'cache_ttl': data.get('cache_ttl'),
-            'column_descriptions': data.get('columns')}
+            'column_descriptions': data.get('columns'), 'agent_writes': data.get('agent_writes'),
+            'max_affected_rows': data.get('max_affected_rows')}
     if body['query_type'] == 'sql':
         body['sql_query'] = data.get('sql')
     for key in _MONGO_FIELDS:

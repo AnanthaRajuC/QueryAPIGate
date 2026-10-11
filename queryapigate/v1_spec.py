@@ -95,6 +95,12 @@ SCHEMAS = {
             'cache_ttl': {'type': 'integer', 'nullable': True},
             'columns': {'type': 'object', 'additionalProperties': {'type': 'string'},
                         'description': 'What its result columns mean, by name - in its MCP tool\'s output schema.'},
+            'agent_writes': {'type': 'string', 'enum': ['approval', 'insert'], 'nullable': True,
+                             'description': 'An AI agent may write through it over MCP: approval - each call '
+                                            'approved by a person; insert - an INSERT, without one (ADR 0008).'},
+            'max_affected_rows': {'type': 'integer', 'nullable': True,
+                                  'description': 'The most rows one agent write may change; more, and it is rolled '
+                                                 'back.'},
             'created_at': _NULLABLE_STRING,
             'last_modified_at': _NULLABLE_STRING,
             'run_count': {'type': 'integer', 'description': "Runs of this version stored in history - in a "
@@ -151,6 +157,12 @@ SCHEMAS = {
             'cache_ttl': {'type': 'integer', 'nullable': True},
             'columns': {'type': 'object', 'additionalProperties': {'type': 'string'},
                         'description': 'What each result column means, by name: {"amt": "Net revenue in EUR"}.'},
+            'agent_writes': {'type': 'string', 'enum': ['approval', 'insert'], 'nullable': True,
+                             'description': 'Let AI agents write through it over MCP (ADR 0008): approval, or insert '
+                                            '(a single INSERT, no approval). Only an INSERT, UPDATE or DELETE.'},
+            'max_affected_rows': {'type': 'integer', 'minimum': 1,
+                                  'description': 'With agent_writes: the most rows one agent write may change '
+                                                 '(default 1).'},
             'mongo_collection': {'type': 'string'}, 'mongo_filter': {'type': 'object'},
             'mongo_projection': {'type': 'object'}, 'mongo_sort': {'type': 'object'},
             'publish': {'type': 'boolean', 'default': False,

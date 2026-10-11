@@ -24,6 +24,47 @@ def validate_cache_ttl(cache_ttl):
 
 MAX_COLUMN_DESCRIPTIONS = 500
 
+# Write tools over MCP (ADR 0008): which saved queries an agent may write through, and on what.
+AGENT_WRITE_MODES = ('approval', 'insert')    # every call approved by a person / inserts only, without one
+AGENT_WRITE_STATEMENTS = ('insert', 'update', 'delete')
+AGENT_WRITE_DIALECTS = ('postgres', 'mysql', 'sqlite', 'duckdb')  # a transaction, and the rows a statement changed
+MAX_AGENT_AFFECTED_ROWS = 100_000
+
+
+def validate_agent_writes(data, query_type):
+    """`agent_writes` and `max_affected_rows` as stored, or {} - refused unless the query is one statement that only
+    changes data (INSERT, UPDATE or DELETE; INSERT alone for "insert"), on a connection type that can run it in a
+    transaction and say how many rows it changed. Never DDL, whatever a grant would allow over REST."""
+    mode, ceiling = data.get('agent_writes'), data.get('max_affected_rows')
+    if mode is None:
+        if ceiling is not None:
+            raise ApiError('max_affected_rows is for agent-writable queries - set agent_writes too',
+                           code='invalid_body')
+        return {}
+    if mode not in AGENT_WRITE_MODES:
+        raise ApiError(f"agent_writes must be one of: {', '.join(AGENT_WRITE_MODES)}", code='invalid_body')
+    if query_type != 'sql':
+        raise ApiError('Only SQL saved queries can be agent-writable', code='invalid_body')
+    sql = data['sql_query'].strip().rstrip(';').strip()
+    if ';' in sqltools._literals_re(None).sub(' ', sql):
+        raise ApiError('An agent-writable query is a single statement', code='invalid_body')
+    keyword = sqltools.first_keyword(sql)
+    allowed = ('insert',) if mode == 'insert' else AGENT_WRITE_STATEMENTS
+    if keyword not in allowed or sqltools.write_operations(sql) != {keyword}:
+        what = 'an INSERT' if mode == 'insert' else 'an INSERT, UPDATE or DELETE'
+        raise ApiError(f'An agent-writable query{" in insert mode" if mode == "insert" else ""} must be {what} - one '
+                       'statement that changes data and nothing else', code='invalid_body')
+    if ceiling is None:
+        ceiling = 1
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool) or not 1 <= ceiling <= MAX_AGENT_AFFECTED_ROWS:
+        raise ApiError(f'max_affected_rows must be a whole number from 1 to {MAX_AGENT_AFFECTED_ROWS}',
+                       code='invalid_body')
+    connection = store.read_connections().get(data.get('connection_name') or '')
+    if connection is not None and connection.get('db') not in AGENT_WRITE_DIALECTS:
+        raise ApiError(f"Agents can't write on '{connection.get('db')}' connections - only "
+                       f"{', '.join(AGENT_WRITE_DIALECTS)}", code='invalid_body')
+    return {'agent_writes': mode, 'max_affected_rows': ceiling}
+
 
 def validate_column_descriptions(value):
     """What a saved query's result columns mean (BACKLOG #86), {"column": "description"} - served to agents in its MCP
@@ -81,6 +122,7 @@ def validate_definition(data):
     cache_ttl = data.get('cache_ttl')
     validate_cache_ttl(cache_ttl)
     column_descriptions = validate_column_descriptions(data.get('column_descriptions'))
+    agent_writes = validate_agent_writes(data, query_type)
     collection = NO_COLLECTION_GIVEN
     if 'collection' in data:
         collection = data['collection']
@@ -95,6 +137,7 @@ def validate_definition(data):
         **({'connection_name': connection_name} if connection_name else {}),
         **({'cache_ttl': cache_ttl} if cache_ttl else {}),
         **({'column_descriptions': column_descriptions} if column_descriptions else {}),
+        **agent_writes,
     }
     if query_type == 'mongo':
         # No 'query_type' field at all for a plain SQL query (query_type's own default) - every saved query

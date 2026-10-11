@@ -102,20 +102,71 @@ def list_tools_for(permission):
     fresh on every call, never cached: two different API keys reach different queries."""
     tools = []
     for name, _number, data, collection in store.live_versions():
-        if name in RESERVED_TOOL_NAMES or not _is_runnable(data) or not is_read_only(data):
+        if name in RESERVED_TOOL_NAMES or not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
         if not apikeys.can_run_saved(permission, name, collection, connection_name):
             continue
-        tools.append({
-            'name': name,
-            'description': data.get('description') or name,
-            'inputSchema': input_schema(data),
-            'outputSchema': output_schema(data),
-            'readOnlyHint': True,
-            'idempotentHint': True,
-        })
+        if is_read_only(data):
+            tools.append({
+                'name': name,
+                'description': data.get('description') or name,
+                'inputSchema': input_schema(data),
+                'outputSchema': output_schema(data),
+                'readOnlyHint': True,
+                'idempotentHint': True,
+            })
+        elif agent_may_write(permission, name, data):
+            tools.append(write_tool(name, data))
     return tools + fixed_tools_for(permission)
+
+
+def agent_may_write(permission, name, data):
+    """Whether this caller may write through this saved query over MCP (ADR 0008): its author marked it
+    (`agent_writes`), the server allows writes, the caller's grant allows this one - as over REST - and its
+    connection can run it in a transaction and count the rows it changed."""
+    if not data.get('agent_writes') or not config.allow_writes():
+        return False
+    if not (permission.allow_writes or apikeys.can_write_query(permission, name)):
+        return False
+    try:
+        dialect = store.get_connection(data.get('connection_name'))['db']
+    except ApiError:
+        return False
+    return dialect in definitions.AGENT_WRITE_DIALECTS
+
+
+APPROVAL_ARGUMENT = 'approval'
+IDEMPOTENCY_ARGUMENT = 'idempotency_key'
+
+
+def write_tool(name, data):
+    """A write tool: its parameters, plus `approval` (the request a person approved) or, for an insert-only one,
+    `idempotency_key`; annotated as writing, destructive unless it only inserts."""
+    insert_only = data.get('agent_writes') == 'insert'
+    schema = input_schema(data)
+    if insert_only:
+        schema['properties'][IDEMPOTENCY_ARGUMENT] = {
+            'type': 'string', 'description': 'Optional: the same key on a retry returns the first call\'s result '
+                                             'instead of inserting again (kept a day).'}
+        how = 'It only adds rows, and runs without an approval.'
+    else:
+        schema['properties'][APPROVAL_ARGUMENT] = {
+            'type': 'string', 'description': 'The write request a person approved. Leave it out the first time: '
+                                             'the answer says where they approve it.'}
+        how = ('A person approves each call before it runs: the first call answers with where they approve it; call '
+               'again with the same arguments and approval set to the request it named.')
+    ceiling = data.get('max_affected_rows') or 1
+    return {
+        'name': name,
+        'description': f"{data.get('description') or name}\n\nThis tool writes. {how} It changes at most "
+                       f"{ceiling} row{'' if ceiling == 1 else 's'}.",
+        'inputSchema': schema,
+        'outputSchema': ROWS_OUTPUT_SCHEMA,
+        'readOnlyHint': False,
+        'destructiveHint': not insert_only,
+        'idempotentHint': False,
+    }
 
 
 def fixed_tools_for(permission):
@@ -491,6 +542,7 @@ def build_server(flask_app):
         return [types.Tool(name=t['name'], description=t['description'], inputSchema=t['inputSchema'],
                            outputSchema=t.get('outputSchema'),
                            annotations=types.ToolAnnotations(readOnlyHint=t['readOnlyHint'],
+                                                             destructiveHint=t.get('destructiveHint'),
                                                              idempotentHint=t['idempotentHint']))
                 for t in list_tools_for(permission)]                          # caller sees an empty /catalog
 

@@ -2448,6 +2448,15 @@
       },
       "QueryVersion": {
         "properties": {
+          "agent_writes": {
+            "description": "An AI agent may write through it over MCP: approval - each call approved by a person; insert - an INSERT, without one (ADR 0008).",
+            "enum": [
+              "approval",
+              "insert"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
           "author": {
             "nullable": true,
             "type": "string"
@@ -2477,6 +2486,11 @@
           "last_modified_at": {
             "nullable": true,
             "type": "string"
+          },
+          "max_affected_rows": {
+            "description": "The most rows one agent write may change; more, and it is rolled back.",
+            "nullable": true,
+            "type": "integer"
           },
           "mongo": {
             "additionalProperties": true,
@@ -2555,6 +2569,15 @@
       },
       "QueryVersionInput": {
         "properties": {
+          "agent_writes": {
+            "description": "Let AI agents write through it over MCP (ADR 0008): approval, or insert (a single INSERT, no approval). Only an INSERT, UPDATE or DELETE.",
+            "enum": [
+              "approval",
+              "insert"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
           "author": {
             "description": "Defaults to the calling key's name.",
             "type": "string"
@@ -2575,6 +2598,11 @@
           },
           "description": {
             "type": "string"
+          },
+          "max_affected_rows": {
+            "description": "With agent_writes: the most rows one agent write may change (default 1).",
+            "minimum": 1,
+            "type": "integer"
           },
           "mongo_collection": {
             "type": "string"

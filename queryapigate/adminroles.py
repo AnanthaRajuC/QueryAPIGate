@@ -27,6 +27,7 @@ CAPABILITIES = {
     'admins.read': 'read administrators and their tokens',
     'admins.write': 'create, change and delete administrators, and issue or revoke anyone\'s tokens',
     'self': 'see who you are, and manage your own admin tokens',
+    'writes.approve': 'approve or reject a write an AI agent asked to make over MCP (ADR 0008)',
     'exports.read': 'read destinations (secrets masked), exports and their runs',
     'exports.write': 'create, change and delete exports',
     'exports.run': 'run an export',
