@@ -12,7 +12,8 @@ export function usePendingWrites() {
     queryKey: ['write-requests', 'pending'],
     queryFn: async () => {
       await gate.check();
-      return unwrap(await api.GET('/api/v1/write-requests', { params: { query: { status: 'pending' } } })).items;
+      return unwrap(await api.GET('/api/v1/write-requests', { params: { query: { status: 'pending' } } }))
+        .items;
     },
     enabled: gate.ready,
     refetchInterval: 30_000,

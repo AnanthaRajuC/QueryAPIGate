@@ -26,6 +26,7 @@ from .errors import ApiError
 
 KEEP_DAYS = 30
 IDEMPOTENCY_SECONDS = 24 * 3600
+MAX_PENDING_PER_CALLER = 100  # an agent asking for writes faster than people decide them is refused, not stored
 STATUSES = ('pending', 'approved', 'running', 'done', 'failed', 'rejected', 'expired')
 _COLUMNS = 'id, query_name, version, caller, status, created_at, expires_at, idempotency_hash, details_json'
 
@@ -94,6 +95,12 @@ def _write_details(conn, request_id, **changes):
 
 def create(caller, name, version, saved, connection_name, values, status='pending', idempotency=None):
     """A new write request; pending ones expire after QUERYAPIGATE_WRITE_APPROVAL_MINUTES."""
+    if status == 'pending':
+        waiting = db.connection().execute("SELECT COUNT(*) FROM write_requests WHERE caller = ? AND status = 'pending' "
+                                          'AND expires_at >= ?', (caller, time.time())).fetchone()[0]
+        if waiting >= MAX_PENDING_PER_CALLER:
+            raise ApiError(f'{waiting} writes asked for by this caller are already waiting for approval - wait for '
+                           'them to be decided or to expire', 429, code='too_many_pending_writes')
     request_id = 'wr_' + secrets.token_hex(6)
     details = {'mode': saved.get('agent_writes'), 'connection_name': connection_name, 'sql': saved['sql_query'],
                'arguments': values, 'arguments_hash': arguments_hash(name, version, values),
@@ -113,6 +120,12 @@ def decide(request_id, approve, actor, via, reason=None):
         raise ApiError('reason is text of at most 500 characters', code='invalid_body')
     with db.transaction() as conn:
         request = get(request_id)
+        if actor == request['caller'] and via != 'open':
+            # Four eyes: the credential an agent asked with can't approve its own write - an MCP client configured with
+            # an approver's token, or the shared key, would otherwise approve whatever its model asks for. (A server
+            # with no keys at all has no identities to tell apart - everyone is "-", and may do anything anyway.)
+            raise ApiError('This write was asked for under your own name - another approver must decide it', 403,
+                           code='own_write')
         if request['status'] != 'pending':
             raise ApiError(f"This write request is {request['status']} - only a pending one can be decided", 409,
                            code='write_request_closed')
@@ -124,8 +137,11 @@ def decide(request_id, approve, actor, via, reason=None):
             raise ApiError('This write request was decided a moment ago', 409, code='write_request_closed')
         _write_details(conn, request_id, decided_by=actor, decided_via=via, decided_at=store.now(),
                        reason=(reason or '').strip() or None)
+    # The arguments' names and hash, never their values: auditors read the audit log, and they have no data access
+    # (the same reason run history keeps a run's parameter names only).
     store.record_audit(actor, 'approve_write' if approve else 'reject_write', request_id,
-                       {'query': request['query'], 'caller': request['caller'], 'arguments': request['arguments'],
+                       {'query': request['query'], 'caller': request['caller'],
+                        'arguments': sorted(request['arguments']), 'arguments_hash': request['_arguments_hash'],
                         **({'reason': reason} if reason else {})}, via=via)
     return get(request_id)
 

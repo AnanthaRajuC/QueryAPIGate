@@ -76,6 +76,8 @@ guide covers one scenario end to end, and every command and response in it was r
 47. [**Tell AI agents what your data means, and see what they did**](47-tell-agents-what-your-data-means-and-see-what-they-did.md)
     (experimental) - descriptions imported from database comments or written, the data dictionary, and the Agents
     screen.
+49. [**Let an AI agent write - with a person approving each write**](49-let-an-agent-write-with-a-person-approving-each-write.md)
+    (experimental) - write tools over MCP: inserts on their own, other writes approved, a row limit, on record.
 
 ## Live updates (SSE)
 

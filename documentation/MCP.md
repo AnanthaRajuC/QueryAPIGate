@@ -9,12 +9,12 @@ below.
 
 ## What's exposed
 
-Only **read-only** saved queries (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`, and any Mongo `find()` query -
-the same classification the REST API's own write guard already uses) become MCP tools. A write-capable saved
-query stays reachable over REST as always, just not over MCP yet - calling a write through an MCP tool needs
-a considered decision on confirming an LLM-initiated write before it executes, which this first version
-doesn't make for you. The same is true of ad-hoc SQL: `execute_sql` (below) always runs read-only over MCP,
-regardless of what the calling key would otherwise be allowed to do over REST.
+Read-only saved queries (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`, and any Mongo `find()` query - the same
+classification the REST API's own write guard already uses) become MCP tools. A saved query that writes becomes one
+only when its author marked it for agents, for a key whose grant allows the write - and then a person approves each
+write first ([write tools](#write-tools-agents-that-write-approved-by-a-person)); otherwise it isn't listed, and isn't
+run when called by name. Ad-hoc SQL never writes: `execute_sql` (below) always runs read-only over MCP, regardless of
+what the calling key would otherwise be allowed to do over REST.
 
 Tool listing (`tools/list`) honors the exact same per-key scoping `GET /catalog` does -
 `connections`/`queries`/`collections` grants, `apikeys.can_run_saved()` - so an agent's key never sees or
@@ -185,6 +185,10 @@ listed as a tool with `readOnlyHint: false` and `destructiveHint: true`. `execut
   agent is given opens its request there - the agent, the SQL, the exact arguments, the row ceiling, when it
   expires - with **Approve** and **Reject** (and a reason). The `writes_awaiting_approval` alert says when writes are
   waiting, and the Agents screen counts each agent's write requests by how they ended.
+- **Four eyes:** a write is never approved by the credential that asked for it (`own_write`) - give agents their own
+  keys. An agent with 100 writes waiting is refused more (`too_many_pending_writes`).
+
+The step by step: [let an AI agent write - with a person approving each write](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/49-let-an-agent-write-with-a-person-approving-each-write.md).
 
 ## Governance: the same rules as REST
 

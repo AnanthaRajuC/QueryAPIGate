@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-11
+
+Agents that act, governed: an AI agent may write through a saved query its author marked for agents - opening a
+ticket by itself, or closing one only once a named person has approved that exact change. Every agent write runs in a
+transaction, rolled back past the rows it may change, runs once, and is on record with who asked and who approved.
+Experimental.
+
 ### Upgrading from 0.20
 - **Schema 11** adds one table (`write_requests`); nothing existing changes. A 0.20 instance still running keeps
   working against the upgraded store, but can't be restarted on it - upgrade every instance.
@@ -64,7 +71,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   an INSERT at once, with an idempotency key. Every agent write runs in a transaction, rolled back past its
   `max_affected_rows`. On PostgreSQL, MySQL, SQLite and DuckDB. The Console's **Approvals** screen (and the link each
   agent is given) shows the SQL and the exact arguments to approve or reject; a `writes_awaiting_approval` alert and
-  the Agents screen's write counts follow them. See
+  the Agents screen's write counts follow them. The credential that asked can never approve (`own_write`), an agent
+  can't pile up more than 100 waiting writes, and the audit log records the arguments' names and hash - never their
+  values. What a write returns (`RETURNING`) is masked like any read. Guide 49. See
   [Write tools](documentation/MCP.md#write-tools-agents-that-write-approved-by-a-person).
 
 ## [0.20.1] - 2026-10-11
@@ -1923,7 +1932,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.19.0...v0.19.1

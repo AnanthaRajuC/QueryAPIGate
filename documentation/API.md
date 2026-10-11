@@ -1397,7 +1397,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.20.1",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.21.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}
@@ -1721,6 +1721,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `approval_mismatch` | 403 | The arguments aren't the ones a person approved - an approval is for exactly one write |
 | `write_request_closed` | 409 | Approving or rejecting a write request that isn't pending |
 | `write_running` | 409 | That approved write is running now |
+| `own_write` | 403 | Approving or rejecting a write asked for under your own name - another approver must |
+| `too_many_pending_writes` | 429 | An agent has 100 writes waiting for approval already |
 | `idempotency_conflict` | 409 | An insert's idempotency key was used before with other arguments |
 | `too_many_rows_affected` | 409 | An agent's write would have changed more rows than its query's `max_affected_rows` - rolled back, nothing changed |
 | `last_owner` | 409 | The change would leave no active owner while `QUERYAPIGATE_API_KEY` isn't set |

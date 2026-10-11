@@ -69,7 +69,10 @@ with `from_claim` parameters so each user only ever sees their own rows. List th
 - A scoped key, not the admin key. Prefer `collections` or `queries` grants - the agent gets saved-query tools only.
   Add a `connections` grant only if it should run its own SQL, and narrow that with `allowed_tables`
   ([guide 25](25-mcp-ad-hoc-tools.md)).
-- Writes are never possible over MCP in this version - not through saved queries, not through `execute_sql`.
+- Writes over MCP only through saved queries an author marked for agents, for a key whose grant allows the write -
+  each approved by a person before it runs, unless it only inserts, and never more rows than the query allows
+  ([guide 49](49-let-an-agent-write-with-a-person-approving-each-write.md)). Give agents their own keys: the
+  credential that asked can't approve. `execute_sql` never writes.
 - Results are capped (`QUERYAPIGATE_MCP_MAX_ROWS`), every call is in run history with `"transport": "mcp"`.
 - Remember that what the agent reads becomes part of its context - and whatever it does next. Give it data you'd be
   comfortable seeing in its output, and [mask](45-hide-personal-data-from-a-partner-or-an-ai-agent.md) what it

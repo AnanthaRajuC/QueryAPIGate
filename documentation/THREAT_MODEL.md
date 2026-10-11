@@ -308,10 +308,10 @@ only ever covers connection passwords, not the rest of what the database holds.
 `queryapigate mcp` (a separate process from `queryapigate serve`) reuses the identical authentication and
 authorization path - the same `X-API-Key` header, the same `apikeys.authenticate()`, the same per-key
 `connections`/`queries`/`collections` scoping `GET /catalog` already enforces, the same open-access
-fallback when no server key is configured. Only read-only saved queries are exposed as MCP tools in this
-first version - a write-capable query stays reachable over REST, deliberately not yet reachable through an
-LLM-initiated tool call, because that needs a considered confirmation flow this version doesn't build for
-you. One transport-specific note: an MCP client has to be configured to send the key as a request header
+fallback when no server key is configured. A saved query that writes is a tool only when its author marked it
+for agents and the caller's grant allows the write - and then each write is approved by a person first, unless it
+only inserts (below); otherwise it isn't listed, and isn't run when called by name or by version (fixed in 0.20.1).
+`execute_sql` never writes. One transport-specific note: an MCP client has to be configured to send the key as a request header
 (Streamable HTTP clients can) - never as a URL query parameter, which would leak it into access logs. The MCP
 server doesn't read `QUERYAPIGATE_TRUST_PROXY`: behind a proxy it sees the proxy's address for every caller, so
 `allowed_ips` and the server-wide rate limit can't tell MCP callers apart there.
@@ -345,6 +345,27 @@ server: it checks tokens; the organisation's identity provider issues them. What
   how clients register: anonymous Dynamic Client Registration lets anyone register a client in your realm.
 - **Revocation** is the provider's too: a token is valid until it expires. Keep access tokens short-lived; disabling
   or narrowing the role in QueryAPIGate takes effect on the next request.
+
+#### Agents that write (ADR 0008, experimental)
+
+- **Only what an author marked, only data changes.** A write tool is a saved query marked `agent_writes` - one
+  `INSERT`, `UPDATE` or `DELETE`, never DDL, checked when saved - for a caller whose per-query grant allows the write,
+  with `QUERYAPIGATE_ALLOW_WRITES` on. The grant, the mark and the server's setting are all checked again on every
+  call, so taking any of them back stops the next one, approved or not.
+- **A named person approves each write, and that write only.** The approval is bound to the caller, the query's
+  version and the exact arguments (by hash), runs once, and expires. A model can't satisfy it by itself: the
+  credential that asked can never approve (`own_write`), so an MCP client holding an approver's token or the shared
+  key can't approve its own writes - give agents their own keys.
+- **A ceiling on what any write changes.** It runs in a transaction, rolled back when it changed more than its
+  `max_affected_rows` - counted when it runs, not estimated when approved. On MySQL that needs transactional (InnoDB)
+  tables.
+- **Insert-only queries skip the approval**, and can add rows but never change or remove one - choose that mode only
+  where an added row can do no harm on its own.
+- **What remains:** an approver judges what they're shown - the SQL and the arguments, not which rows; and a
+  description, a row or a document the agent read can still talk it into *asking* for a write. The approval is where
+  that stops.
+- **What's recorded:** every request 30 days, with who decided and how they signed in; the run in history with its
+  approver; the audit log with the arguments' names and hash, never their values, since auditors read it.
 
 #### What agents are told, and what they did
 

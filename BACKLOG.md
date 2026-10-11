@@ -72,8 +72,10 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 8. **0.20: consolidation** - alerts, remote files, exports and column masking graduate, on terms written into the
    versioning policy (`experimental.GRADUATION`); CI against real S3, Keycloak and the oldest dependencies allowed.
    (Released as 0.20.0 on 2026-10-11; 0.20.1 refused writes over MCP called by name.)
-9. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-10. **1.0.0.**
+9. **0.21: #88 write tools over MCP, each write approved by a person**, experimental
+   ([ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md)). (Released as 0.21.0 on 2026-10-11.)
+10. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+11. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2797,7 +2799,14 @@ usual. Builds on history.py and the instances/alerts work, no new recording.
 
 ## 88. Write tools over MCP, with a confirmation step
 
-**Status: open.** The remainder of #42 (and of the private aspirational backlog's A1).
+**Status: shipped (experimental, in 0.21).** [ADR 0008](documentation/adr/0008-mcp-write-tools-with-approval.md):
+saved queries marked `agent_writes` - one INSERT, UPDATE or DELETE, on PostgreSQL, MySQL, SQLite or DuckDB - are write
+tools for callers whose grant allows the write; `"approval"` ones run only once a person with `writes.approve` approves
+that exact write (`agentwrites.py`, schema 11, the Console's Approvals), `"insert"` ones at once with an idempotency
+key; every write in a transaction, rolled back past `max_affected_rows`; the credential that asked never approves.
+Tested against real PostgreSQL, MySQL and DuckDB; guide 49. Open: approval by the end user an agent acts for, MCP's
+URL-mode elicitation once the server keeps sessions. The remainder of #42 (and of the private aspirational backlog's
+A1).
 
 **Impact:** agents can only read today - deliberately. Some must act: file a ticket, update a status, record an
 order. Exposing a write-capable saved query as a tool needs a decision about confirming a model-initiated write

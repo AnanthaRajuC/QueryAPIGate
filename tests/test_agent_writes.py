@@ -200,7 +200,9 @@ class FlowTests(AgentWriteTestCase):
                          [(request_id, 'admin', 1, 'mcp')])
         from queryapigate import store
         entry = next(e for e in store.read_audit_log() if e['action'] == 'approve_write')
-        self.assertEqual((entry['target'], entry['changes']['arguments']), (request_id, {'status': 'done', 'id': 1}))
+        # names and a hash, never the values - auditors read this, and have no data access
+        self.assertEqual((entry['target'], entry['changes']['arguments']), (request_id, ['id', 'status']))
+        self.assertEqual(len(entry['changes']['arguments_hash']), 64)
 
     def test_a_rejection_and_an_expiry(self):
         rejected = self.call('close_ticket', status='done', id=1)['structuredContent']['request']
@@ -260,6 +262,24 @@ class FlowTests(AgentWriteTestCase):
         token = {'X-API-Key': admins.issue_token('admin-1')[1]}
         decided = self.decide(request_id, 'approve', headers=token)
         self.assertEqual((decided['decided_by'], decided['decided_via']), ('admin-1', 'token'))
+
+    def test_a_credential_cannot_approve_the_write_it_asked_for(self):
+        """Four eyes: an MCP client holding an approver's credential must not approve its own model's writes."""
+        from queryapigate import admins
+        admins.create_admin('alice', 'owner')
+        alice = admins.issue_token('alice')[1]
+        asked = self.call('close_ticket', secret=alice, status='done', id=1)['structuredContent']['request']
+        refused = self.decide(asked, 'approve', status=403, headers={'X-API-Key': alice})
+        self.assertEqual(refused['code'], 'own_write')
+        self.decide(asked, 'approve')  # someone else - here the break-glass key - may
+
+    def test_an_agent_cannot_pile_up_requests(self):
+        from queryapigate import agentwrites
+        with mock.patch.object(agentwrites, 'MAX_PENDING_PER_CALLER', 2):
+            self.call('close_ticket', status='done', id=1)
+            self.call('close_ticket', status='done', id=2)
+            third = self.call('close_ticket', status='done', id=3)['structuredContent']
+        self.assertEqual(third['code'], 'too_many_pending_writes')
 
     def test_waiting_writes_are_an_alert_and_every_request_is_in_agent_usage(self):
         from queryapigate import alerts

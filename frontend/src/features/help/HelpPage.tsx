@@ -321,6 +321,12 @@ const DOCS = [
     path: 'how-to/48-sign-in-to-the-console-through-your-identity-provider.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-49',
+    title: 'Let an AI agent write - with a person approving each write',
+    path: 'how-to/49-let-an-agent-write-with-a-person-approving-each-write.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

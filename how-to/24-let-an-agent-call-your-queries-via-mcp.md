@@ -84,8 +84,9 @@ connection-level access at all. See
 and [Read structured MCP results properly](26-mcp-structured-results.md) for what `structuredContent`
 actually contains and why it's shaped the way it is.
 
-A write-capable saved query is **not** reachable over MCP in this version - it stays available over REST
-as always, just not exposed as a tool an LLM could call unsupervised yet.
+A saved query that writes is a tool only when its author marked it for agents (`agent_writes`) and the key's grant
+allows the write - and then a person approves each write before it runs. See
+[let an AI agent write - with a person approving each write](49-let-an-agent-write-with-a-person-approving-each-write.md).
 
 ## Scoping what an agent can do
 
