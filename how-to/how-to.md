@@ -71,6 +71,9 @@ guide covers one scenario end to end, and every command and response in it was r
 46. [**Let AI clients sign in through your identity provider**](46-let-ai-clients-sign-in-through-your-identity-provider.md)
     (experimental) - OAuth for the MCP server: a hosted assistant connects as the signed-in user, with that user's
     role and masking.
+47. [**Tell AI agents what your data means, and see what they did**](47-tell-agents-what-your-data-means-and-see-what-they-did.md)
+    (experimental) - descriptions imported from database comments or written, the data dictionary, and the Agents
+    screen.
 
 ## Live updates (SSE)
 

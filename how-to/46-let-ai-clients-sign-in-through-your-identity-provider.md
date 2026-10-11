@@ -75,7 +75,7 @@ Here, against the local Keycloak:
 
 ```
 MCP sign-in through http://localhost:58080/realms/qag-test, for tokens issued to http://127.0.0.1:5001/mcp (scope queryapigate.mcp)
-OAuth for the MCP server are experimental (...)
+Experimental: OAuth for the MCP server (...)
 INFO:     Uvicorn running on http://127.0.0.1:5001 (Press CTRL+C to quit)
 ```
 

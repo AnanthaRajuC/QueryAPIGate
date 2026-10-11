@@ -72,7 +72,14 @@ with `from_claim` parameters so each user only ever sees their own rows. List th
 - Writes are never possible over MCP in this version - not through saved queries, not through `execute_sql`.
 - Results are capped (`QUERYAPIGATE_MCP_MAX_ROWS`), every call is in run history with `"transport": "mcp"`.
 - Remember that what the agent reads becomes part of its context - and whatever it does next. Give it data you'd be
-  comfortable seeing in its output.
+  comfortable seeing in its output, and [mask](45-hide-personal-data-from-a-partner-or-an-ai-agent.md) what it
+  shouldn't see.
+- **A hosted assistant signing users in:** [OAuth through your identity provider](46-let-ai-clients-sign-in-through-your-identity-provider.md).
+  Tokens are bound to the MCP server - one issued for anything else is refused - but who gets one, and which role
+  claim it carries, is your provider's configuration: check users can't set their own role claim.
+- **What it's told, and what it did:** descriptions steer an agent's SQL, so only owners and admins write them -
+  review imported database comments before relying on them. **Observability → Agents** shows each agent's calls,
+  refusals and frequent statements, and `agent_unusual_volume` warns when one suddenly reads far more than usual.
 
 ## Limits to know about
 

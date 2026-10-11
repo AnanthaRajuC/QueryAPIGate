@@ -132,7 +132,7 @@ stop `https://data.example.com/public/../private/...`.
   DuckDB's `duckdb_secrets()` - never the secret. Another reason to give partners saved queries, not SQL.
 - **Costs**: on a cloud bucket, each read is requests and egress you pay for. Cache, rate-limit, and prefer Parquet -
   DuckDB reads only the columns and row groups a query needs.
-- **Startup says it's experimental**: *Remote files through DuckDB are experimental (connection lake) ...*.
+- **Startup says it's experimental**: *Experimental: Remote files through DuckDB (connection lake) ...*.
 
 ## Next steps
 

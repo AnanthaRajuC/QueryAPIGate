@@ -49,6 +49,7 @@ from . import apikeys, config
 log = logging.getLogger('queryapigate')
 
 NAME_PREFIX = 'jwt:'
+MCP_NAME_PREFIX = 'mcp:'  # an MCP agent's, when REST trusts another issuer - see mcp_caller_name()
 _LEEWAY = 30            # seconds of clock skew tolerated on exp/nbf/iat
 _MAX_TOKEN_LENGTH = 8192
 _jwks_clients: dict = {}  # JWKS URL -> PyJWKClient
@@ -193,6 +194,8 @@ def discovery_urls(issuer):
 def _fetch_json(url):
     request = urllib.request.Request(url, headers={'Accept': 'application/json'})
     with urllib.request.urlopen(request, timeout=config.CONNECT_TIMEOUT) as response:  # noqa: S310 - an operator's URL
+        if not config._secure_url(response.geturl()):  # redirected off https: what it says could be anyone's
+            raise ValueError(f'{url} redirected to {response.geturl()}')
         return json.loads(response.read(1024 * 1024))
 
 
@@ -282,4 +285,12 @@ def authenticate_mcp(authorization, client_ip=None):
         return None, McpRefusal(403, 'forbidden', 'This access token is valid, but its user has no role here')
     if not apikeys.ip_allowed(role, client_ip):
         return None, McpRefusal(403, 'forbidden', "This role isn't allowed from this address")
-    return apikeys.permission_from_grants(f'{NAME_PREFIX}{user}', role, claims=claims), None
+    return apikeys.permission_from_grants(mcp_caller_name(user), role, claims=claims), None
+
+
+def mcp_caller_name(user):
+    """`jwt:<sub>` - the same name a person signed in to REST has - when REST signs nobody in or trusts the same
+    issuer; `mcp:<sub>` when REST trusts another one, whose users' subs could be the same strings for other people: one
+    name would then be two people, sharing a rate limit, run history and a live-event stream."""
+    same_provider = not config.jwt_enabled() or config.jwt_issuer() == config.mcp_auth_server()
+    return f'{NAME_PREFIX if same_provider else MCP_NAME_PREFIX}{user}'

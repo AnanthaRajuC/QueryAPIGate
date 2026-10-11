@@ -78,19 +78,19 @@ class StartupWarningTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env), self.assertLogs('queryapigate', level=logging.WARNING) as logs:
             logging.getLogger('queryapigate').warning('marker')  # assertLogs needs at least one line
             create_app()
-        return [line for line in logs.output if 'experimental' in line]
+        return [line for line in logs.output if 'experimental' in line.lower()]
 
     def test_nothing_experimental_in_use_says_nothing(self):
         self.assertEqual(self.warnings(), [])
 
     def test_a_setting_of_one_names_it(self):
         [line] = self.warnings(QUERYAPIGATE_ALERT_ERROR_RATE='30')
-        self.assertIn('Alerts are experimental (QUERYAPIGATE_ALERT_ERROR_RATE)', line)
+        self.assertIn('Experimental: Alerts (QUERYAPIGATE_ALERT_ERROR_RATE)', line)
 
     def test_a_connection_of_an_experimental_type_names_it(self):
         write_connections({'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})
         [line] = self.warnings()
-        self.assertIn('H2, JDBC and MongoDB connections are experimental (connection docs)', line)
+        self.assertIn('Experimental: H2, JDBC and MongoDB connections (connection docs)', line)
 
     def test_an_inactive_connection_isnt_in_use(self):
         # `queryapigate init` seeds an inactive H2 template; a fresh server shouldn't warn about it.
@@ -101,7 +101,7 @@ class StartupWarningTests(unittest.TestCase):
         log = logging.getLogger('queryapigate')
         with self.assertLogs(log, level=logging.WARNING) as logs:
             experimental.warn_in_use(log, {}, {}, also=('live_events',))
-        self.assertIn('Live events are experimental (started)', logs.output[0])
+        self.assertIn('Experimental: Live events (started)', logs.output[0])
 
 
 if __name__ == '__main__':

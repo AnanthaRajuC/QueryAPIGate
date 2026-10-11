@@ -113,5 +113,5 @@ def warn_in_use(log, environ, connections, also=()):
         used.setdefault(key, 'started')
     for key, evidence in sorted(used.items()):
         feature = FEATURES[key]
-        log.warning('%s are experimental (%s): they may change in any minor release, noted in the changelog - %s.',
+        log.warning('Experimental: %s (%s) - may change in any minor release, noted in the changelog - %s.',
                     feature['name'], evidence, feature['why'])

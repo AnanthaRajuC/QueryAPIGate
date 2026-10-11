@@ -702,7 +702,8 @@ curl -X PATCH http://127.0.0.1:5000/api/v1/connections/shop/descriptions -H "X-A
   says `{"overwrite": true}`. It answers how many it `found`, `imported` and `kept`.
 - **Served with the schema:** `description` on each table and column of `GET /connections/{name}/schema` (and
   `/api/v1`'s), and `notes`; MCP's `list_tables`; and the [data dictionary](MCP.md#descriptions-and-the-data-dictionary)
-  resource. Only for the tables a caller can reach (`allowed_tables`), and a column the caller gets masked says so:
+  resource. Only for the tables a caller can reach (`allowed_tables`) - and a caller restricted to some tables gets
+  no notes, which may name any table - and a column the caller gets masked says so:
   `"masked": "hash"` (or `mask`, `null`, `drop`, or `refused` for a view column a rule may mean) - so an agent doesn't
   plan around a value it will never see. Another database browsed with `?database=` is shown without them.
 - **A saved query's own result columns** are described in its definition: `"columns": {"amt": "Net revenue in EUR"}`
@@ -1351,7 +1352,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.17.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.18.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

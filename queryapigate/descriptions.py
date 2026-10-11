@@ -182,10 +182,11 @@ def database_comments(connection_name):
     return [(table, column, text) for (table, column), text in sorted(found.items())]
 
 
-def annotate(result, connection_name, mask=None):
+def annotate(result, connection_name, mask=None, allowed_tables=None):
     """A fetched schema ({'tables': [...]}) with each table's and column's description, and - for a caller with
     masking rules - `masked: <action>` on each column they'd get masked. Run after the caller's allowed_tables have
-    been applied, so nothing is described that the caller can't reach."""
+    been applied, so nothing is described that the caller can't reach. The connection's notes are free text that may
+    name any table, so a caller restricted to some tables (`allowed_tables`) never gets them."""
     known = _lookup(connection_name)
     tables = []
     for table in result.get('tables', []):
@@ -207,7 +208,7 @@ def annotate(result, connection_name, mask=None):
             columns.append(column)
         described['columns'] = columns
         tables.append(described)
-    notes_text = known.get(('', ''))
+    notes_text = known.get(('', '')) if allowed_tables is None else None
     return {**result, 'tables': tables, **({'notes': notes_text} if notes_text else {})}
 
 

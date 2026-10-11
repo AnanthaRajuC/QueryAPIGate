@@ -224,7 +224,7 @@ class HttpFilesTests(FilesTestCase):
         self.connect(allowed_paths=[f'{self.base}/public/products.parquet'])
         with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
             create_app()
-        self.assertTrue(any('Remote files through DuckDB are experimental (connection files)' in line
+        self.assertTrue(any('Experimental: Remote files through DuckDB (connection files)' in line
                             for line in logs.output), logs.output)
 
 

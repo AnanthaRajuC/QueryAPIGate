@@ -292,6 +292,49 @@ you. One transport-specific note: an MCP client has to be configured to send the
 server doesn't read `QUERYAPIGATE_TRUST_PROXY`: behind a proxy it sees the proxy's address for every caller, so
 `allowed_ips` and the server-wide rate limit can't tell MCP callers apart there.
 
+Every request to `/mcp` is authenticated before the MCP session sees it, and refused at the HTTP level (`401`,
+`403`, `429`) - nothing of the protocol is reachable without a credential once one is required.
+
+#### OAuth for AI clients (ADR 0006, experimental)
+
+With `QUERYAPIGATE_MCP_RESOURCE_URL` and `QUERYAPIGATE_MCP_AUTH_SERVER` set, the MCP server is an OAuth 2.1 resource
+server: it checks tokens; the organisation's identity provider issues them. What that protects, and what it doesn't:
+
+- **Tokens are bound to the MCP server.** A token's `aud` must be the MCP server's own URL, its `iss` the configured
+  provider, its signature one of the provider's published keys with that key's own algorithm (never `none`, never
+  an HMAC "signed" with a public key), its `exp` in the future, and it must carry `QUERYAPIGATE_MCP_SCOPE`. A token
+  issued for any other application of the same provider - including this server's own REST API - is refused, and
+  REST refuses a token naming the MCP server; startup refuses a REST audience that includes the MCP URL. A leaked
+  token works against one service only, until it expires.
+- **No token is passed on.** Databases are reached with each connection's own credentials; a caller's token never
+  leaves the MCP server.
+- **The provider's keys are found through its metadata**, fetched over `https://` only (a redirect to plain HTTP is
+  refused), from documents that must name the configured issuer as their own (RFC 8414) - a metadata document
+  claiming to be another issuer isn't used. A provider that can't be reached means every token is refused, never
+  accepted unchecked.
+- **One person, one name.** An agent's runs are under `jwt:<sub>` - the name that person has signed in to REST -
+  when REST trusts the same provider; under `mcp:<sub>` when REST trusts another, so that two people whose `sub`s
+  happen to match never share a name, rate limit, history or event stream.
+- **What remains with the provider:** who may get a token for the MCP server, with which scope and which role claim,
+  is the provider's configuration - QueryAPIGate trusts what a valid token says. Review that the role claim can't be
+  set by users themselves (a self-editable profile attribute mapped into the token would let anyone pick a role), and
+  how clients register: anonymous Dynamic Client Registration lets anyone register a client in your realm.
+- **Revocation** is the provider's too: a token is valid until it expires. Keep access tokens short-lived; disabling
+  or narrowing the role in QueryAPIGate takes effect on the next request.
+
+#### What agents are told, and what they did
+
+- **Descriptions are instructions-shaped data.** A table's or column's description, and a connection's notes, are
+  read by agents as context ([descriptions](API.md#descriptions)). Whoever can write them can steer what an agent
+  does with the data it can reach - not what it can reach. Writing them takes `connections.write` (owners and admins),
+  and every change is audited. **Importing from the database's comments** brings in text written by whoever has
+  `COMMENT` rights in the database: review an import (it says `source: "database"` on each) before relying on it.
+- **Descriptions reach no further than the schema.** A caller sees those of the tables it can reach, and a caller
+  restricted to some tables never gets the connection's notes, which may name any table.
+- **Agent usage** (`GET /api/v1/usage/agents`) shows administrators each agent's ad-hoc SQL, as run history does -
+  it is readable by every administrator role, auditors included. With `QUERYAPIGATE_HISTORY_ADHOC_SQL` set to `hash`
+  or `none`, it shows hashes or nothing.
+
 ## Non-goals: what this does not defend against
 
 Being explicit about these is as important as everything above:
@@ -319,6 +362,9 @@ Being explicit about these is as important as everything above:
   secret.
 - **Names can be probed.** A saved query a key can't reach answers `403` naming its connection; a name that
   doesn't exist answers `404`. Don't put anything sensitive in query or connection names.
+- **An agent may be steered by what it reads.** Data in results, descriptions and notes all become part of an AI
+  agent's context. QueryAPIGate limits what an agent can reach and hides what masking covers; it can't make an agent
+  ignore instructions planted in data it is allowed to read.
 - **`/metrics` is intentionally unauthenticated**, on the assumption that a metrics scraper shouldn't need
   a credential either - treat it as public within whatever network can reach the service at all.
 

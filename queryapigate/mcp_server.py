@@ -250,7 +250,8 @@ def list_tables_tool(permission, arguments):
     except ApiError as error:
         return _error(error.message, error.status, error.code)
     if not database:  # descriptions are the connection's own database's
-        result = descriptions.annotate(result, connection_name, mask=permission.mask)
+        result = descriptions.annotate(result, connection_name, mask=permission.mask,
+                                        allowed_tables=permission.allowed_tables)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
 
 
@@ -281,7 +282,8 @@ def read_resource_for(permission, uri):
     if not name or not apikeys.can_use(permission, name):
         raise ApiError(f'No such resource: {uri}', 404, code='not_found')
     result = schema.fetch_schema(name, allowed_tables=permission.allowed_tables)
-    return descriptions.dictionary(name, descriptions.annotate(result, name, mask=permission.mask))
+    return descriptions.dictionary(name, descriptions.annotate(result, name, mask=permission.mask,
+                                                                      allowed_tables=permission.allowed_tables))
 
 
 def execute_sql_tool(permission, arguments):

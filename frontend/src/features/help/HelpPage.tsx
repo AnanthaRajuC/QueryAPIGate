@@ -309,6 +309,12 @@ const DOCS = [
     path: 'how-to/46-let-ai-clients-sign-in-through-your-identity-provider.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-47',
+    title: 'Tell AI agents what your data means, and see what they did',
+    path: 'how-to/47-tell-agents-what-your-data-means-and-see-what-they-did.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

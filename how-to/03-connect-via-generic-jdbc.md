@@ -86,7 +86,7 @@ every `jdbc` connection configured at that moment. So:
 - Add a connection with a **new** jar to a running server: **restart** before using it.
 
 A server with a `jdbc` connection logs at startup that it's experimental:
-*H2, JDBC and MongoDB connections are experimental (connection inventory) ...*
+*Experimental: H2, JDBC and MongoDB connections (connection inventory) ...*
 
 ## Vendor examples (from their documentation - not run here)
 

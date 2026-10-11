@@ -130,7 +130,10 @@ startup. Then:
   with the connection's own credentials.
 - **What the agent may do** is its role's: connections, saved queries, `allowed_tables`, its rate limit, and its
   [masking rules](API.md#column-masking). `from_claim` parameters bind to the token's claims, so an agent acting for
-  a person sees only that person's rows. Its runs are in history as `jwt:<sub>`, with `"transport": "mcp"`.
+  a person sees only that person's rows. Its runs are in history as `jwt:<sub>`, with `"transport": "mcp"` - the
+  same name that person has signed in to REST, when REST trusts the same issuer (or signs nobody in). When REST trusts
+  another issuer, whose users' `sub`s could be the same strings for other people, the agent is `mcp:<sub>` instead,
+  so two people never share one name, rate limit or event stream.
 - **Registering the client** is between the client and your provider: Client ID Metadata Documents or Dynamic
   Client Registration where the provider supports them, or an administrator registering it by hand. QueryAPIGate
   plays no part, and issues no tokens of its own.
@@ -150,6 +153,8 @@ What an agent is told the data means:
   `queryapigate://connections/<name>/dictionary`, Markdown: the notes, then every table it can reach, each column
   with its type, its description and whether it's masked for this caller. `resources/list` lists them;
   `resources/read` returns one. Callers with saved queries only (no `connections` grant) have none.
+
+The step by step: [tell AI agents what your data means, and see what they did](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/47-tell-agents-what-your-data-means-and-see-what-they-did.md).
 
 ## Governance: the same rules as REST
 

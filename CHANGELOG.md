@@ -46,6 +46,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-11
+
+Letting AI agents near your data, governed: hosted AI clients sign in through your identity provider, with tokens
+bound to the MCP server; agents are told what tables and columns mean - imported from the database's own comments or
+written in the Console - so they write the right SQL; and you can see what each agent did, with an alert when one
+suddenly reads far more than usual. All three are experimental.
+
 ### Upgrading from 0.17
 - **Schema 9** adds one table (`descriptions`); nothing existing changes. A 0.17 instance still running keeps working
   against the upgraded store, but can't be restarted on it - upgrade every instance.
@@ -60,22 +67,29 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   Metadata at `/.well-known/oauth-protected-resource`, `401`/`403` with `WWW-Authenticate` - accepting tokens that
   name its own URL as their audience (`QUERYAPIGATE_MCP_RESOURCE_URL`) from the provider in
   `QUERYAPIGATE_MCP_AUTH_SERVER`, with a scope and a role (`QUERYAPIGATE_MCP_SCOPE`, `QUERYAPIGATE_MCP_ROLE`,
-  `QUERYAPIGATE_MCP_ROLE_CLAIM`). The role's grants and masking rules apply to the agent. REST and MCP tokens are kept
-  apart: neither is accepted by the other. See [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth).
+  `QUERYAPIGATE_MCP_ROLE_CLAIM`). The role's grants and masking rules apply to the agent, whose runs are under
+  `jwt:<sub>` - or `mcp:<sub>` when REST trusts another provider, so two people never share a name. REST and MCP
+  tokens are kept apart: neither is accepted by the other. See [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth).
 - **Descriptions** (BACKLOG #86, [ADR 0006](documentation/adr/0006-ai-agents.md), experimental): what each table
   and column means, and a connection's notes (the joins to use, how a metric is worked out) -
   `/api/v1/connections/{name}/descriptions`, written in the Console's schema browser or imported from the database's
   own comments (PostgreSQL, MySQL, ClickHouse, DuckDB). Served with the schema, in MCP's `list_tables` and as a data
   dictionary MCP resource per connection - only for the tables a caller can reach, marking the columns it gets
   masked. A saved query describes its result columns (`columns`), in its MCP tool's output schema.
-  See [Descriptions](documentation/API.md#descriptions).
+  See [Descriptions](documentation/API.md#descriptions) and
+  [guide 47](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/47-tell-agents-what-your-data-means-and-see-what-they-did.md).
 - **Agent usage** (BACKLOG #87, experimental): `GET /api/v1/usage/agents` and the Console's **Agents** screen - per AI
   agent on the MCP server, its calls, rows read, refusals by code, how often masking applied, the saved queries it ran
   and its most frequent ad-hoc statements, from run history. A new alert, `agent_unusual_volume`, warns when an agent
   reads ten times its usual hourly rows, past `QUERYAPIGATE_ALERT_AGENT_ROWS` (default 10,000). See
   [Agent usage](documentation/API.md#agent-usage).
 
-## [0.17.0] - 2026-10-12
+### Changed
+- **The startup warning for an experimental feature** reads `Experimental: <feature> (<what shows it>) - ...`, so it
+  reads right for every feature's name ("OAuth for the MCP server are experimental" didn't). Log searches for
+  `are experimental` need the new wording.
+
+## [0.17.0] - 2026-10-11
 
 Delivering data to partners and pipelines: a saved query can be exported to a bucket or folder as Parquet, CSV or
 NDJSON - incrementally, a file of only what changed each run - and column masking hides personal data from the
@@ -1804,7 +1818,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.17.0
 [0.16.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.16.0
 [0.15.0]: https://github.com/AnanthaRajuC/QueryAPIGate/releases/tag/v0.15.0

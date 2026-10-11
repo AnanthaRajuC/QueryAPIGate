@@ -38,7 +38,9 @@ def _bucket_index(elapsed):
 def _key_label(key):
     """Every signed-in user (jwtauth.py: callers named `jwt:<user>`) is counted under one `jwt` label: one label
     value per user would grow these counters - and every Prometheus series built on them - with the user base."""
-    return 'jwt' if isinstance(key, str) and key.startswith('jwt:') else key
+    if isinstance(key, str) and key.startswith(('jwt:', 'mcp:')):
+        return key.split(':', 1)[0]
+    return key
 
 
 def observe_request(method, endpoint, status, elapsed, key='-'):

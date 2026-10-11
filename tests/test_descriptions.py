@@ -160,6 +160,7 @@ class ServedTests(DescriptionTestCase):
                            mask=[{'column': 'customer.email', 'action': 'hash'}])
         result = self.client.get('/connections/lite/schema', headers=headers).get_json()
         self.assertEqual(list(self.tables(result)), ['customer'])  # film - and its description - not there
+        self.assertNotIn('notes', result)  # free text that may name any table
         email = next(c for c in self.tables(result)['customer']['columns'] if c['name'] == 'email')
         self.assertEqual((email['description'], email['masked']), ('Where invoices go', 'hash'))
         self.assertNotIn('masked', self.tables(result)['customer']['columns'][0])
@@ -180,7 +181,7 @@ class ServedTests(DescriptionTestCase):
         self.assertEqual([r['uri'] for r in listed], ['queryapigate://connections/lite/dictionary'])
         text = mcp_server.read_resource_for(permission, listed[0]['uri'])
         self.assertIn('# Data dictionary: lite', text)
-        self.assertIn('Every film has one title.', text)
+        self.assertNotIn('Every film has one title.', text)  # a table-restricted caller gets no notes
         self.assertIn('## customer\nOne row per paying customer', text)
         self.assertIn('- `email` (TEXT) - Where invoices go - masked for you (hash)', text)
         self.assertNotIn('## film', text)

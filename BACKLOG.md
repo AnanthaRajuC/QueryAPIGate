@@ -62,9 +62,12 @@ descriptions for agents, #87 per-agent usage, #88 write tools with confirmation.
 4. **0.16: #84 Phase 1**, admin identity - the last contract change before the freeze; with #81 Parquet output and
    automatic views over files. (Released as 0.16.0 on 2026-10-06.)
 5. **0.17: #89 exports to object storage and #63 column masking**, both experimental - delivering data to partners
-   and pipelines. (Released as 0.17.0 on 2026-10-12.)
-6. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-7. **1.0.0.**
+   and pipelines. (Released as 0.17.0 on 2026-10-11.)
+6. **0.18: #85 OAuth for the MCP server, #86 descriptions for agents and #87 per-agent usage**, all experimental -
+   letting AI agents near your data, governed ([ADR 0006](documentation/adr/0006-ai-agents.md)). (Released as 0.18.0
+   on 2026-10-11.)
+7. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+8. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2722,8 +2725,16 @@ steps for risky changes (enabling writes, deleting a connection).
 
 ## 85. OAuth 2.1 authorization for the MCP server
 
-**Status: open.** The first of four items (#85-#88, with #63 column masking) that make QueryAPIGate a strong
-governed data gateway for AI agents.
+**Status: shipped (experimental, in 0.18).** [ADR 0006](documentation/adr/0006-ai-agents.md): `/mcp` is an OAuth 2.1
+resource server - Protected Resource Metadata, HTTP 401/403 with `WWW-Authenticate`, tokens from the organisation's
+identity provider bound to the MCP server's URL (RFC 8707 audience) and its scope, roles from claims - and the
+identity provider does sign-in, consent and client registration. Tested against a stand-in provider and a real
+Keycloak, with a real MCP client through the authorization code flow with PKCE; guide 46. Open: a built-in
+authorization server for providers with neither client-registration method (rejected for now in the ADR; revisit with
+#84 Phase 2's Console SSO), opaque tokens through introspection.
+
+The first of four items (#85-#88, with #63 column masking) that make QueryAPIGate a strong governed data gateway for
+AI agents.
 
 **Impact:** the MCP specification's authorization for remote servers is OAuth 2.1, and hosted AI clients - Claude's
 and ChatGPT's connectors among them - expect it. `queryapigate mcp` accepts an API key or a JWT in a request header:
@@ -2741,7 +2752,11 @@ fine for SDKs, agent frameworks and many clients, but not every hosted connector
 
 ## 86. Descriptions for agents: a semantic layer over tables, columns and queries
 
-**Status: open.**
+**Status: shipped (experimental, in 0.18).** `descriptions.py`: per table, column and connection (notes), written in
+the Console's schema browser or imported from database comments (PostgreSQL, MySQL, ClickHouse, DuckDB - integration
+tested on each); served with the schema, in `list_tables`, saved-query tool output schemas and a data dictionary MCP
+resource, only for reachable tables and marking masked columns; guide 47. Open: dbt docs import, example questions,
+approved joins as structured data rather than notes text.
 
 **Impact:** an agent writing SQL sees table and column names and types - `orders.amt`, `cust_tier` - but not what
 they mean. Accuracy on ad-hoc questions depends on knowing that `amt` is net revenue in EUR excluding refunds, which
@@ -2756,7 +2771,9 @@ joins are the right ones, and how a metric is defined. Tools are only as good as
 
 ## 87. A per-agent usage view
 
-**Status: open.**
+**Status: shipped (experimental, in 0.18).** `usage.py`: `GET /api/v1/usage/agents` and the Console's Agents screen,
+from run history; the `agent_unusual_volume` alert. Open: tables read per agent (from the SQL), trends over weeks,
+per-agent exports of the summary.
 
 **Impact:** a data owner who lets agents in needs to see what they did - which questions, how many rows read from
 which tables, what was refused - per agent and over time. Run history has every call (`"transport": "mcp"`, the

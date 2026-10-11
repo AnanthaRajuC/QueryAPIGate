@@ -864,7 +864,8 @@ def connection_schema(name):
     if database and not g.permission.admin:
         raise ApiError('Only the admin key may browse a different database on this connection', 403, code='admin_only')
     result = schema.fetch_schema(name, database=database, allowed_tables=g.permission.allowed_tables)
-    return jsonify(result if database else descriptions.annotate(result, name, mask=g.permission.mask)), 200
+    return jsonify(result if database else descriptions.annotate(result, name, mask=g.permission.mask,
+                                                                       allowed_tables=g.permission.allowed_tables)), 200
 
 
 @bp.route('/connections/<name>/table_ddl', methods=['GET'])

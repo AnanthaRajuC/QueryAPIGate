@@ -191,6 +191,17 @@ class TokenTests(McpOAuthTestCase):
             self.assertIsNone(self.authenticate(self.provider.token())[1])  # Azure-style: the local name in the token
             self.assertEqual(self.authenticate(self.provider.token(scope='queryapigate'))[1].code, 'insufficient_scope')
 
+    def test_an_agent_is_named_apart_from_rest_users_of_another_provider(self):
+        self.assertEqual(self.authenticate(self.provider.token())[0].name, 'jwt:alice')  # REST signs nobody in
+        other = {'QUERYAPIGATE_JWT_SECRET': 'x' * 40, 'QUERYAPIGATE_JWT_ROLE': 'analysts'}
+        with mock.patch.dict(os.environ, other):  # REST's users come from elsewhere: 'alice' may be someone else
+            self.assertEqual(self.authenticate(self.provider.token())[0].name, 'mcp:alice')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_JWT_JWKS_URL': self.provider.issuer + '/certs',
+                                          'QUERYAPIGATE_JWT_ISSUER': self.provider.issuer,
+                                          'QUERYAPIGATE_JWT_AUDIENCE': 'queryapigate',
+                                          'QUERYAPIGATE_JWT_ROLE': 'analysts'}):  # the same provider: one person
+            self.assertEqual(self.authenticate(self.provider.token())[0].name, 'jwt:alice')
+
     def test_a_rest_token_is_refused_on_mcp_and_an_mcp_token_on_rest(self):
         jwks = self.provider.issuer + '/certs'
         rest = {'QUERYAPIGATE_JWT_JWKS_URL': jwks, 'QUERYAPIGATE_JWT_ISSUER': self.provider.issuer,
@@ -237,6 +248,16 @@ class TokenTests(McpOAuthTestCase):
         self.assertNotIn('ann@example.com', emails)
         runs = self.client.get('/api/v1/queries/customers/history', headers={'X-API-Key': 'admin-key'})
         self.assertEqual(runs.get_json()['items'][0]['key_name'], 'jwt:alice')
+
+
+class RedirectTests(unittest.TestCase):
+    def test_metadata_redirected_off_https_is_not_used(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.geturl.return_value = 'http://evil.example.com/.well-known/openid-configuration'
+        response.read.return_value = b'{}'
+        with mock.patch('urllib.request.urlopen', return_value=response), self.assertRaises(ValueError):
+            jwtauth._fetch_json('https://idp.example.com/.well-known/openid-configuration')
 
 
 class DiscoveryTests(unittest.TestCase):
