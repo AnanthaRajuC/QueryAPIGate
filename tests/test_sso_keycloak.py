@@ -2,7 +2,8 @@
 a groups claim, a group and a user in it - and the whole authorization code flow driven as a browser would: the
 server's /auth/sso/login, Keycloak's own login page, the redirect back to /auth/sso/callback, a session.
 
-Skipped unless QUERYAPIGATE_TEST_KEYCLOAK names a Keycloak - see tests/test_mcp_keycloak.py for the one-line start."""
+CI's integration job runs it; locally it's skipped unless QUERYAPIGATE_TEST_KEYCLOAK names a Keycloak - see
+tests/test_mcp_keycloak.py for the one-line start."""
 import html
 import os
 import re

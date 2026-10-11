@@ -36,7 +36,7 @@ jobs:
           fail_ci_if_error: false
 
   integration:
-    name: Integration (real databases)
+    name: Integration (real databases and services)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -77,12 +77,43 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: pip install -e ".[all]"
+      - run: pip install -e ".[all,mcp]"
       - name: Start H2 server
         run: |
           java -cp queryapigate/lib/h2-2.2.224.jar org.h2.tools.Server -tcp -tcpPort 9092 -ifNotExists &
           sleep 5
       - run: python -m unittest tests.test_integration -v
+      # Started here rather than as services: neither image can be given its command that way.
+      - name: Start an S3-compatible store (SeaweedFS), for exports and files on S3
+        run: |
+          mkdir -p /tmp/s3cfg
+          echo '{"identities": [{"name": "ci", "credentials": [{"accessKey": "testkey", "secretKey": "testsecret"}],
+                 "actions": ["Admin", "Read", "Write", "List", "Tagging"]}]}' > /tmp/s3cfg/s3.json
+          docker run -d --name seaweedfs -p 8333:8333 -v /tmp/s3cfg:/cfg chrislusf/seaweedfs:4.48 \
+            server -s3 -s3.config=/cfg/s3.json
+          for i in $(seq 60); do
+            docker exec seaweedfs sh -c 'echo "s3.bucket.create -name qagtest" | weed shell' 2>/dev/null \
+              | grep -q "created bucket" && break
+            sleep 2
+          done
+      - name: Start Keycloak, for the MCP server's OAuth and Console sign-in
+        run: |
+          docker run -d --name keycloak -p 8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin quay.io/keycloak/keycloak:26.0.7 start-dev
+          for i in $(seq 90); do
+            curl -sf http://localhost:8080/realms/master/.well-known/openid-configuration > /dev/null && break
+            sleep 2
+          done
+      - name: Exports, files, OAuth and SSO against the real services - none may skip
+        env:
+          QUERYAPIGATE_TEST_S3: localhost:8333,testkey,testsecret,qagtest
+          QUERYAPIGATE_TEST_KEYCLOAK: http://localhost:8080
+        run: |
+          set -o pipefail  # the tests' own result, not tee's
+          python -m unittest -v tests.test_duckdb_files tests.test_destinations tests.test_exports \
+            tests.test_exporting tests.test_export_security tests.test_mcp_keycloak tests.test_sso_keycloak \
+            2>&1 | tee /tmp/services.log
+          ! grep -E "skipped '(set QUERYAPIGATE_TEST|DuckDB's httpfs)" /tmp/services.log
 
   postgres-metadata:
     # The whole suite again, with the metadata store (connections, saved queries, keys, roles, history, audit
@@ -118,7 +149,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
       - run: pip install -e ".[dev]"
       - name: The previous release, for the rolling-upgrade test (BACKLOG #58)
-        run: python -m venv /tmp/previous-release && /tmp/previous-release/bin/pip install -q "queryapigate[postgres]==0.19.0"
+        run: python -m venv /tmp/previous-release && /tmp/previous-release/bin/pip install -q "queryapigate[postgres]==0.19.1"
       - run: python -m unittest discover -s tests -t . -v
 
   console-e2e:

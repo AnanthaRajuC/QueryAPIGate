@@ -2509,8 +2509,8 @@ opens - DuckDB's own `allowed_directories`/`allowed_paths`, `enable_external_acc
 credentials reuse `user`/`password`; `views` name files for the schema browser and `allowed_tables`; table functions
 are refused for table-restricted keys. HTTP(S) entries must be files, since a web server resolves `..`. Tested against
 local files, a web server and SeaweedFS (S3 API) in `tests/test_duckdb_files.py` (the S3 part when
-`QUERYAPIGATE_TEST_S3` is set); GCS and R2 use the same mechanism, untested. Not done: the AWS credential chain
-(instance roles), and a CI job with an S3-compatible service. Guide 41.
+`QUERYAPIGATE_TEST_S3` is set - in CI's integration job, against SeaweedFS, since 0.20); GCS and R2 use the same
+mechanism, untested. Not done: the AWS credential chain (instance roles). Guide 41.
 
 Since 0.15: `auto_views: true` - a view per file and per subfolder of each allowed folder or prefix, listed through
 the locked connection (`duckfiles.auto_views`) - and a **Files (Parquet, CSV, JSON)** type in the Console's connection
@@ -2844,8 +2844,8 @@ written, refused up front when the parameter couldn't take them back; a lease pe
 `/api/v1/exports`, `queryapigate export --to` and `queryapigate exports run|list`, run history, the `export_failing`
 alert, and the Console's Delivery screens. Guide 44. Found on the way and fixed: Parquet output's memory grew with the
 result (now one DuckDB thread, ~150 MB), and a stream closed before its first row kept its query active and its
-connection checked out. Not done: the AWS credential chain (instance roles) for destinations, and a CI job with an
-S3-compatible service.
+connection checked out. Not done: the AWS credential chain (instance roles) for destinations. Since 0.20 CI's integration
+job runs the exports and destinations tests against an S3-compatible service (SeaweedFS).
 
 **Was: open; after 1.0.** The partner and data-pipeline track: a saved query's result delivered as a file where
 the other side picks it up, on whatever schedule the deployer's own scheduler runs.

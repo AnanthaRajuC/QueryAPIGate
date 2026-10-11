@@ -3,7 +3,8 @@ a realm, a client scope `queryapigate.mcp` that adds the MCP server's URL to the
 user - then real access tokens from it on /mcp. Proves the parts a stand-in can't: that the server finds Keycloak's
 keys through its published metadata, and accepts the tokens it really issues, and only those.
 
-Skipped unless QUERYAPIGATE_TEST_KEYCLOAK names a Keycloak (any realm-admin `admin`/`admin`), e.g.:
+CI's integration job runs it against Keycloak 26. Locally it's skipped unless QUERYAPIGATE_TEST_KEYCLOAK names a
+Keycloak (any realm-admin `admin`/`admin`), e.g.:
   docker run -d --rm --name qag-kc-test -p 58080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \\
       -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin quay.io/keycloak/keycloak:26.0.7 start-dev
   QUERYAPIGATE_TEST_KEYCLOAK=http://localhost:58080"""
