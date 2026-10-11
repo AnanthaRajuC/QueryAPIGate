@@ -32,7 +32,7 @@ import time
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, history, instances, ratelimit, secheaders
+from . import config, cors, db, history, instances, ratelimit, secheaders, tracing
 from .errors import code_for
 
 try:
@@ -307,6 +307,12 @@ class EventServer:
         if permission is None:
             await _respond(writer, 401, {'error': 'Unauthorized'}, allow_origin)
             return
+        # One span for opening the stream (tracing.py) - not one per event: a stream can stay open for hours
+        with tracing.span('GET /events', 'server', {
+                'http.request.method': 'GET', 'http.route': '/events', 'client.address': client_ip,
+                'queryapigate.caller': permission.name or '-', 'http.response.status_code': 200},
+                parent=tracing.extract(headers)):
+            pass
         last_id = _last_event_id(headers, query)
         key_name = None if permission.admin else permission.name
         client = _Client(key_name, writer)

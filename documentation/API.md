@@ -1241,6 +1241,49 @@ the metric names listed above, with panels for request/query rate and latency (p
 rows returned, active queries, pool occupancy and rate-limit rejections. Each QueryAPIGate process needs its own
 scrape target, and the dashboard sums across them.
 
+## Tracing (OpenTelemetry)
+
+> **Experimental** - new in 0.23 ([ADR 0010](adr/0010-tracing-and-security-headers.md)); span names and attributes may
+> change in any minor release, always noted in the changelog, as OpenTelemetry's conventions for databases and AI
+> agents settle. What never goes into a span won't change.
+
+Spans to your tracing backend (Jaeger, Tempo, Honeycomb, Datadog...) through OTLP, so the time between your app and
+its database shows where it went - authentication, the query, serialising the result. Install the extra and set an
+endpoint, the standard way:
+
+~~~bash
+pip install "queryapigate[otel]"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318 queryapigate serve
+~~~
+
+Every other OpenTelemetry variable works as for any service: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`,
+`OTEL_SERVICE_NAME` (default `queryapigate`), `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_TRACES_SAMPLER`, the exporter's
+`..._HEADERS` and `..._TIMEOUT`, `OTEL_SDK_DISABLED`. An endpoint set without the extra stops the server, saying what
+to install. Spans are exported in the background: a collector that's down costs spans, never a slow request. Each
+process - `serve`, `mcp`, `events`, an export - is its own `service.instance.id`, the id the Instances screen shows.
+
+| Span | Kind | What it records |
+|---|---|---|
+| `GET /q/<name>` - the route rule | server | `http.request.method`, `http.route`, `http.response.status_code`, `url.scheme`, `client.address`, `queryapigate.request_id`, `queryapigate.caller`; `error.type` (the error `code`) on a 4xx or 5xx |
+| `query <name>` | internal | `queryapigate.query`, `.version`, `.connection`, `.rows`, `.masked`, `.cache` (`hit`, `miss`); `.agent_write` for an agent's write |
+| `SELECT <connection>` (the statement's kind) | client | `db.system.name`, `db.operation.name`, `db.namespace` (a network database's name), `server.address`, `server.port`, `db.response.returned_rows` or `db.response.affected_rows` |
+| `serialize <format>` | internal | `queryapigate.format`, `queryapigate.bytes` |
+| `tools/call <tool>` (MCP) | server | `gen_ai.tool.name`, `queryapigate.caller`; `error.type` when the tool failed |
+| `GET /events` | server | opening a live stream - one span, not one per event |
+| `export <name>` | internal | a saved export or `queryapigate export`: `queryapigate.rows`, `queryapigate.bytes` |
+
+- **Never in a span:** parameter values, rows or anything from them, statement text, query strings, headers (keys,
+  tokens, cookies), connection passwords, write requests' arguments - a test fails if any does. Spans go to a
+  collector whose readers have no data access. Exceptions aren't recorded either, since a database's message can
+  carry values: a failed span has `error.type`, the error's code or class.
+- **A caller's `traceparent` is continued** on REST and MCP requests, so QueryAPIGate's spans sit inside the
+  caller's trace; `queryapigate export` continues `TRACEPARENT` from its environment, for a scheduler that sets it.
+  Whether a trace is kept follows `OTEL_TRACES_SAMPLER`: by default the caller's sampled flag decides - set
+  `traceidratio` so callers don't.
+- **The trace id goes where the request id goes:** `trace_id` in run history entries, in error bodies beside
+  `request_id`, and in JSON log lines (with `span_id`).
+- A streamed result's database span covers opening the stream, up to its first row, not the whole transfer.
+
 ## Live events (Server-Sent Events)
 
 > **Experimental** - may change in any minor release, always noted in the changelog

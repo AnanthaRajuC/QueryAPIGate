@@ -278,6 +278,17 @@ def _check_watermark(export, value):
 
 
 def run(name, actor):
+    """_run(), in a span (tracing.py): a child of the request that started it, or - run from the CLI, by a scheduler
+    that sets TRACEPARENT - of the scheduler's own trace."""
+    from . import tracing
+    parent = None if tracing.current() is not None else tracing.from_environment()
+    with tracing.span(f'export {name}', attributes={'queryapigate.export': name}, parent=parent) as span:
+        outcome = _run(name, actor)
+        tracing.set_attributes(span, queryapigate__rows=outcome.get('rows'), queryapigate__bytes=outcome.get('bytes'))
+        return outcome
+
+
+def _run(name, actor):
     """Run export `name` once. Returns the run: id, object, rows, bytes, watermark before and after."""
     from .engine import stream_sql
     export = get(name)
@@ -288,8 +299,11 @@ def run(name, actor):
     run_id = exporting.new_run_id()
     incremental = export.get('incremental')
     before = export.get('watermark')
+    from . import tracing
     entry = {'executed_at': store.now(), 'request_id': None, 'key_name': actor, 'transport': 'export',
              'export': name, 'destination': export['destination'], 'run_id': run_id}
+    if tracing.ids()[0]:
+        entry['trace_id'] = tracing.ids()[0]
     path = version = None
     try:
         raw = dict(export.get('params') or {})

@@ -278,6 +278,14 @@ is the deployer's choice (`QUERYAPIGATE_HSTS_MAX_AGE`), sent only over HTTPS. `/
 loads one exact Swagger UI release with Subresource Integrity hashes and a CSP allowing only those files: a compromised
 CDN, or a bad release of the library, can't run script there. The Console bundles everything it runs.
 
+**Tracing** (ADR 0010, experimental, off unless an OTLP endpoint is set) sends spans to a collector the deployer runs.
+Its readers are treated like the audit log's: no data access. So spans carry the route, the saved query's name and
+the row count - never a parameter value, row, statement, header or credential, and not exception messages, which can
+carry values; a test enforces it on every front door. A caller's `traceparent` is accepted, which also lets it ask
+for its trace to be sampled: with the SDK's default sampler, a caller can raise how much is exported. Deployers who
+care set `OTEL_TRACES_SAMPLER=traceidratio`. The OTLP endpoint's headers (`OTEL_EXPORTER_OTLP_HEADERS`, often a
+token) are never shown in Settings.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without

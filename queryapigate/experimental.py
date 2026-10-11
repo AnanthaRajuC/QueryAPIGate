@@ -71,6 +71,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', 'QUERYAPIGATE_CONSOLE_URL'),
         'docs': ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
     },
+    'tracing': {
+        'name': 'Tracing with OpenTelemetry',
+        'why': 'new in 0.23 - span names and attributes may change as the OpenTelemetry conventions for databases and '
+               'AI agents settle (ADR 0010); what never goes into a span will not',
+        'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
+        'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
+    },
     'sso': {
         'name': 'Console sign-in through SSO',
         'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',

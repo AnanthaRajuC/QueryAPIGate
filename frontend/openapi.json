@@ -2018,6 +2018,10 @@
             ],
             "type": "string"
           },
+          "trace_id": {
+            "description": "With tracing on: the trace this run was part of.",
+            "type": "string"
+          },
           "transport": {
             "description": "The front door it came through; export: written to a destination.",
             "enum": [
@@ -3030,6 +3034,10 @@
           "timeout": {
             "description": "The time limit that was exceeded, when query_timeout.",
             "type": "number"
+          },
+          "trace_id": {
+            "description": "With tracing on: the request's trace, to find it in the tracing backend (experimental, ADR 0010).",
+            "type": "string"
           }
         },
         "required": [

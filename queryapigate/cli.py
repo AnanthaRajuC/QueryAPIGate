@@ -160,6 +160,14 @@ def _resolve_export_path(template, name):
 
 
 def _export(args):
+    """_export_run(), in a span (tracing.py) - continuing TRACEPARENT, when the scheduler running it sets one."""
+    from . import tracing
+    with tracing.span(f'export {args.query}', attributes={'queryapigate.query': args.query},
+                      parent=tracing.from_environment()):
+        return _export_run(args)
+
+
+def _export_run(args):
     """``queryapigate export <query> --format csv --out /path/{date}.csv`` - the last small step a
     cron/systemd/Kubernetes CronJob needs to turn the existing ?stream=true export into a scheduled file
     drop, without becoming a scheduler itself (see BACKLOG.md #31 for why that stays out of scope). Runs

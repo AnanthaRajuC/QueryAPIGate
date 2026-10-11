@@ -18,7 +18,7 @@ import logging
 
 from flask import g
 
-from . import config
+from . import config, tracing
 
 _PLAIN_FORMAT = '%(asctime)s %(levelname)s %(name)s [%(request_id)s key=%(key)s]: %(message)s'
 # Every attribute a plain LogRecord carries with no `extra` at all - used to spot which attributes on a
@@ -54,6 +54,9 @@ class _JsonFormatter(logging.Formatter):
         # site, and becomes its own field here rather than staying folded into `message` above.
         payload.update({k: v for k, v in vars(record).items()
                         if k not in _BASE_RECORD_ATTRS and k not in ('request_id', 'key')})
+        trace_id, span_id = tracing.ids()  # with tracing on (ADR 0010): the line leads to its trace, and back
+        if trace_id:
+            payload['trace_id'], payload['span_id'] = trace_id, span_id
         if record.exc_info:
             payload['exception'] = self.formatException(record.exc_info)
         return json.dumps(payload)

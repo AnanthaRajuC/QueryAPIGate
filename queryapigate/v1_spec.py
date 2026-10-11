@@ -50,6 +50,8 @@ SCHEMAS = {
                                                       'param_invalid, table_not_allowed, rate_limited - every code '
                                                       'is listed in API.md under Errors.'},
             'request_id': {'type': 'string', 'description': 'Matches the X-Request-Id header and the server log.'},
+            'trace_id': {'type': 'string', 'description': "With tracing on: the request's trace, to find it in the "
+                                                          'tracing backend (experimental, ADR 0010).'},
             'errors': {'type': 'object', 'additionalProperties': {'type': 'string'},
                        'description': 'Per-parameter problems, when the parameter rules were invalid.'},
             'detail': {'type': 'string', 'description': "The database driver's own message, where there is one."},
@@ -212,6 +214,7 @@ SCHEMAS = {
             'status': {'type': 'string', 'enum': ['success', 'error']},
             'connection_name': {'type': 'string'}, 'key_name': {'type': 'string', 'nullable': True},
             'request_id': {'type': 'string', 'nullable': True}, 'rows': {'type': 'integer', 'nullable': True},
+            'trace_id': {'type': 'string', 'description': 'With tracing on: the trace this run was part of.'},
             'duration_ms': {'type': 'number', 'nullable': True}, 'error': {'type': 'string', 'nullable': True},
             'code': {'type': 'string', 'description': "A failed run's error code (API.md, Errors), from 0.13 on."},
         },

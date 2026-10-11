@@ -4,7 +4,7 @@ import logging
 import re
 import time
 
-from . import config, masking, metrics, mongotools, store
+from . import config, masking, metrics, mongotools, store, tracing
 from .errors import ApiError
 from .formats import ResultSetDTO
 from .pool import get_pool
@@ -18,7 +18,7 @@ from .runners import (
     mongo_list_databases,
     mongo_ping,
 )
-from .sqltools import validate_sql
+from .sqltools import first_keyword, validate_sql
 
 log = logging.getLogger('queryapigate')
 
@@ -40,6 +40,14 @@ def _sql_connection(connection_name):
         raise ApiError(f"'{connection_name}' is a {details['db']} connection, which doesn't run SQL - use "
                        '/execute_mongo for its find() queries', code='wrong_connection_type')
     return details
+
+
+def _db_span(details, sql, connection_name):
+    """The client span around a database call (tracing.py): which statement kind, on which database - never the
+    statement itself."""
+    kind = first_keyword(sql, details['db'])
+    return tracing.span(f'{kind.upper() or "SQL"} {connection_name}', 'client',
+                        tracing.db_attributes(details, kind, connection_name))
 
 
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
@@ -74,8 +82,10 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     status = 'error'
     metrics.inc_active_query()
     try:
-        columns, rows = RUNNERS[details['db']](details, sql, params, limit, offset, not effective_allow_writes,
-                                             timeout, get_pool())
+        with _db_span(details, sql, connection_name) as span:
+            columns, rows = RUNNERS[details['db']](details, sql, params, limit, offset, not effective_allow_writes,
+                                                 timeout, get_pool())
+            tracing.set_attributes(span, db__response__returned_rows=min(len(rows), limit))
         status = 'success'
     except ApiError:
         raise
@@ -135,7 +145,11 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     status = 'error'
     metrics.inc_active_query()
     try:
-        docs = mongo_find(details, collection, filter_doc, projection, sort, limit, offset, timeout, get_pool())
+        with tracing.span(f'find {connection_name}', 'client',
+                          tracing.db_attributes(details, 'find', connection_name)) as span:
+            docs = mongo_find(details, collection, filter_doc, projection, sort, limit, offset, timeout, get_pool())
+            tracing.set_attributes(span, db__collection__name=collection,
+                                   db__response__returned_rows=min(len(docs), limit))
         status = 'success'
     except ApiError:
         raise
@@ -310,8 +324,10 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     status = 'error'
     metrics.inc_active_query()
     try:
-        columns, rows, affected = WRITE_RUNNERS[details['db']](details, sql, params, max_affected_rows, timeout,
-                                                               get_pool())
+        with _db_span(details, sql, connection_name) as span:
+            columns, rows, affected = WRITE_RUNNERS[details['db']](details, sql, params, max_affected_rows, timeout,
+                                                                   get_pool())
+            tracing.set_attributes(span, db__response__affected_rows=affected)
         status = 'success'
     except TooManyRowsAffected as error:
         raise ApiError(f'This write would have changed {error.affected} rows, and this query may change at most '
@@ -357,8 +373,10 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     status = 'error'
     metrics.inc_active_query()
     try:
-        stream = STREAM_RUNNERS[details['db']](details, sql, params, timeout, get_pool())
-        columns = next(stream)
+        # the span covers opening the stream - up to its first row's columns - not the hours a large export may take
+        with _db_span(details, sql, connection_name):
+            stream = STREAM_RUNNERS[details['db']](details, sql, params, timeout, get_pool())
+            columns = next(stream)
         status = 'success'
     except ApiError:
         raise

@@ -170,6 +170,24 @@ class RequestTests(EventServerTestCase):
             self.assertEqual(stream.headers['referrer-policy'], 'no-referrer')
             self.assertEqual(stream.headers['cache-control'], cache)
 
+    def test_opening_a_stream_is_one_span_continuing_the_callers_trace(self):  # ADR 0010
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from queryapigate import tracing
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        tracing.use(provider)
+        self.addCleanup(tracing.use, None)
+        stream = self.open(self.alice, traceparent='00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01')
+        self.assertEqual(stream.status, 200)
+        spans = [s for s in exporter.get_finished_spans() if s.name == 'GET /events']
+        self.assertEqual(len(spans), 1)
+        self.assertEqual(format(spans[0].context.trace_id, '032x'), '0af7651916cd43dd8448eb211c80319c')
+        self.assertEqual(spans[0].attributes['queryapigate.caller'], 'alice')
+
     def test_the_stream_is_chunked_so_each_event_can_be_read_as_it_arrives(self):
         # Delimited only by the connection closing, some clients (Python's requests) hand over nothing until it does.
         stream = self.open('admin')

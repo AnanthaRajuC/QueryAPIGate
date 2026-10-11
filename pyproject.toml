@@ -45,9 +45,12 @@ jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUE
                                # 2.14 is the floor because that is where PyJWKClient stops refetching the JWKS for
                                # every unknown key id: before it, forged tokens could make the server hammer the provider.
 all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption,jwt]"]
+# only needed when an OTLP endpoint is set (OTEL_EXPORTER_OTLP_ENDPOINT) - see tracing.py
+otel = ["opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
 server = ["gunicorn>=21"]
 docs = ["mkdocs-material>=9,<10"]
-dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[mcp]; python_version>='3.10'", "ruff>=0.5",
+dev = ["queryapigate[all]", "queryapigate[redis]", "queryapigate[otel]", "queryapigate[mcp]; python_version>='3.10'",
+      "ruff>=0.5",
       "openapi-spec-validator>=0.7", "hypothesis>=6.100", "mypy>=1.10", "coverage>=7.4"]
 
 [project.urls]

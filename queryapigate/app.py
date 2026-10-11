@@ -45,6 +45,7 @@ from . import (
     sqltools,
     sso,
     store,
+    tracing,
 )
 from . import params as param_rules
 from .errors import ApiError, code_for
@@ -216,11 +217,21 @@ def create_app():
         log.exception('Unhandled error')
         return jsonify(error_body('An error occurred', 500)), 500
 
+    @app.teardown_request
+    def end_trace(_error):
+        tracing.finish(g.pop('trace', None))
+
     @app.before_request
     def gate():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
+        # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
+        rule = request.url_rule.rule if request.url_rule is not None else None
+        g.trace = tracing.start(f'{request.method} {rule}' if rule else request.method, 'server', {
+            'http.request.method': request.method, 'http.route': rule, 'url.scheme': request.scheme,
+            'client.address': request.remote_addr, 'queryapigate.request_id': g.request_id},
+            parent=tracing.extract(request.headers))
         instances.heartbeat()  # at most one small write per HEARTBEAT seconds
         # Order matters: a browser's preflight cannot carry the API key, and rate limiting comes before the key
         # check so that guessing keys is throttled too.
@@ -252,6 +263,14 @@ def create_app():
             response.headers['X-RateLimit-Key-Remaining'] = str(remaining)
         response.headers['X-Request-Id'] = g.get('request_id', '-')
         secheaders.apply(response, request.is_secure)
+        if g.get('trace') is not None:
+            span = g.trace[0]
+            tracing.set_attributes(span, http__response__status_code=response.status_code,
+                                   queryapigate__caller=caller_key_name())
+            if response.status_code >= 400:
+                span.set_attribute('error.type', g.get('error_code') or str(response.status_code))
+            if response.status_code >= 500:
+                tracing.mark_error(span, g.get('error_code') or str(response.status_code))
         rule = request.url_rule.rule if request.url_rule is not None else None
         if rule in deprecations.ROUTES:  # on its way out (deprecations.py): say so, and name its successor
             response.headers['Deprecation'] = deprecations.header_value(rule)
@@ -285,7 +304,10 @@ def error_body(message, status, extra=None, code=None):
     """The JSON body of every error response (errors.py, BACKLOG #69): the message, a stable `code` (the raiser's
     own, or the one for the status), whatever extras the raiser attached, and the `request_id` that finds the
     matching log line."""
-    return {'error': message, 'code': code_for(status, code), **(extra or {}), 'request_id': g.get('request_id', '-')}
+    g.error_code = code_for(status, code)
+    trace_id = tracing.ids()[0]
+    return {'error': message, 'code': g.error_code, **(extra or {}), 'request_id': g.get('request_id', '-'),
+            **({'trace_id': trace_id} if trace_id else {})}
 
 
 # --------------------------------------------------------------------------------------
@@ -422,7 +444,9 @@ def render(result, output_format, page, page_size):
     metrics.observe_serialization(). Streaming responses never go through here; there's no equivalent
     single serialization span to measure for those (see that function's docstring)."""
     started = time.monotonic()
-    response = jsonify({'message': 'No results returned'}) if not result else FORMATTERS[output_format](result)
+    with tracing.span(f'serialize {output_format}', attributes={'queryapigate.format': output_format}) as span:
+        response = jsonify({'message': 'No results returned'}) if not result else FORMATTERS[output_format](result)
+        tracing.set_attributes(span, queryapigate__bytes=response.content_length)
     elapsed = time.monotonic() - started
     metrics.observe_serialization(output_format, elapsed)
     g.serialization_ms = round(elapsed * 1000, 1)
@@ -481,8 +505,10 @@ def masked_entry(fired):
 
 def run_entry(connection_name):
     """The start of one run's history entry: when, where, by whom, through which front door."""
+    trace_id = tracing.ids()[0]
     return {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': g.get('request_id'),
-            'key_name': caller_key_name(), 'transport': g.get('transport', 'rest')}
+            'key_name': caller_key_name(), 'transport': g.get('transport', 'rest'),
+            **({'trace_id': trace_id} if trace_id else {})}
 
 
 def _record_adhoc_and_broadcast(sql, params, connection_name, entry, broadcaster=None):
@@ -688,6 +714,13 @@ def bind_claims(saved, raw):
 
 
 def run_saved(ref, body, url_params):
+    """_run_saved(), in its own span (tracing.py): named once the query is found, never by what the caller sent."""
+    with tracing.span('query') as span:
+        g.query_span = span
+        return _run_saved(ref, body, url_params)
+
+
+def _run_saved(ref, body, url_params):
     """Execute a saved query (its published version unless one is requested) and record the run - or, for one
     with a cache_ttl whose SQL is read-only, serve a cached response instead.
 
@@ -705,6 +738,11 @@ def run_saved(ref, body, url_params):
     if not connection_name:
         raise ApiError('Connection name is missing', code='connection_required')
     query_name = store.query_name(path)
+    query_span = g.get('query_span')
+    if query_span is not None:
+        query_span.update_name(f'query {query_name}')
+        tracing.set_attributes(query_span, queryapigate__query=query_name, queryapigate__version=number,
+                               queryapigate__connection=connection_name)
     # A key's `queries` and `collections` grants are additive on top of `connections` (see apikeys.py's module
     # docstring): either can reach this exact saved query without any connection access - but only on the
     # connection the query itself names. Letting a caller choose another with ?connection_name= would turn
@@ -772,6 +810,7 @@ def run_saved(ref, body, url_params):
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
                          'format': output_format, 'page': page}
             cached = cache_lookup(cache_key, ttl)
+            tracing.set_attributes(query_span, queryapigate__cache='hit' if cached is not None else 'miss')
             if cached is not None:
                 return cached
 
@@ -785,6 +824,7 @@ def run_saved(ref, body, url_params):
         _record_and_broadcast(path, number, connection_name,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
+    tracing.set_attributes(query_span, queryapigate__rows=len(result.rows), queryapigate__masked=bool(result.masked))
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
     _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
                                                           'duration_ms': elapsed_ms,
@@ -802,6 +842,7 @@ def run_agent_write(saved, path, number, name, connection_name, values, sql, tim
     from . import agentwrites
     args = g.get('agent_write_args') or {}
     caller = caller_key_name()
+    tracing.set_attributes(g.get('query_span'), queryapigate__agent_write=saved['agent_writes'])
     if saved['agent_writes'] == 'insert':
         hashed = None
         if args.get('idempotency_key') is not None:

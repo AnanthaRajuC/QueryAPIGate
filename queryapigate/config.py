@@ -395,6 +395,8 @@ def check_settings():
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
     check_secret_keys()
+    from . import tracing
+    tracing.check()
     raw = os.environ.get('QUERYAPIGATE_HSTS_MAX_AGE', '').strip()
     if raw and not (raw.isdigit() and 0 < int(raw) <= MAX_HSTS_SECONDS):
         raise ValueError('QUERYAPIGATE_HSTS_MAX_AGE must be a whole number of seconds from 1 to '
@@ -1055,6 +1057,20 @@ def describe_settings():
             row('CORS origins', 'Comma-separated origins, or * for any. Unset turns CORS off.',
                 'QUERYAPIGATE_CORS_ORIGINS',
                 'off' if cors is None else '*' if cors == '*' else ', '.join(sorted(cors)))]},
+        {'id': 'tracing', 'title': 'Tracing (OpenTelemetry)',
+         'description': 'Spans to your tracing backend through an OpenTelemetry collector - experimental. On when an '
+             'OTLP endpoint is set, with `pip install "queryapigate[otel]"`; every other OTEL_* variable works as '
+             'for any service. Spans never hold parameter values, rows, statements or credentials.', 'rows': [
+            row('OTLP endpoint', 'Where spans are sent (OTLP over HTTP). Unset: no tracing.',
+                'OTEL_EXPORTER_OTLP_ENDPOINT', redact_url(os.environ['OTEL_EXPORTER_OTLP_ENDPOINT'])
+                if os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', '').strip() else 'off'),
+            row('OTLP traces endpoint', 'The same, for traces only - wins over the one above.',
+                'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', redact_url(os.environ['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'])
+                if os.environ.get('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', '').strip() else 'not set'),
+            row('Service name', "The name spans are filed under.", 'OTEL_SERVICE_NAME',
+                os.environ.get('OTEL_SERVICE_NAME', '').strip() or 'queryapigate'),
+            row('Sampler', "Which traces are kept: the SDK's default follows the caller's decision.",
+                'OTEL_TRACES_SAMPLER', os.environ.get('OTEL_TRACES_SAMPLER', '').strip() or 'parentbased_always_on')]},
         {'id': 'audit', 'title': 'Audit & logging',
          'description': 'Retention of administrative actions and log format.', 'rows': [
             row('Audit log limit', 'Entries kept in queryapigate.db.', 'QUERYAPIGATE_AUDIT_LOG_LIMIT',

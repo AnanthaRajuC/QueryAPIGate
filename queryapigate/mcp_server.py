@@ -434,19 +434,27 @@ def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
     return call_as(flask_app, permission, name, arguments, started)
 
 
-def call_as(flask_app, permission, name, arguments, started=None):
+def call_as(flask_app, permission, name, arguments, started=None, headers=None):
     """One tools/call by an authenticated caller: its own rate limit, the tool, and a request in /metrics (method
-    MCP, endpoint mcp.<tool kind>)."""
-    from . import governance, instances
+    MCP, endpoint mcp.<tool kind>) - in a span (tracing.py) continuing the trace a `traceparent` in `headers` names."""
+    from . import governance, instances, tracing
     if started is None:
         instances.heartbeat()
         started = time.monotonic()
-    verdict = governance.check_key_limit(flask_app, permission)
-    if verdict is not None and not verdict.allowed:
-        result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
-                        retry_after=verdict.retry_after)
-    else:
-        result = dispatch_tool_call(flask_app, permission, name, arguments)
+    with tracing.span(f'tools/call {name}', 'server', {
+            'mcp.method.name': 'tools/call', 'gen_ai.tool.name': name, 'gen_ai.operation.name': 'execute_tool',
+            'queryapigate.caller': permission.name or '-'}, parent=tracing.extract(headers)) as span:
+        verdict = governance.check_key_limit(flask_app, permission)
+        if verdict is not None and not verdict.allowed:
+            result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
+                            retry_after=verdict.retry_after)
+        else:
+            result = dispatch_tool_call(flask_app, permission, name, arguments)
+        if span is not None and result.get('isError'):
+            code = (result.get('structuredContent') or {}).get('code')
+            span.set_attribute('error.type', code if isinstance(code, str) else 'tool_error')
+            if result.get('_status', 200) >= 500:
+                tracing.mark_error(span, code if isinstance(code, str) else 'tool_error')
     return _finish(name, permission, result, started)
 
 
@@ -576,7 +584,9 @@ def build_server(flask_app):
             result = _error('Unauthorized: missing or invalid X-API-Key or bearer token', 401)
             result.pop('_status')
         else:
-            result = call_as(flask_app, permission, name, arguments)
+            request = server.request_context.request
+            result = call_as(flask_app, permission, name, arguments,
+                             headers=dict(request.headers) if request is not None else None)
         return types.CallToolResult(content=[types.TextContent(**item) for item in result['content']],
                                     structuredContent=result.get('structuredContent'),
                                     isError=result.get('isError', False))

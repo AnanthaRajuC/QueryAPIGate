@@ -23,8 +23,9 @@ callout in its documentation, `x-experimental: true` on its operations in `/open
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
-(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), and write tools over MCP
-(`agent_writes`, `/api/v1/write-requests`). The list is `queryapigate/experimental.py`.
+(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
+(`agent_writes`, `/api/v1/write-requests`), and tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`). The list
+is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -52,6 +53,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Added
+- **Tracing with OpenTelemetry** (BACKLOG #92, [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md),
+  experimental): `pip install "queryapigate[otel]"` and set `OTEL_EXPORTER_OTLP_ENDPOINT` - every other `OTEL_*`
+  variable works as usual. Spans for each request (by route rule), saved query, database call, serialisation, MCP tool
+  call, live stream opened and export, continuing a caller's `traceparent` (and `TRACEPARENT` for
+  `queryapigate export`). `trace_id` in run history, error bodies and JSON log lines. Spans never hold parameter
+  values, rows, statements, headers or secrets - a test fails if one does. See
+  [Tracing](documentation/API.md#tracing-opentelemetry).
 - **Security headers on every response** (BACKLOG #93, [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md)):
   `X-Content-Type-Options: nosniff`; on API responses `Content-Security-Policy: default-src 'none'; frame-ancestors
   'none'` and `Referrer-Policy: no-referrer`; `Cache-Control: no-store` unless the route says otherwise - on the main
