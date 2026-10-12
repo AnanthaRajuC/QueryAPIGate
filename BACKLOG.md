@@ -88,10 +88,11 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)). (Released as 0.24.0 on 2026-10-11.)
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
     ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)). (Released as 0.25.0 on 2026-10-12.)
-14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
-    compliance documentation; #99 workspaces only on demand.
-15. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-16. **1.0.0.**
+14. **0.26: #100 a Helm chart** ([ADR 0013](documentation/adr/0013-helm-chart.md)).
+15. **Then, in an order set by who asks:** #97 configuration as code, #98 secrets managers, #101 compliance
+    documentation; #99 workspaces only on demand.
+16. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+17. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3049,7 +3050,7 @@ server-wide owners above them. Decide with an ADR before any code, and only with
 
 ## 100. A Helm chart
 
-**Status: open; after 1.0, unless asked for sooner.**
+**Status: open; planned for 0.26** ([ADR 0013](documentation/adr/0013-helm-chart.md)).
 
 **Impact:** plain manifests are in `deploy/kubernetes/`; most teams running Kubernetes install through Helm, with values
 for the image, the store, Redis, ingress and secrets.
