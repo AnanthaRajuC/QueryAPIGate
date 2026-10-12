@@ -53,6 +53,23 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **A Helm chart** (BACKLOG #100, [ADR 0013](documentation/adr/0013-helm-chart.md), experimental): `deploy/helm/queryapigate`,
+  for Helm 3 and 4, released with the server (chart X.Y.Z runs X.Y.Z). One pod on SQLite with its store on a volume, or
+  several on PostgreSQL and Redis rolled one at a time behind a disruption budget; the secrets from a Secret you manage
+  (or one the chart makes), every other setting as `config`; ingress with `/events` routed to the events server, the
+  MCP server on its own host; locked-down pods (non-root, read-only root filesystem, no capabilities); a
+  ServiceMonitor, NetworkPolicy and autoscaler if you want them. `helm install` refuses what can't work - more than
+  one pod on SQLite or without Redis, a database URL in `config` - and `values.schema.json` a misspelt value.
+
+### Changed
+- **The image starts gunicorn with `--no-control-socket`** (and gunicorn 26 or later): its control interface, unused,
+  wrote under the home folder - the one write outside `/data` and `/tmp`. The image now runs on a read-only root
+  filesystem.
+- **`deploy/kubernetes/queryapigate.yaml`** runs its pods the same way - non-root, read-only root filesystem, no
+  capabilities, no service account token - and gives the events server a liveness probe. A test keeps it in step
+  with what the chart renders.
+
 ## [0.25.0] - 2026-10-12
 
 An audit trail an auditor can rely on: every administrative change chained to the one before and signed, checked in

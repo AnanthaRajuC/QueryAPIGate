@@ -1,0 +1,119 @@
+{{- $fullname := include "queryapigate.fullname" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  {{- with .Values.service.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {{- include "queryapigate.selectorLabels" (dict "root" . "component" "server") | nindent 4 }}
+  ports: [{name: http, port: {{ .Values.service.port }}, targetPort: http}]
+{{- if and (eq .Values.store.type "sqlite") (not .Values.store.persistence.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-data
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep   # the store outlives `helm uninstall`: delete it yourself when you mean to
+spec:
+  accessModes: {{- toYaml .Values.store.persistence.accessModes | nindent 4 }}
+  {{- with .Values.store.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests: {storage: {{ .Values.store.persistence.size }}}
+{{- end }}
+{{- if .Values.secret.create }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+type: Opaque
+stringData: {{- toYaml .Values.secret.values | nindent 2 }}
+{{- end }}
+{{- if .Values.serviceAccount.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "queryapigate.serviceAccountName" . }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+{{- end }}
+{{- $replicas := ternary (int .Values.autoscaling.minReplicas) (int .Values.replicas) .Values.autoscaling.enabled }}
+{{- if and .Values.podDisruptionBudget.enabled (gt $replicas 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable | default (sub $replicas 1) }}
+  selector:
+    matchLabels: {{- include "queryapigate.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: {{ $fullname }}}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}}}
+{{- end }}
+{{- if .Values.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels: {{- include "queryapigate.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}
+  endpoints:
+    - {port: http, path: /metrics, interval: {{ .Values.serviceMonitor.interval }}}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "queryapigate.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: {{- toYaml (.Values.networkPolicy.ingressFrom | default (list (dict "podSelector" (dict)))) | nindent 8 }}
+  egress:
+    - to: [{namespaceSelector: {}}]   # DNS
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    {{- with .Values.networkPolicy.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

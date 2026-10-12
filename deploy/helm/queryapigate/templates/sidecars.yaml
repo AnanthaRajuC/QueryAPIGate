@@ -1,0 +1,53 @@
+{{- $fullname := include "queryapigate.fullname" . -}}
+{{- range $component, $spec := dict "events" (dict "port" 5002 "values" .Values.events) "mcp" (dict "port" 5001 "values" .Values.mcp) }}
+{{- if $spec.values.enabled }}
+---
+# `queryapigate {{ $component }}`: {{ if eq $component "events" }}live events for many clients, from the shared store{{ else }}the MCP server for AI agents{{ end }}.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-{{ $component }}
+  labels: {{- include "queryapigate.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  replicas: {{ $spec.values.replicas }}
+  selector:
+    matchLabels: {{- include "queryapigate.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  template:
+    metadata: {{- include "queryapigate.podMetadata" (dict "root" $ "component" $component) | nindent 6 }}
+    spec:
+      {{- include "queryapigate.podSpec" $ | nindent 6 }}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "queryapigate.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["queryapigate", "{{ $component }}", "--host", "0.0.0.0", "--port", "{{ $spec.port }}"]
+          ports: [{name: http, containerPort: {{ $spec.port }}}]
+          {{- include "queryapigate.env" $ | nindent 10 }}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext: {{- toYaml $.Values.securityContext | nindent 12 }}
+          resources: {{- toYaml $spec.values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-{{ $component }}
+  labels: {{- include "queryapigate.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  selector: {{- include "queryapigate.selectorLabels" (dict "root" $ "component" $component) | nindent 4 }}
+  ports: [{name: http, port: 80, targetPort: http}]
+{{- end }}
+{{- end }}

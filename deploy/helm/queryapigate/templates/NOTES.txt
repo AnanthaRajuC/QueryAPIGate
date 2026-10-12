@@ -1,0 +1,24 @@
+QueryAPIGate {{ .Chart.AppVersion }} is installed as {{ include "queryapigate.fullname" . }} - {{ if eq .Values.store.type "sqlite" }}one pod, its store on the volume {{ include "queryapigate.fullname" . }}-data (kept on uninstall){{ else }}{{ .Values.replicas }} pod(s) on the PostgreSQL store{{ end }}.
+{{- if .Values.secret.create }}
+
+Its secrets came from secret.values: they are in your values file. For anything beyond trying it out, keep them in
+a Secret you manage and set existingSecret instead.
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+Open https://{{ .Values.ingress.host }}/console/ - or see it's up:
+  curl https://{{ .Values.ingress.host }}/health
+{{- else }}
+
+See it's up:
+  kubectl port-forward svc/{{ include "queryapigate.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://127.0.0.1:8080/health
+then open http://127.0.0.1:8080/console/
+{{- end }}
+{{- if .Values.mcp.enabled }}
+
+The MCP server: {{ if .Values.mcp.ingress.host }}https://{{ .Values.mcp.ingress.host }}/mcp{{ else }}http://{{ include "queryapigate.fullname" . }}-mcp.{{ .Release.Namespace }}.svc/mcp, in the cluster{{ end }}
+{{- end }}
+
+The chart is experimental in this release: value names may change, always noted in the changelog.

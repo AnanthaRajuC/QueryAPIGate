@@ -1,0 +1,18 @@
+apiVersion: v2
+name: queryapigate
+description: >-
+  QueryAPIGate - one governed gate between your databases and everything that asks them for data: saved SQL as REST
+  endpoints and MCP tools for AI agents, with keys, roles, masking, quotas and a tamper-evident audit log.
+type: application
+# Released in lockstep with the server (ADR 0013): chart X.Y.Z runs QueryAPIGate X.Y.Z. Set by the release workflow.
+version: 0.25.0
+appVersion: "0.25.0"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/AnanthaRajuC/QueryAPIGate
+sources:
+  - https://github.com/AnanthaRajuC/QueryAPIGate
+icon: https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/frontend/public/favicon.svg
+keywords: [sql, api, rest, mcp, gateway, postgresql, duckdb]
+annotations:
+  # Experimental in 0.26: value names may still change, always noted in the changelog.
+  queryapigate.dev/experimental: "true"

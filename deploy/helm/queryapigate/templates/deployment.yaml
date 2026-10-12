@@ -1,0 +1,62 @@
+{{- include "queryapigate.validate" . -}}
+{{- $sqlite := eq .Values.store.type "sqlite" }}
+# The API server: REST, the Management API, the Console. SQLite: one pod on a volume, replaced not rolled. PostgreSQL:
+# several, replaced one at a time while the previous release keeps serving (DEPLOYMENT.md, Rolling upgrades).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "queryapigate.fullname" . }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "queryapigate.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}
+  strategy:
+    {{- if $sqlite }}
+    type: Recreate   # two pods can't share the store's file
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+    {{- end }}
+  template:
+    metadata: {{- include "queryapigate.podMetadata" (dict "root" . "component" "server") | nindent 6 }}
+    spec:
+      {{- include "queryapigate.podSpec" . | nindent 6 }}
+      terminationGracePeriodSeconds: 45   # the preStop pause plus gunicorn's 30 s to finish requests in flight
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: queryapigate
+          image: {{ include "queryapigate.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{name: http, containerPort: 5000}]
+          {{- include "queryapigate.env" . | nindent 10 }}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          lifecycle:
+            # Keep serving a few seconds after being told to stop, while the endpoint is removed everywhere -
+            # otherwise a rolling update drops the requests still arriving in that moment.
+            preStop: {exec: {command: ["sleep", "10"]}}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        {{- if $sqlite }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.store.persistence.existingClaim | default (printf "%s-data" (include "queryapigate.fullname" .)) }}
+        {{- else }}
+        - {name: data, emptyDir: {}}   # the store is PostgreSQL: nothing kept here
+        {{- end }}
+        - {name: tmp, emptyDir: {}}

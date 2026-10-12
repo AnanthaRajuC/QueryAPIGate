@@ -5,6 +5,8 @@
 #   kubectl apply -f secret.yaml -f queryapigate.yaml
 #
 # Pin the image to a release (an upgrade is a deliberate change of this line - DEPLOYMENT.md, Rolling upgrades).
+# On Helm? deploy/helm/queryapigate renders the same, with values for what differs (ADR 0013); a test keeps the two in
+# step.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +24,14 @@ spec:
       labels: {app: queryapigate}
     spec:
       enableServiceLinks: false   # else a Service named queryapigate sets QUERYAPIGATE_PORT=tcp://... in the pod
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: 45   # the preStop pause plus gunicorn's 30 s to finish requests in flight
+      securityContext:   # the image writes only to /data and /tmp - kept in step with the Helm chart's defaults
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: queryapigate
           image: ghcr.io/anantharajuc/queryapigate:0.25.0
@@ -41,9 +50,19 @@ spec:
             # Keep serving for a few seconds after being told to stop, while the endpoint is removed everywhere -
             # otherwise a rolling update drops the requests that still arrive in that moment.
             preStop: {exec: {command: ["sleep", "10"]}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 250m, memory: 256Mi}
             limits: {memory: 1Gi}
+      volumes:
+        - {name: data, emptyDir: {}}   # the store is PostgreSQL: nothing kept here
+        - {name: tmp, emptyDir: {}}
 ---
 apiVersion: v1
 kind: Service
@@ -77,10 +96,17 @@ spec:
       labels: {app: queryapigate-events}
     spec:
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:   # the image writes only to /data and /tmp - kept in step with the Helm chart's defaults
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: events
           image: ghcr.io/anantharajuc/queryapigate:0.25.0
-          command: ["queryapigate", "events", "--host", "0.0.0.0"]
+          command: ["queryapigate", "events", "--host", "0.0.0.0", "--port", "5002"]
           ports: [{name: http, containerPort: 5002}]
           envFrom: [{secretRef: {name: queryapigate}}]
           env:
@@ -88,8 +114,23 @@ spec:
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
 ---
 apiVersion: v1
 kind: Service

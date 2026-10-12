@@ -34,7 +34,7 @@ COPY --from=console /queryapigate/console_dist ./queryapigate/console_dist
 # Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
 # tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment
 # turns on with an environment variable or a second command - none of them should need a custom image.
-RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,server]" \
+RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,server]" "gunicorn>=26" \
     && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
 
 RUN useradd --create-home app && mkdir /data && chown app /data
@@ -57,6 +57,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # ignores it, handling one connection at a time) - required so a long-lived /events SSE connection (BACKLOG
 # #43) never blocks every other request to the single worker for as long as that one client stays connected.
 # The worker timeout must stay above QUERYAPIGATE_QUERY_TIMEOUT (30 s by default), or gunicorn would kill the worker
-# at the same moment the database cancels a slow query.
+# at the same moment the database cancels a slow query. --no-control-socket: gunicorn 26's control interface, unused
+# here, would otherwise write under the home folder - the only write outside /data and /tmp, so with it off the image
+# runs on a read-only root filesystem (the Helm chart's default, ADR 0013).
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", "--threads", "8", \
-     "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "queryapigate.app:create_app()"]
+     "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "--no-control-socket", \
+     "queryapigate.app:create_app()"]

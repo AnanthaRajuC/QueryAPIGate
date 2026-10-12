@@ -1,0 +1,136 @@
+# QueryAPIGate's Helm chart (ADR 0013) - experimental in 0.26: value names may still change, noted in the changelog.
+# Everything here has a working default; a real install sets at least the secret, and for several instances the
+# PostgreSQL store and Redis.
+
+image:
+  repository: ghcr.io/anantharajuc/queryapigate
+  # Defaults to the chart's appVersion - the release this chart was made with. Pin it rather than use a moving tag.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Where QueryAPIGate keeps its store - connections, saved queries, keys, history, the audit log.
+store:
+  # sqlite: one pod, queryapigate.db on a PersistentVolumeClaim - to try it, or a small internal deployment.
+  # postgres: several pods on one PostgreSQL store; QUERYAPIGATE_DATABASE_URL must be in the secret.
+  type: sqlite
+  persistence:   # sqlite only
+    size: 1Gi
+    storageClass: ""   # the cluster's default
+    accessModes: [ReadWriteOnce]
+    existingClaim: ""  # use a PersistentVolumeClaim you made instead
+
+# Pods of the API server. More than one needs store.type postgres and Redis (QUERYAPIGATE_REDIS_URL in the secret or
+# in config), or rate limits, max_concurrent and quotas would each be counted per pod - the chart refuses.
+replicas: 1
+redis:
+  # QUERYAPIGATE_REDIS_URL is in the existingSecret (the chart can't see inside one): set this to say so.
+  inExistingSecret: false
+
+# The settings that are secrets - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, QUERYAPIGATE_DATABASE_URL,
+# QUERYAPIGATE_REDIS_URL, QUERYAPIGATE_AUDIT_KEY, ... - as environment variables from a Secret.
+existingSecret: ""   # recommended: a Secret you manage (sealed-secrets, External Secrets, Vault, by hand)
+secret:
+  create: false      # or let the chart make one from these values - they then sit in your values file
+  values: {}
+    # QUERYAPIGATE_API_KEY: change-me
+    # QUERYAPIGATE_SECRET_KEY: <a Fernet key>
+    # QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:...@db:5432/queryapigate
+    # QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
+
+# Every other setting, as environment variables - any QUERYAPIGATE_* or OTEL_* (Settings in the Console lists them).
+config: {}
+  # QUERYAPIGATE_ALLOW_WRITES: "1"
+  # QUERYAPIGATE_HSTS_MAX_AGE: "31536000"
+  # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  host: api.example.com
+  tls:
+    enabled: true
+    secretName: queryapigate-tls
+  # ingress-nginx's: /events must reach the client unbuffered. Another controller: replace them with its own.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+
+# Live events for many clients (`queryapigate events`), routed at /events through the ingress.
+events:
+  enabled: false
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+# The MCP server for AI agents (`queryapigate mcp`), its own Service - and its own host, when mcp.ingress.host is set.
+mcp:
+  enabled: false
+  replicas: 1
+  service:
+    port: 80
+  ingress:
+    host: ""   # e.g. mcp.example.com; empty: reachable in the cluster only
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {memory: 1Gi}
+
+resources:
+  requests: {cpu: 250m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+# Kept on unless you have a reason: the image writes only to /data (the store) and /tmp.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+podDisruptionBudget:
+  enabled: true      # with more than one replica
+  minAvailable: ""   # default: all but one
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountToken: false
+
+# Prometheus Operator: scrape /metrics.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# Allow traffic in only from the ingress controller's namespace (and Prometheus, with serviceMonitor), and out only to
+# what egress lists - your databases, Redis, the SIEM - plus DNS. Off by default: the rules depend on your cluster.
+networkPolicy:
+  enabled: false
+  ingressFrom: []    # e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}]
+  egress: []         # e.g. [{to: [{ipBlock: {cidr: 10.0.0.0/16}}], ports: [{port: 5432}]}]
+
+# Several pods on PostgreSQL and Redis only.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""

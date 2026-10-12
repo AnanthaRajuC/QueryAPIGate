@@ -1,0 +1,4 @@
+# Not part of the chart package
+*.tgz
+.DS_Store
+tests/

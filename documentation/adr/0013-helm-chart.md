@@ -1,6 +1,6 @@
 # ADR 0013: A Helm chart
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Backlog:** #100 (a Helm chart).
 

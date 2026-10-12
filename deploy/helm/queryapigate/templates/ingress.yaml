@@ -1,0 +1,40 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullname := include "queryapigate.fullname" . -}}
+# One host for the API: /events to the events server when it's on, the rest to the instances. And the MCP server on
+# its own host, when mcp.ingress.host is set.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+        {{- if and .Values.mcp.enabled .Values.mcp.ingress.host }}
+        - {{ .Values.mcp.ingress.host }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          {{- if .Values.events.enabled }}
+          - {path: /events, pathType: Prefix, backend: {service: {name: {{ $fullname }}-events, port: {name: http}}}}
+          {{- end }}
+          - {path: /, pathType: Prefix, backend: {service: {name: {{ $fullname }}, port: {name: http}}}}
+    {{- if and .Values.mcp.enabled .Values.mcp.ingress.host }}
+    - host: {{ .Values.mcp.ingress.host }}
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: {{ $fullname }}-mcp, port: {name: http}}}}
+    {{- end }}
+{{- end }}
