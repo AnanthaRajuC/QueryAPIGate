@@ -22,6 +22,7 @@ one it supersedes.
 | [0011](0011-per-key-limits-and-quotas.md) | Per-key limits on concurrency, time and rows, and usage quotas | Accepted |
 | [0012](0012-tamper-evident-audit-log-and-siem.md) | A tamper-evident audit log, streamed to a SIEM | Accepted |
 | [0013](0013-helm-chart.md) | A Helm chart | Accepted |
+| [0014](0014-configuration-as-code.md) | Configuration as code | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

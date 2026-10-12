@@ -41,6 +41,7 @@ nav:
       - 0011 Per-key limits and quotas: documentation/adr/0011-per-key-limits-and-quotas.md
       - 0012 Tamper-evident audit log: documentation/adr/0012-tamper-evident-audit-log-and-siem.md
       - 0013 Helm chart: documentation/adr/0013-helm-chart.md
+      - 0014 Configuration as code: documentation/adr/0014-configuration-as-code.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

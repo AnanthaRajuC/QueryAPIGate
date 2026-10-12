@@ -89,10 +89,11 @@ documentation. #99 workspaces only if asked for.
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
     ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)). (Released as 0.25.0 on 2026-10-12.)
 14. **0.26: #100 a Helm chart** ([ADR 0013](documentation/adr/0013-helm-chart.md)). (Released as 0.26.0 on 2026-10-12.)
-15. **Then, in an order set by who asks:** #97 configuration as code, #98 secrets managers, #101 compliance
-    documentation; #99 workspaces only on demand.
-16. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
-17. **1.0.0.**
+15. **0.27: #97 configuration as code** ([ADR 0014](documentation/adr/0014-configuration-as-code.md), proposed).
+16. **Then, in an order set by who asks:** #98 secrets managers, #101 compliance documentation; #99 workspaces only
+    on demand.
+17. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+18. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3013,7 +3014,7 @@ in the store's transaction.
 
 ## 97. Configuration as code: export, diff and apply
 
-**Status: open.**
+**Status: open; planned for 0.27** ([ADR 0014](documentation/adr/0014-configuration-as-code.md), proposed).
 
 **Impact:** collections of saved queries move between environments as bundles (`queryapigate collection export|import`),
 but roles, API keys' grants, connections and destinations don't - so dev → staging → prod is done by hand, or by scripts

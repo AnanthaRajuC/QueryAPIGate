@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0014-configuration-as-code.md"
