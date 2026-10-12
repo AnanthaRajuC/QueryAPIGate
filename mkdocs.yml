@@ -43,6 +43,7 @@ nav:
       - 0013 Helm chart: documentation/adr/0013-helm-chart.md
       - 0014 Configuration as code: documentation/adr/0014-configuration-as-code.md
       - 0015 Secrets managers: documentation/adr/0015-secrets-managers-and-short-lived-credentials.md
+      - 0016 Data flows and FIPS: documentation/adr/0016-data-flows-and-fips.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

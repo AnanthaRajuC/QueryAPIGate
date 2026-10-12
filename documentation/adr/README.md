@@ -24,6 +24,7 @@ one it supersedes.
 | [0013](0013-helm-chart.md) | A Helm chart | Accepted |
 | [0014](0014-configuration-as-code.md) | Configuration as code | Accepted |
 | [0015](0015-secrets-managers-and-short-lived-credentials.md) | Secrets managers and short-lived credentials | Accepted |
+| [0016](0016-data-flows-and-fips.md) | Where data goes, and FIPS-validated cryptography | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
