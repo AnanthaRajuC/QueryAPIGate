@@ -25,17 +25,31 @@ ADMIN = {'X-API-Key': 'admin-key'}
 
 
 def _cert(name, issuer=None, issuer_key=None, ca=False, server=False):
+    """A certificate as a real CA issues one - with the key identifiers and usages RFC 5280 asks for, which Python
+    3.13 and later check by default (ssl.VERIFY_X509_STRICT)."""
     key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.datetime.now(datetime.timezone.utc)
+    signer_key = issuer_key or key
     builder = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
                .issuer_name(issuer or x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
                .public_key(key.public_key()).serial_number(x509.random_serial_number())
                .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=1))
-               .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
+               .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+               .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(signer_key.public_key()),
+                              critical=False)
+               .add_extension(x509.KeyUsage(digital_signature=not ca, key_cert_sign=ca, crl_sign=ca,
+                                            content_commitment=False, key_encipherment=False, data_encipherment=False,
+                                            key_agreement=False, encipher_only=False, decipher_only=False),
+                              critical=True))
+    if not ca:
+        builder = builder.add_extension(x509.ExtendedKeyUsage(
+            [x509.oid.ExtendedKeyUsageOID.SERVER_AUTH if server else x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH]),
+            critical=False)
     if server:
         builder = builder.add_extension(x509.SubjectAlternativeName(
             [x509.DNSName('localhost'), x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]), critical=False)
-    return key, builder.sign(issuer_key or key, hashes.SHA256())
+    return key, builder.sign(signer_key, hashes.SHA256())
 
 
 def _write_pem(folder, name, key, cert):

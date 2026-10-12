@@ -1700,7 +1700,9 @@ Every entry, as it's written, to your SIEM - Splunk, Microsoft Sentinel, Elastic
   refused - it loses entries silently. RFC 5424 messages, octet-counted: facility 13 (log audit), the `action` as MSGID,
   `[meta sequenceId="<seq>"]`, and the entry as JSON with `seq`, `prev_hash` and `hash`. The server's certificate is
   checked against the system's CAs, or `QUERYAPIGATE_AUDIT_SYSLOG_CA`; `QUERYAPIGATE_AUDIT_SYSLOG_CERT` and `_KEY` give
-  a client certificate, for mutual TLS.
+  a client certificate, for mutual TLS. On Python 3.13 and later the check is strict (RFC 5280): a private CA's
+  certificates need their Authority and Subject Key Identifiers - which `openssl` and every real CA add, but a
+  hand-rolled script may not (*certificate verify failed: Missing Authority Key Identifier*).
 - **OTLP logs:** `QUERYAPIGATE_AUDIT_OTLP=1` - OTLP/HTTP with JSON encoding to `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` (or
   `OTEL_EXPORTER_OTLP_ENDPOINT` + `/v1/logs`), with `OTEL_EXPORTER_OTLP[_LOGS]_HEADERS`. No extra package. Each entry a
   log record: the entry as its body, `queryapigate.audit.seq`, `.hash`, `.action`, `.actor`, `.target` as attributes.
