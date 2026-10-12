@@ -7,6 +7,8 @@ Call `write_connections()` after QUERYAPIGATE_HOME is patched to the test's temp
 `create_app()` - the same place a test used to open db_connections.json and json.dump into it.
 """
 import os
+import sqlite3
+import unittest
 
 from queryapigate import db, store
 
@@ -90,3 +92,9 @@ def export_dir(test):
     patcher.start()
     test.addCleanup(patcher.stop)
     return root
+
+
+# RETURNING and ALTER TABLE ... DROP COLUMN arrived in SQLite 3.35; Red Hat Enterprise Linux 9's is 3.34 (CI's FIPS job
+# runs there). For a test whose own SQL needs them - not QueryAPIGate's, which runs on 3.34.
+needs_sqlite_335 = unittest.skipIf(sqlite3.sqlite_version_info < (3, 35),
+                                   f'needs SQLite 3.35 (RETURNING, DROP COLUMN) - this is {sqlite3.sqlite_version}')

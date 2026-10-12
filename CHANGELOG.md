@@ -61,6 +61,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   what, for how long and by which setting, who reads it, what is never kept, and the categories of personal data - for
   a record of processing or a security questionnaire. A test fails if a table of the store, a setting that bounds
   what's kept, or a way data leaves isn't on it.
+- **FIPS 140:** every algorithm QueryAPIGate uses is FIPS-approved - a test fails if the code gains one that isn't -
+  and [Where data goes](documentation/DATA_PROTECTION.md#cryptography) lists each use and says how to run on a
+  validated module: Red Hat Enterprise Linux 9 or Ubuntu Pro FIPS, with Python and `cryptography` from the
+  distribution (PyPI's wheel carries an unvalidated OpenSSL), and the database drivers built against it. A new CI job
+  runs the whole suite in Red Hat UBI 9 with OpenSSL's FIPS provider forced, and first checks that it is.
 - **Forgetting a person:** `queryapigate history forget CALLER` (`--dry-run`) and `DELETE /api/v1/history?caller=`
   delete every run by a caller - `jwt:alice@example.com` - and their usage counts, in the store and in Redis.
   Audited as `forget_caller` by the caller's SHA-256, not their name. Owners only (`history.forget`).

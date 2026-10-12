@@ -107,3 +107,62 @@ What isn't erased, and what to say:
 - **Write requests** - an agent's, naming the caller - are kept 30 days, then deleted.
 - **Logs, traces and SIEM copies** are in your platforms, under their retention.
 - **The connected databases** are yours: QueryAPIGate doesn't hold their data.
+
+## Cryptography
+
+Every algorithm QueryAPIGate uses is FIPS-approved (FIPS 140-3, SP 800-131A); a test fails if the code gains one that
+isn't - MD5, SHA-1, BLAKE2, or `random` for anything that must be unpredictable.
+
+| Protects | Algorithm | Through |
+|---|---|---|
+| Connection and destination passwords at rest (`QUERYAPIGATE_SECRET_KEY`) | Fernet: AES-128-CBC and HMAC-SHA256 | `cryptography` |
+| API keys, admin tokens, Console sessions, sign-in state - stored as hashes | SHA-256 | `hashlib` |
+| The audit log's chain (`QUERYAPIGATE_AUDIT_KEY`) | HMAC-SHA256 (SHA-256 without a key) | `hmac`, `hashlib` |
+| Column masking's `hash` | HMAC-SHA256 | `hmac` |
+| PKCE for Console sign-in | SHA-256 (`S256`) | `hashlib` |
+| Secrets it makes - keys, tokens, verifiers, ids | The operating system's random source | `secrets` |
+| Signed-in users' tokens | RS256 with a JWKS, HS256 with a shared secret - or `QUERYAPIGATE_JWT_ALGORITHMS` (keep to RS*, PS*, ES*, HS*) | PyJWT, `cryptography` |
+| TLS: to Vault, the SIEM, the OTLP collector, Redis | As the platform's OpenSSL negotiates | Python's `ssl` |
+| RDS IAM tokens | AWS Signature Version 4: HMAC-SHA256 | botocore |
+| Cache keys, ETags, configuration files' hashes - not secrets | SHA-256 | `hashlib` |
+
+`random` is used only where nothing depends on it being unpredictable: which runs history samples, and the example
+database, from a fixed seed.
+
+### On a FIPS-validated module
+
+Validation is a property of the cryptographic module, not of the application: QueryAPIGate is FIPS-ready when it runs
+on a validated OpenSSL in FIPS mode, and that is a choice of platform.
+
+- **Use a distribution whose OpenSSL is validated, in FIPS mode** - Red Hat Enterprise Linux 9 (booted with `fips=1`,
+  or `fips-mode-setup --enable`), or Ubuntu Pro FIPS. A container uses its host's mode.
+- **Python and `cryptography` from the distribution, not PyPI** - PyPI's `cryptography` wheel carries its own
+  OpenSSL, which is not a validated module. On RHEL 9:
+
+  ```bash
+  dnf install python3.12 python3.12-pip python3.12-cryptography
+  python3.12 -m venv --system-site-packages /opt/queryapigate
+  /opt/queryapigate/bin/pip install "queryapigate[server,postgres]"   # keeps the distribution's cryptography
+  ```
+
+- **Check it:** both must say so.
+
+  ```bash
+  /opt/queryapigate/bin/python -c "import hashlib; hashlib.md5(b'x')"            # ValueError: unsupported
+  /opt/queryapigate/bin/python -c "from cryptography.hazmat.backends.openssl import backend; print(backend._fips_enabled)"
+  ```
+
+- **Database drivers bring their own TLS.** `psycopg2-binary` carries its own libpq and OpenSSL: on a FIPS platform,
+  build `psycopg2` from source against the system's libpq (`dnf install libpq-devel gcc python3.12-devel`, then
+  `pip install psycopg2 --no-binary psycopg2`). `mysql-connector-python`'s C extension carries its own OpenSSL too:
+  MySQL connections are outside the validated boundary unless your connector build uses the system's. Also outside
+  QueryAPIGate's control: DuckDB's own TLS for remote files, and a JDBC or H2 connection's Java runtime - use a
+  FIPS-configured JRE, or don't use them there.
+- **What your platform's FIPS policy refuses is refused** - a JWT algorithm in `QUERYAPIGATE_JWT_ALGORITHMS` its
+  module doesn't offer, a TLS cipher it doesn't allow - with an error, never a weaker fallback.
+
+**Tested in CI:** a job runs the whole suite in Red Hat UBI 9 with OpenSSL's FIPS provider forced
+(`OPENSSL_FORCE_FIPS_MODE=1`), Python 3.12 and `cryptography` from the distribution - and first checks that FIPS is
+really in force: MD5 refused, `cryptography` on the system's OpenSSL, in FIPS mode. RHEL 9's SQLite is 3.34, older than
+the 3.35 that `RETURNING` and `DROP COLUMN` need: an agent's write with `RETURNING` to a SQLite database fails there,
+and the two tests that need 3.35 skip.

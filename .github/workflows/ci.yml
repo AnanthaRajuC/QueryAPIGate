@@ -138,6 +138,29 @@ jobs:
             tests.test_vault tests.test_aws 2>&1 | tee /tmp/services.log
           ! grep -E "skipped '(set QUERYAPIGATE_TEST|DuckDB's httpfs)" /tmp/services.log
 
+  fips:
+    name: Tests under FIPS (Red Hat UBI 9, OpenSSL's FIPS provider)
+    runs-on: ubuntu-latest
+    # ADR 0016: a validated module in FIPS mode - Python, OpenSSL and cryptography from the distribution, the FIPS
+    # provider forced (there's no FIPS kernel to read it from in CI) - and the whole suite on it.
+    container:
+      image: registry.access.redhat.com/ubi9/ubi:9.6
+      env:
+        OPENSSL_FORCE_FIPS_MODE: "1"
+    steps:
+      - run: dnf -q -y install python3.12 python3.12-pip python3.12-cryptography git
+      - uses: actions/checkout@v7
+      - name: A virtualenv that keeps the distribution's cryptography (PyPI's wheel carries an unvalidated OpenSSL)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3.12 -m venv --system-site-packages /venv
+          /venv/bin/pip install -q -e ".[dev]"
+          /venv/bin/python -c "import cryptography; assert cryptography.__file__.startswith('/usr/lib64/'), cryptography.__file__"
+      - name: The suite, FIPS in force - test_fips first checks that it is
+        env:
+          QUERYAPIGATE_TEST_FIPS: "1"
+        run: QUERYAPIGATE_HOME=$(mktemp -d) /venv/bin/python -m unittest discover -s tests -t . -v
+
   oldest-dependencies:
     # The lowest versions pyproject.toml allows, so a minimum can't quietly stop being true again: DuckDB 1.2 is the
     # first that can lock a connection to its paths, sqlglot 25.2 the first masking's tracing works on.

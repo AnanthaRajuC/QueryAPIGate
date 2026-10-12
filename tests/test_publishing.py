@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import apikeys, bundle, create_app, db, history, mcp_server, store
-from tests.helpers import save_query, write_connections
+from tests.helpers import needs_sqlite_335, save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 
@@ -157,6 +157,7 @@ class UpgradeTests(unittest.TestCase):
     """A schema-3 store (before publishing existed) upgrades with every query published at its newest version:
     callers see no difference."""
 
+    @needs_sqlite_335
     def test_existing_queries_are_published_at_their_newest_version(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):
             create_app()  # creates a current store

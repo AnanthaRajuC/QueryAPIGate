@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import adminroles, apikeys, mcp_server
-from tests.helpers import write_connections
+from tests.helpers import needs_sqlite_335, write_connections
 from tests.test_api_v1 import ADMIN, V1TestCase
 
 WRITES_ON = {'QUERYAPIGATE_ALLOW_WRITES': '1'}
@@ -232,6 +232,7 @@ class FlowTests(AgentWriteTestCase):
         status = self.call_api('get', f'/api/v1/write-requests/{request_id}', 200)
         self.assertEqual((status['status'], status['result']['code']), ('failed', 'too_many_rows_affected'))
 
+    @needs_sqlite_335
     def test_an_insert_runs_at_once_and_once_per_idempotency_key(self):
         first = self.call('file_ticket', title='monitor', idempotency_key='k1')['structuredContent']
         self.assertEqual((first['status'], first['rows_affected'], first['rows'][0]['title']), ('done', 1, 'monitor'))
@@ -244,6 +245,7 @@ class FlowTests(AgentWriteTestCase):
         self.assertEqual(conflict['code'], 'idempotency_conflict')
         self.assertEqual(self.call('file_ticket', title='mouse')['structuredContent']['status'], 'done')
 
+    @needs_sqlite_335
     def test_what_a_write_returns_is_masked_like_any_read(self):
         masked = self.key('masked', [{'name': 'file_ticket', 'allow_writes': True}],
                           mask=[{'column': 'tickets.title', 'action': 'hash'}])

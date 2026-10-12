@@ -22,6 +22,7 @@ from unittest import mock
 
 from queryapigate import create_app, db, history
 from tests import TEST_DATABASE_URL
+from tests.helpers import needs_sqlite_335
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'stores')
 ADMIN = {'X-API-Key': 'fixture-admin-key'}
@@ -163,6 +164,7 @@ class RefusalTests(FixtureTestCase):
             create_app()
         return str(caught.exception)
 
+    @needs_sqlite_335
     def test_a_missing_column_is_named(self):
         self.alter(self.store(), 'ALTER TABLE api_keys DROP COLUMN expires_at')
         message = self.refusal()
