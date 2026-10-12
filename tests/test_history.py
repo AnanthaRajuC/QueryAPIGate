@@ -1,5 +1,6 @@
 """Tests for history.py - batched, sampled, retained run history - and GET /history. Runs on whichever metadata
 backend the suite runs on (see tests/__init__.py)."""
+import contextlib
 import json
 import os
 import sqlite3
@@ -61,9 +62,23 @@ class HistoryTestCase(unittest.TestCase):
         history.write(rows, db.current_target())
 
 
+class _NoWriterThread(contextlib.ExitStack):
+    def __enter__(self):
+        super().__enter__()
+        self.enter_context(mock.patch.object(history._Writer, '_ensure_thread'))
+        self.enter_context(mock.patch.object(history, '_writer_instance', history._Writer()))
+        return self
+
+
 class BatchingTests(HistoryTestCase):
+    @staticmethod
+    def no_writer_thread():
+        """A writer of its own, with no thread: nothing drains the queue on its own - not even a thread an earlier
+        test left running, which drains its own writer's queue."""
+        return _NoWriterThread()
+
     def test_runs_are_queued_then_written_in_one_batch(self):
-        with mock.patch.object(history._Writer, '_ensure_thread'):  # no writer thread: nothing drains on its own
+        with self.no_writer_thread():
             for _ in range(3):
                 self.assertEqual(self.run_query().status_code, 200)
             self.assertEqual((self.stored(), history.pending_count()), (0, 3))
@@ -105,7 +120,7 @@ class BatchingTests(HistoryTestCase):
 
     def test_a_full_queue_drops_and_counts_instead_of_blocking(self):
         before = dict(metrics._history_runs)
-        with mock.patch.object(history, '_MAX_PENDING', 2), mock.patch.object(history._Writer, '_ensure_thread'):
+        with mock.patch.object(history, '_MAX_PENDING', 2), self.no_writer_thread():
             for _ in range(5):
                 self.assertEqual(self.run_query().status_code, 200)  # the request itself never notices
             self.assertEqual(history.pending_count(), 2)
@@ -114,7 +129,7 @@ class BatchingTests(HistoryTestCase):
         self.assertEqual(self.stored(), 2)
 
     def test_a_run_of_a_query_deleted_meanwhile_is_skipped_not_fatal(self):
-        with mock.patch.object(history._Writer, '_ensure_thread'):
+        with self.no_writer_thread():
             self.run_query('q')
             self.run_query('other')
             self.assertEqual(self.client.delete('/api/v1/queries/other', headers=self.admin).status_code, 204)
