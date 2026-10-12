@@ -1,6 +1,6 @@
 # ADR 0012: A tamper-evident audit log, streamed to a SIEM
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Backlog:** #96 (a tamper-evident audit log, streamed to a SIEM).
 

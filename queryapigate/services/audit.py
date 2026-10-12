@@ -23,7 +23,7 @@ def _matches(entry, action, actor, target, text):
 def listing(action=None, actor=None, target=None, text=None):
     """The matching entries, newest first, with what a filter needs: every action in the log (not only the
     matching ones), the stored total and the retention cap."""
-    entries = list(reversed(store.read_audit_log()))
+    entries = list(reversed(store.read_audit_entries()))
     return {
         'items': [e for e in entries if _matches(e, action, actor, target, (text or '').strip())],
         'total': len(entries),

@@ -58,7 +58,7 @@ KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
          'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete',
-         'quota_nearly_used')
+         'quota_nearly_used', 'audit_chain_broken')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -75,7 +75,7 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_encryption(), *_writes(), *_quotas(), *_keys(now), *_runs(now),
+    found = [*_server(now), *_sso(), *_encryption(), *_audit_chain(), *_writes(), *_quotas(), *_keys(now), *_runs(now),
              *_rate_limited(),
              *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
@@ -119,6 +119,30 @@ def _encryption():
                    'Every password is under the new encryption key - remove the old ones',
                    f"QUERYAPIGATE_SECRET_KEY still lists {found['keys']} keys, but nothing is encrypted with any but "
                    'the first. Remove the others from every instance to finish the rotation.', target)]
+
+
+def _audit_chain():
+    """The audit log's hash chain doesn't verify (ADR 0012): an entry changed, removed, inserted or reordered."""
+    from . import auditchain
+    try:
+        report = auditchain.cached_verify(db.connection())
+    except db.Error:
+        return []
+    if report['intact']:
+        return []
+    found = report['break']
+    where = f"entry {found.get('seq')} ({found.get('action')}, {found.get('timestamp')})"
+    problem = _CHAIN_PROBLEMS.get(found.get('problem'), found.get('problem'))
+    return [_alert('critical', 'audit_chain_broken', 'audit_log', 'The audit log has been tampered with',
+                   f"Its hash chain breaks at {where}: {problem}. Compare it with your SIEM's copy, or the export "
+                   'file (queryapigate audit verify --file).', {'type': 'audit', 'name': 'verify'},
+                   found.get('timestamp'))]
+
+
+_CHAIN_PROBLEMS = {'changed': 'it was changed after it was written',
+                   'changed_before': 'the entry before it was changed or removed',
+                   'missing': 'entries before it are missing', 'out_of_order': 'it is out of order',
+                   'unkeyed_after_keyed': 'it was re-written without the audit key'}
 
 
 def _quotas():

@@ -52,6 +52,21 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Upgrading from 0.24
+- **Schema 14** adds three columns to `audit_log` (`seq`, `prev_hash`, `hash`) and two tables (`audit_chain`,
+  `audit_delivery`). The entries already stored are chained at the upgrade, as they are, and an `audit_chain_started`
+  entry records when. A 0.24 instance still running keeps writing entries without a link; the next upgraded write
+  links them in - but upgrade every instance.
+
+### Added
+- **A tamper-evident audit log** (BACKLOG #96, [ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)):
+  each entry chained to the one before (`seq`, `prev_hash`, `hash`), HMAC-signed with `QUERYAPIGATE_AUDIT_KEY` when set
+  (rotated as `new,old`), plain SHA-256 otherwise; the chain kept through the rolling cap by an anchor.
+  `queryapigate audit verify [--file]` and `GET /api/v1/audit/verify` name the first entry that doesn't verify -
+  changed, missing, out of order, or re-written without the key - and the `audit_chain_broken` alert says so. The
+  export file's lines carry the chain too. See
+  [A tamper-evident chain](documentation/API.md#a-tamper-evident-chain).
+
 ## [0.24.0] - 2026-10-11
 
 Limits a contract can be written in: a key or role can cap the queries it runs at once, how long each may run and

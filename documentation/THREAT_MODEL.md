@@ -264,6 +264,16 @@ one after it, `queryapigate rekey` re-encrypts every stored password under the n
 nothing), and the old key is then removed. A key suspected leaked is replaced the same way; backups taken before the
 rekey still open with the old key, so they need retiring with it.
 
+### The audit trail
+
+The audit log is a hash chain (ADR 0012): each entry's `hash` covers the previous entry's, so changing, removing,
+inserting or reordering one breaks every hash after it, and `queryapigate audit verify` (and a check every 5 minutes)
+names the first. Against someone who can write to the store, a plain hash is only consistency - they can recompute
+it - so with `QUERYAPIGATE_AUDIT_KEY` set the chain is HMAC-signed with a key kept outside the store, and a key once set
+means every newer entry must carry it. What the chain can't show alone: the newest entries deleted (its end can't know
+what came after it), and a rewrite by someone holding both the store and the key. Both are why a copy outside - the
+SIEM stream, or the export file shipped elsewhere - matters.
+
 ### Transport
 
 QueryAPIGate does not terminate TLS itself - that is explicitly the reverse proxy's job (Caddy, nginx,

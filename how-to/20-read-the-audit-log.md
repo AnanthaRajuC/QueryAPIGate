@@ -103,12 +103,28 @@ The file is the one to keep for compliance: ship it to your log system, or rotat
 are independent - a problem writing the file (its directory missing, say) doesn't stop the change from being made or
 recorded in the store.
 
+## Check nobody has edited it
+
+Every entry is chained to the one before it (since 0.25):
+
+```bash
+queryapigate audit verify
+# Intact: entries 1 to 214, keyed with QUERYAPIGATE_AUDIT_KEY.
+queryapigate audit verify --file /var/log/queryapigate/audit.jsonl   # the export file, on its own
+```
+
+Set `QUERYAPIGATE_AUDIT_KEY` (`python -c "import secrets; print(secrets.token_hex(32))"`), kept outside the store,
+so an edit made with only the store can't be re-signed. A break is named - *BROKEN at entry 87 (update_key,
+2026-10-12 09:14:02): changed* - and raises the `audit_chain_broken` alert. See
+[the chain](../documentation/API.md#a-tamper-evident-chain).
+
 ## What it can't tell you
 
 - **Which person** used the shared admin key: everyone who has it is `admin`. Give each person their own admin token
   ([guide 43](43-give-your-team-their-own-admin-access.md)) and the log names them; any later use of the shared key
   is then flagged as `break_glass_used`.
-- **Changes made outside QueryAPIGate** - editing `queryapigate.db` directly, or restoring a backup.
+- **Changes made outside QueryAPIGate** - restoring a backup, or deleting the newest entries: the chain catches an
+  edit to, or a removal from, the entries it holds, but its end can't know what came after it. A copy in your SIEM does.
 
 ## Next steps
 

@@ -409,7 +409,8 @@ owner.
 | Method and path | What it does |
 |---|---|
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
-| `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target` and `changes`. Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
+| `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
+| `GET /api/v1/audit/verify` | Walk the audit log's hash chain from its anchor: `{"intact": true, "first_seq", "last_seq", "keyed", ...}`, or `{"intact": false, "break": {"seq", "action", "timestamp", "problem"}}` - `problem` is `changed`, `changed_before`, `missing`, `out_of_order` or `unkeyed_after_keyed`. |
 
 ### Collections and the example APIs
 
@@ -1472,6 +1473,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 | `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
+| `audit_chain_broken` | critical | The audit log's hash chain doesn't verify: an entry was changed, removed, inserted or reordered (checked every 5 minutes) |
 | `quota_nearly_used` | warning, critical | An API key has used 80% of a usage quota this period (warning), or all of it - its calls are refused until it resets (critical) |
 | `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |
 | `sso_unreachable` | critical | Console sign-in through SSO is on, but the identity provider's metadata can't be fetched - nobody can sign in that way; open sessions keep working |
@@ -1661,6 +1663,29 @@ For retention a cap can never satisfy - keeping every entry indefinitely rather 
 however many - set `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` to a path; every entry is also appended there, one JSON
 object per line, and that file is never capped or rewritten. The two writes are independent, so a problem
 with one (the export path's directory missing, say) never blocks the other.
+
+### A tamper-evident chain
+
+Since 0.25 ([ADR 0012](adr/0012-tamper-evident-audit-log-and-siem.md)) each entry is a link in a hash chain: `seq` (1,
+2, 3 ... across every instance, with no gaps), the previous entry's `hash` as its `prev_hash`, and its own `hash` over
+both and the entry. Change, remove, insert or reorder an entry, and every hash from there on stops matching.
+
+- **Keyed, or not.** With `QUERYAPIGATE_AUDIT_KEY` set (32 characters or more, kept outside the store like
+  `QUERYAPIGATE_SECRET_KEY`), each `hash` is `hmac-sha256:...`: someone who can write to the store but hasn't the key
+  can't re-sign an edit. Without it, `sha256:...` - consistent, but anyone with the store can recompute every hash
+  after an edit; Settings says which is in effect. Setting a key is recorded (`audit_key_set`), and from then on an
+  unkeyed entry - or a chain re-written unkeyed from the start - is a break.
+- **Rotating the key:** `QUERYAPIGATE_AUDIT_KEY=<new>,<old>` - the first signs, every one verifies; startup records
+  `audit_key_rotated`. Keep the old key listed for as long as entries signed with it are kept.
+- **The rolling cap still applies:** the chain's anchor remembers the newest entry trimmed, so the oldest kept must
+  follow it - removing entries from the start isn't mistaken for a trim.
+- **Checking it:** `queryapigate audit verify` (exit 0 intact, 1 broken) or `GET /api/v1/audit/verify`, which name the
+  first entry that doesn't verify; `queryapigate audit verify --file` checks an export file on its own, whose lines
+  carry `seq`, `prev_hash` and `hash` too. Each server re-checks every 5 minutes: `audit_chain_broken` (critical).
+- **What it can't show on its own:** the newest entries removed - the chain's end can't know what came after it - or a
+  rewrite by someone holding both the store and the key. A copy outside the store, in your SIEM, is what shows those.
+- **Upgrading to 0.25** chains the entries already stored, as they are, and records `audit_chain_started`: the chain
+  proves nothing about them before that moment.
 
 The admin UI's Audit Log tab filters this client-side over what it already fetched - an action dropdown
 (populated from whatever actions actually appear) and a search box matching actor, target or timestamp -

@@ -395,8 +395,9 @@ def check_settings():
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
     check_secret_keys()
-    from . import tracing
+    from . import auditchain, tracing
     tracing.check()
+    auditchain.check_keys()
     raw = os.environ.get('QUERYAPIGATE_HSTS_MAX_AGE', '').strip()
     if raw and not (raw.isdigit() and 0 < int(raw) <= MAX_HSTS_SECONDS):
         raise ValueError('QUERYAPIGATE_HSTS_MAX_AGE must be a whole number of seconds from 1 to '
@@ -443,6 +444,14 @@ def secret_key():
     """The key new values are encrypted with - the first of secret_keys() - or None when encryption is off."""
     keys = secret_keys()
     return keys[0] if keys else None
+
+
+def _audit_key_state():
+    from . import auditchain
+    count = len(auditchain.keys())
+    if not count:
+        return 'not set - plain SHA-256'
+    return 'keyed (HMAC-SHA256)' + (f', {count} keys' if count > 1 else '')
 
 
 def _encryption_state():
@@ -1077,6 +1086,9 @@ def describe_settings():
                 str(audit_log_limit())),
             row('Audit export file', 'Append-only JSON-lines copy of every audit entry, never rolled off.',
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),
+            row('Audit chain key', 'HMAC key the audit log is chained with, so an edit made without it shows. Unset: '
+                'plain SHA-256 - consistent, but anyone with the store can recompute it.', 'QUERYAPIGATE_AUDIT_KEY',
+                _audit_key_state(), secret=True),
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs()))]},
         {'id': 'history', 'title': 'Run history',

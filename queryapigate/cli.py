@@ -539,6 +539,33 @@ def _handler():
     return Handler
 
 
+def _audit_verify(args):
+    """`queryapigate audit verify [--file PATH]`: walk the audit log's hash chain (ADR 0012) - the store's, or an export
+    file's - and say whether it's intact, or where it first breaks. Exit 0 intact, 1 broken, 2 unreadable."""
+    from . import auditchain
+    try:
+        auditchain.check_keys()
+        report = auditchain.verify_file(args.file) if args.file else auditchain.verify(db.connection())
+    except (OSError, ValueError) as error:
+        print(f'queryapigate audit verify: {error}', file=sys.stderr)
+        return 2
+    if report['intact']:
+        if not report.get('entries'):
+            print('Intact: no chained entries yet.')
+            return 0
+        how = ('keyed with QUERYAPIGATE_AUDIT_KEY' if report.get('keyed')
+               else 'unkeyed (plain SHA-256: set QUERYAPIGATE_AUDIT_KEY so an edit cannot be re-signed)')
+        print(f"Intact: entries {report['first_seq']} to {report['last_seq']}, {how}.")
+        if report.get('unchecked_without_key'):
+            print(f"  {report['unchecked_without_key']} keyed entries not checked - QUERYAPIGATE_AUDIT_KEY is not set")
+        return 0
+    found = report['break']
+    where = f"line {found['line']}" if 'line' in found else (
+        f"entry {found['seq']} ({found.get('action')}, {found.get('timestamp')})")
+    print(f"BROKEN at {where}: {found['problem'].replace('_', ' ')}", file=sys.stderr)
+    return 1
+
+
 def _rekey(args):
     from . import rekey
     try:
@@ -687,6 +714,14 @@ def build_parser():
     admins_token.set_defaults(func=_admins_token)
     admins_list.set_defaults(func=_admins_list)
 
+    audit_parser = commands.add_parser('audit', help="check the audit log's hash chain")
+    audit_parser.set_defaults(func=lambda a: audit_parser.print_help() or 2)
+    audit_actions = audit_parser.add_subparsers(dest='action')
+    audit_verify = audit_actions.add_parser('verify', help='walk the chain and say whether it is intact, or where it '
+                                                          'first breaks (exit 0 or 1)')
+    audit_verify.add_argument('--file', help='an export file (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE) instead of the store')
+    audit_verify.set_defaults(func=_audit_verify)
+
     rekey_parser = commands.add_parser('rekey', help='re-encrypt every stored password under the first key in '
                                                      'QUERYAPIGATE_SECRET_KEY, so the others can be removed (rotating '
                                                      'the key)')
@@ -705,7 +740,8 @@ def build_parser():
     exports_list.set_defaults(func=_exports_list)
 
     for sub in (serve, init, export, collection_export, collection_import, examples_load, examples_unload,
-                examples_status, admins_create, admins_token, admins_list, exports_run, exports_list, rekey_parser):
+                examples_status, admins_create, admins_token, admins_list, exports_run, exports_list, rekey_parser,
+                audit_verify):
         sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
     return parser

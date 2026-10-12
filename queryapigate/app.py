@@ -187,6 +187,7 @@ def create_app():
                     "environment variable instead - it reads the same way but keeps the secret out of the file, "
                     "or set QUERYAPIGATE_SECRET_KEY to encrypt it at rest automatically.",
                     ', '.join(plaintext), config.db_file())
+    _note_audit_key_rotation()
     if config.load_examples():
         load_examples_at_startup()
     app.json = JSONProvider(app)
@@ -311,6 +312,23 @@ def create_app():
     app.register_blueprint(v1.bp)
     app.register_blueprint(sso.bp)
     return app
+
+
+def _note_audit_key_rotation():
+    """Put a change of QUERYAPIGATE_AUDIT_KEY in the chain (ADR 0012): `audit_key_set` when one is set and the newest
+    entry isn't keyed yet - so a key set means the newest entry is keyed, which verify() holds the chain to - and
+    `audit_key_rotated` when the first key changed since the newest entry was signed."""
+    from . import auditchain
+    if not auditchain.keys():
+        return
+    try:
+        conn = db.connection()
+        if not auditchain.head_keyed(conn):  # a key set for the first time: from here on, every entry is keyed
+            store.record_audit('startup', 'audit_key_set', 'audit_log', None)
+        elif auditchain.head_signed_by(conn) not in (None, 0):
+            store.record_audit('startup', 'audit_key_rotated', 'audit_log', {'keys': len(auditchain.keys())})
+    except db.Error:
+        log.warning('Could not check the audit key against the audit log', exc_info=True)
 
 
 def error_body(message, status, extra=None, code=None):

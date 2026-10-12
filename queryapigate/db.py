@@ -26,11 +26,12 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 13  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 14  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
-#                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters - see _upgrade()
+#                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
+#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery - see _upgrade()
 
 _local = threading.local()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
@@ -111,7 +112,23 @@ CREATE TABLE IF NOT EXISTS roles (
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp TEXT NOT NULL,
-  entry_json TEXT NOT NULL
+  entry_json TEXT NOT NULL,
+  seq INTEGER,                 -- the hash chain (auditchain.py, ADR 0012): 1, 2, 3 ... across every instance
+  prev_hash TEXT,
+  hash TEXT
+);
+-- The chain's anchor: the newest entry the rolling cap has trimmed, so the first one kept must follow it.
+CREATE TABLE IF NOT EXISTS audit_chain (
+  name TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  hash TEXT NOT NULL
+);
+-- Where each SIEM output has delivered up to, and which instance is delivering (ADR 0012).
+CREATE TABLE IF NOT EXISTS audit_delivery (
+  output TEXT PRIMARY KEY,
+  last_seq INTEGER NOT NULL DEFAULT 0,
+  lease_until REAL,
+  details_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 
@@ -302,7 +319,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,
   rowid BIGINT GENERATED ALWAYS AS (id) STORED,  -- see execution_history's own rowid
   timestamp TEXT NOT NULL,
-  entry_json TEXT NOT NULL
+  entry_json TEXT NOT NULL,
+  seq BIGINT,
+  prev_hash TEXT,
+  hash TEXT
+);
+CREATE TABLE IF NOT EXISTS audit_chain (
+  name TEXT COLLATE "C" PRIMARY KEY,
+  seq BIGINT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit_delivery (
+  output TEXT COLLATE "C" PRIMARY KEY,
+  last_seq BIGINT NOT NULL DEFAULT 0,
+  lease_until DOUBLE PRECISION,
+  details_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 
@@ -635,7 +666,12 @@ def _upgrade(conn, postgres):
         index on previous_hash, made here rather than in the schema so it can follow the column on an older store.
         Additive: a 0.21 process still running ignores them (so an old secret in its grace period doesn't
         authenticate there - upgrade every instance before rotating a key).
-    13: usage_counters (ADR 0011) - a new table, made by CREATE TABLE IF NOT EXISTS; additive."""
+    13: usage_counters (ADR 0011) - a new table, made by CREATE TABLE IF NOT EXISTS; additive.
+    14: the audit log's hash chain (ADR 0012): audit_log.seq/prev_hash/hash, and audit_chain and audit_delivery (new
+        tables). The entries already stored are chained here, oldest first, as they are - and an audit_chain_started
+        entry says from when the chain holds. A 0.24 process still running writes entries without a link; the next
+        upgraded write links them in (auditchain.append() chains any it finds), so nothing is lost - but upgrade
+        every instance."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -655,6 +691,17 @@ def _upgrade(conn, postgres):
         conn.execute('ALTER TABLE api_keys ADD COLUMN previous_hash TEXT')
         conn.execute('ALTER TABLE api_keys ADD COLUMN previous_expires_at TEXT')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_previous_hash ON api_keys(previous_hash)')
+    if 'seq' not in _columns(conn, 'audit_log', postgres):
+        conn.execute('ALTER TABLE audit_log ADD COLUMN seq INTEGER' if not postgres
+                     else 'ALTER TABLE audit_log ADD COLUMN seq BIGINT')
+        conn.execute('ALTER TABLE audit_log ADD COLUMN prev_hash TEXT')
+        conn.execute('ALTER TABLE audit_log ADD COLUMN hash TEXT')
+        from . import auditchain
+        chained = auditchain.chain_existing(conn)
+        auditchain.append(conn, {'timestamp': _now(), 'actor': 'startup', 'via': None,
+                                 'action': 'audit_chain_started', 'target': 'audit_log',
+                                 'changes': {'entries_chained': chained}}, config.audit_log_limit())
+    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_log_seq ON audit_log(seq)')
     if _history_requires_a_query(conn, postgres):
         if postgres:
             conn.execute('ALTER TABLE execution_history ALTER COLUMN query_name DROP NOT NULL')
@@ -669,6 +716,11 @@ def _upgrade(conn, postgres):
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_qv '
                          'ON execution_history(query_name, version, executed_at)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at)')
+
+
+def _now():
+    from datetime import datetime
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _refuse_newer(conn):
@@ -807,7 +859,9 @@ _MIGRATED_TABLES = (
     ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json', 'previous_hash',
                   'previous_expires_at'), 'name'),
     ('roles', ('name', 'created_at', 'details_json'), 'name'),
-    ('audit_log', ('timestamp', 'entry_json'), 'id'),
+    ('audit_log', ('timestamp', 'entry_json', 'seq', 'prev_hash', 'hash'), 'id'),
+    ('audit_chain', ('name', 'seq', 'hash'), 'name'),
+    ('audit_delivery', ('output', 'last_seq', 'lease_until', 'details_json'), 'output'),
     ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),
     ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
     ('destinations', ('name', 'created_at', 'updated_at', 'details_json'), 'name'),

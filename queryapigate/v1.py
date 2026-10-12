@@ -719,6 +719,13 @@ def list_audit():
                                  text=args.get('q'))), 200
 
 
+@bp.route('/audit/verify', methods=['GET'])
+def verify_audit():
+    """Walk the audit log's hash chain (ADR 0012) from its anchor: intact, or the first entry that isn't."""
+    from . import auditchain, db
+    return jsonify(auditchain.verify(db.connection())), 200
+
+
 # --------------------------------------------------------------------------------------
 # Settings and MCP
 # --------------------------------------------------------------------------------------

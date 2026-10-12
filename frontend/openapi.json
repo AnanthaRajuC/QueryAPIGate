@@ -393,7 +393,8 @@
               "sso_unreachable",
               "writes_awaiting_approval",
               "encryption_key_rotation_incomplete",
-              "quota_nearly_used"
+              "quota_nearly_used",
+              "audit_chain_broken"
             ],
             "type": "string"
           },
@@ -424,7 +425,8 @@
                   "settings",
                   "export",
                   "agent",
-                  "approvals"
+                  "approvals",
+                  "audit"
                 ],
                 "type": "string"
               }
@@ -727,6 +729,16 @@
             "description": "For a change, each field as {from, to}; for a create or delete, the whole record. Never a secret.",
             "nullable": true
           },
+          "hash": {
+            "description": "hmac-sha256:<hex> (QUERYAPIGATE_AUDIT_KEY) or sha256:<hex>, over the previous entry's hash, seq and this entry.",
+            "nullable": true,
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its place in the hash chain (ADR 0012): 1, 2, 3 ... with no gaps.",
+            "nullable": true,
+            "type": "integer"
+          },
           "target": {
             "nullable": true,
             "type": "string"
@@ -787,6 +799,68 @@
           "total",
           "actions",
           "retention"
+        ],
+        "type": "object"
+      },
+      "AuditVerify": {
+        "properties": {
+          "break": {
+            "description": "The first entry that does not verify.",
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "expected_seq": {
+                "type": "integer"
+              },
+              "problem": {
+                "enum": [
+                  "changed",
+                  "changed_before",
+                  "missing",
+                  "out_of_order",
+                  "unkeyed_after_keyed"
+                ],
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "checked": {
+            "type": "integer"
+          },
+          "entries": {
+            "type": "integer"
+          },
+          "entries_stored": {
+            "type": "integer"
+          },
+          "first_seq": {
+            "type": "integer"
+          },
+          "intact": {
+            "type": "boolean"
+          },
+          "keyed": {
+            "description": "Whether the chain is signed with QUERYAPIGATE_AUDIT_KEY.",
+            "type": "boolean"
+          },
+          "last_seq": {
+            "type": "integer"
+          },
+          "unchecked_without_key": {
+            "description": "Keyed entries not checked: no key is set to check them with.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "intact"
         ],
         "type": "object"
       },
@@ -4845,6 +4919,66 @@
           }
         },
         "summary": "Administrative changes, newest first",
+        "tags": [
+          "Management API v1"
+        ]
+      }
+    },
+    "/api/v1/audit/verify": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerify"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Walk the audit log's hash chain: intact, or the first entry that isn't",
         "tags": [
           "Management API v1"
         ]

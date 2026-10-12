@@ -142,10 +142,11 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
   {
     id: 'rate-limits',
     label: 'Rate limits',
-    kinds: ['key_rate_limited', 'client_rate_limited'],
+    kinds: ['key_rate_limited', 'client_rate_limited', 'quota_nearly_used'],
     about:
       'API keys refused by their own rate_limit, and client addresses refused by QUERYAPIGATE_RATE_LIMIT, 10 times ' +
-      'or more in the last hour (counted by this server since it started).',
+      'or more in the last hour (counted by this server since it started) - and keys that have used 80% or all of ' +
+      'a usage quota.',
   },
   {
     id: 'agents',
@@ -167,6 +168,14 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
     label: 'Open access',
     kinds: ['open_server'],
     about: 'Whether the server runs with no API key at all, letting anyone query and change it.',
+  },
+  {
+    id: 'audit-chain',
+    label: 'Audit log',
+    kinds: ['audit_chain_broken'],
+    about:
+      "The audit log's hash chain not verifying - an entry changed, removed, inserted or reordered since it was " +
+      'written (checked every 5 minutes).',
   },
   {
     id: 'encryption',

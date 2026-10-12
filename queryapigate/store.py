@@ -94,24 +94,29 @@ def record_audit(actor, action, target, changes=None, via=None):
     (e.g. the export path's directory missing) never suppresses the other."""
     entry = {'timestamp': now(), 'actor': actor, 'via': via or _audit_via(actor), 'action': action, 'target': target,
              'changes': changes}
+    from . import auditchain
+    link = None
     try:
         with db.transaction() as conn:
-            conn.execute('INSERT INTO audit_log (timestamp, entry_json) VALUES (?, ?)',
-                        (entry['timestamp'], json.dumps(entry, default=str)))
-            conn.execute("""
-                DELETE FROM audit_log WHERE rowid IN (
-                    SELECT rowid FROM audit_log ORDER BY timestamp DESC, rowid DESC LIMIT -1 OFFSET ?
-                )
-            """, (config.audit_log_limit(),))
+            # the next link of the hash chain (ADR 0012), then the rolling cap - under the store's write lock, so
+            # several instances still make one chain
+            link = auditchain.append(conn, entry, config.audit_log_limit())
     except (OSError, *db.Error):
         pass
     export_path = config.audit_log_export_file()
     if export_path is not None:
+        chain = {'seq': link[0], 'prev_hash': link[1], 'hash': link[2]} if link else {}
         try:
             with lock, open(export_path, 'a') as f:
-                f.write(json.dumps(entry, default=str) + '\n')
+                f.write(json.dumps({**entry, **chain}, default=str) + '\n')
         except OSError:
             pass
+
+
+def read_audit_entries():
+    """Every stored entry with its place in the hash chain (`seq`, `hash`), oldest first - for /api/v1/audit."""
+    rows = db.connection().execute('SELECT entry_json, seq, hash FROM audit_log ORDER BY id').fetchall()
+    return [{**json.loads(row['entry_json']), 'seq': row['seq'], 'hash': row['hash']} for row in rows]
 
 
 def read_audit_log():

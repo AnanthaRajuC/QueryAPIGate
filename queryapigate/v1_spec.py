@@ -230,7 +230,7 @@ SCHEMAS = {
                       'description': 'When the condition began or will begin, where known (server time).'},
             'target': {'type': 'object', 'nullable': True, 'required': ['type', 'name'], 'properties': {
                 'type': {'type': 'string', 'enum': ['key', 'query', 'connection', 'settings', 'export', 'agent',
-                                                    'approvals']},
+                                                    'approvals', 'audit']},
                 'name': {'type': 'string'}}},
         },
     },
@@ -365,6 +365,28 @@ SCHEMAS = {
             'target': _NULLABLE_STRING,
             'changes': {'nullable': True, 'description': 'For a change, each field as {from, to}; for a create or '
                                                          'delete, the whole record. Never a secret.'},
+            'seq': {'type': 'integer', 'nullable': True,
+                    'description': 'Its place in the hash chain (ADR 0012): 1, 2, 3 ... with no gaps.'},
+            'hash': {'type': 'string', 'nullable': True,
+                     'description': 'hmac-sha256:<hex> (QUERYAPIGATE_AUDIT_KEY) or sha256:<hex>, over the previous '
+                                    "entry's hash, seq and this entry."},
+        },
+    },
+    'AuditVerify': {
+        'type': 'object', 'required': ['intact'],
+        'properties': {
+            'intact': {'type': 'boolean'},
+            'entries': {'type': 'integer'}, 'entries_stored': {'type': 'integer'},
+            'first_seq': {'type': 'integer'}, 'last_seq': {'type': 'integer'},
+            'keyed': {'type': 'boolean', 'description': 'Whether the chain is signed with QUERYAPIGATE_AUDIT_KEY.'},
+            'unchecked_without_key': {'type': 'integer',
+                                      'description': 'Keyed entries not checked: no key is set to check them with.'},
+            'checked': {'type': 'integer'},
+            'break': {'type': 'object', 'description': 'The first entry that does not verify.', 'properties': {
+                'seq': {'type': 'integer'}, 'timestamp': {'type': 'string'}, 'action': {'type': 'string'},
+                'problem': {'type': 'string', 'enum': ['changed', 'changed_before', 'missing', 'out_of_order',
+                                                       'unkeyed_after_keyed']},
+                'expected_seq': {'type': 'integer'}}},
         },
     },
     'Me': {
@@ -1088,6 +1110,10 @@ PATHS = {
             {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
              'description': 'Matches the time, actor or target.'}]),
+    },
+    '/api/v1/audit/verify': {
+        'get': _op("Walk the audit log's hash chain: intact, or the first entry that isn't",
+                   {'200': _ok(_ref('AuditVerify'))}),
     },
     '/api/v1/cache/entries': {
         'get': _op('What is in the response cache now, soonest to expire first', {'200': _ok(_ref('CacheEntryList'))}),
