@@ -55,8 +55,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Upgrading from 0.26
-- **Schema 15** adds one table, `config_managed`: what a configuration file manages. Additive - 0.26 instances keep
-  working on the upgraded store.
+- **Schema 15** adds two tables, `config_managed` (what a configuration file manages) and `config_applied` (every
+  file applied, by its hash). Additive - 0.26 instances keep working on the upgraded store.
 
 ### Added
 - **Configuration as code** (BACKLOG #97, [ADR 0014](documentation/adr/0014-configuration-as-code.md), experimental),
@@ -69,6 +69,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `via: config`, under one `config_applied` entry with the file's hash. `--prune` deletes only what a file manages
   (applied or named before), never what was made in the Console. `POST /api/v1/config/diff` too; both owners only
   (`config.apply`). See [Configuration as code](documentation/API.md#configuration-as-code).
+  `QUERYAPIGATE_CONFIG_FILE` applies a file at startup, once per file - with several instances, the first to start
+  applies it - and one that can't be applied stops startup, changing nothing; `QUERYAPIGATE_CONFIG_PRUNE` prunes
+  then too. `QUERYAPIGATE_CONFIG_LOCKED` keeps what a file manages to the file: the API and the Console answer
+  `409 config_managed`. `GET /api/v1/config/managed`, and the Console tags what's managed. The Helm chart's
+  `configAsCode` mounts the file and rolls the pods when it changes - checked on kind, a file that can't be applied
+  stopping the rollout at its first pod.
 
 ## [0.26.0] - 2026-10-12
 

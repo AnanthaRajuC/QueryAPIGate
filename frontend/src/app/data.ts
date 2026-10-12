@@ -68,6 +68,16 @@ export function useRoles() {
   });
 }
 
+// What a configuration file manages (ADR 0014) - and whether the server takes changes to it only from a file.
+export function useManaged() {
+  return useQuery({
+    queryKey: ['config-managed'],
+    queryFn: async () => unwrap(await api.GET('/api/v1/config/managed')),
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
 export function useCollections() {
   return useQuery({
     queryKey: ['collections'],

@@ -625,16 +625,26 @@ def file_hash(doc):
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def apply(doc, prune=False, actor='cli'):
+def apply(doc, prune=False, actor='cli', once=False):
     """Make the store match `doc`, all or nothing, and return what changed (diff()'s shape) with `applied`.
 
     Everything happens in one transaction, holding the store's write lock: the file is checked and compared against
     the store as it is then, every change is made through the functions the API uses - each audited, `via: config`
     - and the objects the file names are marked managed. Any problem, at any step, rolls all of it back; the error
     names the object. One `config_applied` entry, by `actor`, records the file's hash and the counts. A file that
-    changes nothing writes nothing."""
+    changes nothing writes nothing.
+
+    With `once` - QUERYAPIGATE_CONFIG_FILE at startup - a file already applied, by this instance or another, is left
+    alone (`already_applied`): several instances starting together apply it once, and a change made since in the
+    Console isn't undone at every restart."""
     digest = file_hash(doc)
-    with db.transaction():
+    with db.transaction() as conn:
+        seen = conn.execute('SELECT 1 FROM config_applied WHERE file_hash = ?', (digest,)).fetchone() is not None
+        if once and seen:
+            return {'changes': [], 'not_in_file': [], 'applied': False, 'already_applied': True, 'file_sha256': digest}
+        if not seen:
+            conn.execute('INSERT INTO config_applied (file_hash, applied_at, actor) VALUES (?, ?, ?)',
+                         (digest, store.now(), actor))
         plan = _plan(desired(doc), prune)
         result, wanted, have = plan['result'], plan['wanted'], plan['have']
         entries = {kind: _objects(doc, kind, _Problems()) for kind in wanted if kind != 'descriptions'}
@@ -773,6 +783,60 @@ def _apply_export(change, entry, after, before, actor, digest):
         export_service.update(change['name'], _cleared(after, before), actor)
     else:
         export_service.delete(change['name'], actor)
+
+
+# --------------------------------------------------------------------------------------
+# QUERYAPIGATE_CONFIG_LOCKED: what a file manages changes only through a file
+# --------------------------------------------------------------------------------------
+
+# The /api/v1 operations that change one named object, by the kind they change. Creating isn't here: what doesn't
+# exist yet isn't managed. Running an export is: it changes nothing a file describes.
+_CHANGES = {
+    'connections': ('update_connection', 'delete_connection'),
+    'descriptions': ('update_descriptions', 'import_descriptions'),
+    'queries': ('update_query', 'delete_query', 'add_version', 'update_version', 'delete_version', 'publish',
+                'unpublish'),
+    'api_keys': ('update_api_key', 'delete_api_key', 'rotate_api_key', 'end_previous_secret'),
+    'roles': ('update_role', 'delete_role'),
+    'destinations': ('update_destination', 'delete_destination'),
+    'exports': ('update_export', 'delete_export'),
+}
+_KIND_OF = {f'v1.{operation}': kind for kind, operations in _CHANGES.items() for operation in operations}
+
+
+def managed_listing():
+    """What GET /api/v1/config/managed answers: whether the lock is on, and every managed object."""
+    from . import config
+    rows = db.connection().execute(
+        'SELECT kind, name, applied_at, file_hash FROM config_managed ORDER BY kind, name').fetchall()
+    return {'locked': config.config_locked(),
+            'items': [{'kind': r[0], 'name': r[1], 'applied_at': r[2], 'file_sha256': r[3]} for r in rows]}
+
+
+def refuse_if_locked(endpoint, view_args):
+    """409 config_managed when QUERYAPIGATE_CONFIG_LOCKED is on and this request would change what a file manages - a
+    managed object, or a collection a managed query is in or a managed key or role is granted (renaming it moves
+    both)."""
+    from . import config
+    if not config.config_locked():
+        return
+    name = (view_args or {}).get('name')
+    if endpoint == 'v1.rename_collection':
+        managed = _managed()
+        touched = [('queries', q) for q in store.collection_members().get(name, [])]
+        grants = apikeys.collection_grants().get(name, {})
+        touched += [('api_keys', k) for k in grants.get('keys', [])] + [('roles', r) for r in grants.get('roles', [])]
+        held = [f'{kind}[{n}]' for kind, n in touched if (kind, n) in managed]
+        if held:
+            raise ApiError(f"Collection '{name}' holds what a configuration file manages ({', '.join(held)}) - rename "
+                           'it in the file (QUERYAPIGATE_CONFIG_LOCKED)', 409, code='config_managed')
+        return
+    kind = _KIND_OF.get(endpoint)
+    if kind is None or name is None:
+        return
+    if (kind, name) in _managed():
+        raise ApiError(f'{kind}[{name}] is managed by a configuration file - change it there; this server takes '
+                       'changes to it only from a file (QUERYAPIGATE_CONFIG_LOCKED)', 409, code='config_managed')
 
 
 _APPLY = {'connections': _apply_connection, 'destinations': _apply_destination, 'queries': _apply_query,

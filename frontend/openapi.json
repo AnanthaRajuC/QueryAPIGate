@@ -1013,6 +1013,9 @@
       },
       "ConfigApplied": {
         "properties": {
+          "already_applied": {
+            "type": "boolean"
+          },
           "applied": {
             "description": "False when nothing needed changing, or for a dry run.",
             "type": "boolean"
@@ -1146,6 +1149,46 @@
         "required": [
           "format",
           "format_version"
+        ],
+        "type": "object"
+      },
+      "ConfigManaged": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "applied_at": {
+                  "type": "string"
+                },
+                "file_sha256": {
+                  "description": "The file that last applied it.",
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "applied_at",
+                "file_sha256"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "locked": {
+            "description": "QUERYAPIGATE_CONFIG_LOCKED is on.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "locked",
+          "items"
         ],
         "type": "object"
       },
@@ -5880,6 +5923,68 @@
           }
         },
         "summary": "What applying a configuration file would change, field by field - nothing is written",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/config/managed": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. With `locked` (QUERYAPIGATE_CONFIG_LOCKED), changing any of these through this API answers 409 `config_managed`.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigManaged"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What a configuration file manages, and whether the server takes changes to it only from a file",
         "tags": [
           "Management API v1"
         ],

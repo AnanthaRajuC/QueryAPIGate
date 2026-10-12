@@ -39,6 +39,17 @@ metadata:
 type: Opaque
 stringData: {{- toYaml .Values.secret.values | nindent 2 }}
 {{- end }}
+{{- if and .Values.configAsCode.enabled .Values.configAsCode.file }}
+---
+# The configuration file (ADR 0014): no secret in it - passwords are ${VAR} references to the Secret above
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "queryapigate.configMapName" . }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+data:
+  {{ .Values.configAsCode.key }}: {{ .Values.configAsCode.file | quote }}
+{{- end }}
 {{- if .Values.serviceAccount.create }}
 ---
 apiVersion: v1

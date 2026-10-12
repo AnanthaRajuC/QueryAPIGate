@@ -7,6 +7,7 @@ import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from
 import { Empty, Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
+import { ManagedTag } from '@/components/Managed';
 
 // The classic Connections screen (ui.py #tab-connections, renderConnections, openConnectionForm,
 // openDeleteConnectionForm): All / Active / Inactive / Deleted, a filter, the table with each connection's live
@@ -188,6 +189,7 @@ export function ConnectionsPage() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="name">{c.name}</span>
+                      <ManagedTag kind="connections" name={c.name} />
                       {c.example && (
                         <span
                           className="tag example"

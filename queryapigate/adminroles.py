@@ -91,7 +91,7 @@ OPERATIONS = {
     'v1.list_exports': 'exports.read', 'v1.get_export': 'exports.read', 'v1.list_export_runs': 'exports.read',
     'v1.create_export': 'exports.write', 'v1.update_export': 'exports.write', 'v1.delete_export': 'exports.write',
     'v1.run_export': 'exports.run',
-    'v1.config_diff': 'config.apply', 'v1.config_apply': 'config.apply',
+    'v1.config_diff': 'config.apply', 'v1.config_apply': 'config.apply', 'v1.config_managed': 'observe',
 }
 
 

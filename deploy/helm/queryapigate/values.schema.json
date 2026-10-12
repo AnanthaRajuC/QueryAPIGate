@@ -98,6 +98,11 @@
                      "maxReplicas": {"type": "integer", "minimum": 1},
                      "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}}
     },
+    "configAsCode": {"type": "object", "additionalProperties": false,
+                     "properties": {"enabled": {"type": "boolean"}, "file": {"type": "string"},
+                                    "existingConfigMap": {"type": "string"},
+                                    "key": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+                                    "prune": {"type": "boolean"}, "locked": {"type": "boolean"}}},
     "extraVolumes": {"type": "array", "items": {"type": "object", "required": ["name"]}},
     "extraVolumeMounts": {"type": "array", "items": {"type": "object", "required": ["name", "mountPath"]}},
     "podAnnotations": {"type": "object"}, "podLabels": {"type": "object"},

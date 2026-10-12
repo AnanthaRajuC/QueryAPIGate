@@ -7,6 +7,7 @@ import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 
 import { useDestinations, useReport } from './shared';
+import { ManagedTag } from '@/components/Managed';
 
 // Where exports may write (ADR 0004), on /api/v1/destinations: a bucket prefix or a folder, and its credentials.
 
@@ -81,7 +82,9 @@ export function DestinationsPage() {
           <tbody>
             {list.data.map((d) => (
               <tr key={d.name} data-name={d.name}>
-                <td className="name">{d.name}</td>
+                <td>
+                  <span className="name">{d.name}</span> <ManagedTag kind="destinations" name={d.name} />
+                </td>
                 <td className="mono">{d.url}</td>
                 <td className="dim">
                   {[d.storage ?? 'local folder', d.region, d.endpoint].filter(Boolean).join(' · ')}

@@ -311,6 +311,17 @@ SCHEMAS = {
                                       'properties': {'kind': {'type': 'string'}, 'name': {'type': 'string'}}}},
         },
     },
+    'ConfigManaged': {
+        'type': 'object', 'required': ['locked', 'items'],
+        'properties': {
+            'locked': {'type': 'boolean', 'description': 'QUERYAPIGATE_CONFIG_LOCKED is on.'},
+            'items': {'type': 'array', 'items': {
+                'type': 'object', 'required': ['kind', 'name', 'applied_at', 'file_sha256'],
+                'properties': {'kind': {'type': 'string'}, 'name': {'type': 'string'},
+                               'applied_at': {'type': 'string'},
+                               'file_sha256': {'type': 'string', 'description': 'The file that last applied it.'}}}},
+        },
+    },
     'ConfigApplied': {
         'type': 'object', 'required': ['changes', 'not_in_file', 'applied'],
         'properties': {
@@ -318,6 +329,7 @@ SCHEMAS = {
             'not_in_file': {'type': 'array', 'items': {'type': 'object'}},
             'applied': {'type': 'boolean', 'description': 'False when nothing needed changing, or for a dry run.'},
             'file_sha256': {'type': 'string', 'description': "The file's hash, as the audit log names it."},
+            'already_applied': {'type': 'boolean'},
         },
     },
     'AgentUsage': {
@@ -1230,6 +1242,12 @@ PATHS = {
                     description='The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with '
                                 'problems answers 400 `invalid_config`, listing every one in `problems`. Owners '
                                 'only (`config.apply`).'),
+    },
+    '/api/v1/config/managed': {
+        'get': _op('What a configuration file manages, and whether the server takes changes to it only from a file',
+                   {'200': _ok(_ref('ConfigManaged'))},
+                   description='With `locked` (QUERYAPIGATE_CONFIG_LOCKED), changing any of these through this '
+                               'API answers 409 `config_managed`.'),
     },
     '/api/v1/config/apply': {
         'post': _op('Make the server match a configuration file, all or nothing',

@@ -23,7 +23,7 @@ spec:
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           command: ["queryapigate", "{{ $component }}", "--host", "0.0.0.0", "--port", "{{ $spec.port }}"]
           ports: [{name: http, containerPort: {{ $spec.port }}}]
-          {{- include "queryapigate.env" $ | nindent 10 }}
+          {{- include "queryapigate.env" (dict "root" $ "server" false) | nindent 10 }}
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 10

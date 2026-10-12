@@ -64,6 +64,25 @@ def load_examples():
     return env_flag('QUERYAPIGATE_LOAD_EXAMPLES')
 
 
+def config_file():
+    """QUERYAPIGATE_CONFIG_FILE: a configuration file (ADR 0014) applied at startup, before the server serves - once per
+    file: an instance that finds it already applied leaves the store alone. None when unset."""
+    raw = os.environ.get('QUERYAPIGATE_CONFIG_FILE', '').strip()
+    return Path(raw) if raw else None
+
+
+def config_prune():
+    """QUERYAPIGATE_CONFIG_PRUNE: applying QUERYAPIGATE_CONFIG_FILE at startup also deletes what a file manages and this
+    one no longer has (`config apply --prune`)."""
+    return env_flag('QUERYAPIGATE_CONFIG_PRUNE')
+
+
+def config_locked():
+    """QUERYAPIGATE_CONFIG_LOCKED: what a configuration file manages can be changed only through a file - the API and
+    the Console answer 409 config_managed (ADR 0014)."""
+    return env_flag('QUERYAPIGATE_CONFIG_LOCKED')
+
+
 def home():
     """Folder holding queryapigate.db (QUERYAPIGATE_HOME, default: current directory)."""
     return _resolved_home(os.environ.get('QUERYAPIGATE_HOME') or '', os.getcwd())
@@ -335,6 +354,13 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_LOAD_EXAMPLES', '').strip().lower()
     if raw not in _FLAG_WORDS:
         raise ValueError(f"QUERYAPIGATE_LOAD_EXAMPLES must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
+    for name in ('QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED'):
+        raw = os.environ.get(name, '').strip().lower()
+        if raw not in _FLAG_WORDS:
+            raise ValueError(f"{name} must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
+    if config_prune() and config_file() is None:
+        raise ValueError('QUERYAPIGATE_CONFIG_PRUNE is set but QUERYAPIGATE_CONFIG_FILE is not - prune what, against '
+                         'which file?')
     raw = os.environ.get('QUERYAPIGATE_RATE_LIMIT', '').strip()
     if raw:
         parse_rate_limit(raw)
@@ -1004,6 +1030,13 @@ def describe_settings():
                 else f'PostgreSQL ({redact_url(database_url())})', secret=True),
             row('Load examples', 'Load the example APIs at startup. Idempotent.',
                 'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples())),
+            row('Configuration file', 'A configuration file applied at startup, once per file - connections, '
+                'queries, roles, keys and the rest as code (ADR 0014).', 'QUERYAPIGATE_CONFIG_FILE',
+                str(config_file()) if config_file() else 'none'),
+            row('Prune at startup', 'Applying it also deletes what a file manages and this one no longer has.',
+                'QUERYAPIGATE_CONFIG_PRUNE', on_off(config_prune())),
+            row('Locked to the file', 'What a file manages can be changed only through a file, not here or the API.',
+                'QUERYAPIGATE_CONFIG_LOCKED', on_off(config_locked())),
             row('H2 driver', 'JAR used for h2 connections.', 'QUERYAPIGATE_H2_JAR',
                 Path(h2_jar()).name + ('' if os.environ.get('QUERYAPIGATE_H2_JAR') else ' (bundled)'))]},
         {'id': 'security', 'title': 'Security',

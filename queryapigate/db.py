@@ -32,7 +32,7 @@ SCHEMA_VERSION = 15  # 3: execution_history.status/key_name; 4: saved_queries.pu
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
-#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed
+#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied
 #                    - see _upgrade()
 
 _local = threading.local()
@@ -258,6 +258,13 @@ CREATE TABLE IF NOT EXISTS config_managed (
   file_hash TEXT NOT NULL,     -- SHA-256 of the file that last applied it
   PRIMARY KEY (kind, name)
 );
+-- Every configuration file applied, by its hash: QUERYAPIGATE_CONFIG_FILE is applied at startup once per file, by
+-- whichever instance starts first.
+CREATE TABLE IF NOT EXISTS config_applied (
+  file_hash TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL,
+  actor TEXT NOT NULL
+);
 """
 
 
@@ -466,6 +473,11 @@ CREATE TABLE IF NOT EXISTS config_managed (
   applied_at TEXT NOT NULL,
   file_hash TEXT NOT NULL,
   PRIMARY KEY (kind, name)
+);
+CREATE TABLE IF NOT EXISTS config_applied (
+  file_hash TEXT COLLATE "C" PRIMARY KEY,
+  applied_at TEXT NOT NULL,
+  actor TEXT NOT NULL
 );
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
@@ -691,7 +703,7 @@ def _upgrade(conn, postgres):
         entry says from when the chain holds. A 0.24 process still running writes entries without a link; the next
         upgraded write links them in (auditchain.append() chains any it finds), so nothing is lost - but upgrade
         every instance.
-    15: config_managed (ADR 0014) - a new table, made by CREATE TABLE IF NOT EXISTS; additive."""
+    15: config_managed and config_applied (ADR 0014) - new tables, made by CREATE TABLE IF NOT EXISTS; additive."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -937,6 +949,7 @@ _MIGRATED_TABLES = (
                         'idempotency_hash', 'details_json'), 'created_at, id'),
     ('usage_counters', ('caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
     ('config_managed', ('kind', 'name', 'applied_at', 'file_hash'), 'kind, name'),
+    ('config_applied', ('file_hash', 'applied_at', 'actor'), 'file_hash'),
 )
 
 

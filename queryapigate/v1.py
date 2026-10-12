@@ -44,8 +44,11 @@ bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
 @bp.before_request
 def admin_only():
-    """Administrators only, each operation to the roles whose capabilities include it (adminroles.py)."""
+    """Administrators only, each operation to the roles whose capabilities include it (adminroles.py) - and with
+    QUERYAPIGATE_CONFIG_LOCKED, nothing a configuration file manages changed but through a file (ADR 0014)."""
     adminroles.authorize(g.permission, request.endpoint)
+    from . import configcode
+    configcode.refuse_if_locked(request.endpoint, request.view_args)
 
 
 def _check_if_match(content):
@@ -791,6 +794,13 @@ def config_diff():
     """What applying the configuration file in the body would change, field by field - nothing is written."""
     from . import configcode
     return jsonify(configcode.diff(_config_document(), prune=_flag('prune'))), 200
+
+
+@bp.route('/config/managed', methods=['GET'])
+def config_managed():
+    """What a configuration file manages, and whether QUERYAPIGATE_CONFIG_LOCKED keeps it to the file."""
+    from . import configcode
+    return jsonify(configcode.managed_listing()), 200
 
 
 @bp.route('/config/apply', methods=['POST'])

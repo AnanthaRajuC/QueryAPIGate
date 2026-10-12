@@ -103,6 +103,34 @@ class ShapeTests(unittest.TestCase):
             self.assertIn({'name': 'siem-tls', 'mountPath': '/etc/queryapigate/siem', 'readOnly': True},
                           pod['containers'][0]['volumeMounts'])
 
+    def test_a_configuration_file_for_the_api_server_only(self):
+        """configAsCode (ADR 0014): the file in a ConfigMap, mounted on the API server pods - which apply it as they
+        start - and its checksum on them, so a change rolls them."""
+        text = 'format: queryapigate-config\nformat_version: 1\nroles: []\n'
+        docs = render(*POSTGRES, '--set', 'events.enabled=true', '--set', 'configAsCode.enabled=true',
+                      '--set-string', f'configAsCode.file={text}', '--set', 'configAsCode.locked=true')
+        self.assertEqual(by_kind(docs, 'ConfigMap', 'qag-queryapigate-config')[0]['data'], {'queryapigate.yaml': text})
+        server = by_kind(docs, 'Deployment', 'qag-queryapigate')[0]
+        env = {e['name']: e.get('value') for e in container(server)['env']}
+        self.assertEqual((env['QUERYAPIGATE_CONFIG_FILE'], env['QUERYAPIGATE_CONFIG_LOCKED']),
+                         ('/etc/queryapigate/config/queryapigate.yaml', '1'))
+        self.assertNotIn('QUERYAPIGATE_CONFIG_PRUNE', env)
+        self.assertIn({'name': 'config-file', 'mountPath': '/etc/queryapigate/config', 'readOnly': True},
+                      container(server)['volumeMounts'])
+        self.assertIn('checksum/config-file', server['spec']['template']['metadata']['annotations'])
+        events = by_kind(docs, 'Deployment', 'qag-queryapigate-events')[0]
+        self.assertFalse(any(e['name'].startswith('QUERYAPIGATE_CONFIG') for e in container(events)['env']))
+        self.assertNotIn('checksum/config-file', events['spec']['template']['metadata']['annotations'])
+
+    def test_a_configuration_file_from_your_own_config_map(self):
+        docs = render(*SECRET, '--set', 'configAsCode.enabled=true', '--set', 'configAsCode.existingConfigMap=mine',
+                      '--set', 'configAsCode.key=prod.yaml')
+        self.assertFalse(by_kind(docs, 'ConfigMap'))
+        pod = by_kind(docs, 'Deployment')[0]['spec']['template']['spec']
+        self.assertIn({'name': 'config-file', 'configMap': {'name': 'mine'}}, pod['volumes'])
+        env = {e['name']: e.get('value') for e in pod['containers'][0]['env']}
+        self.assertEqual(env['QUERYAPIGATE_CONFIG_FILE'], '/etc/queryapigate/config/prod.yaml')
+
     def test_the_optional_parts(self):
         docs = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'networkPolicy.enabled=true',
                       '--set', 'autoscaling.enabled=true')
@@ -156,7 +184,11 @@ class RefusalTests(unittest.TestCase):
                 ((*SECRET, '--set', 'autoscaling.enabled=true'), 'runs one pod'),
                 ((*SECRET, '--set', 'replica=3'), 'replica'),  # a typo: the values schema
                 ((*SECRET, '--set', 'config.allow_writes=1'), 'allow_writes'),
-                ((*SECRET, '--set', 'store.type=mysql'), 'store/type')):
+                ((*SECRET, '--set', 'store.type=mysql'), 'store/type'),
+                ((*SECRET, '--set', 'configAsCode.enabled=true'), 'configAsCode.enabled needs the file'),
+                ((*SECRET, '--set', 'configAsCode.enabled=true', '--set', 'configAsCode.file=x',
+                  '--set', 'configAsCode.existingConfigMap=y'), 'choose one'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_CONFIG_FILE=/x'), 'through configAsCode')):
             failed, stderr = refused(*args)
             self.assertTrue(failed, args)
             self.assertIn(words, stderr, args)

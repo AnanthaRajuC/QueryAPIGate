@@ -29,6 +29,7 @@ import {
   StatTiles,
 } from './tabs';
 import { Time } from '@/components/Time';
+import { ManagedTag } from '@/components/Managed';
 
 // The classic saved-query detail panel (ui.py renderDetail): title row with the version switcher and actions,
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
@@ -116,7 +117,9 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
     <div id="query-detail" className="panel detail">
       <div className="d-head">
         <div className="d-title">
-          <h3>{query.name}</h3>
+          <h3>
+            {query.name} <ManagedTag kind="queries" name={query.name} />
+          </h3>
           {query.versions.length > 1 ? (
             <div className="versions" role="group" aria-label="Version">
               {query.versions.map((x) => (

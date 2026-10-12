@@ -353,3 +353,39 @@ describe('Roles', () => {
     expect(await screen.findByText('Deleted role analyst')).toBeInTheDocument();
   });
 });
+
+describe('Managed by a configuration file', () => {
+  const managed = (locked: boolean) => ({
+    ...routes(),
+    'GET /api/v1/config/managed': () => ({
+      locked,
+      items: [
+        { kind: 'roles', name: 'analyst', applied_at: '2026-10-12 09:00:00', file_sha256: 'ab'.repeat(32) },
+      ],
+    }),
+  });
+
+  it('tags what a file manages, and says when it is locked to the file', async () => {
+    fakeBackend(managed(false));
+    renderAt('/roles');
+    const analyst = await waitFor(() => {
+      const found = rolesTable().querySelector('tr[data-name="analyst"]') as HTMLElement;
+      expect(within(found).getByText('managed')).toBeInTheDocument();
+      return found;
+    });
+    expect(within(analyst).getByText('managed').getAttribute('title')).toContain('shows as drift');
+  });
+
+  it('says locked when the server takes changes only from a file', async () => {
+    fakeBackend(managed(true));
+    renderAt('/roles');
+    expect(await screen.findByText('managed · locked')).toBeInTheDocument();
+  });
+
+  it('tags nothing a file does not manage', async () => {
+    fakeBackend(routes());
+    renderAt('/roles');
+    await waitFor(() => expect(rolesTable().querySelector('tr[data-name="analyst"]')).not.toBeNull());
+    expect(screen.queryByText('managed')).toBeNull();
+  });
+});

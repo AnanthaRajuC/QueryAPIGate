@@ -376,6 +376,15 @@ body.reduce-motion {
   font-size: 10.5px;
   vertical-align: middle;
 }
+.tag.managed {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+}
+h3 .tag.managed {
+  margin-left: 4px;
+  font-weight: 400;
+}
 h1 .tag.experimental {
   margin-left: 4px;
   font-weight: 400;

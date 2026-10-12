@@ -34,7 +34,7 @@ spec:
           image: {{ include "queryapigate.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{name: http, containerPort: 5000}]
-          {{- include "queryapigate.env" . | nindent 10 }}
+          {{- include "queryapigate.env" (dict "root" . "server" true) | nindent 10 }}
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 10
@@ -51,6 +51,9 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- if .Values.configAsCode.enabled }}
+            - {name: config-file, mountPath: /etc/queryapigate/config, readOnly: true}
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -63,6 +66,10 @@ spec:
         - {name: data, emptyDir: {}}   # the store is PostgreSQL: nothing kept here
         {{- end }}
         - {name: tmp, emptyDir: {}}
+        {{- if .Values.configAsCode.enabled }}
+        - name: config-file
+          configMap: {name: {{ include "queryapigate.configMapName" . }}}
+        {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

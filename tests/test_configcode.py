@@ -695,3 +695,115 @@ class CliApplyTests(ConfigTestCase):
         self.assertEqual(apikeys.list_roles()['partner']['rate_limit'], '10/minute')
         code, out, _ = self.cli('config', 'apply', '-', stdin=text)
         self.assertIn('No changes: the server matches the file.', out)
+
+
+# --------------------------------------------------------------------------------------
+# Slice 3: applied at startup, and locked to the file
+# --------------------------------------------------------------------------------------
+
+class StartupTests(ConfigTestCase):
+    def write(self, doc):
+        path = os.path.join(self.tmp.name, 'queryapigate.yaml')
+        with open(path, 'w') as f:
+            yaml.safe_dump(doc, f)
+        return path
+
+    def start(self, path, **env):
+        from queryapigate import create_app
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CONFIG_FILE': path, **env}):
+            return create_app()
+
+    def test_the_file_is_applied_before_serving(self):
+        path = self.write(self.file(roles=[{'name': 'from-the-file', 'connections': []}]))
+        with self.assertLogs('queryapigate', 'INFO') as logs:
+            self.start(path)
+        self.assertIn('from-the-file', apikeys.list_roles())
+        self.assertTrue(any('1 created, 0 changed, 0 deleted' in line for line in logs.output))
+        entry = json.loads(db.connection().execute(
+            "SELECT entry_json FROM audit_log WHERE entry_json LIKE '%config_applied%'").fetchone()[0])
+        self.assertEqual(entry['actor'], 'startup')
+
+    def test_once_per_file_so_a_console_change_survives_a_restart(self):
+        path = self.write(self.file(roles=[{'name': 'r', 'connections': [], 'rate_limit': '5/minute'}]))
+        self.start(path)
+        apikeys.update_role('r', rate_limit='50/minute')  # changed in the Console since
+        with self.assertLogs('queryapigate', 'INFO') as logs:
+            self.start(path)  # a restart, or the next instance
+        self.assertEqual(apikeys.list_roles()['r']['rate_limit'], '50/minute')
+        self.assertTrue(any('is already applied' in line for line in logs.output))
+        self.assertEqual(configcode.apply(configcode.load(open(path).read()))['changes'][0]['fields'],
+                         {'rate_limit': {'from': '50/minute', 'to': '5/minute'}})  # applied by hand, it does
+
+    def test_a_file_that_cant_be_applied_stops_startup_changing_nothing(self):
+        path = self.write(self.file(roles=[{'name': 'r'}], connections=[{'name': 'c', 'db': 'mysql',
+                                                                          'password': 'plain'}]))
+        with self.assertRaises(ValueError) as caught:
+            self.start(path)
+        self.assertIn('was not applied - nothing in it was. connections[c]: password must be a ${VAR}',
+                      str(caught.exception))
+        self.assertEqual(apikeys.list_roles(), {})
+        with self.assertRaises(ValueError) as caught:
+            self.start(os.path.join(self.tmp.name, 'missing.yaml'))
+        self.assertIn('could not be read', str(caught.exception))
+
+    def test_prune_needs_a_file(self):
+        from queryapigate import config
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CONFIG_PRUNE': '1'}):
+            with self.assertRaises(ValueError) as caught:
+                config.check_settings()
+        self.assertIn('QUERYAPIGATE_CONFIG_FILE is not', str(caught.exception))
+
+    def test_with_prune_startup_deletes_what_the_file_dropped(self):
+        self.start(self.write(self.file(roles=[{'name': 'a', 'connections': []}, {'name': 'b', 'connections': []}])))
+        self.start(self.write(self.file(roles=[{'name': 'a', 'connections': []}])), QUERYAPIGATE_CONFIG_PRUNE='1')
+        self.assertEqual(set(apikeys.list_roles()), {'a'})
+
+
+class LockTests(ConfigTestCase):
+    def setUp(self):
+        super().setUp()
+        self.build()
+        doc, _, _ = configcode.export(kinds=('queries', 'roles', 'connections'))
+        configcode.apply(doc)
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        from queryapigate import create_app
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin-key'}
+
+    def locked(self):
+        return mock.patch.dict(os.environ, {'QUERYAPIGATE_CONFIG_LOCKED': '1'})
+
+    def test_what_a_file_manages_changes_only_through_a_file(self):
+        with self.locked():
+            for method, path, body in (
+                    ('patch', '/api/v1/roles/partner', {'rate_limit': '1/minute'}),
+                    ('delete', '/api/v1/queries/loose', None),
+                    ('post', '/api/v1/queries/loose/versions', {'sql': 'SELECT 2', 'description': 'd'}),
+                    ('patch', '/api/v1/connections/legacy', {'host': 'elsewhere'}),
+                    ('patch', '/api/v1/collections/finance', {'name': 'money'})):
+                response = getattr(self.client, method)(path, json=body, headers=self.admin)
+                with self.subTest(path=path):
+                    self.assertEqual((response.status_code, response.get_json()['code']), (409, 'config_managed'))
+            # what no file manages is as it always was
+            self.assertEqual(self.client.patch('/api/v1/api-keys/ops', json={'rate_limit': '1/minute'},
+                                               headers=self.admin).status_code, 200)
+            # and the file itself still can
+            doc, _, _ = configcode.export(kinds=('roles',))
+            doc['roles'][0]['rate_limit'] = '1/minute'
+            self.assertEqual(self.client.post('/api/v1/config/apply', json=doc, headers=self.admin).status_code, 200)
+        self.assertEqual(apikeys.list_roles()['partner']['rate_limit'], '1/minute')
+
+    def test_unlocked_the_api_changes_anything_and_the_diff_shows_the_drift(self):
+        response = self.client.patch('/api/v1/roles/partner', json={'rate_limit': '1/minute'}, headers=self.admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/config/managed', headers=self.admin).get_json()['locked'], False)
+        doc, _, _ = configcode.export(kinds=('roles',))
+        doc['roles'][0]['rate_limit'] = '60/minute'
+        change = configcode.diff(doc)['changes'][0]
+        self.assertEqual(change['fields'], {'rate_limit': {'from': '1/minute', 'to': '60/minute'}})
+
+    def test_the_managed_listing(self):
+        with self.locked():
+            body = self.client.get('/api/v1/config/managed', headers=self.admin).get_json()
+        self.assertTrue(body['locked'])
+        self.assertIn(('roles', 'partner'), [(i['kind'], i['name']) for i in body['items']])

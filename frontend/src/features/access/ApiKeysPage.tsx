@@ -7,6 +7,7 @@ import { useAccessDrawers, useRevokeKey } from './forms';
 import { ScopeNode } from './grants';
 import { Time } from '@/components/Time';
 import { PencilIcon } from '@/components/icons';
+import { ManagedTag } from '@/components/Managed';
 
 // The classic API keys screen (ui.py #tab-apikeys, renderApiKeys), on /api/v1/api-keys.
 
@@ -130,6 +131,7 @@ export function ApiKeysPage() {
                       >
                         {name}
                       </span>
+                      <ManagedTag kind="api_keys" name={name} />
                       {k.previous_expires_at ? (
                         <span className="tag" title="Rotated: the old secret works until then too">
                           rotating

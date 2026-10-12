@@ -10,6 +10,7 @@ import { Time } from '@/components/Time';
 import { useDestinations, useExports, useReport } from './shared';
 import { MaskRulesField } from '@/features/access/MaskRules';
 import { maskPayload, type MaskRule } from '@/features/access/maskRules';
+import { ManagedTag } from '@/components/Managed';
 
 // Saved exports (ADR 0004), on /api/v1/exports: a saved query delivered to a destination, run by a scheduler or here.
 
@@ -91,6 +92,7 @@ export function ExportsPage() {
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="name">{x.name}</span>
+                    <ManagedTag kind="exports" name={x.name} />
                     {x.running && <span className="tag">running</span>}
                   </div>
                 </td>

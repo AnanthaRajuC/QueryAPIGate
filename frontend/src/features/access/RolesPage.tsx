@@ -5,6 +5,7 @@ import { AccessCell } from '@/features/repository/reach';
 
 import { useAccessDrawers, useDeleteRole } from './forms';
 import { ExampleBadge, queryGrantTags } from './grants';
+import { ManagedTag } from '@/components/Managed';
 
 // The classic Roles screen (ui.py #tab-roles, renderRoles), on /api/v1/roles.
 
@@ -70,6 +71,7 @@ export function RolesPage() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span className="name">{name}</span>
+                      <ManagedTag kind="roles" name={name} />
                       {r.example && <ExampleBadge />}
                       {r.mask?.length ? (
                         <span

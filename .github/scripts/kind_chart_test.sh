@@ -111,6 +111,61 @@ echo "$RESULT" | grep -q '^RESULT ok=[1-9][0-9]* failed=0$' || { echo 'requests 
 kubectl -n pg get pods -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image}{"\n"}{end}' \
   | grep qag-queryapigate
 
+# ---- configuration as code (ADR 0014) ----
+say "a configuration file through the chart: applied once, by the first new pod, and locked to the file"
+CONFIG_DIR=$(mktemp -d)
+cat > "$CONFIG_DIR/good.yaml" <<'YAML'
+format: queryapigate-config
+format_version: 1
+queries:
+  - name: from_the_file
+    connection_name: cluster_db
+    description: Made by the configuration file
+    sql: SELECT COUNT(*) AS tables FROM information_schema.tables
+YAML
+CURRENT=(--set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAGE")")
+helm upgrade qag "$CHART" "${COMMON[@]}" "${CURRENT[@]}" --set configAsCode.enabled=true \
+  --set-file configAsCode.file="$CONFIG_DIR/good.yaml" --set configAsCode.locked=true --wait --timeout 6m
+kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
+LOGS=$(kubectl -n pg logs -l app.kubernetes.io/component=server --tail=-1)
+APPLIED=$(echo "$LOGS" | grep -c 'Applied QUERYAPIGATE_CONFIG_FILE' || true)
+ALREADY=$(echo "$LOGS" | grep -c 'is already applied' || true)
+echo "pods that applied the file: $APPLIED, that found it applied: $ALREADY"
+[ "$APPLIED" = 1 ] && [ "$ALREADY" = 2 ] || { echo 'expected one pod to apply the file and two to find it applied'; exit 1; }
+kubectl -n pg run config-check --rm -i --restart=Never --image="$IMAGE" --command -- python -c "
+import json, urllib.error, urllib.request
+headers = {'X-API-Key': 'ci-key', 'Content-Type': 'application/json'}
+rows = json.load(urllib.request.urlopen(urllib.request.Request('http://qag-queryapigate/q/from_the_file', headers=headers),
+                                        timeout=10))
+print('the query from the file answers:', rows)
+try:
+    urllib.request.urlopen(urllib.request.Request('http://qag-queryapigate/api/v1/queries/from_the_file', method='DELETE',
+                                                  headers=headers), timeout=10)
+    raise SystemExit('a managed query was deleted through the API, with the lock on')
+except urllib.error.HTTPError as error:
+    body = json.load(error)
+    assert (error.code, body['code']) == (409, 'config_managed'), (error.code, body)
+    print('deleting it through the API:', error.code, body['code'])
+"
+
+say "a file that can't be applied stops the rollout at its first pod; the others keep serving"
+cat > "$CONFIG_DIR/bad.yaml" <<'YAML'
+format: queryapigate-config
+format_version: 1
+connections:
+  - {name: leaky, db: postgres, host: postgres, password: a-literal-password}
+YAML
+if helm upgrade qag "$CHART" "${COMMON[@]}" "${CURRENT[@]}" --set configAsCode.enabled=true \
+    --set-file configAsCode.file="$CONFIG_DIR/bad.yaml" --wait --timeout 90s; then
+  echo 'a file with a literal password was applied'; exit 1
+fi
+kubectl -n pg logs -l app.kubernetes.io/component=server --tail=-1 --prefix | grep 'was not applied' | head -1 || true
+READY=$(kubectl -n pg get deploy qag-queryapigate -o jsonpath='{.status.readyReplicas}')
+echo "pods still serving: $READY"
+[ "$READY" = 3 ] || { echo 'the rollout took serving pods down'; exit 1; }
+helm rollback qag --namespace pg --wait --timeout 6m
+kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
+
 # ---- one pod on SQLite ----
 say "the SQLite shape: one pod, its store on a volume that outlives the pod"
 kubectl create namespace lite

@@ -70,6 +70,19 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq .Values.store.type "postgres") .Values.secret.create (not (hasKey .Values.secret.values "QUERYAPIGATE_DATABASE_URL")) -}}
 {{- fail "store.type postgres needs QUERYAPIGATE_DATABASE_URL in secret.values (or in your existingSecret)." -}}
 {{- end -}}
+{{- with .Values.configAsCode -}}
+{{- if and .enabled (not .file) (not .existingConfigMap) -}}
+{{- fail "configAsCode.enabled needs the file: configAsCode.file (the YAML, inline) or configAsCode.existingConfigMap." -}}
+{{- end -}}
+{{- if and .file .existingConfigMap -}}
+{{- fail "configAsCode.file and configAsCode.existingConfigMap are two ways to give the file - choose one." -}}
+{{- end -}}
+{{- end -}}
+{{- range $name := list "QUERYAPIGATE_CONFIG_FILE" "QUERYAPIGATE_CONFIG_PRUNE" "QUERYAPIGATE_CONFIG_LOCKED" -}}
+{{- if hasKey $.Values.config $name -}}
+{{- fail (printf "Set %s through configAsCode, not config - the chart mounts the file and sets it." $name) -}}
+{{- end -}}
+{{- end -}}
 {{- /* config is plain env in the Deployment, read by anyone who can get deployments: no secrets there. */ -}}
 {{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
 {{- if hasKey $.Values.config $name -}}
@@ -80,16 +93,31 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* The environment every QueryAPIGate process gets: the Secret, then config, then what the chart itself knows. */}}
 {{- define "queryapigate.env" -}}
+{{- $root := .root -}}
 envFrom:
-  - secretRef: {name: {{ include "queryapigate.secretName" . }}}
+  - secretRef: {name: {{ include "queryapigate.secretName" $root }}}
 env:
   - {name: QUERYAPIGATE_HOME, value: /data}
-  {{- if and .Values.ingress.enabled (not (hasKey .Values.config "QUERYAPIGATE_TRUST_PROXY")) }}
+  {{- if and $root.Values.ingress.enabled (not (hasKey $root.Values.config "QUERYAPIGATE_TRUST_PROXY")) }}
   - {name: QUERYAPIGATE_TRUST_PROXY, value: "1"}   # one proxy in front: the ingress controller
   {{- end }}
-  {{- range $name, $value := .Values.config }}
+  {{- range $name, $value := $root.Values.config }}
   - {name: {{ $name }}, value: {{ $value | toString | quote }}}
   {{- end }}
+  {{- if and .server $root.Values.configAsCode.enabled }}
+  # the API server applies the file as it starts, once per file (ADR 0014)
+  - {name: QUERYAPIGATE_CONFIG_FILE, value: {{ printf "/etc/queryapigate/config/%s" $root.Values.configAsCode.key | quote }}}
+  {{- if $root.Values.configAsCode.prune }}
+  - {name: QUERYAPIGATE_CONFIG_PRUNE, value: "1"}
+  {{- end }}
+  {{- if $root.Values.configAsCode.locked }}
+  - {name: QUERYAPIGATE_CONFIG_LOCKED, value: "1"}
+  {{- end }}
+  {{- end }}
+{{- end -}}
+
+{{- define "queryapigate.configMapName" -}}
+{{- .Values.configAsCode.existingConfigMap | default (printf "%s-config" (include "queryapigate.fullname" .)) -}}
 {{- end -}}
 
 {{/* The pod-level settings every Deployment shares. */}}
@@ -118,6 +146,10 @@ affinity: {{- toYaml . | nindent 2 }}
 {{- define "queryapigate.podMetadata" -}}
 annotations:
   checksum/config: {{ toJson .root.Values.config | sha256sum | trunc 16 }}
+  {{- if and (eq .component "server") .root.Values.configAsCode.enabled .root.Values.configAsCode.file }}
+  # a change to the file rolls the API server pods, and the first new one applies it
+  checksum/config-file: {{ .root.Values.configAsCode.file | sha256sum | trunc 16 }}
+  {{- end }}
   {{- if .root.Values.secret.create }}
   checksum/secret: {{ toJson .root.Values.secret.values | sha256sum | trunc 16 }}
   {{- end }}

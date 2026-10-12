@@ -91,6 +91,30 @@ class JSONProvider(DefaultJSONProvider):
     sort_keys = False  # keep result columns in the order the query returned them
 
 
+def apply_config_at_startup():
+    """QUERYAPIGATE_CONFIG_FILE (ADR 0014): apply it before serving - once per file, so with several instances the first
+    to start applies it and the others find it done. A file that can't be applied stops startup, changing nothing:
+    in a rolling update the new pods don't come up, and the ones still serving keep the configuration they have."""
+    from . import configcode
+    path = config.config_file()
+    if path is None:
+        return
+    try:
+        doc = configcode.load(path.read_text())
+        result = configcode.apply(doc, prune=config.config_prune(), actor='startup', once=True)
+    except OSError as error:
+        raise ValueError(f'QUERYAPIGATE_CONFIG_FILE {path} could not be read: {error}') from None
+    except configcode.ConfigInvalid as error:
+        raise ValueError(f'QUERYAPIGATE_CONFIG_FILE {path} was not applied - nothing in it was. '
+                         + '; '.join(error.problems)) from None
+    if result.get('already_applied'):
+        log.info('QUERYAPIGATE_CONFIG_FILE %s (sha256 %s) is already applied', path, result['file_sha256'][:12])
+    else:
+        counts = {a: sum(1 for c in result['changes'] if c['action'] == a) for a in ('create', 'update', 'delete')}
+        log.info('Applied QUERYAPIGATE_CONFIG_FILE %s (sha256 %s): %d created, %d changed, %d deleted', path,
+                 result['file_sha256'][:12], counts['create'], counts['update'], counts['delete'])
+
+
 def load_examples_at_startup():
     """QUERYAPIGATE_LOAD_EXAMPLES=yes: make sure the example APIs are installed. A problem (something of yours
     holds an example's name, the home is read-only) is a warning, not a startup failure - the examples are a
@@ -190,6 +214,7 @@ def create_app():
     _note_audit_key_rotation()
     from . import auditstream
     auditstream.start()  # the audit log to a SIEM, when an output is set (ADR 0012)
+    apply_config_at_startup()
     if config.load_examples():
         load_examples_at_startup()
     app.json = JSONProvider(app)

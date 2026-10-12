@@ -668,6 +668,20 @@ that changes nothing writes nothing, so applying the same file twice records not
   and no file has named - and, for a connection the file lists descriptions for, the descriptions it doesn't list.
   Deleting is refused where the API refuses it (a destination an export writes to), and changes nothing then.
 
+**At startup, for GitOps.** `QUERYAPIGATE_CONFIG_FILE` names a file the server applies as it starts, before it serves
+- once per file: every file applied is recorded by its hash (`config_applied`), so with several instances the first to
+start applies it, under the store's write lock, and the others find it done; and a change made since in the Console
+isn't undone at every restart (applying the file by hand does undo it). A file that can't be applied stops startup
+with its problems, changing nothing - in a rolling update the new pods don't come up, and the ones still serving keep
+what they have. `QUERYAPIGATE_CONFIG_PRUNE=1` prunes at startup too. The Helm chart's `configAsCode` mounts the file
+and sets these ([DEPLOYMENT.md](DEPLOYMENT.md#kubernetes-helm)).
+
+**Locked to the file.** With `QUERYAPIGATE_CONFIG_LOCKED=1`, what a file manages changes only through a file: every
+`/api/v1` change to one of those objects - an edit, a delete, a new version, a rotation, renaming a collection a
+managed query is in - answers `409 config_managed`. Running an export, and everything no file manages, works as
+always. `GET /api/v1/config/managed` lists what's managed and whether it's locked; the Console tags each such object
+*managed* (or *managed · locked*). Without the lock, a change made in the Console shows as drift in `config diff`.
+
 ## Example APIs
 
 Four worked scenarios (reporting, dashboard, export, partner) ship with the package and can be loaded into a home
@@ -1935,6 +1949,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_filter` | 400 | A bad history/audit filter (`status`, `kind`, `since`, `until`, `limit`, `cursor`) or Mongo filter |
 | `invalid_bundle` | 400 | A collection bundle that isn't one, or is malformed |
 | `invalid_config` | 400 | A configuration file (ADR 0014) that isn't one, or has problems - each one listed in `problems` |
+| `config_managed` | 409 | With `QUERYAPIGATE_CONFIG_LOCKED`, a change to something a configuration file manages - change it in the file |
 | `sql_required` | 400 | No SQL given |
 | `connection_required` | 400 | No connection named, and the saved query has none |
 | `collection_required` | 400 | No collection named |

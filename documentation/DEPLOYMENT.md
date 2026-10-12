@@ -407,6 +407,7 @@ on the PostgreSQL store with Redis. They roll one at a time, and a new pod must 
 | Observability | `serviceMonitor.enabled` for the Prometheus Operator ([section 6](#6-observability)). Tracing through `config` (`OTEL_EXPORTER_OTLP_ENDPOINT`). |
 | Network | `networkPolicy.enabled`: in only from `networkPolicy.ingressFrom`, out only to `networkPolicy.egress` and DNS. List your databases, Redis and the SIEM there. |
 | Scale | `autoscaling.enabled`, CPU-based, PostgreSQL shape only. |
+| Configuration as code | `configAsCode.enabled` with `configAsCode.file` (or `existingConfigMap`): connections, queries, roles, keys and the rest as one file in git, applied by the first new API server pod as it starts, once per file ([Configuration as code](API.md#configuration-as-code), experimental). A change to it rolls the pods; a file that can't be applied stops the rollout at its first pod. `locked: true` keeps what it manages to the file. |
 
 Two things to know:
 - **Changing a Secret you manage doesn't restart the pods**, since the chart can't see inside it. Run
