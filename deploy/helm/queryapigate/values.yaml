@@ -20,8 +20,8 @@ store:
     accessModes: [ReadWriteOnce]
     existingClaim: ""  # use a PersistentVolumeClaim you made instead
 
-# Pods of the API server. More than one needs store.type postgres and Redis (QUERYAPIGATE_REDIS_URL in the secret or
-# in config), or rate limits, max_concurrent and quotas would each be counted per pod - the chart refuses.
+# Pods of the API server. More than one needs store.type postgres and Redis (QUERYAPIGATE_REDIS_URL in the secret), or
+# rate limits, max_concurrent and quotas would each be counted per pod - the chart refuses.
 replicas: 1
 redis:
   # QUERYAPIGATE_REDIS_URL is in the existingSecret (the chart can't see inside one): set this to say so.
@@ -39,6 +39,7 @@ secret:
     # QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
 
 # Every other setting, as environment variables - any QUERYAPIGATE_* or OTEL_* (Settings in the Console lists them).
+# Plain text in the Deployment, so the secret ones (keys, the database and Redis URLs, OTLP headers) are refused here.
 config: {}
   # QUERYAPIGATE_ALLOW_WRITES: "1"
   # QUERYAPIGATE_HSTS_MAX_AGE: "31536000"
@@ -126,6 +127,12 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
+
+# Files the settings name by path - the SIEM's CA and client certificate (QUERYAPIGATE_AUDIT_SYSLOG_CA, _CERT, _KEY), a
+# directory for exports (QUERYAPIGATE_EXPORT_DIRS, QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE) - mounted into every pod. The root
+# filesystem is read-only: anything QueryAPIGate writes outside /data and /tmp needs a volume here.
+extraVolumes: []        # e.g. [{name: siem-tls, secret: {secretName: siem-client-tls}}]
+extraVolumeMounts: []   # e.g. [{name: siem-tls, mountPath: /etc/queryapigate/siem, readOnly: true}]
 
 podAnnotations: {}
 podLabels: {}

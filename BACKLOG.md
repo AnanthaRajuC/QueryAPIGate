@@ -88,7 +88,7 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)). (Released as 0.24.0 on 2026-10-11.)
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
     ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)). (Released as 0.25.0 on 2026-10-12.)
-14. **0.26: #100 a Helm chart** ([ADR 0013](documentation/adr/0013-helm-chart.md)).
+14. **0.26: #100 a Helm chart** ([ADR 0013](documentation/adr/0013-helm-chart.md)). (Released as 0.26.0 on 2026-10-12.)
 15. **Then, in an order set by who asks:** #97 configuration as code, #98 secrets managers, #101 compliance
     documentation; #99 workspaces only on demand.
 16. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
@@ -3050,7 +3050,10 @@ server-wide owners above them. Decide with an ADR before any code, and only with
 
 ## 100. A Helm chart
 
-**Status: open; planned for 0.26** ([ADR 0013](documentation/adr/0013-helm-chart.md)).
+**Status: shipped (0.26, experimental).** [ADR 0013](documentation/adr/0013-helm-chart.md): `deploy/helm/queryapigate`,
+the SQLite and PostgreSQL shapes, locked-down pods, refusals and `values.schema.json`; pushed to
+`oci://ghcr.io/anantharajuc/charts` on each tag; CI lints it with Helm 3 and 4 (`tests/test_helm.py`) and installs it on
+kind, upgrading under load (`.github/scripts/kind_chart_test.sh`). Guide 54.
 
 **Impact:** plain manifests are in `deploy/kubernetes/`; most teams running Kubernetes install through Helm, with values
 for the image, the store, Redis, ingress and secrets.

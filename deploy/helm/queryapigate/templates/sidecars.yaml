@@ -36,9 +36,15 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- with $.Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - {name: data, emptyDir: {}}
         - {name: tmp, emptyDir: {}}
+        {{- with $.Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

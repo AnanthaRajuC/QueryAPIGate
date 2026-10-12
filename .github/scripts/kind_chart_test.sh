@@ -114,9 +114,15 @@ kubectl -n pg get pods -o jsonpath='{range .items[*]}{.metadata.name} {.spec.con
 # ---- one pod on SQLite ----
 say "the SQLite shape: one pod, its store on a volume that outlives the pod"
 kubectl create namespace lite
+# with a file mounted by extraVolumes, as the SIEM's CA would be
+kubectl -n lite create secret generic siem-tls --from-literal=ca.crt=not-a-real-certificate
 helm install lite "$CHART" --namespace lite --set secret.create=true --set secret.values.QUERYAPIGATE_API_KEY=ci-key \
   --set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAGE")" --set resources.requests.cpu=50m \
-  --wait --timeout 4m
+  --set 'extraVolumes[0].name=siem-tls' --set 'extraVolumes[0].secret.secretName=siem-tls' \
+  --set 'extraVolumeMounts[0].name=siem-tls' --set 'extraVolumeMounts[0].mountPath=/etc/queryapigate/siem' \
+  --set 'extraVolumeMounts[0].readOnly=true' --wait --timeout 4m
+test "$(kubectl -n lite exec deploy/lite-queryapigate -- cat /etc/queryapigate/siem/ca.crt)" = not-a-real-certificate
+echo "the mounted file is there"
 # A Service just created, or a pod just replaced, can refuse connections for a few seconds: retry those (a refused
 # request never reached the server, so retrying the POST can't make the key twice).
 CALL="

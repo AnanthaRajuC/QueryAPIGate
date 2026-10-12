@@ -31,7 +31,7 @@ mcp: {enabled: true, ingress: {host: mcp.example.com}}
 ```
 
 `helm install` refuses what can't work: more than one pod on SQLite, more than one without Redis, PostgreSQL without a
-database URL, a database URL in `config` instead of the secret, a misspelt value.
+database URL, a secret setting in `config` instead of the secret, a misspelt value.
 
 ## Values
 
@@ -43,7 +43,8 @@ database URL, a database URL in `config` instead of the secret, a misspelt value
 | `existingSecret` | | A Secret you manage, as environment variables - recommended |
 | `secret.create`, `secret.values` | `false`, `{}` | Or let the chart make one (the values then sit in your values file) |
 | `redis.inExistingSecret` | `false` | `QUERYAPIGATE_REDIS_URL` is in `existingSecret` |
-| `config` | `{}` | Any other `QUERYAPIGATE_*` or `OTEL_*` setting |
+| `config` | `{}` | Any other `QUERYAPIGATE_*` or `OTEL_*` setting - not the secret ones, refused here |
+| `extraVolumes`, `extraVolumeMounts` | `[]` | Files settings name by path (the SIEM's certificates, an export directory), in every pod |
 | `ingress.*` | off | `className`, `host`, `tls`, `annotations` (ingress-nginx's no-buffering for `/events`) |
 | `events.*`, `mcp.*` | off | The events server and the MCP server, each its own Deployment; `mcp.ingress.host` for its own host |
 | `resources` | 250m / 256Mi, 1Gi limit | Per API server pod |
@@ -55,4 +56,6 @@ database URL, a database URL in `config` instead of the secret, a misspelt value
 | `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`, `serviceAccount.*`, `podAnnotations`, `podLabels`, `imagePullSecrets` | | As usual |
 
 Every value is checked by `values.schema.json`. The full reference, with the rest of the deployment story:
-[DEPLOYMENT.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md).
+[DEPLOYMENT.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md#kubernetes-helm).
+A walkthrough, run on kind:
+[Install on Kubernetes with Helm](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/54-install-on-kubernetes-with-helm.md).

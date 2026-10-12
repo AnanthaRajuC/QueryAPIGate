@@ -368,7 +368,7 @@ container with several workers would reach one of them at random. For more headr
 ~~~yaml
     command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread",
               "--threads", "16", "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-",
-              "queryapigate.app:create_app()"]
+              "--no-control-socket", "queryapigate.app:create_app()"]
 ~~~
 
 **What stays per instance:** `/metrics` (scrape each instance; the bundled dashboard sums them), the Console's Metrics
@@ -378,6 +378,48 @@ instances; an `instances_not_shared` alert means some of them run without Redis.
 **Several instances without a PostgreSQL store** - each with its own SQLite volume - are separate servers with their
 own keys and connections, not one service. For simple redundancy without PostgreSQL, run one active instance and a
 standby restored from backups.
+
+## Kubernetes (Helm)
+
+> **Experimental** in 0.26 ([ADR 0013](adr/0013-helm-chart.md)): the chart's value names may change in a minor
+> release, always noted in the changelog.
+
+The chart is published with every release, at the server's version: chart 0.26.0 installs QueryAPIGate 0.26.0.
+
+~~~bash
+helm install queryapigate oci://ghcr.io/anantharajuc/charts/queryapigate --version 0.26.0 \
+  -n queryapigate --set existingSecret=queryapigate
+~~~
+
+It has the two shapes above. `store.type: sqlite`, the default, runs one pod with `queryapigate.db` on a
+PersistentVolumeClaim. The claim is kept on `helm uninstall`. Upgrades replace that pod rather than roll it: the old
+pod stops before the new one starts, so expect a few seconds of downtime. `store.type: postgres` runs `replicas` pods
+on the PostgreSQL store with Redis. They roll one at a time, and a new pod must be ready before an old one stops
+(`maxUnavailable: 0`). A PodDisruptionBudget keeps all but one up during node drains.
+
+| Concern | How the chart handles it |
+|---|---|
+| Secrets | `existingSecret`, a Secret you manage, becomes the pods' environment: `QUERYAPIGATE_API_KEY`, `_SECRET_KEY`, `_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, ... Or `secret.create: true` with `secret.values`, which then sit in your values file. |
+| Other settings | `config`: any `QUERYAPIGATE_*` or `OTEL_*` variable from [Installation and setup](INSTALLATION_AND_SETUP.md). |
+| Refusals | `helm install` fails, before anything changes, on more than one pod on SQLite, more than one without Redis, PostgreSQL without a database URL, a secret setting in `config`, or a value not in `values.schema.json`. |
+| Routing | `ingress.*` sends `/events` to the events server (`events.enabled`) and the rest to the API pods, and sets `QUERYAPIGATE_TRUST_PROXY=1`. `mcp.enabled` runs the MCP server; `mcp.ingress.host` gives it its own host. The default annotations are ingress-nginx's no-buffering for `/events`; replace them for another controller. |
+| Pod security | Non-root (UID 1000), a read-only root filesystem, every capability dropped, the RuntimeDefault seccomp profile, no service account token. The server writes only to `/data` and `/tmp`. |
+| Observability | `serviceMonitor.enabled` for the Prometheus Operator ([section 6](#6-observability)). Tracing through `config` (`OTEL_EXPORTER_OTLP_ENDPOINT`). |
+| Network | `networkPolicy.enabled`: in only from `networkPolicy.ingressFrom`, out only to `networkPolicy.egress` and DNS. List your databases, Redis and the SIEM there. |
+| Scale | `autoscaling.enabled`, CPU-based, PostgreSQL shape only. |
+
+Two things to know:
+- **Changing a Secret you manage doesn't restart the pods**, since the chart can't see inside it. Run
+  `kubectl rollout restart` on each Deployment. Changes to `config`, and to a Secret the chart makes, roll the pods
+  on `helm upgrade`.
+- **Backups** are the same as above. Run `kubectl exec deploy/queryapigate -- queryapigate backup /tmp/backup.db`,
+  then `kubectl cp` the file out. For PostgreSQL, use your database's own backups.
+
+Every value: [the chart's README](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/deploy/helm/queryapigate/README.md).
+Walkthrough, run on kind:
+[Install on Kubernetes with Helm](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/54-install-on-kubernetes-with-helm.md).
+Plain manifests of the PostgreSQL shape, kept in step with the chart by a test:
+[`deploy/kubernetes/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/deploy/kubernetes).
 
 ## Upgrading
 

@@ -351,6 +351,12 @@ const DOCS = [
     path: 'how-to/53-send-the-audit-log-to-your-siem.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-54',
+    title: 'Install on Kubernetes with Helm',
+    path: 'how-to/54-install-on-kubernetes-with-helm.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

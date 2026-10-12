@@ -98,6 +98,8 @@
                      "maxReplicas": {"type": "integer", "minimum": 1},
                      "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}}
     },
+    "extraVolumes": {"type": "array", "items": {"type": "object", "required": ["name"]}},
+    "extraVolumeMounts": {"type": "array", "items": {"type": "object", "required": ["name", "mountPath"]}},
     "podAnnotations": {"type": "object"}, "podLabels": {"type": "object"},
     "nodeSelector": {"type": "object"}, "tolerations": {"type": "array"}, "affinity": {"type": "object"},
     "topologySpreadConstraints": {"type": "array"}, "priorityClassName": {"type": "string"},

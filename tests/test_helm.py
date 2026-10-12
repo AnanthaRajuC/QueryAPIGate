@@ -91,6 +91,18 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual((env['QUERYAPIGATE_ALLOW_WRITES'], env['OTEL_SERVICE_NAME'], env['QUERYAPIGATE_HOME']),
                          ('1', 'gateway', '/data'))
 
+    def test_extra_volumes_reach_every_pod(self):
+        docs = render(*POSTGRES, '--set', 'events.enabled=true', '--set', 'mcp.enabled=true',
+                      '--set', 'extraVolumes[0].name=siem-tls', '--set', 'extraVolumes[0].secret.secretName=siem',
+                      '--set', 'extraVolumeMounts[0].name=siem-tls',
+                      '--set', 'extraVolumeMounts[0].mountPath=/etc/queryapigate/siem',
+                      '--set', 'extraVolumeMounts[0].readOnly=true')
+        for deployment in by_kind(docs, 'Deployment'):
+            pod = deployment['spec']['template']['spec']
+            self.assertIn({'name': 'siem-tls', 'secret': {'secretName': 'siem'}}, pod['volumes'])
+            self.assertIn({'name': 'siem-tls', 'mountPath': '/etc/queryapigate/siem', 'readOnly': True},
+                          pod['containers'][0]['volumeMounts'])
+
     def test_the_optional_parts(self):
         docs = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'networkPolicy.enabled=true',
                       '--set', 'autoscaling.enabled=true')
@@ -133,6 +145,14 @@ class RefusalTests(unittest.TestCase):
                 ((*SECRET, '--set', 'existingSecret=qag'), 'choose one'),
                 ((*SECRET, '--set', 'store.type=postgres'), 'needs QUERYAPIGATE_DATABASE_URL'),
                 ((*POSTGRES, '--set', 'config.QUERYAPIGATE_DATABASE_URL=postgresql://u:p@db/x'), 'not config'),
+                # config is plain text in the Deployment: every secret setting is refused there, whatever the store
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_SECRET_KEY=x'), 'QUERYAPIGATE_SECRET_KEY is a secret'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_AUDIT_KEY=x'), 'QUERYAPIGATE_AUDIT_KEY is a secret'),
+                ((*POSTGRES, '--set', 'config.QUERYAPIGATE_REDIS_URL=redis://:pw@redis:6379/0'),
+                 'QUERYAPIGATE_REDIS_URL is a secret'),
+                ((*SECRET, '--set-string', 'config.OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer x'),
+                 'OTEL_EXPORTER_OTLP_HEADERS is a secret'),
+                ((*SECRET, '--set', 'extraVolumeMounts[0].name=x'), 'mountPath'),
                 ((*SECRET, '--set', 'autoscaling.enabled=true'), 'runs one pod'),
                 ((*SECRET, '--set', 'replica=3'), 'replica'),  # a typo: the values schema
                 ((*SECRET, '--set', 'config.allow_writes=1'), 'allow_writes'),

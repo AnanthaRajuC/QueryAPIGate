@@ -56,7 +56,11 @@ metrics scraping. And nothing tests them in CI.
 ### 4. What else the values cover
 
 - **`config`:** every other `QUERYAPIGATE_*` (and `OTEL_*`) setting as a map, set as environment variables. The
-  chart doesn't re-model the server's settings - Settings in the Console lists them.
+  chart doesn't re-model the server's settings - Settings in the Console lists them. The settings that are secrets
+  (the keys, the database and Redis URLs, the SSO client secret, OTLP headers) are refused there: `config` is plain
+  text in the Deployment, where `get deployments` reads it.
+- **`extraVolumes`, `extraVolumeMounts`:** files the settings name by path - the SIEM's CA and client certificate,
+  a directory for exports - in every pod, since the root filesystem is read-only.
 - **`ingress`:** class, host, TLS, annotations, with `/events` routed to the events server when it's on. It ships
   with ingress-nginx's no-buffering annotation, which other controllers can replace.
 - **`events.enabled`, `mcp.enabled`:** each its own Deployment and Service, with its own replicas.

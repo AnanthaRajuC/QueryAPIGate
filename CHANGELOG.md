@@ -53,6 +53,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-12
+
+QueryAPIGate on Kubernetes the way most teams install things there: `helm install` from ghcr, one pod on SQLite or
+several on PostgreSQL and Redis, locked-down pods, and a chart that refuses setups that can't work. CI installs it on a
+real cluster and upgrades it under load on every change. The chart is experimental in 0.26.
+
+### Upgrading from 0.25
+- **No schema change**, and rolling upgrades from 0.25 work as usual.
+- **The image needs gunicorn 26 or later and passes `--no-control-socket`.** If you override the image's `command:`,
+  add the flag (DEPLOYMENT.md's example has it). Without it gunicorn writes a control socket under the home folder,
+  which a read-only root filesystem doesn't allow.
+
 ### Added
 - **A Helm chart** (BACKLOG #100, [ADR 0013](documentation/adr/0013-helm-chart.md), experimental): `deploy/helm/queryapigate`,
   for Helm 3 and 4, released with the server (chart X.Y.Z runs X.Y.Z). One pod on SQLite with its store on a volume, or
@@ -60,7 +72,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   (or one the chart makes), every other setting as `config`; ingress with `/events` routed to the events server, the
   MCP server on its own host; locked-down pods (non-root, read-only root filesystem, no capabilities); a
   ServiceMonitor, NetworkPolicy and autoscaler if you want them. `helm install` refuses what can't work - more than
-  one pod on SQLite or without Redis, a database URL in `config` - and `values.schema.json` a misspelt value.
+  one pod on SQLite or without Redis, a secret setting in `config` (plain text in the Deployment) - and
+  `values.schema.json` a misspelt value. `extraVolumes` for files settings name by path, such as the SIEM's
+  certificates.
+  Published with each release: `helm install queryapigate oci://ghcr.io/anantharajuc/charts/queryapigate --version
+  0.26.0`. CI lints it with Helm 3 and 4, renders every option, and installs it on kind, upgrading from the previous
+  release with requests running and failing on a single failed request. Guide 54,
+  [Install on Kubernetes with Helm](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/54-install-on-kubernetes-with-helm.md),
+  run on kind; [Kubernetes (Helm)](documentation/DEPLOYMENT.md#kubernetes-helm) in the deployment guide.
 
 ### Changed
 - **The image starts gunicorn with `--no-control-socket`** (and gunicorn 26 or later): its control interface, unused,
@@ -74,6 +93,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **On several instances, the example queries answered 404 from every instance but the one that loaded them**: the
   store said they were there, but their SQLite database was a file only that instance had. Each instance now makes
   its own copy when it's missing. Found by the new Kubernetes test in CI.
+- **The threat model still said the audit log wasn't tamper-evident**, in two places 0.25 missed. It now says what
+  the chain shows and what only a copy outside the store does. It also gains a section on running on Kubernetes.
 
 ## [0.25.0] - 2026-10-12
 

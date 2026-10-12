@@ -45,7 +45,7 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* Whether QUERYAPIGATE_REDIS_URL is set somewhere the chart can see, or said to be in the existing Secret. */}}
 {{- define "queryapigate.hasRedis" -}}
-{{- if or (hasKey .Values.config "QUERYAPIGATE_REDIS_URL") (hasKey .Values.secret.values "QUERYAPIGATE_REDIS_URL") .Values.redis.inExistingSecret -}}true{{- end -}}
+{{- if or (hasKey .Values.secret.values "QUERYAPIGATE_REDIS_URL") .Values.redis.inExistingSecret -}}true{{- end -}}
 {{- end -}}
 
 {{/* Fail at install, not at runtime, on a setup that can't work (ADR 0013). */}}
@@ -59,7 +59,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail "autoscaling needs store.type: postgres - SQLite runs one pod." -}}
 {{- end -}}
 {{- if and (gt $replicas 1) (not (include "queryapigate.hasRedis" .)) -}}
-{{- fail "More than one pod needs Redis, or rate limits, max_concurrent and quotas are counted per pod: set QUERYAPIGATE_REDIS_URL in secret.values or config - or, if it is in your existingSecret, redis.inExistingSecret: true." -}}
+{{- fail "More than one pod needs Redis, or rate limits, max_concurrent and quotas are counted per pod: set QUERYAPIGATE_REDIS_URL in secret.values - or, if it is in your existingSecret, redis.inExistingSecret: true." -}}
 {{- end -}}
 {{- if and (not .Values.existingSecret) (not .Values.secret.create) -}}
 {{- fail "Set existingSecret to a Secret holding QUERYAPIGATE_API_KEY (and the other secrets), or secret.create: true with secret.values." -}}
@@ -70,8 +70,11 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and (eq .Values.store.type "postgres") .Values.secret.create (not (hasKey .Values.secret.values "QUERYAPIGATE_DATABASE_URL")) -}}
 {{- fail "store.type postgres needs QUERYAPIGATE_DATABASE_URL in secret.values (or in your existingSecret)." -}}
 {{- end -}}
-{{- if and (eq .Values.store.type "postgres") (hasKey .Values.config "QUERYAPIGATE_DATABASE_URL") -}}
-{{- fail "QUERYAPIGATE_DATABASE_URL holds the store's password: put it in the secret, not config." -}}
+{{- /* config is plain env in the Deployment, read by anyone who can get deployments: no secrets there. */ -}}
+{{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
+{{- if hasKey $.Values.config $name -}}
+{{- fail (printf "%s is a secret: put it in your existingSecret or secret.values, not config - config is plain text in the Deployment." $name) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

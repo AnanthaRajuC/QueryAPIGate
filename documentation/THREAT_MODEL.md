@@ -309,6 +309,26 @@ caller's address (`client.address`) and who called (`queryapigate.caller` - for 
 which may be an email address) - keep the collector's retention to what that allows. An MCP client's tool name is
 recorded only if it has the shape a saved query's name can have; anything else is `(invalid)`.
 
+### On Kubernetes (the Helm chart, ADR 0013, experimental)
+
+The chart's pods run as UID 1000, with a read-only root filesystem, every capability dropped, the RuntimeDefault
+seccomp profile, and no service account token: QueryAPIGate never calls the Kubernetes API, so a compromised pod has
+no credential for it. The server writes only to `/data` (the store's volume, or an empty directory on PostgreSQL) and
+`/tmp`. What stays the deployer's:
+
+- **Secrets in a Kubernetes Secret are only as safe as the cluster.** Anyone who can `get secrets` in the namespace,
+  or read etcd unencrypted, reads the API key, the Fernet key and the database URL. Keep that RBAC narrow, and encrypt
+  Secrets at rest. With `secret.create`, the values are also in your values file and in Helm's release record (itself
+  a Secret in the namespace). `existingSecret` keeps them out of both.
+- **The chart refuses a secret setting in `config`**: the keys, the database and Redis URLs, the SSO client secret
+  and OTLP headers. `config` is plain text in the Deployment, where `get deployments` reads it.
+- **NetworkPolicy is off by default**, because the right rules depend on the cluster. Without it, any pod in the
+  cluster can reach the API, `/metrics` (unauthenticated, as above) and the MCP server. `networkPolicy.enabled`
+  limits who can connect in, and narrows what a pod can reach out to, to `egress` - so a stolen admin key can't point
+  a new connection at an internal address it doesn't list.
+- **The chart and image are as trusted as ghcr and this repository's release workflow.** The chart is pushed by the
+  same tag-triggered workflow as the image. Neither is signed yet, so pin the version, and a digest if you mirror them.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without
@@ -344,11 +364,11 @@ table - the actor (the administrator's name, or `admin` for the shared key), how
 own token, the break-glass key, the CLI), the action, the target, and a JSON diff of what changed. Only
 administrators can read it, and nothing in the API can alter it; a scoped key cannot see it. A
 separate `execution_history` table records individual query runs (caller, row count, timing), independent
-of the audit log's configuration-change trail. **Neither is tamper-evident** - both are plain append logs
-with no hash-chaining or signing, so an attacker with direct database access (not API access - the API
-never exposes a way to alter history) could edit them without detection. If you need tamper-evidence,
-export the audit log to an external, append-only sink (`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`, or your own
-log shipper watching it) rather than treating the in-database copy as the record of truth.
+of the audit log's configuration-change trail. **The audit log is tamper-evident** - a hash chain, signed with
+`QUERYAPIGATE_AUDIT_KEY` ([The audit trail](#the-audit-trail)); keep a copy outside the store too (the SIEM stream, or
+`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` shipped elsewhere), since only that catches its newest entries deleted. **Run
+history is not**: a plain table, which someone with direct database access (not API access - the API never exposes a
+way to alter history) could edit without detection.
 
 #### Data at rest: what one file actually holds
 
@@ -455,9 +475,9 @@ Being explicit about these is as important as everything above:
   each counts limits on its own (the `instances_not_shared` alert says so), and two replicas each with their *own*
   SQLite volume are two separate servers with their own keys, connections and audit trail. `/metrics` is always per
   process - scrape each one.
-- **The audit log and execution history are not tamper-evident.** They record what happened for
-  operational visibility and accountability, not as a forensic-grade, append-only ledger - export them
-  externally if that guarantee matters for your deployment.
+- **Run history is not tamper-evident, and the audit log's chain has limits.** The chain shows an edit, but not its
+  newest entries deleted, nor a rewrite by someone holding both the store and `QUERYAPIGATE_AUDIT_KEY` - a copy
+  outside the store (the SIEM stream) is what proves those ([The audit trail](#the-audit-trail)).
 - **Connection metadata (hosts, ports, usernames, database names) is visible to every administrator role** -
   `GET /api/v1/connections` is administrators-only, and passwords are always masked, but the rest is not treated as
   secret.
