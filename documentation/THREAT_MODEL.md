@@ -544,6 +544,8 @@ Being explicit about these is as important as everything above:
 
 ## Where to go from here
 
+- [Where data goes](DATA_PROTECTION.md) - what is kept, where, for how long and who reads it; the record of
+  processing this page's controls protect.
 - [SECURITY.md](../SECURITY.md) - the operational hardening checklist this page explains the reasoning
   behind, and where to report a real vulnerability.
 - [DEPLOYMENT.md](DEPLOYMENT.md) - TLS termination, secrets in an env file, backups, and the single-worker

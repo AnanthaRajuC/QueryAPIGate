@@ -279,6 +279,11 @@ SCHEMAS = {
                                                           '`check`).'},
         },
     },
+    'Forgotten': {
+        'type': 'object', 'required': ['runs', 'usage_periods'],
+        'properties': {'runs': {'type': 'integer', 'description': 'Runs deleted (or that would be, with dry_run).'},
+                       'usage_periods': {'type': 'integer', 'description': 'Days and months of usage counts deleted.'}},
+    },
     'ConfigFile': {
         'type': 'object', 'required': ['format', 'format_version'],
         'description': "A server's configuration (ADR 0014): `format: queryapigate-config`, `format_version: 1`, and "
@@ -1118,6 +1123,14 @@ PATHS = {
             {'name': 'until', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'default': 100}},
             {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'}}]),
+        'delete': _op("Forget a person: every run by a caller, and its usage counts", {'200': _ok(_ref('Forgotten'))},
+                      parameters=[{'name': 'caller', 'in': 'query', 'required': True, 'schema': {'type': 'string'},
+                                   'description': 'A key name, or jwt:<subject> for a signed-in person.'},
+                                  {'name': 'dry_run', 'in': 'query', 'schema': {'type': 'boolean'},
+                                   'description': 'Count what would go; delete nothing.'}],
+                      description='For a request to erase a person\'s data (ADR 0016). Recorded in the audit log as '
+                                  '`forget_caller`, by the caller\'s SHA-256, not its name. Their quota\'s count for '
+                                  'the period starts again. Owners only (`history.forget`).'),
     },
     '/api/v1/me': {
         'get': _op('Who you are: your name, role and what it may do', {'200': _ok(_ref('Me'))}),

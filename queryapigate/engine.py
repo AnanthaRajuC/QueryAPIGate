@@ -50,6 +50,13 @@ def _db_span(details, sql, connection_name):
                         tracing.db_attributes(details, kind, connection_name))
 
 
+def logged_sql(sql):
+    """A statement as the log shows it: its text - or, when QUERYAPIGATE_HISTORY_ADHOC_SQL keeps SQL text out of run
+    history (hash, none), out of the log too, by its SHA-256 (ADR 0016): an ad-hoc statement, or a legacy {name}
+    placeholder, can carry a value in its text."""
+    return sql if config.history_adhoc_sql() == 'text' else f'(text not logged; sha256 {_sql_hash(sql)})'
+
+
 def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, allow_writes=True, key_name='-',
                 allowed_write_ops=None, database=None, allowed_tables=None, mask=None):
     """Run ``sql`` on a named connection and return the requested page as a ResultSetDTO.
@@ -77,7 +84,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     # The caller's own limits (limits.py, ADR 0011), within the server's
     timeout, limit = limits.timeout(timeout), limits.rows(limit)
     log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
-             connection_name, details['db'], limit, offset, timeout, sql,
+             connection_name, details['db'], limit, offset, timeout, logged_sql(sql),
              extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
                    'timeout': timeout, 'sql_hash': _sql_hash(sql)})
     started = time.monotonic()
@@ -104,7 +111,8 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
         metrics.observe_query(connection_name, details['db'], status, elapsed, key_name)
         threshold = config.slow_query_threshold()
         if threshold and elapsed >= threshold:
-            log.warning('Slow query on %s (%s): %.1fms - %s', connection_name, details['db'], elapsed * 1000, sql,
+            log.warning('Slow query on %s (%s): %.1fms - %s', connection_name, details['db'], elapsed * 1000,
+                        logged_sql(sql),
                        extra={'connection': connection_name, 'dialect': details['db'],
                               'duration_ms': round(elapsed * 1000, 1)})
     has_more = len(rows) > limit
@@ -322,7 +330,8 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     returns_rows = re.search(r'\bRETURNING\b', sql, re.IGNORECASE) is not None
     masked = masking.prepare(mask, sql, connection_name, details['db'], None) if mask and returns_rows else None
     timeout = limits.timeout(timeout)
-    log.info('Agent write on %s (%s), at most %s rows: %s', connection_name, details['db'], max_affected_rows, sql,
+    log.info('Agent write on %s (%s), at most %s rows: %s', connection_name, details['db'], max_affected_rows,
+             logged_sql(sql),
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     started = time.monotonic()
     status = 'error'
@@ -375,7 +384,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     timeout = limits.timeout(timeout)
     row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
     slot = limits.acquire(timeout)  # held until the last row is read - _drain() or _Rows.close() releases it
-    log.info('Streaming from %s (%s): %s', connection_name, details['db'], sql,
+    log.info('Streaming from %s (%s): %s', connection_name, details['db'], logged_sql(sql),
              extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     status = 'error'
     metrics.inc_active_query()

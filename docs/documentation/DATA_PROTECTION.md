@@ -1,0 +1,1 @@
+--8<-- "documentation/DATA_PROTECTION.md"

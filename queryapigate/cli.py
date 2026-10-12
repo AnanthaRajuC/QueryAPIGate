@@ -663,11 +663,35 @@ def _handler():
     """Werkzeug's request handler, without its version banner (`Server: Werkzeug/3.x Python/3.12`, ADR 0010)."""
     from werkzeug.serving import WSGIRequestHandler
 
+    from . import accesslog
+
     class Handler(WSGIRequestHandler):
         def version_string(self):
             return 'QueryAPIGate'
 
+        def log_request(self, code='-', size='-'):
+            """The access log line without the query string's values (accesslog.py, ADR 0016)."""
+            line = accesslog.request_line(self.command, self.path, self.request_version)
+            self.log('info', '"%s" %s %s', line, getattr(code, 'value', code), size)
+
     return Handler
+
+
+def _history_forget(args):
+    """`queryapigate history forget CALLER`: delete a person's runs and usage counts (ADR 0016)."""
+    from . import history
+    try:
+        config.check_settings()
+        found = history.forget(args.caller, 'cli', dry_run=args.dry_run)
+    except (ApiError, ValueError) as error:
+        print(f'queryapigate history forget: {getattr(error, "message", error)}', file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print(f"Would delete {found['runs']} run(s) and {found['usage_periods']} usage period(s) of {args.caller}.")
+    else:
+        print(f"Deleted {found['runs']} run(s) and {found['usage_periods']} usage period(s) of {args.caller}; recorded "
+              'in the audit log by its hash, not its name.')
+    return 0
 
 
 def _audit_verify(args):
@@ -893,6 +917,16 @@ def build_parser():
                                                           'first breaks (exit 0 or 1)')
     audit_verify.add_argument('--file', help='an export file (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE) instead of the store')
     audit_verify.set_defaults(func=_audit_verify)
+
+    history_parser = commands.add_parser('history', help='run history: forget a person (ADR 0016)')
+    history_parser.set_defaults(func=lambda a: history_parser.print_help() or 2)
+    history_actions = history_parser.add_subparsers(dest='action')
+    history_forget = history_actions.add_parser(
+        'forget', help="delete every run by CALLER and its usage counts - a person's data, on request; recorded in the "
+                       'audit log by its hash, not its name')
+    history_forget.add_argument('caller', help='a key name, or jwt:<subject> for a signed-in person')
+    history_forget.add_argument('--dry-run', action='store_true', help='say how much would go; delete nothing')
+    history_forget.set_defaults(func=_history_forget)
 
     rekey_parser = commands.add_parser('rekey', help='re-encrypt every stored password under the first key in '
                                                      'QUERYAPIGATE_SECRET_KEY, so the others can be removed (rotating '

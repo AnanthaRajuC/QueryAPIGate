@@ -246,6 +246,34 @@ def _ensure_written():
         history.ensure_writer()
 
 
+def forget(caller):
+    """Delete a caller's usage counts - unwritten, stored and in Redis (ADR 0016: forgetting a person). Their quota's
+    count for the period starts again. Returns how many periods the store had."""
+    with _counter.lock:
+        for slot in [s for s in _counter.pending if s[1] == caller]:
+            del _counter.pending[slot]
+        for slot in [s for s in _counter.read if s[0] == caller]:
+            del _counter.read[slot]
+    with db.transaction() as tx:
+        stored = tx.execute('DELETE FROM usage_counters WHERE caller = ?', (caller,)).rowcount
+    shared = _redis()
+    if shared is not None:
+        try:
+            names = list(shared._client.scan_iter(match=f'qag:quota:{_glob_escape(caller)}:*', count=500))
+            if names:
+                shared._client.delete(*names)
+        except shared._error as error:
+            shared._down(error)
+            raise ApiError(f'Redis could not be reached to forget the counts it holds: {error}', 503,
+                           code='redis_unavailable') from None
+    return stored
+
+
+def _glob_escape(text):
+    """`text` matched literally by Redis's SCAN MATCH: its special characters each escaped with a backslash."""
+    return ''.join('\\' + c if c in '*?[]\\' else c for c in text)
+
+
 def check(permission):
     """Refuse a call - 429 quota_exceeded - once the caller's period is used up. None (no quota) passes."""
     quota = getattr(permission, 'quota', None)

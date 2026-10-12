@@ -1,6 +1,6 @@
 # ADR 0016: Where data goes, and FIPS-validated cryptography
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Backlog:** #101 (compliance documentation: data flows, and FIPS-validated cryptography).
 
@@ -70,8 +70,8 @@ string, is left out too.
 
 ### 3. Forgetting a person
 
-A caller who is a person - `jwt:alice@example.com` - is named in run history, usage counters and the response
-cache's ownership. `queryapigate history forget CALLER` (and `DELETE /api/v1/history?caller=...`, `history.forget`,
+A caller who is a person - `jwt:alice@example.com` - is named in run history and usage counters (the response cache is
+keyed by query and parameters, never by caller). `queryapigate history forget CALLER` (and `DELETE /api/v1/history?caller=...`, `history.forget`,
 owners only) deletes that caller's runs and usage counters, and records that it did - in the audit log, with the
 caller's SHA-256, not their name, so the record of the erasure doesn't keep what was erased.
 

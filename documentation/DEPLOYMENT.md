@@ -368,7 +368,7 @@ container with several workers would reach one of them at random. For more headr
 ~~~yaml
     command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread",
               "--threads", "16", "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-",
-              "--no-control-socket", "queryapigate.app:create_app()"]
+              "--no-control-socket", "-c", "python:queryapigate.gunicorn_conf", "queryapigate.app:create_app()"]
 ~~~
 
 **What stays per instance:** `/metrics` (scrape each instance; the bundled dashboard sums them), the Console's Metrics

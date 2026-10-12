@@ -725,6 +725,14 @@ def search_history():
     return jsonify({'items': entries, 'next_cursor': next_cursor}), 200
 
 
+@bp.route('/history', methods=['DELETE'])
+def forget_history():
+    """Delete every run by `caller` - a person, jwt:<subject>, or a key - and its usage counts (ADR 0016). Recorded in
+    the audit log by the caller's hash, not its name."""
+    caller = request.args.get('caller')
+    return jsonify(history.forget(caller, caller_key_name(), dry_run=request.args.get('dry_run') == 'true')), 200
+
+
 @bp.route('/audit', methods=['GET'])
 def list_audit():
     """Administrative changes, newest first. `q` matches the time, actor or target."""

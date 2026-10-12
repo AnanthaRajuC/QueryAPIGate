@@ -62,4 +62,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # runs on a read-only root filesystem (the Helm chart's default, ADR 0013).
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", "--threads", "8", \
      "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "--no-control-socket", \
+     "-c", "python:queryapigate.gunicorn_conf", \
      "queryapigate.app:create_app()"]

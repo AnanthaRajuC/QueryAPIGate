@@ -200,6 +200,30 @@ def record_adhoc(entry, sql, params=None, sample=True):
     return entry
 
 
+def forget(caller, actor, dry_run=False):
+    """Delete every run by `caller` - a person signed in as `jwt:alice@example.com`, or a key - and their usage counts
+    (ADR 0016). Recorded in the audit log by the caller's SHA-256, not their name, so the record of the erasure keeps
+    nothing of what was erased. Returns {'runs': n, 'usage_periods': n}."""
+    import hashlib
+
+    from . import quotas, store
+    if not isinstance(caller, str) or not caller.strip():
+        raise ApiError('Name the caller to forget: a key, or jwt:<subject>', code='invalid_body')
+    flush()  # runs still queued are written first, so none is missed
+    conn = db.connection()
+    if dry_run:
+        runs = conn.execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?', (caller,)).fetchone()[0]
+        periods = conn.execute('SELECT COUNT(*) FROM usage_counters WHERE caller = ?', (caller,)).fetchone()[0]
+        return {'runs': runs, 'usage_periods': periods}
+    with db.transaction() as tx:
+        runs = tx.execute('DELETE FROM execution_history WHERE key_name = ?', (caller,)).rowcount
+    periods = quotas.forget(caller)
+    found = {'runs': runs, 'usage_periods': periods}
+    store.record_audit(actor, 'forget_caller', 'history',
+                       {'caller_sha256': hashlib.sha256(caller.encode()).hexdigest(), **found})
+    return found
+
+
 def flush():
     """Have everything this process has queued written, now - called before every history read, so a process
     always sees its own runs (read-your-writes). The writer thread does the writing; this only waits for it.

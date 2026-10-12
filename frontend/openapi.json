@@ -2141,6 +2141,23 @@
         ],
         "type": "object"
       },
+      "Forgotten": {
+        "properties": {
+          "runs": {
+            "description": "Runs deleted (or that would be, with dry_run).",
+            "type": "integer"
+          },
+          "usage_periods": {
+            "description": "Days and months of usage counts deleted.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "usage_periods"
+        ],
+        "type": "object"
+      },
       "Grants": {
         "properties": {
           "allow_writes": {
@@ -8310,6 +8327,84 @@
       }
     },
     "/api/v1/history": {
+      "delete": {
+        "description": "For a request to erase a person's data (ADR 0016). Recorded in the audit log as `forget_caller`, by the caller's SHA-256, not its name. Their quota's count for the period starts again. Owners only (`history.forget`).",
+        "parameters": [
+          {
+            "description": "A key name, or jwt:<subject> for a signed-in person.",
+            "in": "query",
+            "name": "caller",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Count what would go; delete nothing.",
+            "in": "query",
+            "name": "dry_run",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forgotten"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Forget a person: every run by a caller, and its usage counts",
+        "tags": [
+          "Management API v1"
+        ]
+      },
       "get": {
         "parameters": [
           {

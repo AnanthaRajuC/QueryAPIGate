@@ -55,6 +55,24 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Where data goes** (BACKLOG #101, [ADR 0016](documentation/adr/0016-data-flows-and-fips.md)):
+  [documentation/DATA_PROTECTION.md](documentation/DATA_PROTECTION.md) - every place QueryAPIGate keeps or sends data:
+  what, for how long and by which setting, who reads it, what is never kept, and the categories of personal data - for
+  a record of processing or a security questionnaire. A test fails if a table of the store, a setting that bounds
+  what's kept, or a way data leaves isn't on it.
+- **Forgetting a person:** `queryapigate history forget CALLER` (`--dry-run`) and `DELETE /api/v1/history?caller=`
+  delete every run by a caller - `jwt:alice@example.com` - and their usage counts, in the store and in Redis.
+  Audited as `forget_caller` by the caller's SHA-256, not their name. Owners only (`history.forget`).
+
+### Changed
+- **The access log leaves query strings out.** The image's gunicorn (`-c python:queryapigate.gunicorn_conf`) and
+  `queryapigate serve` log the request's path without its query string - parameter values sent in the URL - and
+  never the referrer. `QUERYAPIGATE_ACCESS_LOG_QUERY=1` keeps the query string. A `command:` override of the image
+  needs `-c python:queryapigate.gunicorn_conf` to keep this.
+- **With `QUERYAPIGATE_HISTORY_ADHOC_SQL` `hash` or `none`, the log shows statements by their SHA-256** too - an
+  ad-hoc statement, or a legacy `{name}` placeholder, can carry a value in its text.
+
 ## [0.28.0] - 2026-10-12
 
 No database password anywhere: a connection's secrets come from where they live - a file the CSI driver or Vault

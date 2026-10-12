@@ -64,6 +64,12 @@ def load_examples():
     return env_flag('QUERYAPIGATE_LOAD_EXAMPLES')
 
 
+def access_log_query():
+    """QUERYAPIGATE_ACCESS_LOG_QUERY: the access log keeps each request's query string - its parameter values. Off by
+    default (ADR 0016): the path alone, as QueryAPIGate's own log, run history and traces keep it."""
+    return env_flag('QUERYAPIGATE_ACCESS_LOG_QUERY')
+
+
 def config_file():
     """QUERYAPIGATE_CONFIG_FILE: a configuration file (ADR 0014) applied at startup, before the server serves - once per
     file: an instance that finds it already applied leaves the store alone. None when unset."""
@@ -362,7 +368,7 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_LOAD_EXAMPLES', '').strip().lower()
     if raw not in _FLAG_WORDS:
         raise ValueError(f"QUERYAPIGATE_LOAD_EXAMPLES must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
-    for name in ('QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED'):
+    for name in ('QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED', 'QUERYAPIGATE_ACCESS_LOG_QUERY'):
         raw = os.environ.get(name, '').strip().lower()
         if raw not in _FLAG_WORDS:
             raise ValueError(f"{name} must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
@@ -1359,8 +1365,12 @@ def describe_settings():
             row('Ad-hoc history limit', 'Ad-hoc SQL runs kept in all, unless a retention period is set.',
                 'QUERYAPIGATE_HISTORY_ADHOC_LIMIT', f'{history_adhoc_limit()} runs'),
             row('Ad-hoc SQL kept', 'What an ad-hoc run\'s history keeps of its SQL: the text (first '
-                f'{HISTORY_ADHOC_SQL_MAX} characters), a hash, or none. Parameter values are never kept.',
+                f'{HISTORY_ADHOC_SQL_MAX} characters), a hash, or none - and with hash or none, the log shows every '
+                'statement by its hash too. Parameter values are never kept.',
                 'QUERYAPIGATE_HISTORY_ADHOC_SQL', history_adhoc_sql()),
+            row('Access log query strings', 'The access log keeps each request\'s query string - parameter values '
+                'sent in the URL. Off: the path alone (ADR 0016).', 'QUERYAPIGATE_ACCESS_LOG_QUERY',
+                on_off(access_log_query())),
             row('History retention', 'Keep every run for this many days instead of a per-version count. Best '
                 'with a PostgreSQL metadata store.', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS',
                 'per-version limit' if history_retention_days() is None else f'{history_retention_days()} days'),

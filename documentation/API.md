@@ -408,6 +408,7 @@ owner.
 
 | Method and path | What it does |
 |---|---|
+| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 | `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance` (experimental). |
@@ -2043,6 +2044,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_filter` | 400 | A bad history/audit filter (`status`, `kind`, `since`, `until`, `limit`, `cursor`) or Mongo filter |
 | `invalid_bundle` | 400 | A collection bundle that isn't one, or is malformed |
 | `invalid_config` | 400 | A configuration file (ADR 0014) that isn't one, or has problems - each one listed in `problems` |
+| `redis_unavailable` | 503 | Forgetting a caller needed Redis - which holds their usage counts - and it couldn't be reached; the store's were deleted, run it again |
 | `secret_unavailable` | 503 | A secret provider couldn't give a connection's secret, and no value still within its time was held (ADR 0015) |
 | `config_managed` | 409 | With `QUERYAPIGATE_CONFIG_LOCKED`, a change to something a configuration file manages - change it in the file |
 | `sql_required` | 400 | No SQL given |
