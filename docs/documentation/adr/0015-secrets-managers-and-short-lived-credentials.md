@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0015-secrets-managers-and-short-lived-credentials.md"

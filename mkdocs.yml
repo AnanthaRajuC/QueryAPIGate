@@ -42,6 +42,7 @@ nav:
       - 0012 Tamper-evident audit log: documentation/adr/0012-tamper-evident-audit-log-and-siem.md
       - 0013 Helm chart: documentation/adr/0013-helm-chart.md
       - 0014 Configuration as code: documentation/adr/0014-configuration-as-code.md
+      - 0015 Secrets managers: documentation/adr/0015-secrets-managers-and-short-lived-credentials.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md
