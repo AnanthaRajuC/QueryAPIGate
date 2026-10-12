@@ -248,10 +248,10 @@ def _ensure_written():
 
 def forget(caller):
     """Delete a caller's usage counts - unwritten, stored and in Redis (ADR 0016: forgetting a person). Their quota's
-    count for the period starts again. Returns how many periods the store had."""
+    count for the period starts again. Returns how many periods there were: what this process hadn't written yet is
+    written first, so the answer doesn't depend on whether a background write happened to come first."""
+    write()
     with _counter.lock:
-        for slot in [s for s in _counter.pending if s[1] == caller]:
-            del _counter.pending[slot]
         for slot in [s for s in _counter.read if s[0] == caller]:
             del _counter.read[slot]
     with db.transaction() as tx:

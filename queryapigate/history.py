@@ -210,6 +210,7 @@ def forget(caller, actor, dry_run=False):
     if not isinstance(caller, str) or not caller.strip():
         raise ApiError('Name the caller to forget: a key, or jwt:<subject>', code='invalid_body')
     flush()  # runs still queued are written first, so none is missed
+    quotas.write()  # and usage counts not written yet: both counted the same whichever came first
     conn = db.connection()
     if dry_run:
         runs = conn.execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?', (caller,)).fetchone()[0]
