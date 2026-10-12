@@ -20,12 +20,13 @@ at once. What also depends on the store as it will be - an export against the pu
 again when it's applied, by the same validation the API runs.
 """
 import difflib
+import hashlib
 import json
 import re
 
 import yaml
 
-from . import apikeys, definitions, descriptions, destinations, exports, store
+from . import apikeys, db, definitions, descriptions, destinations, exports, store
 from .errors import ApiError
 from .services import access
 from .services import queries as query_service
@@ -33,7 +34,7 @@ from .services import queries as query_service
 FORMAT = 'queryapigate-config'
 FORMAT_VERSION = 1
 # Every kind, in the order apply writes them: each only refers to kinds before it.
-KINDS = ('connections', 'destinations', 'roles', 'queries', 'api_keys', 'descriptions', 'exports')
+KINDS = ('connections', 'destinations', 'queries', 'roles', 'api_keys', 'descriptions', 'exports')
 SECRET = '<stored secret>'  # a password the store holds as a value (literal or encrypted): compared, never shown
 CHANGED = '<changed>'  # how a diff shows a key's secret hash changing
 MAX_PROBLEMS = 50
@@ -447,32 +448,57 @@ def _key_fields(key):
     return {**(key['grants'] or {}), 'active': key['active'], 'expires_at': key['expires_at']}
 
 
-def diff(doc):
+def _managed():
+    """{(kind, name)} for every object a configuration file manages (ADR 0014)."""
+    return {(row[0], row[1]) for row in db.connection().execute('SELECT kind, name FROM config_managed').fetchall()}
+
+
+def diff(doc, prune=False):
     """What applying `doc` would do: {'changes': [...], 'not_in_file': [...]}.
 
-    Each change is {'kind', 'name', 'action': 'create' | 'update', 'fields': {field: {'from', 'to'}}, 'notes'}. A
-    saved query's update is a new version (published) when its definition changes, and a move when only its
-    collection does. `not_in_file` names what the server holds, of the kinds the file has, that the file doesn't:
-    applying leaves it alone."""
-    wanted = desired(doc)
+    Each change is {'kind', 'name', 'action': 'create' | 'update' | 'delete', 'fields': {field: {'from', 'to'}},
+    'notes'}. A saved query's update is a new version (published) when its definition changes, and a move when only
+    its collection does. With `prune`, what a file manages (it created, changed or named it) and this one doesn't
+    have is deleted - and a managed connection's descriptions this one doesn't list. `not_in_file` names the rest of
+    what the server holds, of the kinds the file has, that the file doesn't: applying leaves it alone."""
+    return _plan(desired(doc), prune)['result']
+
+
+def _plan(wanted, prune):
     have = current(tuple(wanted), examples=True)  # a file may name the bundled examples too
     ours = current(tuple(wanted))  # but one that doesn't hasn't left them out: they're not listed below
-    changes, not_in_file = [], []
+    managed = _managed() if prune else set()
+    changes, deletes, not_in_file = [], [], []
     for kind in KINDS:
         if kind not in wanted:
             continue
         for name, after in wanted[kind].items():
-            before = have[kind].get(name)
-            change = _change(kind, name, before, after)
+            change = _change(kind, name, have[kind].get(name), after, prune and (kind, name) in managed)
             if change is not None:
                 changes.append(change)
         for name in ours[kind]:
-            if name not in wanted[kind]:
+            if name in wanted[kind]:
+                continue
+            if (kind, name) in managed:
+                deletes.append({'kind': kind, 'name': name, 'action': 'delete', 'fields': {},
+                                'notes': _delete_notes(kind, name)})
+            else:
                 not_in_file.append({'kind': kind, 'name': name})
-    return {'changes': changes, 'not_in_file': not_in_file}
+    # deletes last, and in reverse: an export before the destination it writes to
+    order = {kind: i for i, kind in enumerate(KINDS)}
+    deletes.sort(key=lambda c: -order[c['kind']])
+    return {'result': {'changes': changes + deletes, 'not_in_file': not_in_file}, 'wanted': wanted, 'have': have}
 
 
-def _change(kind, name, before, after):
+def _delete_notes(kind, name):
+    if kind == 'connections':
+        users = sorted(q for q, _, data, _ in store.latest_versions() if data.get('connection_name') == name)
+        if users:
+            return [f"saved queries still use it: {', '.join(users)} - they stop working"]
+    return []
+
+
+def _change(kind, name, before, after, prune_items=False):
     notes = []
     if kind == 'queries':
         stored, draft = before if before is not None else (None, None)
@@ -492,7 +518,8 @@ def _change(kind, name, before, after):
         found = _changes(_key_fields(before), fields)
         if after['secret_sha256'] is not None and after['secret_sha256'] != before['secret_sha256']:
             found['secret'] = {'from': CHANGED, 'to': CHANGED}
-            notes.append('a new secret: the old one keeps working for 60 minutes, as a rotation does')
+            notes.append(f'a new secret: the old one keeps working for {apikeys.DEFAULT_GRACE_MINUTES} minutes, as a '
+                         'rotation does')
         return {'kind': kind, 'name': name, 'action': 'update', 'fields': found, 'notes': notes} if found else None
     else:
         ignore = ()
@@ -501,6 +528,9 @@ def _change(kind, name, before, after):
         after = {_label(*k): v for k, v in after.items()}
         found = {label: {'from': before.get(label), 'to': text} for label, text in sorted(after.items())
                  if before.get(label) != text}
+        if prune_items:  # the file lists this connection's descriptions in full: the rest go
+            found.update({label: {'from': text, 'to': None} for label, text in sorted(before.items())
+                          if label not in after})
         if not found:
             return None
         return {'kind': kind, 'name': name, 'action': 'update' if before else 'create', 'fields': found,
@@ -524,6 +554,11 @@ def _label(table, column):
     return (table or '(connection)') + (f'.{column}' if column else '')
 
 
+def _unlabel(label):
+    table, _, column = label.partition('.')
+    return (None if table == '(connection)' else table), (column or None)
+
+
 def _shown(value):
     if value is None:
         return '(none)'
@@ -537,11 +572,11 @@ def _long(value):
 
 
 def render(result):
-    """The diff as a reviewer reads it: + for created, ~ for changed, each field's old and new value - long text as a
-    line diff."""
+    """The diff as a reviewer reads it: + for created, ~ for changed, - for deleted, each field's old and new value -
+    long text as a line diff."""
     lines = []
     for change in result['changes']:
-        mark = '+' if change['action'] == 'create' else '~'
+        mark = {'create': '+', 'update': '~', 'delete': '-'}[change['action']]
         lines.append(f"{mark} {change['kind']}[{change['name']}]")
         for note in change['notes']:
             lines.append(f'    ({note})')
@@ -563,8 +598,8 @@ def render(result):
                         lines.append(f'      {line}')
             else:
                 lines.append(f'    {field}: {_shown(old)} -> {_shown(new)}')
-    created = sum(1 for c in result['changes'] if c['action'] == 'create')
-    changed = len(result['changes']) - created
+    counts = {action: sum(1 for c in result['changes'] if c['action'] == action)
+              for action in ('create', 'update', 'delete')}
     if result['not_in_file']:
         lines.append('')
         lines.append('On the server but not in the file - applying leaves them alone:')
@@ -573,10 +608,176 @@ def render(result):
     if lines:
         lines.append('')
     if result['changes']:
-        lines.append(f'{created} to create, {changed} to change.')
+        lines.append(f"{counts['create']} to create, {counts['update']} to change"
+                     + (f", {counts['delete']} to delete." if counts['delete'] else '.'))
     else:
         lines.append('No changes: the server matches the file.')
     return '\n'.join(lines)
+
+
+# --------------------------------------------------------------------------------------
+# Applying a file
+# --------------------------------------------------------------------------------------
+
+def file_hash(doc):
+    """The SHA-256 of a document, as its canonical JSON - what the audit log and the managed marks name it by."""
+    canonical = json.dumps(doc, sort_keys=True, separators=(',', ':'), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def apply(doc, prune=False, actor='cli'):
+    """Make the store match `doc`, all or nothing, and return what changed (diff()'s shape) with `applied`.
+
+    Everything happens in one transaction, holding the store's write lock: the file is checked and compared against
+    the store as it is then, every change is made through the functions the API uses - each audited, `via: config`
+    - and the objects the file names are marked managed. Any problem, at any step, rolls all of it back; the error
+    names the object. One `config_applied` entry, by `actor`, records the file's hash and the counts. A file that
+    changes nothing writes nothing."""
+    digest = file_hash(doc)
+    with db.transaction():
+        plan = _plan(desired(doc), prune)
+        result, wanted, have = plan['result'], plan['wanted'], plan['have']
+        entries = {kind: _objects(doc, kind, _Problems()) for kind in wanted if kind != 'descriptions'}
+        managed = _managed()
+        unmarked = [(kind, name) for kind in wanted for name in wanted[kind] if (kind, name) not in managed]
+        if not result['changes'] and not unmarked:
+            return {**result, 'applied': False, 'file_sha256': digest}
+        with store.audit_via('config'):
+            for change in result['changes']:
+                kind, name = change['kind'], change['name']
+                try:
+                    _APPLY[kind](change, entries.get(kind, {}).get(name), wanted[kind].get(name),
+                                 have[kind].get(name), actor, digest)
+                except ApiError as error:
+                    raise ConfigInvalid([f'{kind}[{name}]: {error.message}']) from None
+        conn = db.connection()
+        timestamp = store.now()
+        for change in result['changes']:
+            if change['action'] == 'delete':
+                conn.execute('DELETE FROM config_managed WHERE kind = ? AND name = ?', (change['kind'], change['name']))
+        for kind in wanted:
+            for name in wanted[kind]:
+                conn.execute('INSERT INTO config_managed (kind, name, applied_at, file_hash) VALUES (?, ?, ?, ?) '
+                             'ON CONFLICT(kind, name) DO UPDATE SET applied_at = excluded.applied_at, '
+                             'file_hash = excluded.file_hash', (kind, name, timestamp, digest))
+        counts = {action: sum(1 for c in result['changes'] if c['action'] == action)
+                  for action in ('create', 'update', 'delete')}
+        store.record_audit(actor, 'config_applied', digest[:12], {
+            'file_sha256': digest, 'created': counts['create'], 'changed': counts['update'],
+            'deleted': counts['delete'], 'newly_managed': len(unmarked), 'pruned': prune})
+    return {**result, 'applied': True, 'file_sha256': digest}
+
+
+def _cleared(after, before, keep=()):
+    """An update's body: every field the file sets, and None for each it no longer has - which the API removes."""
+    return {**after, **{k: None for k in (before or {}) if k not in after and k not in keep}}
+
+
+def _apply_connection(change, entry, after, before, actor, digest):
+    from .services import connections
+    if change['action'] == 'create':
+        connections.create(entry, actor)
+    elif change['action'] == 'update':
+        body = _cleared(after, before, keep=('db', 'active'))
+        if body.get('password') == SECRET:
+            del body['password']
+        connections.update(change['name'], body, actor)
+    else:
+        connections.delete(change['name'], f'removed by configuration file {digest[:12]}', actor)
+
+
+def _apply_destination(change, entry, after, before, actor, digest):
+    from .services import destinations as destination_service
+    if change['action'] == 'create':
+        destination_service.create(entry, actor)
+    elif change['action'] == 'update':
+        body = _cleared(after, before, keep=('storage',))
+        if body.get('password') == SECRET:
+            del body['password']
+        destination_service.update(change['name'], body, actor)
+    else:
+        destination_service.delete(change['name'], actor, used_by=exports.using_destination(change['name']))
+
+
+def _apply_query(change, entry, after, before, actor, digest):
+    from . import collection_admin
+    name = change['name']
+    if change['action'] == 'delete':
+        store.delete_saved(name)
+        store.record_audit(actor, 'delete_query', name, None)
+        return
+    body = {k: v for k, v in entry.items() if k != 'collection'}
+    if change['action'] == 'create':
+        query_service.create({**body, 'collection': after['collection'], 'publish': True}, actor)
+        return
+    if set(change['fields']) - {'collection'}:
+        query_service.add_version(name, {**{k: v for k, v in body.items() if k != 'name'}, 'publish': True}, actor)
+    stored = store.read_collection(store.load_versions(name, with_history=False))
+    if after['collection'] != stored:
+        access_change = collection_admin.access_change(stored, after['collection'])
+        previous = store.set_collection(name, after['collection'])
+        store.record_audit(actor, 'move_query', name, {
+            'collection': {'from': previous, 'to': after['collection']},
+            'keys_gaining_access': access_change['keys']['gain'], 'keys_losing_access': access_change['keys']['lose']})
+
+
+def _apply_role(change, entry, after, before, actor, digest):
+    if change['action'] == 'create':
+        access.create_role(entry, actor)
+    elif change['action'] == 'update':
+        access.update_role(change['name'], after, actor)
+    else:
+        access.delete_role(change['name'], actor)
+
+
+def _apply_key(change, entry, after, before, actor, digest):
+    name = change['name']
+    if change['action'] == 'delete':
+        access.delete_key(name, actor)
+        return
+    if change['action'] == 'create':
+        body = {'name': name, 'expires_at': after['expires_at']}
+        body.update({'role': after['role']} if after['role'] else after['grants'])
+        access.create_key(body, actor)  # with a random secret, replaced at once: it never works
+        apikeys.set_secret_hash(name, after['secret_sha256'], grace_minutes=0)
+        if not after['active']:
+            access.update_key(name, {'active': False}, actor)
+        store.record_audit(actor, 'set_key_secret', name, {'grace_minutes': 0})
+        return
+    fields = set(change['fields']) - {'secret'}
+    if fields:
+        access.update_key(name, {**after['grants'], 'active': after['active'], 'expires_at': after['expires_at']},
+                          actor)
+    if 'secret' in change['fields']:
+        until = apikeys.set_secret_hash(name, after['secret_sha256'])
+        store.record_audit(actor, 'set_key_secret', name, {'grace_minutes': apikeys.DEFAULT_GRACE_MINUTES,
+                                                           'previous_expires_at': until})
+
+
+def _apply_descriptions(change, entry, after, before, actor, digest):
+    from .services import descriptions as description_service
+    if change['action'] == 'delete':
+        fields = {label: None for label in (_label(*k) for k in before)}
+    else:
+        fields = {label: values['to'] for label, values in change['fields'].items()}
+    items = [{'table': table, 'column': column, 'description': text}
+             for (table, column), text in ((_unlabel(label), text) for label, text in fields.items())]
+    description_service.update(change['name'], {'items': items}, actor)
+
+
+def _apply_export(change, entry, after, before, actor, digest):
+    from .services import exports as export_service
+    if change['action'] == 'create':
+        export_service.create(entry, actor)
+    elif change['action'] == 'update':
+        export_service.update(change['name'], _cleared(after, before), actor)
+    else:
+        export_service.delete(change['name'], actor)
+
+
+_APPLY = {'connections': _apply_connection, 'destinations': _apply_destination, 'queries': _apply_query,
+          'roles': _apply_role, 'api_keys': _apply_key, 'descriptions': _apply_descriptions,
+          'exports': _apply_export}
 
 
 # --------------------------------------------------------------------------------------

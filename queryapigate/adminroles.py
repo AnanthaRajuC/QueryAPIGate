@@ -33,12 +33,13 @@ CAPABILITIES = {
     'exports.write': 'create, change and delete exports',
     'exports.run': 'run an export',
     'destinations.write': 'create, change, test and delete destinations',
+    'config.apply': 'see what a configuration file would change, and apply it - any of the above (ADR 0014)',
 }
 
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
     'owner': set(CAPABILITIES),
-    'admin': set(CAPABILITIES) - {'admins.read', 'admins.write', 'secrets.rotate'},
+    'admin': set(CAPABILITIES) - {'admins.read', 'admins.write', 'secrets.rotate', 'config.apply'},
     'developer': _EVERYONE | {'queries.write', 'exports.read', 'exports.run'},
     'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read'},
 }
@@ -90,6 +91,7 @@ OPERATIONS = {
     'v1.list_exports': 'exports.read', 'v1.get_export': 'exports.read', 'v1.list_export_runs': 'exports.read',
     'v1.create_export': 'exports.write', 'v1.update_export': 'exports.write', 'v1.delete_export': 'exports.write',
     'v1.run_export': 'exports.run',
+    'v1.config_diff': 'config.apply', 'v1.config_apply': 'config.apply',
 }
 
 

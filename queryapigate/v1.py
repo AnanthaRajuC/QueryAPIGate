@@ -14,6 +14,8 @@ each one replaces keep working, marked deprecated. Conventions, the same on ever
 
 Routes here translate HTTP to services/ calls and back; the meaning of each operation lives in the service.
 """
+import json
+
 from flask import Blueprint, Response, current_app, g, jsonify, request
 
 from . import (
@@ -763,6 +765,42 @@ def rekey():
     if check:
         return jsonify(rekeying.check()), 200
     return jsonify(rekeying.rekey(caller_key_name(), g.permission.via)), 200
+
+
+def _config_document():
+    """The configuration file a request carries: as JSON, or as YAML with a YAML Content-Type (ADR 0014)."""
+    from . import configcode
+    if request.mimetype in ('application/yaml', 'application/x-yaml', 'text/yaml'):
+        return configcode.load(request.get_data(as_text=True))
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ApiError('The body is a configuration file: a JSON object, or YAML sent as application/yaml',
+                       code='invalid_config')
+    return configcode.load(json.dumps(data))
+
+
+def _flag(name):
+    value = request.args.get(name, 'false')
+    if value not in ('true', 'false'):
+        raise ApiError(f'{name} is true or false', code='invalid_body')
+    return value == 'true'
+
+
+@bp.route('/config/diff', methods=['POST'])
+def config_diff():
+    """What applying the configuration file in the body would change, field by field - nothing is written."""
+    from . import configcode
+    return jsonify(configcode.diff(_config_document(), prune=_flag('prune'))), 200
+
+
+@bp.route('/config/apply', methods=['POST'])
+def config_apply():
+    """Make the server match the configuration file in the body, all or nothing (ADR 0014)."""
+    from . import configcode
+    doc, prune = _config_document(), _flag('prune')
+    if _flag('dry_run'):
+        return jsonify({**configcode.diff(doc, prune=prune), 'applied': False}), 200
+    return jsonify(configcode.apply(doc, prune=prune, actor=caller_key_name())), 200
 
 
 @bp.route('/mcp/status', methods=['GET'])

@@ -54,14 +54,21 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Upgrading from 0.26
+- **Schema 15** adds one table, `config_managed`: what a configuration file manages. Additive - 0.26 instances keep
+  working on the upgraded store.
+
 ### Added
 - **Configuration as code** (BACKLOG #97, [ADR 0014](documentation/adr/0014-configuration-as-code.md), experimental),
   first part: `queryapigate config export` writes a server's connections, destinations, roles, saved queries, API
   keys' grants, descriptions and exports as one YAML file, with no secret in it - passwords as `${VAR}` references,
   keys as their hashes. `queryapigate config diff FILE` says, field by field, what applying a file would change, and
   reports every problem in it at once (exit 0, 2 or 1, as `terraform plan -detailed-exitcode`). `config new-key`
-  makes a key's secret and its hash. See
-  [Configuration as code](documentation/API.md#configuration-as-code). Applying a file comes next.
+  makes a key's secret and its hash. `queryapigate config apply FILE` (and `POST /api/v1/config/apply`) makes the
+  server match it, all or nothing: one transaction, every change through the API's own rules and audited
+  `via: config`, under one `config_applied` entry with the file's hash. `--prune` deletes only what a file manages
+  (applied or named before), never what was made in the Console. `POST /api/v1/config/diff` too; both owners only
+  (`config.apply`). See [Configuration as code](documentation/API.md#configuration-as-code).
 
 ## [0.26.0] - 2026-10-12
 

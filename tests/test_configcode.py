@@ -426,3 +426,272 @@ class CliTests(ConfigTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# --------------------------------------------------------------------------------------
+# Slice 2: transactions that nest, and apply
+# --------------------------------------------------------------------------------------
+
+class TransactionTests(ConfigTestCase):
+    def count(self):
+        return db.connection().execute('SELECT COUNT(*) FROM config_managed').fetchone()[0]
+
+    def insert(self, conn, name):
+        conn.execute("INSERT INTO config_managed (kind, name, applied_at, file_hash) VALUES ('t', ?, 'now', 'h')",
+                     (name,))
+
+    def test_a_nested_block_that_fails_rolls_back_alone(self):
+        with db.transaction() as conn:
+            self.insert(conn, 'kept')
+            with self.assertRaises(RuntimeError):
+                with db.transaction() as inner:
+                    self.insert(inner, 'undone')
+                    raise RuntimeError
+            self.insert(conn, 'also kept')
+        names = [r[0] for r in db.connection().execute('SELECT name FROM config_managed ORDER BY name')]
+        self.assertEqual(names, ['also kept', 'kept'])
+
+    def test_a_nested_block_commits_only_with_the_outer_one(self):
+        with self.assertRaises(RuntimeError):
+            with db.transaction() as conn:
+                with db.transaction() as inner:
+                    self.insert(inner, 'nested')
+                self.insert(conn, 'outer')
+                raise RuntimeError
+        self.assertEqual(self.count(), 0)
+        self.assertFalse(db.in_transaction())
+
+    def test_follow_ups_run_after_the_commit_and_never_after_a_rollback(self):
+        ran = []
+        with db.transaction():
+            db.after_commit(lambda: ran.append('outer'))
+            with self.assertRaises(RuntimeError):
+                with db.transaction():
+                    db.after_commit(lambda: ran.append('rolled back'))
+                    raise RuntimeError
+            self.assertEqual(ran, [])
+        self.assertEqual(ran, ['outer'])
+        with self.assertRaises(RuntimeError):
+            with db.transaction():
+                db.after_commit(lambda: ran.append('never'))
+                raise RuntimeError
+        db.after_commit(lambda: ran.append('now'))  # outside one: at once
+        self.assertEqual(ran, ['outer', 'now'])
+
+    def test_an_audit_entry_rolled_back_never_reaches_the_export_file(self):
+        path = os.path.join(self.tmp.name, 'audit.jsonl')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE': path}):
+            with self.assertRaises(RuntimeError):
+                with db.transaction():
+                    store.record_audit('t', 'rolled_back', 'x')
+                    raise RuntimeError
+            store.record_audit('t', 'kept', 'x')
+            store.record_audit('t', 'kept too', 'x')
+        with open(path) as f:
+            lines = [json.loads(line) for line in f]
+        self.assertEqual([e['action'] for e in lines], ['kept', 'kept too'])
+        from queryapigate import auditchain
+        # the rolled-back entry's seq went to the next one: the file and the store each hold one unbroken chain
+        self.assertTrue(auditchain.verify_file(path)['intact'])
+        self.assertTrue(auditchain.verify(db.connection())['intact'])
+
+
+class ApplyTests(ConfigTestCase):
+    def audit(self):
+        rows = db.connection().execute('SELECT entry_json FROM audit_log ORDER BY id').fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def promote(self):
+        """dev's setup exported, then applied to an empty prod - the point of it all."""
+        self.build()
+        doc, _, _ = configcode.export()
+        hashes = apikeys.secret_hashes()
+        db.close()
+        prod = tempfile.TemporaryDirectory()
+        self.addCleanup(prod.cleanup)
+        os.environ['QUERYAPIGATE_HOME'] = prod.name
+        db.init_schema()
+        return doc, hashes
+
+    def test_a_file_applied_to_an_empty_server_makes_it_match(self):
+        doc, hashes = self.promote()
+        result = configcode.apply(doc)
+        self.assertTrue(result['applied'])
+        self.assertEqual(sorted({c['action'] for c in result['changes']}), ['create'])
+        self.assertEqual(configcode.diff(doc), {'changes': [], 'not_in_file': []})
+        self.assertEqual(apikeys.secret_hashes(), hashes)  # the same secrets work on prod
+        self.assertEqual(store.read_published(store.load_versions('monthly_revenue')), 1)
+        self.assertEqual(exports.get('daily')['destination'], 'bucket')
+        self.assertFalse(apikeys.list_keys()['ops']['active'])
+
+    def test_every_change_is_audited_via_config_under_one_entry(self):
+        doc, _ = self.promote()
+        result = configcode.apply(doc, actor='alice')
+        entries = self.audit()
+        top = entries[-1]
+        self.assertEqual((top['action'], top['actor'], top['changes']['file_sha256']),
+                         ('config_applied', 'alice', result['file_sha256']))
+        self.assertEqual(top['changes']['created'], len(result['changes']))
+        self.assertEqual({e['via'] for e in entries[:-1]}, {'config'})
+        self.assertIn('create_connection', [e['action'] for e in entries])
+
+    def test_applying_it_again_changes_and_records_nothing(self):
+        doc, _ = self.promote()
+        configcode.apply(doc)
+        before = len(self.audit())
+        result = configcode.apply(doc)
+        self.assertEqual((result['applied'], result['changes'], len(self.audit())), (False, [], before))
+
+    def test_a_problem_at_any_step_changes_nothing(self):
+        doc, _ = self.promote()
+        # passes the file's own checks, fails against the store as it will be: the export's path needs a value the
+        # query doesn't take
+        doc['exports'][0]['path'] = 'revenue/{param:nowhere}.csv'
+        path = os.path.join(self.tmp.name, 'audit.jsonl')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE': path}):
+            with self.assertRaises(configcode.ConfigInvalid) as caught:
+                configcode.apply(doc)
+        self.assertTrue(caught.exception.problems[0].startswith('exports[daily]: '), caught.exception.problems)
+        self.assertEqual((store.read_connections(), apikeys.list_keys(), self.audit()), ({}, {}, []))
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM config_managed').fetchone()[0], 0)
+
+    def test_changes_go_through_the_apis_own_paths(self):
+        self.build()
+        doc, _, _ = configcode.export()
+        query = next(q for q in doc['queries'] if q['name'] == 'monthly_revenue')
+        query['sql'] = 'SELECT 2 AS n WHERE :since IS NOT NULL'
+        next(q for q in doc['queries'] if q['name'] == 'loose')['collection'] = 'finance'
+        next(c for c in doc['connections'] if c['name'] == 'legacy')['host'] = 'new-host'
+        doc['descriptions']['warehouse'][0]['description'] = 'Monthly revenue'
+        configcode.apply(doc)
+        content = store.load_versions('monthly_revenue')
+        self.assertEqual(store.read_published(content), 2)
+        self.assertEqual(store.read_collection(store.load_versions('loose')), 'finance')
+        self.assertEqual(store.read_connections()['legacy']['host'], 'new-host')
+        self.assertEqual(descriptions.list_for('warehouse')[0]['description'], 'Monthly revenue')
+        actions = [e['action'] for e in self.audit() if e['via'] == 'config']
+        self.assertEqual(sorted(actions), ['move_query', 'save_query', 'update_connection', 'update_descriptions'])
+
+    def test_a_new_secret_hash_rotates_the_key_with_the_usual_grace(self):
+        self.build()
+        apikeys.set_secret_hash('partner-a', hashlib.sha256(b'sk_old').hexdigest(), grace_minutes=0)
+        doc, _, _ = configcode.export()
+        next(k for k in doc['api_keys'] if k['name'] == 'partner-a')['secret_sha256'] = KEY_HASH
+        configcode.apply(doc)
+        self.assertEqual(apikeys.authenticate('sk_partner').name, 'partner-a')
+        self.assertEqual(apikeys.authenticate('sk_old').name, 'partner-a')  # still, for its grace period
+        entry = next(e for e in self.audit() if e['action'] == 'set_key_secret')
+        self.assertEqual(entry['changes']['grace_minutes'], apikeys.DEFAULT_GRACE_MINUTES)
+
+    def test_a_new_keys_random_secret_never_works(self):
+        apikeys_before = set(apikeys.list_keys())
+        with mock.patch('secrets.token_urlsafe', return_value='predictable'):
+            configcode.apply(self.file(api_keys=[{'name': 'k', 'connections': [], 'secret_sha256': KEY_HASH}]))
+        self.assertEqual(set(apikeys.list_keys()) - apikeys_before, {'k'})
+        self.assertIsNone(apikeys.authenticate('sk_predictable'))
+        self.assertEqual(apikeys.authenticate('sk_partner').name, 'k')
+
+    def test_one_secret_names_one_key(self):
+        apikeys.create_key('first', connections=[])
+        apikeys.set_secret_hash('first', KEY_HASH, grace_minutes=0)
+        with self.assertRaises(configcode.ConfigInvalid) as caught:
+            configcode.apply(self.file(api_keys=[{'name': 'second', 'connections': [], 'secret_sha256': KEY_HASH}]))
+        self.assertIn('another key already has this secret_sha256', caught.exception.problems[0].lower())
+        self.assertNotIn('second', apikeys.list_keys())
+
+
+class PruneTests(ConfigTestCase):
+    def setUp(self):
+        super().setUp()
+        self.build()
+        self.doc, _, _ = configcode.export(kinds=('queries', 'descriptions'))
+        configcode.apply(self.doc)  # the file now manages these queries and descriptions
+
+    def test_only_what_a_file_manages_is_deleted(self):
+        store.save_version('made_in_the_console', {'sql_query': 'SELECT 1', 'author': 'a', 'description': 'd',
+                                                   'tags': [], 'query_parameters': {}})
+        self.doc['queries'] = [q for q in self.doc['queries'] if q['name'] != 'loose']
+        result = configcode.diff(self.doc, prune=True)
+        self.assertEqual([(c['kind'], c['name'], c['action']) for c in result['changes']],
+                         [('queries', 'loose', 'delete')])
+        self.assertEqual(result['not_in_file'], [{'kind': 'queries', 'name': 'made_in_the_console'}])
+        self.assertIn('1 to delete.', configcode.render(result))
+        self.assertTrue(store.saved_query_exists('loose'))  # a diff deletes nothing
+        configcode.apply(self.doc, prune=True)
+        self.assertFalse(store.saved_query_exists('loose'))
+        self.assertTrue(store.saved_query_exists('made_in_the_console'))
+
+    def test_without_prune_nothing_is_deleted(self):
+        self.doc['queries'] = []
+        self.assertEqual(configcode.apply(self.doc)['changes'], [])
+        self.assertTrue(store.saved_query_exists('loose'))
+
+    def test_a_managed_connections_descriptions_are_listed_in_full(self):
+        self.doc['descriptions']['warehouse'] = self.doc['descriptions']['warehouse'][:1]
+        configcode.apply(self.doc, prune=True)
+        self.assertEqual([d['column'] for d in descriptions.list_for('warehouse')], [None])
+
+    def test_a_destination_an_export_still_uses_is_not_deleted(self):
+        doc, _, _ = configcode.export(kinds=('destinations',))
+        configcode.apply(doc)
+        with self.assertRaises(configcode.ConfigInvalid) as caught:
+            configcode.apply(self.file(destinations=[]), prune=True)
+        self.assertIn('used by export(s) daily', caught.exception.problems[0])
+        self.assertEqual([d['name'] for d in destinations.list_all()], ['bucket'])
+
+
+class ApiTests(ConfigTestCase):
+    def setUp(self):
+        super().setUp()
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        from queryapigate import admins, create_app
+        self.client = create_app().test_client()
+        admins.create_admin('ops', 'admin')
+        self.ops = {'X-API-Key': admins.issue_token('ops')[1]}
+        self.owner = {'X-API-Key': 'admin-key'}
+        self.doc = self.file(roles=[{'name': 'r', 'connections': []}])
+
+    def test_diff_and_apply_as_json_or_yaml(self):
+        response = self.client.post('/api/v1/config/diff', json=self.doc, headers=self.owner)
+        self.assertEqual((response.status_code, response.get_json()['changes'][0]['action']), (200, 'create'))
+        response = self.client.post('/api/v1/config/apply?dry_run=true', data=yaml.safe_dump(self.doc),
+                                    content_type='application/yaml', headers=self.owner)
+        self.assertEqual((response.status_code, response.get_json()['applied']), (200, False))
+        self.assertEqual(apikeys.list_roles(), {})
+        response = self.client.post('/api/v1/config/apply', json=self.doc, headers=self.owner)
+        self.assertTrue(response.get_json()['applied'])
+        self.assertIn('r', apikeys.list_roles())
+        entry = json.loads(db.connection().execute(
+            "SELECT entry_json FROM audit_log WHERE entry_json LIKE '%config_applied%'").fetchone()[0])
+        self.assertEqual((entry['actor'], entry['via']), ('admin', 'break-glass'))
+
+    def test_owners_only(self):
+        for path in ('/api/v1/config/diff', '/api/v1/config/apply'):
+            response = self.client.post(path, json=self.doc, headers=self.ops)
+            self.assertEqual((response.status_code, response.get_json()['code']), (403, 'role_forbidden'))
+
+    def test_every_problem_in_the_answer(self):
+        response = self.client.post('/api/v1/config/diff', headers=self.owner, json=self.file(
+            connections=[{'name': 'c', 'db': 'mysql', 'password': 'plain'}], roles=[{'name': 'r', 'x': 1}]))
+        body = response.get_json()
+        self.assertEqual((response.status_code, body['code'], len(body['problems'])), (400, 'invalid_config', 2))
+
+
+class CliApplyTests(ConfigTestCase):
+    def test_apply_dry_run_and_prune(self):
+        self.build()
+        path = os.path.join(self.tmp.name, 'queryapigate.yaml')
+        self.cli('config', 'export', '--kinds', 'roles', '--out', path)
+        with open(path) as f:
+            text = f.read().replace('60/minute', '10/minute')
+        code, out, _ = self.cli('config', 'apply', '--dry-run', '-', stdin=text)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.endswith('Dry run: nothing was changed.\n'))
+        self.assertEqual(apikeys.list_roles()['partner']['rate_limit'], '60/minute')
+        code, out, _ = self.cli('config', 'apply', '-', stdin=text)
+        self.assertEqual(code, 0)
+        self.assertIn('Applied: the server matches the file', out)
+        self.assertEqual(apikeys.list_roles()['partner']['rate_limit'], '10/minute')
+        code, out, _ = self.cli('config', 'apply', '-', stdin=text)
+        self.assertIn('No changes: the server matches the file.', out)

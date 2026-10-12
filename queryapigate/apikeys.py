@@ -630,13 +630,43 @@ def rotate_key(name, grace_minutes=None):
                            '- end that first (DELETE .../previous), or wait for it', 409,
                            code='key_rotation_pending', previous_expires_at=row['previous_expires_at'])
         secret = 'sk_' + secrets.token_urlsafe(32)
-        until = (datetime.now() + timedelta(minutes=grace)).strftime('%Y-%m-%d %H:%M:%S') if grace else None
-        details = json.loads(row['details_json'])
-        details.pop('previous_last_used_at', None)
-        conn.execute('UPDATE api_keys SET hash = ?, previous_hash = ?, previous_expires_at = ?, details_json = ? '
-                     'WHERE name = ?', (_hash(secret), row['hash'] if until else None, until, json.dumps(details),
-                                        name))
+        until = _replace_hash(conn, name, row, _hash(secret), grace)
     return secret, until
+
+
+def _replace_hash(conn, name, row, new_hash, grace):
+    """The key's secret becomes the one `new_hash` is the hash of; the old one keeps working `grace` minutes."""
+    until = (datetime.now() + timedelta(minutes=grace)).strftime('%Y-%m-%d %H:%M:%S') if grace else None
+    details = json.loads(row['details_json'])
+    details.pop('previous_last_used_at', None)
+    conn.execute('UPDATE api_keys SET hash = ?, previous_hash = ?, previous_expires_at = ?, details_json = ? '
+                 'WHERE name = ?', (new_hash, row['hash'] if until else None, until, json.dumps(details), name))
+    return until
+
+
+def set_secret_hash(name, secret_hash, grace_minutes=None):
+    """A key's secret set to the one `secret_hash` is the SHA-256 of - a configuration file's `secret_sha256`
+    (ADR 0014) - with the old secret kept working for `grace_minutes`, as rotate_key() does. The secret itself is
+    never seen here. Refused when another key already has it: one secret must name one key. Returns when the old
+    secret stops working."""
+    grace = _validate_grace(grace_minutes)
+    with db.transaction() as conn:
+        row = conn.execute('SELECT hash, details_json, previous_hash, previous_expires_at FROM api_keys WHERE name = ?',
+                           (name,)).fetchone()
+        if row is None:
+            raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
+        taken = conn.execute('SELECT name FROM api_keys WHERE (hash = ? OR previous_hash = ?) AND name <> ?',
+                             (secret_hash, secret_hash, name)).fetchone()
+        if taken is not None:
+            raise ApiError("Another key already has this secret_sha256 - each key needs its own secret",
+                           409, code='key_secret_taken')
+        if row['hash'] == secret_hash:
+            return None
+        if grace and row['previous_hash'] and row['previous_expires_at'] and row['previous_expires_at'] > store.now():
+            raise ApiError(f"The secret this key had before its last change works until {row['previous_expires_at']} "
+                           '- end that first (DELETE .../previous), or wait for it', 409,
+                           code='key_rotation_pending', previous_expires_at=row['previous_expires_at'])
+        return _replace_hash(conn, name, row, secret_hash, grace)
 
 
 def end_previous(name):

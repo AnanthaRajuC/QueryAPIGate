@@ -279,6 +279,47 @@ SCHEMAS = {
                                                           '`check`).'},
         },
     },
+    'ConfigFile': {
+        'type': 'object', 'required': ['format', 'format_version'],
+        'description': "A server's configuration (ADR 0014): `format: queryapigate-config`, `format_version: 1`, and "
+                       'any of connections, destinations, queries, roles, api_keys (each a list of objects with '
+                       "this API's fields), descriptions (by connection) and exports.",
+        'properties': {'format': {'type': 'string', 'enum': ['queryapigate-config']},
+                       'format_version': {'type': 'integer', 'enum': [1]}},
+    },
+    'ConfigChange': {
+        'type': 'object', 'required': ['kind', 'name', 'action', 'fields', 'notes'],
+        'properties': {
+            'kind': {'type': 'string', 'enum': ['connections', 'destinations', 'queries', 'roles', 'api_keys',
+                                                'descriptions', 'exports']},
+            'name': {'type': 'string'},
+            'action': {'type': 'string', 'enum': ['create', 'update', 'delete']},
+            'fields': {'type': 'object', 'description': 'Each field that changes: {"from": ..., "to": ...}. A stored '
+                                                        'password shows as <stored secret>, a key\'s secret as '
+                                                        '<changed>.',
+                       'additionalProperties': {'type': 'object', 'properties': {'from': {}, 'to': {}}}},
+            'notes': {'type': 'array', 'items': {'type': 'string'}},
+        },
+    },
+    'ConfigDiff': {
+        'type': 'object', 'required': ['changes', 'not_in_file'],
+        'properties': {
+            'changes': {'type': 'array', 'items': _ref('ConfigChange')},
+            'not_in_file': {'type': 'array', 'description': 'What the server has, of the kinds the file has, and the '
+                                                            'file does not: left alone.',
+                            'items': {'type': 'object', 'required': ['kind', 'name'],
+                                      'properties': {'kind': {'type': 'string'}, 'name': {'type': 'string'}}}},
+        },
+    },
+    'ConfigApplied': {
+        'type': 'object', 'required': ['changes', 'not_in_file', 'applied'],
+        'properties': {
+            'changes': {'type': 'array', 'items': _ref('ConfigChange')},
+            'not_in_file': {'type': 'array', 'items': {'type': 'object'}},
+            'applied': {'type': 'boolean', 'description': 'False when nothing needed changing, or for a dry run.'},
+            'file_sha256': {'type': 'string', 'description': "The file's hash, as the audit log names it."},
+        },
+    },
     'AgentUsage': {
         'type': 'object',
         'required': ['agent', 'calls', 'rows', 'errors', 'masked_calls', 'first_seen', 'last_seen', 'connections',
@@ -985,6 +1026,9 @@ def _op(summary, responses, parameters=(), body=None, description=None):
 
 
 _ID = {'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}
+_PRUNE = {'name': 'prune', 'in': 'query', 'schema': {'type': 'boolean'},
+          'description': 'Also delete what a file manages and this one no longer has - never what was made in the '
+                         'Console or this API.'}
 _QUERY = _ok(_ref('Query'), etag=True)
 _CONNECTION = _ok(_ref('ConnectionDetail'), etag=True)
 _UNREACHABLE = {'502': {'description': "Couldn't reach the database (code connection_failed)",
@@ -1179,6 +1223,22 @@ PATHS = {
                     body={'type': 'object', 'properties': {'check': {'type': 'boolean', 'default': False}}},
                     description='All or nothing, in one transaction; running it again is harmless. Owners only '
                                 '(`secrets.rotate`). Recorded in the audit log as `rekey`, with counts only.'),
+    },
+    '/api/v1/config/diff': {
+        'post': _op('What applying a configuration file would change, field by field - nothing is written',
+                    {'200': _ok(_ref('ConfigDiff'))}, parameters=[_PRUNE], body=_ref('ConfigFile'),
+                    description='The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with '
+                                'problems answers 400 `invalid_config`, listing every one in `problems`. Owners '
+                                'only (`config.apply`).'),
+    },
+    '/api/v1/config/apply': {
+        'post': _op('Make the server match a configuration file, all or nothing',
+                    {'200': _ok(_ref('ConfigApplied'))}, body=_ref('ConfigFile'),
+                    parameters=[_PRUNE, {'name': 'dry_run', 'in': 'query', 'schema': {'type': 'boolean'},
+                                         'description': 'Say what would change; change nothing.'}],
+                    description='In one transaction: every change is made through the same rules as the rest of '
+                                'this API and audited (`via: config`), under one `config_applied` entry with the '
+                                "file's hash. A problem at any step changes nothing. Owners only (`config.apply`)."),
     },
     '/api/v1/mcp/status': {
         'get': _op("Whether the MCP server's port answers (a TCP connect, run only when asked)",

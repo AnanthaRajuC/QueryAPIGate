@@ -595,14 +595,19 @@ as the admin key - no server needs to be running.
 One file describes what a server holds - connections, destinations, roles, saved queries, API keys' grants,
 descriptions and exports - so it can be reviewed as a pull request, kept in git, and promoted from one environment to
 the next. `queryapigate config export` writes a server's file; `queryapigate config diff` says, field by field, what
-applying one would change.
+applying one would change; `queryapigate config apply` makes the server match it.
 
 ~~~sh
 queryapigate config export --out queryapigate.yaml        # or stdout; --kinds roles,api_keys for some of it
 queryapigate config diff queryapigate.yaml                # exit 0: no changes, 2: changes, 1: problems in the file
 queryapigate config diff --json queryapigate.yaml         # the same, for a script
+queryapigate config apply queryapigate.yaml               # all or nothing; --dry-run, --prune
 queryapigate config new-key                               # a secret and its secret_sha256, for a new key
 ~~~
+
+Against a running server, for CI: `POST /api/v1/config/diff` and `POST /api/v1/config/apply` (`?prune=true`,
+`?dry_run=true`), with the file as JSON or as YAML (`Content-Type: application/yaml`). Owners only - the
+`config.apply` capability, since a file can change anything.
 
 ~~~yaml
 format: queryapigate-config
@@ -649,6 +654,19 @@ Write `${VAR}` references in block style, as above: inside `{...}` on one line, 
   The examples (`queryapigate examples load`) are exported only with `--examples`.
 - **Not in the file:** the server's settings (environment variables), administrators and their tokens, run history,
   usage counters, the audit log, and a query's earlier versions.
+
+**Applying is all or nothing.** The file is checked and compared with the store, and every change made, in one
+transaction holding the store's write lock: each through the same function the API uses for it, and audited as the
+API would audit it - `via: config` - under one `config_applied` entry naming who applied it and the file's SHA-256.
+A problem at any step (`invalid_config`, naming the object) rolls all of it back, audit entries included. A file
+that changes nothing writes nothing, so applying the same file twice records nothing the second time.
+
+- A key's new `secret_sha256` is a rotation: the old secret keeps working for 60 minutes, as `rotate` gives it. A new
+  key's secret is the one its hash is of from the start; two keys can't have one secret (`key_secret_taken`).
+- **What a file manages:** everything a file has applied, or named, is marked managed (schema 15, `config_managed`).
+  **`--prune` deletes only managed objects** the file no longer has - never what was made in the Console or the API
+  and no file has named - and, for a connection the file lists descriptions for, the descriptions it doesn't list.
+  Deleting is refused where the API refuses it (a destination an export writes to), and changes nothing then.
 
 ## Example APIs
 
@@ -1957,6 +1975,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `connection_not_found` | 404 | No such connection |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
 | `key_rotation_pending` | 409 | The key's old secret from its last rotation still works (`previous_expires_at`) - end it (`DELETE /api/v1/api-keys/{name}/previous`) or wait, then rotate again |
+| `key_secret_taken` | 409 | A configuration file gives a key the `secret_sha256` another key already has - each key needs its own secret |
 | `previous_secret_not_found` | 404 | The key has no old secret that still works - nothing to end |
 | `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
 | `destination_not_found`, `export_not_found` | 404 | No such destination or export |

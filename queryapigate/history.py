@@ -208,6 +208,8 @@ def flush():
     off the queue before it writes it, so a batch still being written leaves the queue empty - checking that
     alone let a read go ahead before the batch's transaction committed, and miss the runs in it."""
     writer = _writer_instance
+    if db.in_transaction():
+        return  # the writer thread can't write until this transaction ends: waiting for it would never end
     if writer is not None and writer.pid == os.getpid() and writer.unwritten():
         writer.wait_until_written()
 

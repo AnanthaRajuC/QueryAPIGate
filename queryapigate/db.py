@@ -19,6 +19,7 @@ transaction can't be invalidated by another writer before that transaction commi
 """
 import contextlib
 import functools
+import itertools
 import os
 import re
 import sqlite3
@@ -26,14 +27,16 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 14  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 15  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
-#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery - see _upgrade()
+#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed
+#                    - see _upgrade()
 
 _local = threading.local()
+_savepoints = itertools.count(1)  # names for nested transactions' savepoints - see transaction()
 _inherited: list[object] = []  # connections a forked child must neither use nor close - see connection()
 
 _SCHEMA = """
@@ -246,6 +249,15 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (caller, period)
 );
+-- What a configuration file manages (configcode.py, ADR 0014): an object it created, changed or named. Pruning only
+-- ever deletes these - never what was made in the Console or the API and no file has named.
+CREATE TABLE IF NOT EXISTS config_managed (
+  kind TEXT NOT NULL,          -- connections, destinations, queries, roles, api_keys, descriptions, exports
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL,
+  file_hash TEXT NOT NULL,     -- SHA-256 of the file that last applied it
+  PRIMARY KEY (kind, name)
+);
 """
 
 
@@ -447,6 +459,13 @@ CREATE TABLE IF NOT EXISTS usage_counters (
   rows BIGINT NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (caller, period)
+);
+CREATE TABLE IF NOT EXISTS config_managed (
+  kind TEXT COLLATE "C" NOT NULL,
+  name TEXT COLLATE "C" NOT NULL,
+  applied_at TEXT NOT NULL,
+  file_hash TEXT NOT NULL,
+  PRIMARY KEY (kind, name)
 );
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
@@ -671,7 +690,8 @@ def _upgrade(conn, postgres):
         tables). The entries already stored are chained here, oldest first, as they are - and an audit_chain_started
         entry says from when the chain holds. A 0.24 process still running writes entries without a link; the next
         upgraded write links them in (auditchain.append() chains any it finds), so nothing is lost - but upgrade
-        every instance."""
+        every instance.
+    15: config_managed (ADR 0014) - a new table, made by CREATE TABLE IF NOT EXISTS; additive."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -809,10 +829,32 @@ def transaction(append_only=False, target=None):
     (synchronous_commit off), the same durability SQLite's synchronous=NORMAL gives: a crash can lose the last
     few runs' history, never corrupt anything. On SQLite it changes nothing.
 
-    ``target`` (a current_target() value) runs the block against that store instead of the current one."""
+    ``target`` (a current_target() value) runs the block against that store instead of the current one.
+
+    **Inside another transaction on the same connection**, a block joins it as a savepoint (ADR 0014): it still
+    rolls back on its own if it fails, as it would alone, but commits only with the outer transaction - so a caller
+    can make several writes, each through its usual function, all or nothing (configcode.apply())."""
     conn = connection(target) if target else connection()
     postgres = (target[0] == 'postgres') if target else is_postgres()
+    if getattr(_local, 'transaction_conn', None) is conn:
+        savepoint = f'qag_{next(_savepoints)}'
+        queued = len(_local.after_commit)
+        conn.execute(f'SAVEPOINT {savepoint}')
+        try:
+            yield conn
+        except BaseException:
+            del _local.after_commit[queued:]  # this block's own follow-ups: rolled back with it
+            try:
+                conn.execute(f'ROLLBACK TO SAVEPOINT {savepoint}')
+                conn.execute(f'RELEASE SAVEPOINT {savepoint}')
+            except Exception:  # a lost connection: the outer transaction's own rollback reports it
+                pass
+            raise
+        conn.execute(f'RELEASE SAVEPOINT {savepoint}')
+        return
     conn.execute('BEGIN' if postgres else 'BEGIN IMMEDIATE')
+    _local.transaction_conn = conn
+    _local.after_commit = []
     try:
         if postgres and append_only:
             conn.execute('SET LOCAL synchronous_commit TO OFF')
@@ -824,12 +866,34 @@ def transaction(append_only=False, target=None):
         yield conn
         conn.execute('COMMIT')
     except BaseException:
+        _local.after_commit = []  # rolled back: what was to follow it never happened
         try:
             conn.execute('ROLLBACK')
         except Exception:  # a lost connection has nothing left to roll back; the original error matters more
             if not postgres:
                 raise
         raise
+    finally:
+        _local.transaction_conn = None
+    callbacks, _local.after_commit = _local.after_commit, []
+    for callback in callbacks:
+        callback()
+
+
+def after_commit(callback):
+    """Run `callback` once this thread's transaction commits - now, outside one. For what must follow the store
+    rather than run ahead of it: an audit entry's copy in the export file, written after a rollback, would name an
+    entry the store doesn't have (store.record_audit())."""
+    if in_transaction():
+        _local.after_commit.append(callback)
+    else:
+        callback()
+
+
+def in_transaction():
+    """Whether this thread is inside transaction() - where waiting on another thread's write would wait forever on
+    SQLite, whose write lock this one holds (history.flush())."""
+    return getattr(_local, 'transaction_conn', None) is not None
 
 
 def _error_types():
@@ -872,6 +936,7 @@ _MIGRATED_TABLES = (
     ('write_requests', ('id', 'query_name', 'version', 'caller', 'status', 'created_at', 'expires_at',
                         'idempotency_hash', 'details_json'), 'created_at, id'),
     ('usage_counters', ('caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
+    ('config_managed', ('kind', 'name', 'applied_at', 'file_hash'), 'kind, name'),
 )
 
 

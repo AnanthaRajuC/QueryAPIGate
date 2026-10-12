@@ -392,12 +392,30 @@ def _config_export(args):
 
 @_config_command
 def _config_diff(args):
-    result = configcode.diff(_read_config_file(args.file))
+    result = configcode.diff(_read_config_file(args.file), prune=args.prune)
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
         print(configcode.render(result))
     return 2 if result['changes'] else 0
+
+
+@_config_command
+def _config_apply(args):
+    doc = _read_config_file(args.file)
+    if args.dry_run:
+        result = {**configcode.diff(doc, prune=args.prune), 'applied': False}
+    else:
+        result = configcode.apply(doc, prune=args.prune, actor='cli')
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    print(configcode.render(result))
+    if args.dry_run:
+        print('Dry run: nothing was changed.')
+    elif result['applied']:
+        print(f"Applied: the server matches the file (sha256 {result['file_sha256'][:12]}).")
+    return 0
 
 
 def _config_new_key(args):
@@ -764,7 +782,7 @@ def build_parser():
     collection_import.set_defaults(func=_collection_import)
 
     config_parser = commands.add_parser('config', help="the server's configuration as a file (ADR 0014, experimental): "
-                                                       'export it, and see what applying one would change')
+                                                       'export it, see what applying one would change, apply it')
     config_parser.set_defaults(func=lambda a: config_parser.print_help() or 2)
     config_actions = config_parser.add_subparsers(dest='action')
     config_export = config_actions.add_parser(
@@ -779,7 +797,18 @@ def build_parser():
                      'changes; 2: changes; 1: the file has problems')
     config_diff.add_argument('file', help='a configuration file (YAML or JSON), or - for stdin')
     config_diff.add_argument('--json', action='store_true', help='the changes as JSON, for a script')
+    config_diff.add_argument('--prune', action='store_true', help='also show what --prune would delete')
     config_diff.set_defaults(func=_config_diff)
+    config_apply = config_actions.add_parser(
+        'apply', help='make the server match FILE, all or nothing - every change through the same rules as the API, '
+                      'audited; what the file does not name is left alone')
+    config_apply.add_argument('file', help='a configuration file (YAML or JSON), or - for stdin')
+    config_apply.add_argument('--prune', action='store_true',
+                              help='also delete what a file manages (created, changed or named before) and this one '
+                                   'no longer has - never what was made in the Console or the API')
+    config_apply.add_argument('--dry-run', action='store_true', help='say what would change; change nothing')
+    config_apply.add_argument('--json', action='store_true', help='the result as JSON, for a script')
+    config_apply.set_defaults(func=_config_apply)
     config_new_key = config_actions.add_parser(
         'new-key', help="a fresh API key secret and its secret_sha256, for a key declared in a file - nothing stored")
     config_new_key.set_defaults(func=_config_new_key)

@@ -6,6 +6,7 @@ Every saved-query function still speaks in terms of a "path" for backward compat
 caller - resolve_saved_file()'s own docstring explains why that's now just the query's name, not a real
 filesystem path.
 """
+import contextlib
 import json
 import os
 import re
@@ -73,10 +74,27 @@ def _zone_name(local):
 # and with what `changes` shape; this module only persists whatever it's given.
 # --------------------------------------------------------------------------------------
 
+_audit_local = threading.local()
+
+
+@contextlib.contextmanager
+def audit_via(via):
+    """Every audit entry this thread records in the block says it came `via` this - 'config' for the changes a
+    configuration file makes (ADR 0014), however the caller who applied it authenticated."""
+    previous = getattr(_audit_local, 'via', None)
+    _audit_local.via = via
+    try:
+        yield
+    finally:
+        _audit_local.via = previous
+
+
 def _audit_via(actor):
     """How the actor authenticated (ADR 0003): 'token', 'break-glass' or 'open' from the request's caller, whoever
     they are; outside a request, 'cli' or 'startup' for the server's own changes. The request comes first, so an
-    actor's name can never stand in for how they signed in."""
+    actor's name can never stand in for how they signed in - unless audit_via() says how the change was made."""
+    if getattr(_audit_local, 'via', None) is not None:
+        return _audit_local.via
     from flask import g, has_request_context  # a core dependency; imported here to keep the store Flask-free
     permission = g.get('permission') if has_request_context() else None
     if permission is not None:
@@ -103,16 +121,22 @@ def record_audit(actor, action, target, changes=None, via=None):
             link = auditchain.append(conn, entry, config.audit_log_limit())
     except (OSError, *db.Error):
         pass
-    from . import auditstream
-    auditstream.wake()  # to the SIEM soon, not at the next round
-    export_path = config.audit_log_export_file()
-    if export_path is not None:
-        chain = {'seq': link[0], 'prev_hash': link[1], 'hash': link[2]} if link else {}
-        try:
-            with lock, open(export_path, 'a') as f:
-                f.write(json.dumps({**entry, **chain}, default=str) + '\n')
-        except OSError:
-            pass
+
+    def deliver():
+        from . import auditstream
+        auditstream.wake()  # to the SIEM soon, not at the next round
+        export_path = config.audit_log_export_file()
+        if export_path is not None:
+            chain = {'seq': link[0], 'prev_hash': link[1], 'hash': link[2]} if link else {}
+            try:
+                with lock, open(export_path, 'a') as f:
+                    f.write(json.dumps({**entry, **chain}, default=str) + '\n')
+            except OSError:
+                pass
+
+    # Inside a larger transaction (a configuration file applied, ADR 0014), only once it commits: rolled back, the
+    # entry never existed - and its seq is used again by the next one.
+    db.after_commit(deliver)
 
 
 def read_audit_entries():

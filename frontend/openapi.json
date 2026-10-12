@@ -1011,6 +1011,144 @@
         ],
         "type": "object"
       },
+      "ConfigApplied": {
+        "properties": {
+          "applied": {
+            "description": "False when nothing needed changing, or for a dry run.",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigChange"
+            },
+            "type": "array"
+          },
+          "file_sha256": {
+            "description": "The file's hash, as the audit log names it.",
+            "type": "string"
+          },
+          "not_in_file": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes",
+          "not_in_file",
+          "applied"
+        ],
+        "type": "object"
+      },
+      "ConfigChange": {
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "properties": {
+                "from": {},
+                "to": {}
+              },
+              "type": "object"
+            },
+            "description": "Each field that changes: {\"from\": ..., \"to\": ...}. A stored password shows as <stored secret>, a key's secret as <changed>.",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "connections",
+              "destinations",
+              "queries",
+              "roles",
+              "api_keys",
+              "descriptions",
+              "exports"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "action",
+          "fields",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "ConfigDiff": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigChange"
+            },
+            "type": "array"
+          },
+          "not_in_file": {
+            "description": "What the server has, of the kinds the file has, and the file does not: left alone.",
+            "items": {
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "changes",
+          "not_in_file"
+        ],
+        "type": "object"
+      },
+      "ConfigFile": {
+        "description": "A server's configuration (ADR 0014): `format: queryapigate-config`, `format_version: 1`, and any of connections, destinations, queries, roles, api_keys (each a list of objects with this API's fields), descriptions (by connection) and exports.",
+        "properties": {
+          "format": {
+            "enum": [
+              "queryapigate-config"
+            ],
+            "type": "string"
+          },
+          "format_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "format",
+          "format_version"
+        ],
+        "type": "object"
+      },
       "Connection": {
         "properties": {
           "active": {
@@ -5574,6 +5712,178 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/config/apply": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. In one transaction: every change is made through the same rules as the rest of this API and audited (`via: config`), under one `config_applied` entry with the file's hash. A problem at any step changes nothing. Owners only (`config.apply`).",
+        "parameters": [
+          {
+            "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
+            "in": "query",
+            "name": "prune",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Say what would change; change nothing.",
+            "in": "query",
+            "name": "dry_run",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigApplied"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Make the server match a configuration file, all or nothing",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/config/diff": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with problems answers 400 `invalid_config`, listing every one in `problems`. Owners only (`config.apply`).",
+        "parameters": [
+          {
+            "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
+            "in": "query",
+            "name": "prune",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDiff"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "What applying a configuration file would change, field by field - nothing is written",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/connections": {

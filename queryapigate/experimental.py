@@ -96,6 +96,7 @@ FEATURES: dict[str, dict[str, Any]] = {
     'config_as_code': {
         'name': 'Configuration as code',
         'why': 'new in 0.27 - the file format and the commands may change as teams use them (ADR 0014)',
+        'operations': (('post', '/api/v1/config/diff'), ('post', '/api/v1/config/apply')),
         'docs': ('documentation/API.md', 'Configuration as code'),
     },
     'sso': {
