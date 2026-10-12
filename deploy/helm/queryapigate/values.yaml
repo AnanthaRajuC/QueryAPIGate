@@ -117,8 +117,16 @@ podDisruptionBudget:
 serviceAccount:
   create: true
   name: ""
+  # IRSA, for ${aws-sm:...} and aws-rds-iam (ADR 0015): eks.amazonaws.com/role-arn: arn:aws:iam::...:role/queryapigate
   annotations: {}
-  automountToken: false
+  automountToken: false   # QueryAPIGate never calls the Kubernetes API: no token for it
+
+# Vault's Kubernetes auth (ADR 0015): a token for Vault alone - projected, short-lived, kubelet-rotated - set as
+# QUERYAPIGATE_VAULT_K8S_TOKEN_FILE. Not the service account token above, which would also reach the Kubernetes API.
+vaultToken:
+  enabled: false
+  audience: ""            # the audience the Vault role checks, if it names one
+  expirationSeconds: 3600
 
 # Prometheus Operator: scrape /metrics.
 serviceMonitor:

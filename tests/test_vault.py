@@ -277,9 +277,9 @@ class CredentialTests(VaultTestCase):
             'credentials']))
         self.assertIn("'payroll' isn't a role QUERYAPIGATE_VAULT_DATABASE_ROLES allows",
                       refused(credentials={'source': 'vault-database', 'role': 'payroll'}))
-        self.assertIn('credentials.source must be one of: vault-database',
+        self.assertIn('credentials.source must be one of: aws-rds-iam, vault-database',
                       refused(credentials={'source': 'ldap', 'role': 'r'}))
-        self.assertIn('is {"source": ..., "role": ...}', refused(credentials={'source': 'vault-database'}))
+        self.assertIn('is {"role": ..., "source": ...}', refused(credentials={'source': 'vault-database'}))
         with self.assertRaises(ApiError) as caught:
             connections.create({'name': 'c', 'db': 'sqlite', 'database': 'x.db',
                                 'credentials': self.details['credentials']}, 't')

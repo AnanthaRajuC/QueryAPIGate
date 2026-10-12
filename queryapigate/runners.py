@@ -32,10 +32,17 @@ def _millis(timeout):
     return max(1, int(timeout * 1000))
 
 
-def _connect_args(details, **renames):
-    """Pick the standard connection fields out of a stored connection, renaming keys per driver."""
+# A connection's TLS settings each driver is given (as `options`, or alongside the standard fields) - only these: other
+# driver parameters can make it read files of the server's (libpq's passfile and service, for one).
+POSTGRES_TLS = ('sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'sslcrl')
+MYSQL_TLS = ('ssl_ca', 'ssl_cert', 'ssl_key', 'ssl_verify_cert', 'ssl_verify_identity', 'ssl_disabled', 'auth_plugin')
+
+
+def _connect_args(details, tls=(), **renames):
+    """Pick the standard connection fields out of a stored connection, renaming keys per driver - and its TLS
+    settings, `tls`."""
     args = {}
-    for key in ('host', 'port', 'user', 'password', 'database'):
+    for key in ('host', 'port', 'user', 'password', 'database', *tls):
         if details.get(key) not in (None, ''):
             args[renames.get(key, key)] = details[key]
     return args
@@ -184,7 +191,8 @@ class _MySQL(_Driver):
 
     def connect(self, details, read_only):
         import mysql.connector
-        conn = mysql.connector.connect(connection_timeout=config.CONNECT_TIMEOUT, **_connect_args(details))
+        conn = mysql.connector.connect(connection_timeout=config.CONNECT_TIMEOUT,
+                                       **_connect_args(details, tls=MYSQL_TLS))
         if read_only:
             try:
                 cursor = conn.cursor()
@@ -244,7 +252,8 @@ class _Postgres(_Driver):
 
     def connect(self, details, read_only):
         import psycopg2
-        conn = psycopg2.connect(connect_timeout=config.CONNECT_TIMEOUT, **_connect_args(details, database='dbname'))
+        conn = psycopg2.connect(connect_timeout=config.CONNECT_TIMEOUT,
+                                **_connect_args(details, tls=POSTGRES_TLS, database='dbname'))
         if read_only:
             try:
                 conn.set_session(readonly=True)

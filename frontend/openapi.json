@@ -395,7 +395,8 @@
               "encryption_key_rotation_incomplete",
               "quota_nearly_used",
               "audit_chain_broken",
-              "audit_delivery_behind"
+              "audit_delivery_behind",
+              "secret_provider_failing"
             ],
             "type": "string"
           },

@@ -809,6 +809,7 @@ show the reference as written.
 | `${VAR}` | The server's environment, as always. |
 | `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
 | `${vault:secret/data/warehouse#password}` | A field of a secret in Vault's KV engine, version 1 or 2: the path as Vault's API names it (`secret/data/...` for version 2), `#`, the field. |
+| `${aws-sm:prod/warehouse#password}` | An AWS Secrets Manager secret, by name or ARN - with `#field`, that field of its JSON; without, the whole string. |
 
 A reference can stand alone (`"password": "${file:/run/secrets/warehouse}"`) or sit inside a value
 (`"jdbc_url": "jdbc:...;password=${file:/run/secrets/warehouse}"`).
@@ -839,6 +840,12 @@ retired before its lease ends - a tenth of the lease, between 5 seconds and 5 mi
 on a connection whose user Vault is about to drop. Leases the process took are revoked when it exits cleanly. Any
 type with a user and password (not SQLite, DuckDB or H2); with `credentials`, leave out `user` and `password`.
 
+For RDS and Aurora, `"credentials": {"source": "aws-rds-iam"}` makes an IAM authentication token the password of the
+connection's own `user` - PostgreSQL or MySQL, good for 15 minutes, signed by the server from its own AWS credentials
+(nothing is sent to AWS to make it). A token is a password, so only over TLS: a PostgreSQL connection needs
+`sslmode` `verify-full` (with `sslrootcert`, the RDS CA bundle) or `require`, a MySQL one `ssl_ca`. Leave out the
+`password`. Tested in CI to the token's signature; whether RDS accepts it can only be tested against RDS.
+
 **Vault.** `QUERYAPIGATE_VAULT_ADDR` (with `QUERYAPIGATE_VAULT_CACERT` for a private CA, and
 `QUERYAPIGATE_VAULT_NAMESPACE`), and the way this server signs in, `QUERYAPIGATE_VAULT_AUTH`:
 
@@ -853,6 +860,16 @@ the database engine isn't at `database`. What Vault lets this server's token rea
 `${vault:...}` reads only under `QUERYAPIGATE_VAULT_PATHS` (comma-separated prefixes, `secret/data/reporting/`), and
 `credentials` asks only for `QUERYAPIGATE_VAULT_DATABASE_ROLES` - unset, neither is allowed. Tested in CI against
 Vault 1.21 and PostgreSQL.
+
+**AWS.** Through boto3 (`pip install "queryapigate[aws]"`; in the image already), with the standard credential
+chain - IRSA on EKS (the chart's `serviceAccount.annotations`), an instance or task role, the usual `AWS_*`
+variables - and region (`QUERYAPIGATE_AWS_REGION`, else boto3's). `${aws-sm:...}` reads only secrets whose names
+begin with one of `QUERYAPIGATE_AWS_SECRET_PREFIXES`, and `aws-rds-iam` makes tokens only for
+`QUERYAPIGATE_AWS_RDS_HOSTS` (names, or suffixes starting with a dot: `.abc123.eu-west-1.rds.amazonaws.com`) - unset,
+neither is allowed. Tested in CI against a Secrets Manager stand-in.
+
+**When a provider keeps failing**, the `secret_provider_failing` alert (critical) says so after five minutes, and
+Settings shows how each provider this instance has used last answered.
 
 **The server's own secrets, from files.** Each setting that is a secret - `QUERYAPIGATE_API_KEY`, `_SECRET_KEY`,
 `_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, `_MASK_KEY`, `_JWT_SECRET`, `_SSO_CLIENT_SECRET` - can be read from a
@@ -1641,6 +1658,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 | `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
 | `audit_delivery_behind` | warning, critical | An audit log output to a SIEM is more than five minutes behind (critical while delivery is also failing); the entries wait, past the rolling cap |
+| `secret_provider_failing` | critical | A secret provider - a file, Vault, AWS - has failed for five minutes in this instance; connections taking a secret from it work only while what it gave before is within its time |
 | `audit_chain_broken` | critical | The audit log's hash chain doesn't verify: an entry was changed, removed, inserted or reordered (checked every 5 minutes) |
 | `quota_nearly_used` | warning, critical | An API key has used 80% of a usage quota this period (warning), or all of it - its calls are refused until it resets (critical) |
 | `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |

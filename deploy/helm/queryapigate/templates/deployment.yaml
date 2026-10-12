@@ -51,6 +51,7 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- include "queryapigate.vaultTokenMount" . | nindent 12 }}
             {{- if .Values.configAsCode.enabled }}
             - {name: config-file, mountPath: /etc/queryapigate/config, readOnly: true}
             {{- end }}
@@ -66,6 +67,7 @@ spec:
         - {name: data, emptyDir: {}}   # the store is PostgreSQL: nothing kept here
         {{- end }}
         - {name: tmp, emptyDir: {}}
+        {{- include "queryapigate.vaultTokenVolume" . | nindent 8 }}
         {{- if .Values.configAsCode.enabled }}
         - name: config-file
           configMap: {name: {{ include "queryapigate.configMapName" . }}}

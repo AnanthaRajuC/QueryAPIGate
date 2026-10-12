@@ -104,6 +104,9 @@ env:
   {{- range $name, $value := $root.Values.config }}
   - {name: {{ $name }}, value: {{ $value | toString | quote }}}
   {{- end }}
+  {{- if $root.Values.vaultToken.enabled }}
+  - {name: QUERYAPIGATE_VAULT_K8S_TOKEN_FILE, value: /var/run/secrets/vault/token}
+  {{- end }}
   {{- if and .server $root.Values.configAsCode.enabled }}
   # the API server applies the file as it starts, once per file (ADR 0014)
   - {name: QUERYAPIGATE_CONFIG_FILE, value: {{ printf "/etc/queryapigate/config/%s" $root.Values.configAsCode.key | quote }}}
@@ -161,4 +164,26 @@ labels:
   {{- with .root.Values.podLabels }}
   {{- toYaml . | nindent 2 }}
   {{- end }}
+{{- end -}}
+
+
+{{/* The projected token for Vault's Kubernetes auth (ADR 0015): the volume, and where it's mounted. */}}
+{{- define "queryapigate.vaultTokenVolume" -}}
+{{- if .Values.vaultToken.enabled }}
+- name: vault-token
+  projected:
+    sources:
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: {{ .Values.vaultToken.expirationSeconds }}
+          {{- with .Values.vaultToken.audience }}
+          audience: {{ . | quote }}
+          {{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "queryapigate.vaultTokenMount" -}}
+{{- if .Values.vaultToken.enabled }}
+- {name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true}
+{{- end }}
 {{- end -}}

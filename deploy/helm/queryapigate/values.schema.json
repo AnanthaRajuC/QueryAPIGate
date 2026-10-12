@@ -98,6 +98,9 @@
                      "maxReplicas": {"type": "integer", "minimum": 1},
                      "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}}
     },
+    "vaultToken": {"type": "object", "additionalProperties": false,
+                   "properties": {"enabled": {"type": "boolean"}, "audience": {"type": "string"},
+                                  "expirationSeconds": {"type": "integer", "minimum": 600}}},
     "configAsCode": {"type": "object", "additionalProperties": false,
                      "properties": {"enabled": {"type": "boolean"}, "file": {"type": "string"},
                                     "existingConfigMap": {"type": "string"},

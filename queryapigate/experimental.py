@@ -106,7 +106,8 @@ FEATURES: dict[str, dict[str, Any]] = {
         'why': 'new in 0.28 - the reference forms and the providers\' settings may change as they meet real Vault '
                'and AWS setups (ADR 0015)',
         'settings': ('QUERYAPIGATE_SECRET_FILE_DIRS', 'QUERYAPIGATE_SECRET_CACHE_SECONDS', 'QUERYAPIGATE_VAULT_ADDR',
-                     'QUERYAPIGATE_VAULT_PATHS', 'QUERYAPIGATE_VAULT_DATABASE_ROLES'),
+                     'QUERYAPIGATE_VAULT_PATHS', 'QUERYAPIGATE_VAULT_DATABASE_ROLES', 'QUERYAPIGATE_AWS_REGION',
+                     'QUERYAPIGATE_AWS_SECRET_PREFIXES', 'QUERYAPIGATE_AWS_RDS_HOSTS'),
         'docs': ('documentation/API.md', 'Secrets from files and secrets managers'),
     },
     'sso': {

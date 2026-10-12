@@ -55,6 +55,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+- **A PostgreSQL or MySQL connection's TLS settings are now given to its driver.** `sslmode` (with `sslrootcert`,
+  `sslcert`, `sslkey`, `sslcrl`) and MySQL's `ssl_ca`, `ssl_cert`, `ssl_key`, `ssl_verify_cert`,
+  `ssl_verify_identity` and `ssl_disabled` were documented as passed through, and weren't: a connection set to
+  `verify-full` connected without checking the server's certificate - with libpq's default, `prefer`, even without
+  TLS when the server didn't offer it. They are passed now, and only these: a connection that asks for TLS the
+  server can't give, or a certificate that doesn't verify, now fails instead.
+
 ### Added
 - **Secrets from files** (BACKLOG #98,
   [ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md), experimental), first part: a
@@ -68,7 +76,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   database secrets engine for each lease, shared by the connections opened during it, every pooled connection retired
   before its lease ends, and the leases revoked when the process exits. The server signs in with a token (or Vault
   Agent's token file), Kubernetes auth or AppRole; `QUERYAPIGATE_VAULT_PATHS` and `QUERYAPIGATE_VAULT_DATABASE_ROLES`
-  say what it may ask for. Tested in CI against Vault 1.21. See
+  say what it may ask for. Tested in CI against Vault 1.21. **AWS** (the `aws` extra, in the image):
+  `${aws-sm:prod/warehouse#password}` from Secrets Manager, by name or ARN, and `credentials: {source: aws-rds-iam}`
+  - an IAM token as the password for RDS and Aurora, PostgreSQL or MySQL, only over TLS - with IRSA through the
+  chart's `serviceAccount.annotations`; `QUERYAPIGATE_AWS_SECRET_PREFIXES` and `QUERYAPIGATE_AWS_RDS_HOSTS`. The
+  chart's `vaultToken` mounts a projected token for Vault's Kubernetes auth. The `secret_provider_failing` alert, and
+  each provider's last answer in Settings. See
   [Secrets from files and secrets managers](documentation/API.md#secrets-from-files-and-secrets-managers).
 
 ## [0.27.0] - 2026-10-12

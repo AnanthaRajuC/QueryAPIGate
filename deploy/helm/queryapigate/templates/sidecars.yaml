@@ -36,12 +36,14 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            {{- include "queryapigate.vaultTokenMount" $ | nindent 12 }}
             {{- with $.Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - {name: data, emptyDir: {}}
         - {name: tmp, emptyDir: {}}
+        {{- include "queryapigate.vaultTokenVolume" $ | nindent 8 }}
         {{- with $.Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

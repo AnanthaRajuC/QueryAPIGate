@@ -58,7 +58,7 @@ KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
          'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete',
-         'quota_nearly_used', 'audit_chain_broken', 'audit_delivery_behind')
+         'quota_nearly_used', 'audit_chain_broken', 'audit_delivery_behind', 'secret_provider_failing')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -75,7 +75,8 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_encryption(), *_audit_chain(), *_audit_delivery(now), *_writes(),
+    found = [*_server(now), *_sso(), *_encryption(), *_secret_providers(), *_audit_chain(), *_audit_delivery(now),
+             *_writes(),
              *_quotas(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
@@ -118,6 +119,25 @@ def _encryption():
                    'Every password is under the new encryption key - remove the old ones',
                    f"QUERYAPIGATE_SECRET_KEY still lists {found['keys']} keys, but nothing is encrypted with any but "
                    'the first. Remove the others from every instance to finish the rotation.', target)]
+
+
+def _secret_providers():
+    """A secret provider - a file, Vault, AWS - failing for five minutes in this process (ADR 0015): connections whose
+    secrets come from it work only while the values it gave before are within their time, then fail."""
+    import time
+
+    from . import secretrefs
+    found = []
+    for name, status in sorted(secretrefs.cache.status.items()):
+        since = status.get('failing_since')
+        if since is None or time.time() - since < 300:
+            continue
+        stamp = f'{datetime.fromtimestamp(since):%Y-%m-%d %H:%M:%S}'
+        found.append(_alert('critical', 'secret_provider_failing', name, f'The secret provider {name} is failing',
+                            f"It has failed since {stamp}: {status.get('last_error')}. Connections that take a secret "
+                            'from it work only while what it gave before is within its time; then they fail with '
+                            'secret_unavailable.', {'type': 'settings', 'name': 'security'}, stamp))
+    return found
 
 
 def _audit_chain():

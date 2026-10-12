@@ -45,6 +45,8 @@ database URL, a secret setting in `config` instead of the secret, a misspelt val
 | `redis.inExistingSecret` | `false` | `QUERYAPIGATE_REDIS_URL` is in `existingSecret` |
 | `config` | `{}` | Any other `QUERYAPIGATE_*` or `OTEL_*` setting - not the secret ones, refused here |
 | `configAsCode.*` | off | A configuration file (ADR 0014) the API server applies as it starts, once per file: `file` inline (or `--set-file`) or `existingConfigMap`; `prune`, `locked`. A change to `file` rolls the pods |
+| `vaultToken.*` | off | A projected token for Vault's Kubernetes auth (ADR 0015), set as `QUERYAPIGATE_VAULT_K8S_TOKEN_FILE` - not the service account token, which stays unmounted |
+| `serviceAccount.annotations` | `{}` | IRSA for `${aws-sm:...}` and `aws-rds-iam`: `eks.amazonaws.com/role-arn` |
 | `extraVolumes`, `extraVolumeMounts` | `[]` | Files settings name by path (the SIEM's certificates, an export directory), in every pod |
 | `ingress.*` | off | `className`, `host`, `tls`, `annotations` (ingress-nginx's no-buffering for `/events`) |
 | `events.*`, `mcp.*` | off | The events server and the MCP server, each its own Deployment; `mcp.ingress.host` for its own host |

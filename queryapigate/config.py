@@ -553,6 +553,23 @@ def vault_database_mount():
     return _setting('QUERYAPIGATE_VAULT_DATABASE_MOUNT', 'database').strip('/')
 
 
+def aws_region():
+    """QUERYAPIGATE_AWS_REGION: the region for Secrets Manager and RDS IAM tokens - else boto3's own (AWS_REGION...)."""
+    return _setting('QUERYAPIGATE_AWS_REGION') or None
+
+
+def aws_secret_prefixes():
+    """QUERYAPIGATE_AWS_SECRET_PREFIXES: the secret names ${aws-sm:...} may read begin with one of these
+    (prod/reporting/) - unset, none: the server's IAM role may reach far more than any connection should."""
+    return [p.strip() for p in os.environ.get('QUERYAPIGATE_AWS_SECRET_PREFIXES', '').split(',') if p.strip()]
+
+
+def aws_rds_hosts():
+    """QUERYAPIGATE_AWS_RDS_HOSTS: the database hosts aws-rds-iam credentials may be made for - a name, or a suffix
+    starting with a dot (.abc123.eu-west-1.rds.amazonaws.com). Unset, none."""
+    return [h.strip().lower() for h in os.environ.get('QUERYAPIGATE_AWS_RDS_HOSTS', '').split(',') if h.strip()]
+
+
 def _check_vault():
     if not vault_addr():
         return
@@ -1151,6 +1168,23 @@ def _seconds(value):
     return None if value is None else f'{value:g} s'
 
 
+def _provider_status():
+    from datetime import datetime
+
+    from . import secretrefs
+    status = dict(secretrefs.cache.status)
+    if not status:
+        return 'none used yet'
+    parts = []
+    for name, st in sorted(status.items()):
+        if st.get('failing_since'):
+            parts.append(f"{name}: failing since {datetime.fromtimestamp(st['failing_since']):%H:%M:%S} - "
+                         f"{st.get('last_error')}")
+        else:
+            parts.append(f"{name}: ok at {datetime.fromtimestamp(st['last_ok']):%H:%M:%S}")
+    return '; '.join(parts)
+
+
 def describe_settings():
     """Every server setting the admin UI's Settings screen shows, grouped: [{id, title, description, rows}].
 
@@ -1204,6 +1238,15 @@ def describe_settings():
                 'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused'),
             row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
                 'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
+            row('Secret providers', 'How the ones this process has used answered, last.', '',
+                _provider_status()),
+            row('AWS', 'Region for ${aws-sm:...} and aws-rds-iam - else boto3\'s own. Secrets: names beginning with '
+                'QUERYAPIGATE_AWS_SECRET_PREFIXES; IAM tokens: hosts in QUERYAPIGATE_AWS_RDS_HOSTS.',
+                'QUERYAPIGATE_AWS_REGION', aws_region() or 'boto3\'s default'),
+            row('AWS secret prefixes', 'Secret names ${aws-sm:...} may read begin with one of these.',
+                'QUERYAPIGATE_AWS_SECRET_PREFIXES', ', '.join(aws_secret_prefixes()) or 'none - ${aws-sm:...} refused'),
+            row('RDS IAM hosts', 'Hosts aws-rds-iam credentials may be made for.', 'QUERYAPIGATE_AWS_RDS_HOSTS',
+                ', '.join(aws_rds_hosts()) or 'none - aws-rds-iam refused'),
             row('Vault', 'Where ${vault:...} references and vault-database credentials come from, and how this server '
                 'signs in to it.', 'QUERYAPIGATE_VAULT_ADDR',
                 f'{vault_addr()} ({vault_auth()})' if vault_addr() else 'off'),

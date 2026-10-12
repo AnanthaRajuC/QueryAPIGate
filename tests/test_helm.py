@@ -131,6 +131,22 @@ class ShapeTests(unittest.TestCase):
         env = {e['name']: e.get('value') for e in pod['containers'][0]['env']}
         self.assertEqual(env['QUERYAPIGATE_CONFIG_FILE'], '/etc/queryapigate/config/prod.yaml')
 
+    def test_a_token_for_vault_alone(self):
+        """vaultToken (ADR 0015): a projected token with its own audience, for Vault's Kubernetes auth - not the service
+        account token, which stays unmounted."""
+        docs = render(*POSTGRES, '--set', 'mcp.enabled=true', '--set', 'vaultToken.enabled=true',
+                      '--set', 'vaultToken.audience=vault')
+        for deployment in by_kind(docs, 'Deployment'):
+            pod = deployment['spec']['template']['spec']
+            self.assertFalse(pod['automountServiceAccountToken'])
+            volume = next(v for v in pod['volumes'] if v['name'] == 'vault-token')
+            self.assertEqual(volume['projected']['sources'][0]['serviceAccountToken'],
+                             {'path': 'token', 'expirationSeconds': 3600, 'audience': 'vault'})
+            env = {e['name']: e.get('value') for e in pod['containers'][0]['env']}
+            self.assertEqual(env['QUERYAPIGATE_VAULT_K8S_TOKEN_FILE'], '/var/run/secrets/vault/token')
+        self.assertFalse(any(v['name'] == 'vault-token' for d in by_kind(render(*SECRET), 'Deployment')
+                             for v in d['spec']['template']['spec']['volumes']))
+
     def test_the_optional_parts(self):
         docs = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'networkPolicy.enabled=true',
                       '--set', 'autoscaling.enabled=true')

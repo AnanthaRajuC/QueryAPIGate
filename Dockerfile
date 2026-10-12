@@ -34,7 +34,7 @@ COPY --from=console /queryapigate/console_dist ./queryapigate/console_dist
 # Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
 # tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment
 # turns on with an environment variable or a second command - none of them should need a custom image.
-RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,server]" "gunicorn>=26" \
+RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,aws,server]" "gunicorn>=26" \
     && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
 
 RUN useradd --create-home app && mkdir /data && chown app /data

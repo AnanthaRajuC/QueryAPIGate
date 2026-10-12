@@ -145,60 +145,156 @@ class VaultProvider:
             raise _FetchError(str(error)) from None
 
 
-PROVIDERS = {provider.name: provider for provider in (FileProvider(), VaultProvider())}
+class AwsSecretsProvider:
+    """`${aws-sm:prod/warehouse#password}`: an AWS Secrets Manager secret - by name or ARN - and, after `#`, a field of
+    its JSON; without one, the whole SecretString."""
+
+    name = 'aws-sm'
+
+    @staticmethod
+    def _name(secret_id):
+        """The secret's name, from a name or an ARN (arn:aws:secretsmanager:region:account:secret:name-AbCdEf)."""
+        return secret_id.split(':secret:', 1)[1] if secret_id.startswith('arn:') and ':secret:' in secret_id \
+            else secret_id
+
+    def check(self, what):
+        secret_id = what.partition('#')[0]
+        prefixes = config.aws_secret_prefixes()
+        if not prefixes:
+            return 'QUERYAPIGATE_AWS_SECRET_PREFIXES is not set: no secret may be read'
+        if not any(self._name(secret_id).startswith(prefix) for prefix in prefixes):
+            return f"'{secret_id}' isn't a secret QUERYAPIGATE_AWS_SECRET_PREFIXES allows"
+        return None
+
+    def fetch(self, what):
+        from . import aws
+        secret_id, _, field = what.partition('#')
+        try:
+            return aws.secret(secret_id, field or None)
+        except aws.AwsError as error:
+            raise _FetchError(str(error)) from None
+
+
+PROVIDERS = {provider.name: provider for provider in (FileProvider(), VaultProvider(), AwsSecretsProvider())}
 
 
 # --------------------------------------------------------------------------------------
 # Short-lived database credentials: a connection's `credentials`
 # --------------------------------------------------------------------------------------
 
+# Connections that have no user and password to replace, so nothing to ask a credential source for.
+_NO_CREDENTIALS = ('sqlite', 'duckdb', 'h2')
+
+
+def _refused(message):
+    return ApiError(message, code='invalid_body')
+
+
 class VaultDatabaseCredentials:
     """`"credentials": {"source": "vault-database", "role": "reporting-ro"}`: a username and password from Vault's
     database secrets engine, for the lease's length - the same pair for every connection opened meanwhile."""
 
     name = 'vault-database'
-    lease = True  # kept for its lease, not QUERYAPIGATE_SECRET_CACHE_SECONDS: a new pair is a new lease in Vault
+    shape = {'source', 'role'}
 
-    def check(self, role):
+    def validate(self, spec, fields):
+        if fields.get('db') in _NO_CREDENTIALS:
+            raise _refused(f"A {fields['db']} connection has no user and password for credentials to give")
+        given = sorted(k for k in ('user', 'password') if fields.get(k) not in (None, ''))
+        if given:
+            raise _refused(f"credentials gives the user and password - leave out {', '.join(given)}")
+
+    def reason(self, spec, details):
         if not config.vault_addr():
             return 'QUERYAPIGATE_VAULT_ADDR is not set'
         allowed = config.vault_database_roles()
         if not allowed:
             return 'QUERYAPIGATE_VAULT_DATABASE_ROLES is not set: no database role may be asked for'
-        if role not in allowed:
-            return f"'{role}' isn't a role QUERYAPIGATE_VAULT_DATABASE_ROLES allows"
+        if spec['role'] not in allowed:
+            return f"'{spec['role']}' isn't a role QUERYAPIGATE_VAULT_DATABASE_ROLES allows"
         return None
 
-    def fetch(self, role):
+    def key(self, spec, details):
+        return spec['role']
+
+    def fetch(self, spec, details):
         from . import vault
         try:
-            return vault.client.database_credentials(role)
+            return vault.client.database_credentials(spec['role'])
         except vault.VaultError as error:
             raise _FetchError(str(error)) from None
 
+    def apply(self, details, pair):
+        return {**details, 'user': pair[0], 'password': pair[1]}
 
-CREDENTIAL_SOURCES = {source.name: source for source in (VaultDatabaseCredentials(),)}
-# Connections that have no user and password to replace, so nothing to ask a credential source for.
-_NO_CREDENTIALS = ('sqlite', 'duckdb', 'h2')
+
+class AwsRdsIamCredentials:
+    """`"credentials": {"source": "aws-rds-iam"}`: an IAM authentication token as the connection's password, for its
+    `user` on its host - RDS and Aurora, PostgreSQL or MySQL. Good for 15 minutes; only ever sent over TLS."""
+
+    name = 'aws-rds-iam'
+    shape = {'source'}
+    _TLS = ('require', 'verify-ca', 'verify-full')
+
+    def validate(self, spec, fields):
+        db = fields.get('db')
+        if db not in ('postgres', 'mysql'):
+            raise _refused('aws-rds-iam credentials are for postgres and mysql connections (RDS and Aurora)')
+        if fields.get('password') not in (None, ''):
+            raise _refused('aws-rds-iam credentials give the password - leave it out')
+        for need in ('host', 'user'):
+            if fields.get(need) in (None, ''):
+                raise _refused(f'aws-rds-iam credentials need the connection\'s {need}')
+        if db == 'postgres' and fields.get('sslmode') not in self._TLS:
+            raise _refused('aws-rds-iam sends a token as the password: set sslmode to verify-full (with sslrootcert, '
+                           'the RDS CA bundle) - or require')
+        verified = fields.get('ssl_ca') or fields.get('ssl_verify_cert')
+        if db == 'mysql' and (fields.get('ssl_disabled') or not verified):
+            raise _refused('aws-rds-iam sends a token as the password: set ssl_ca to the RDS CA bundle')
+
+    def reason(self, spec, details):
+        allowed = config.aws_rds_hosts()
+        if not allowed:
+            return 'QUERYAPIGATE_AWS_RDS_HOSTS is not set: no IAM token may be made'
+        host = str(details.get('host') or '').lower()
+        if not any(host == h or (h.startswith('.') and host.endswith(h)) for h in allowed):
+            return f"'{host}' isn't a host QUERYAPIGATE_AWS_RDS_HOSTS allows"
+        return None
+
+    def key(self, spec, details):
+        return (str(details.get('host')).lower(), self._port(details), details.get('user'))
+
+    @staticmethod
+    def _port(details):
+        return int(details.get('port') or (5432 if details.get('db') == 'postgres' else 3306))
+
+    def fetch(self, spec, details):
+        from . import aws
+        try:
+            return aws.rds_token(details['host'], self._port(details), details['user'])
+        except aws.AwsError as error:
+            raise _FetchError(str(error)) from None
+
+    def apply(self, details, pair):
+        extra = {'auth_plugin': 'mysql_clear_password'} if details.get('db') == 'mysql' else {}
+        return {**details, 'password': pair[1], **extra}
+
+
+CREDENTIAL_SOURCES = {source.name: source for source in (VaultDatabaseCredentials(), AwsRdsIamCredentials())}
 
 
 def check_credentials(spec, fields):
     """A connection's `credentials`, when it's saved (invalid_body)."""
-    if not isinstance(spec, dict) or set(spec) != {'source', 'role'} or not all(
-            isinstance(spec[k], str) and spec[k] for k in ('source', 'role')):
-        raise ApiError('credentials is {"source": ..., "role": ...} - and nothing else', code='invalid_body')
-    if spec['source'] not in CREDENTIAL_SOURCES:
-        raise ApiError(f"credentials.source must be one of: {', '.join(sorted(CREDENTIAL_SOURCES))}",
-                       code='invalid_body')
-    if fields.get('db') in _NO_CREDENTIALS:
-        raise ApiError(f"A {fields['db']} connection has no user and password for credentials to give",
-                       code='invalid_body')
-    given = sorted(k for k in ('user', 'password') if fields.get(k) not in (None, ''))
-    if given:
-        raise ApiError(f"credentials gives the user and password - leave out {', '.join(given)}", code='invalid_body')
-    reason = CREDENTIAL_SOURCES[spec['source']].check(spec['role'])
+    source = CREDENTIAL_SOURCES.get(spec.get('source')) if isinstance(spec, dict) else None
+    if source is None:
+        raise _refused(f"credentials.source must be one of: {', '.join(sorted(CREDENTIAL_SOURCES))}")
+    if set(spec) != source.shape or not all(isinstance(spec[k], str) and spec[k] for k in source.shape):
+        shape = ', '.join(f'"{k}": ...' for k in sorted(source.shape))
+        raise _refused(f'credentials for {source.name} is {{{shape}}} - and nothing else')
+    source.validate(spec, fields)
+    reason = source.reason(spec, fields)
     if reason:
-        raise ApiError(f"credentials {spec['source']} '{spec['role']}' is refused: {reason}", code='invalid_body')
+        raise _refused(f'credentials {source.name} is refused: {reason}')
 
 
 _expiries: dict[str, float] = {}  # sha256 of (user, password) -> when they stop being usable (monotonic)
@@ -218,13 +314,15 @@ def resolve_credentials(details):
     source = CREDENTIAL_SOURCES.get(spec.get('source'))
     if source is None:
         raise ApiError(f"There is no credential source '{spec.get('source')}'", 500, code='connection_misconfigured')
-    (user, password), until = cache.resolve_credentials(source, spec.get('role'))
+    rest = {k: v for k, v in details.items() if k != 'credentials'}
+    pair, until = cache.resolve_credentials(source, spec, rest)
+    resolved = source.apply(rest, pair)
     with _expiries_lock:
         now = time.monotonic()
         for gone in [k for k, v in _expiries.items() if v < now]:
             del _expiries[gone]  # past their lease: no pooled connection still uses them
-        _expiries[_pair_key(user, password)] = until
-    return {**{k: v for k, v in details.items() if k != 'credentials'}, 'user': user, 'password': password}
+        _expiries[_pair_key(resolved.get('user'), resolved.get('password'))] = until
+    return resolved
 
 
 def credential_expiry(details):
@@ -307,29 +405,28 @@ class _Cache:
             self._entries[key] = (value, version, now + keep * REFRESH_AT, now + keep)
         return value
 
-    def resolve_credentials(self, source, role):
+    def resolve_credentials(self, source, spec, details):
         """((user, password), usable until - monotonic) for a credential source, kept for its lease: fetched again
-        from REFRESH_AT of it, and never used within LEASE_MARGIN of its end - so a connection opened with it has
+        from REFRESH_AT of it, and never used within lease_margin() of its end - so a connection opened with it has
         time to be used and retired before the lease is revoked."""
-        reason = source.check(role)
-        if reason:
-            raise ApiError(f"credentials {source.name} '{role}' is refused: {reason}", 500,
-                           code='connection_misconfigured')
-        key = (source.name, role)
+        reason = source.reason(spec, details)
+        if reason:  # the allow-list may have shrunk since the connection was saved
+            raise ApiError(f'credentials {source.name} is refused: {reason}', 500, code='connection_misconfigured')
+        key = (source.name, source.key(spec, details))
         now = time.monotonic()
         with self._lock:
             held = self._entries.get(key)
         if held is not None and now < held[2]:
             return held[0], held[3]
         try:
-            pair, ttl = source.fetch(role)
+            pair, ttl = source.fetch(spec, details)
         except _FetchError as error:
             self._note(source.name, error)
             if held is not None and now < held[3]:
                 log.warning('The credential source %s failed (%s) - using the credentials it gave before, good for '
                             '%ds more', source.name, error, int(held[3] - now))
                 return held[0], held[3]
-            raise unavailable(f"credentials {source.name} '{role}' could not be resolved: {error}") from None
+            raise unavailable(f'credentials {source.name} could not be resolved: {error}') from None
         self._note(source.name, None)
         lasts = float(ttl) if ttl else float(config.secret_cache_seconds())
         usable = max(0.0, lasts - lease_margin(lasts))
