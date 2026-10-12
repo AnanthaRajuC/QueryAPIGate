@@ -40,7 +40,6 @@ CHANGED = '<changed>'  # how a diff shows a key's secret hash changing
 MAX_PROBLEMS = 50
 _FAILED = object()  # what _Problems.check() returns for a check that raised
 
-_ENV_REF_RE = re.compile(r'^\$\{\w+\}$')
 _HASH_RE = re.compile(r'^[0-9a-f]{64}$')
 _VAR_UNSAFE_RE = re.compile(r'[^A-Z0-9]+')
 # The fields an object of each kind may carry in a file - the API's create fields, less what a file can't hold.
@@ -66,7 +65,7 @@ class ConfigInvalid(ApiError):
 
 
 def _env_ref(value):
-    return isinstance(value, str) and bool(_ENV_REF_RE.fullmatch(value))
+    return store._is_env_ref(value)
 
 
 # --------------------------------------------------------------------------------------
@@ -159,8 +158,8 @@ def _check_password(where, value, problems):
     if value in (None, ''):
         return
     if not _env_ref(value):
-        problems.add(where, 'password must be a ${VAR} reference, set where the server runs - a configuration file '
-                            'never holds a secret')
+        problems.add(where, 'password must be a ${VAR} reference, set where the server runs, or one to a secret '
+                            "provider (${file:...}) - a configuration file never holds a secret")
         return
     problems.check(where, store.refuse_server_settings, {'password': value})
 

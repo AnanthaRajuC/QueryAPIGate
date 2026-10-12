@@ -101,6 +101,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_CONFIG_FILE', 'QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED'),
         'docs': ('documentation/API.md', 'Configuration as code'),
     },
+    'secret_providers': {
+        'name': 'Secrets from files and secrets managers',
+        'why': 'new in 0.28 - the reference forms and the providers\' settings may change as they meet real Vault '
+               'and AWS setups (ADR 0015)',
+        'settings': ('QUERYAPIGATE_SECRET_FILE_DIRS', 'QUERYAPIGATE_SECRET_CACHE_SECONDS'),
+        'docs': ('documentation/API.md', 'Secrets from files and secrets managers'),
+    },
     'sso': {
         'name': 'Console sign-in through SSO',
         'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',

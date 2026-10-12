@@ -795,6 +795,41 @@ Fernet key*). Step by step, with several instances:
 `truncated` is `true` only if the connection has more than 5000 columns across all its tables and views combined,
 in which case the list was cut off.
 
+### Secrets from files and secrets managers
+
+> **Experimental** - new in 0.28 ([ADR 0015](adr/0015-secrets-managers-and-short-lived-credentials.md)): the
+> reference forms and the providers' settings may change as they meet real setups, always noted in the changelog.
+
+A connection's or destination's field can name where its secret lives instead of holding it - resolved when the
+connection is opened, kept in memory a while, and never written anywhere. Responses, diffs and configuration files
+show the reference as written.
+
+| Reference | Resolved from |
+|---|---|
+| `${VAR}` | The server's environment, as always. |
+| `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
+
+A reference can stand alone (`"password": "${file:/run/secrets/warehouse}"`) or sit inside a value
+(`"jdbc_url": "jdbc:...;password=${file:/run/secrets/warehouse}"`).
+
+**Nothing is reachable until you say so.** A provider reads whatever the server can, which is more than any one
+connection should: an administrator could point a connection at a host of theirs and have the server send them a
+secret meant for something else. So `${file:...}` reads only inside `QUERYAPIGATE_SECRET_FILE_DIRS` (comma-separated
+absolute folders, symbolic links followed) - unset, it's refused - and never the server's home, where its store is.
+A reference outside is refused when it's saved (`invalid_body`), and again when it's used, in case the list shrank
+(`connection_misconfigured`). The server's own `QUERYAPIGATE_*` and `OTEL_*` settings are never reachable, by any
+reference.
+
+**It fails closed.** A resolved value is kept for at most `QUERYAPIGATE_SECRET_CACHE_SECONDS` (default 300) and
+fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
+up - with a warning in the log - and never after: the connection fails with `503 secret_unavailable`, naming the
+provider's error, never the secret.
+
+**The server's own secrets, from files.** Each setting that is a secret - `QUERYAPIGATE_API_KEY`, `_SECRET_KEY`,
+`_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, `_MASK_KEY`, `_JWT_SECRET`, `_SSO_CLIENT_SECRET` - can be read from a
+file instead, with `_FILE` added: `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet`. Read at startup, as the variable
+would be; setting both is refused. Settings says which came from a file.
+
 ## Descriptions
 
 > **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); the shape and where descriptions are served
@@ -1956,6 +1991,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_filter` | 400 | A bad history/audit filter (`status`, `kind`, `since`, `until`, `limit`, `cursor`) or Mongo filter |
 | `invalid_bundle` | 400 | A collection bundle that isn't one, or is malformed |
 | `invalid_config` | 400 | A configuration file (ADR 0014) that isn't one, or has problems - each one listed in `problems` |
+| `secret_unavailable` | 503 | A secret provider couldn't give a connection's secret, and no value still within its time was held (ADR 0015) |
 | `config_managed` | 409 | With `QUERYAPIGATE_CONFIG_LOCKED`, a change to something a configuration file manages - change it in the file |
 | `sql_required` | 400 | No SQL given |
 | `connection_required` | 400 | No connection named, and the saved query has none |

@@ -26,7 +26,8 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
 (`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`),
 usage quotas (`quota`, `/api/v1/usage/quotas`), the audit log streamed to a SIEM
-(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), and configuration as code (`queryapigate config`).
+(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), configuration as code (`queryapigate config`), and
+secrets from files and secrets managers (`${file:...}`).
 The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -53,6 +54,17 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Added
+- **Secrets from files** (BACKLOG #98,
+  [ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md), experimental), first part: a
+  connection's or destination's field can be `${file:/run/secrets/name}` - read when the connection is opened, again
+  as soon as the file changes, so a password the CSI driver or Vault Agent rotates in place is used without a restart.
+  Only inside `QUERYAPIGATE_SECRET_FILE_DIRS`, never the server's home, checked when saved and when used. Resolved
+  values are kept in memory at most `QUERYAPIGATE_SECRET_CACHE_SECONDS`; past that a failing provider fails the
+  connection with `503 secret_unavailable`, never a stale secret. Every secret setting can be read from a file too:
+  `QUERYAPIGATE_SECRET_KEY_FILE` and the like. See
+  [Secrets from files and secrets managers](documentation/API.md#secrets-from-files-and-secrets-managers).
 
 ## [0.27.0] - 2026-10-12
 

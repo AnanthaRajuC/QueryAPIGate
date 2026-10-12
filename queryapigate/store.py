@@ -20,7 +20,6 @@ from .errors import ApiError
 # Serialises read-modify-write cycles on the JSON files this app manages.
 lock = threading.RLock()
 
-_ENV_REF_RE = re.compile(r'\$\{(\w+)\}')
 _FILENAME_RE = re.compile(r'^[\w .\-]{1,100}$')
 _ENC_PREFIX = 'enc:'  # marks a connection password as Fernet-encrypted - see _encrypt_password()
 # One canonical spelling, rejected (never silently case-folded) when violated, so "Reporting" and "reporting"
@@ -175,21 +174,16 @@ def read_connections():
 
 
 def _server_setting(name):
-    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL, and the OpenTelemetry
-    # exporter's (OTEL_EXPORTER_OTLP_HEADERS often carries a collector token)... - are never a connection's or
-    # destination's to read: an administrator could put one in a password sent to a host of theirs.
-    return name.upper().startswith(('QUERYAPIGATE_', 'OTEL_'))
+    from . import secretrefs
+    return secretrefs.server_setting(name)
 
 
 def refuse_server_settings(fields):
-    """Refuse - when a connection or destination is saved or tried - a ${VAR} reference to one of the server's own
-    QUERYAPIGATE_* or OTEL_* settings."""
-    for value in (fields or {}).values():
-        if isinstance(value, str):
-            for name in _ENV_REF_RE.findall(value):
-                if _server_setting(name):
-                    raise ApiError(f"${{{name}}} is one of this server's own settings and can't be referenced - "
-                                   'use a variable of its own for the secret', code='invalid_body')
+    """Refuse - when a connection or destination is saved or tried - a reference it may not hold (secretrefs.py, ADR
+    0015): to one of the server's own QUERYAPIGATE_* or OTEL_* settings, to a secret provider there is none of, or to
+    what a provider's allow-list doesn't reach."""
+    from . import secretrefs
+    secretrefs.check_fields(fields)
 
 
 def refuse_store_access(details):
@@ -215,25 +209,15 @@ def refuse_store_access(details):
 
 
 def _expand_env(value):
-    """Replace ${VAR} references in a connection value with the environment variable's content."""
-    if not isinstance(value, str):
-        return value
-
-    def replace(match):
-        name = match.group(1)
-        if _server_setting(name):
-            raise ApiError(f"${{{name}}} is one of this server's own settings and can't be referenced by a "
-                           'connection or destination', 500, code='connection_misconfigured')
-        if name not in os.environ:
-            raise ApiError(f"Environment variable '{name}' referenced by the connection is not set", 500,
-                           code='connection_misconfigured')
-        return os.environ[name]
-
-    return _ENV_REF_RE.sub(replace, value)
+    """Replace the references in a connection value - ${VAR}, ${file:...} - with what they name (secretrefs.py)."""
+    from . import secretrefs
+    return secretrefs.expand(value)
 
 
 def _is_env_ref(value):
-    return isinstance(value, str) and bool(_ENV_REF_RE.fullmatch(value))
+    """A whole value that is one reference: shown as written, never encrypted - it isn't a secret, only names one."""
+    from . import secretrefs
+    return secretrefs.is_reference(value)
 
 
 def _is_encrypted(value):

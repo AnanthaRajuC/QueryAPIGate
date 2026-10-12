@@ -313,7 +313,9 @@ publish saved queries or views and grant those instead.
 
 Any string value may contain `${VAR}` references, replaced with the environment variable's value when the connection is
 used (a missing variable is reported as an error naming it). `GET /api/v1/connections/{name}` masks plain-text passwords as
-`********` and shows `${VAR}` references as written.
+`********` and shows `${VAR}` references as written. A secret kept in a file - the CSI driver's, Docker's, Vault
+Agent's - is `${file:/run/secrets/name}`, read inside the folders `QUERYAPIGATE_SECRET_FILE_DIRS` allows
+([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers), experimental).
 
 ## Best practice
 

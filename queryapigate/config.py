@@ -343,6 +343,13 @@ def port_setting(name, default):
 def check_settings():
     """Raise ValueError for a malformed setting, so a typo fails at startup instead of silently switching off a
     protection."""
+    load_secret_files()
+    raw = os.environ.get('QUERYAPIGATE_SECRET_CACHE_SECONDS', '').strip()
+    if raw and (not raw.isdigit() or not 1 <= int(raw) <= 86400):
+        raise ValueError('QUERYAPIGATE_SECRET_CACHE_SECONDS must be a whole number of seconds from 1 to 86400')
+    for folder in os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '').split(','):
+        if folder.strip() and not os.path.isabs(folder.strip()):
+            raise ValueError(f"QUERYAPIGATE_SECRET_FILE_DIRS: '{folder.strip()}' must be an absolute path")
     # This project was named SQL2API before it was QueryAPIGate, and its settings were SQL2API_*. They are
     # deliberately not read any more - but silently ignoring a leftover SQL2API_API_KEY would start the server
     # with no admin key configured, which means open access. So a leftover old name is a startup error.
@@ -453,6 +460,55 @@ def export_dirs():
     return [os.path.realpath(p.strip()) for p in raw.split(',') if p.strip()]
 
 
+def secret_file_dirs():
+    """QUERYAPIGATE_SECRET_FILE_DIRS: the folders `${file:...}` references may read (ADR 0015) - comma-separated
+    absolute paths, set by whoever runs the server. Unset, no file may be read as a secret: otherwise an
+    administrator could have the server send them any file it can read, as a connection's password."""
+    raw = os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '')
+    return [os.path.realpath(p.strip()) for p in raw.split(',') if p.strip()]
+
+
+def secret_cache_seconds():
+    """QUERYAPIGATE_SECRET_CACHE_SECONDS: how long a secret resolved from a provider is kept in memory at most (default
+    300) - fetched again a little before. Validated by check_settings()."""
+    raw = os.environ.get('QUERYAPIGATE_SECRET_CACHE_SECONDS', '').strip()
+    return int(raw) if raw.isdigit() and 1 <= int(raw) <= 86400 else 300
+
+
+# The settings that are secrets: each can also be read from a file, NAME_FILE (ADR 0015) - Docker's and most images'
+# convention - read at startup, as the environment variable would be.
+SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
+                   'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
+                   'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET')
+_from_files: dict[str, str] = {}  # setting -> the file it was read from
+
+
+def load_secret_files():
+    """Read each NAME_FILE that's set into NAME, once: every reader of the setting then works as if it were set
+    directly. Both set is refused - which one would win isn't obvious, so neither does."""
+    for name in SECRET_SETTINGS:
+        path = os.environ.get(f'{name}_FILE', '').strip()
+        if not path or _from_files.get(name) == path:
+            continue
+        if os.environ.get(name, '').strip():
+            raise ValueError(f'{name} and {name}_FILE are both set - set one')
+        try:
+            with open(path, encoding='utf-8') as f:
+                value = f.read()
+        except (OSError, UnicodeDecodeError) as error:
+            raise ValueError(f'{name}_FILE: {path} could not be read: {error}') from None
+        value = value[:-2] if value.endswith('\r\n') else value[:-1] if value.endswith('\n') else value
+        if not value.strip():
+            raise ValueError(f'{name}_FILE: {path} is empty')
+        os.environ[name] = value
+        _from_files[name] = path
+
+
+def secret_source(name):
+    """Where a secret setting came from, for Settings: its file, or None for the environment."""
+    return _from_files.get(name)
+
+
 def mask_key():
     """QUERYAPIGATE_MASK_KEY: the key column masking's `hash` action is keyed with (masking.py), or None - then the
     store makes one once and every instance shares it."""
@@ -530,6 +586,7 @@ def _number_in(raw, accept):
 def check_database_url():
     """Part of check_settings(), callable on its own: the CLI opens the store (db.init_schema()) before any
     command runs, so a malformed QUERYAPIGATE_DATABASE_URL must be reported there, not as a driver traceback."""
+    load_secret_files()  # QUERYAPIGATE_DATABASE_URL_FILE: the store's URL is needed before anything else
     raw = os.environ.get('QUERYAPIGATE_DATABASE_URL', '').strip()
     if not raw:
         return
@@ -1005,6 +1062,8 @@ def describe_settings():
     variables, changed by restarting the server, not through the API."""
     def row(label, description, env, value, secret=False, experimental_row=False):
         raw = os.environ.get(env, '').strip()
+        if secret and secret_source(env):
+            value = f'{value} (from {env}_FILE)'  # never the file's content: where it came from
         return {'label': label, 'description': description, 'env': env, 'value': value,
                 'source': 'env' if raw else 'default', 'env_value': None if secret or not raw else raw,
                 'experimental': experimental_row or env in experimental.SETTINGS}
@@ -1041,6 +1100,11 @@ def describe_settings():
                 Path(h2_jar()).name + ('' if os.environ.get('QUERYAPIGATE_H2_JAR') else ' (bundled)'))]},
         {'id': 'security', 'title': 'Security',
          'description': 'Admin access, write protection and secrets at rest.', 'rows': [
+            row('Secret files', 'Folders ${file:...} references may read - a connection\'s or destination\'s '
+                'password from a file the CSI driver, Docker or Vault Agent keeps current (ADR 0015).',
+                'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused'),
+            row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
+                'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
             row('Admin API key', 'Key with full access to this UI and the admin API. Unset means open access.',
                 'QUERYAPIGATE_API_KEY', 'configured' if api_key() else 'not set - open access', secret=True),
             row('Allow writes', 'When off, statements that modify data are rejected.',

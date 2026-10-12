@@ -1,6 +1,6 @@
 # ADR 0015: Secrets from a secrets manager, and short-lived database credentials
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Backlog:** #98 (secrets from a secrets manager, and short-lived database credentials).
 

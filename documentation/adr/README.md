@@ -23,7 +23,7 @@ one it supersedes.
 | [0012](0012-tamper-evident-audit-log-and-siem.md) | A tamper-evident audit log, streamed to a SIEM | Accepted |
 | [0013](0013-helm-chart.md) | A Helm chart | Accepted |
 | [0014](0014-configuration-as-code.md) | Configuration as code | Accepted |
-| [0015](0015-secrets-managers-and-short-lived-credentials.md) | Secrets managers and short-lived credentials | Proposed |
+| [0015](0015-secrets-managers-and-short-lived-credentials.md) | Secrets managers and short-lived credentials | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
