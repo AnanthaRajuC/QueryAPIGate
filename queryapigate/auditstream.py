@@ -367,9 +367,25 @@ def _run():
                             error)
 
 
+def release_leases(me=None):
+    """Give back the leases this instance holds - at a clean exit, so another instance (or this one, restarted) takes
+    over at once rather than when the lease would have lapsed."""
+    from . import instances
+    me = me or instances.instance_id()
+    try:
+        with db.transaction() as conn:
+            for row in conn.execute('SELECT output, details_json FROM audit_delivery').fetchall():
+                if json.loads(row['details_json'] or '{}').get('instance') == me:
+                    conn.execute('UPDATE audit_delivery SET lease_until = NULL WHERE output = ?', (row['output'],))
+    except Exception:  # at exit the store may be gone already: the lease lapses by itself
+        pass
+
+
 def start():
     """The delivery thread, once per process, when an output is configured."""
     if not AUTO_START or not outputs() or _started['pid'] == os.getpid():
         return
     _started['pid'] = os.getpid()
+    import atexit
+    atexit.register(release_leases)
     threading.Thread(target=_run, name='queryapigate-audit-stream', daemon=True).start()

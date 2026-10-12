@@ -541,7 +541,8 @@ def _handler():
 
 def _audit_verify(args):
     """`queryapigate audit verify [--file PATH]`: walk the audit log's hash chain (ADR 0012) - the store's, or an export
-    file's - and say whether it's intact, or where it first breaks. Exit 0 intact, 1 broken, 2 unreadable."""
+    file's - and say whether it's intact, or where it first breaks. Exit 0 intact, 1 broken, 2 can't be checked
+    (unreadable, or keyed with no key set)."""
     from . import auditchain
     try:
         auditchain.check_keys()
@@ -553,6 +554,10 @@ def _audit_verify(args):
         if not report.get('entries'):
             print('Intact: no chained entries yet.')
             return 0
+        if report.get('unchecked_without_key') == report['entries']:
+            print(f"Not checked: all {report['entries']} entries are keyed, and QUERYAPIGATE_AUDIT_KEY is not set - "
+                  'set it to the key they were written with.', file=sys.stderr)
+            return 2
         how = ('keyed with QUERYAPIGATE_AUDIT_KEY' if report.get('keyed')
                else 'unkeyed (plain SHA-256: set QUERYAPIGATE_AUDIT_KEY so an edit cannot be re-signed)')
         print(f"Intact: entries {report['first_seq']} to {report['last_seq']}, {how}.")

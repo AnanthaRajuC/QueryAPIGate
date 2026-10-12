@@ -326,7 +326,10 @@ def _note_audit_key_rotation():
     try:
         conn = db.connection()
         if not auditchain.head_keyed(conn):  # a key set for the first time: from here on, every entry is keyed
-            store.record_audit('startup', 'audit_key_set', 'audit_log', None)
+            # How many came before, unkeyed: expected once, when the key is first set. Again later - after a key was
+            # set long ago - it means the keyed history was replaced, which the SIEM's copy shows (ADR 0012).
+            unkeyed = conn.execute('SELECT COUNT(*) FROM audit_log').fetchone()[0]
+            store.record_audit('startup', 'audit_key_set', 'audit_log', {'entries_before_unkeyed': unkeyed})
         elif auditchain.head_signed_by(conn) not in (None, 0):
             store.record_audit('startup', 'audit_key_rotated', 'audit_log', {'keys': len(auditchain.keys())})
     except db.Error:

@@ -53,6 +53,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-12
+
+An audit trail an auditor can rely on: every administrative change chained to the one before and signed, checked in
+one command, and streamed as it happens - over mutual TLS - to the SIEM where security teams already look, without
+losing an entry while it's down. The chain is stable; the stream is experimental.
+
 ### Upgrading from 0.24
 - **Schema 14** adds three columns to `audit_log` (`seq`, `prev_hash`, `hash`) and two tables (`audit_chain`,
   `audit_delivery`). The entries already stored are chained at the upgrade, as they are, and an `audit_chain_started`
@@ -71,7 +77,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   TCP, with `QUERYAPIGATE_AUDIT_SYSLOG_URL`; OTLP logs with `QUERYAPIGATE_AUDIT_OTLP=1`. A cursor per output in the
   store and a lease, so one instance delivers and another takes over; at least once; entries not yet delivered kept
   past the rolling cap, up to ten times it. `GET /api/v1/audit/delivery` and the `audit_delivery_behind` alert. See
-  [Streaming the audit log to a SIEM](documentation/API.md#streaming-the-audit-log-to-a-siem).
+  [Streaming the audit log to a SIEM](documentation/API.md#streaming-the-audit-log-to-a-siem). A process that exits
+  cleanly gives its lease back, so another takes over at once. Guide 53,
+  [Send the audit log to your SIEM](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/53-send-the-audit-log-to-your-siem.md),
+  run against syslog-ng over mutual TLS.
 
 ## [0.24.0] - 2026-10-11
 
@@ -2081,7 +2090,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.0...v0.22.1

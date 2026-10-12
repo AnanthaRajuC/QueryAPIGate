@@ -277,6 +277,13 @@ SIEM stream, or the export file shipped elsewhere - matters. The stream (experim
 store contradicts what the SIEM already has; its delivery is at least once, and syslog over TCP can lose the batch
 sent to a SIEM that dies without closing the connection (OTLP, acknowledged per batch, doesn't).
 
+The key's guarantee starts at the `audit_key_set` entry the server writes when it first starts with a key. Someone
+with write access to the store, while the server is stopped, could delete the keyed history and leave an unkeyed one:
+at the next start the server sees an unkeyed chain, as when a key is first set, and writes `audit_key_set` again.
+It records how many entries came before it unkeyed (`entries_before_unkeyed`) - a second `audit_key_set`, or one
+counting entries you know were keyed, is the sign - but only a copy outside the store proves which history is real:
+the SIEM's already holds the keyed hashes.
+
 ### Transport
 
 QueryAPIGate does not terminate TLS itself - that is explicitly the reverse proxy's job (Caddy, nginx,

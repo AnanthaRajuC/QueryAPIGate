@@ -87,7 +87,7 @@ documentation. #99 workspaces only if asked for.
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas**
     ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)). (Released as 0.24.0 on 2026-10-11.)
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
-    ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)).
+    ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)). (Released as 0.25.0 on 2026-10-12.)
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
     compliance documentation; #99 workspaces only on demand.
 15. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
@@ -2994,9 +2994,14 @@ in `/api/v1/api-keys/{name}` and the Console; an alert at 80%. Builds on run his
 
 ## 96. A tamper-evident audit log, streamed to a SIEM
 
-**Status: open; planned for 0.25** ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)).
+**Status: shipped (0.25; the stream experimental).** [ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md):
+`auditchain.py` - `seq`, `prev_hash`, `hash` on every entry, HMAC-signed with `QUERYAPIGATE_AUDIT_KEY`, an anchor through
+the rolling cap, `queryapigate audit verify [--file]`, `GET /api/v1/audit/verify`, the `audit_chain_broken` alert;
+`auditstream.py` - syslog over TLS (mutual TLS too) and OTLP logs, a cursor and a lease per output, entries kept past
+the cap until delivered, `audit_delivery_behind`. Guide 53 against syslog-ng. Found on the way: syslog over TCP can lose a
+batch to a dead connection - a closed one is now noticed before writing, and a refused certificate at connect.
 
-**Impact:** the audit log can be appended to a file (`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`, #30), but an entry can be
+**Was:** the audit log can be appended to a file (`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`, #30), but an entry can be
 edited or removed without trace, and there's no stream a SIEM (Splunk, Sentinel, Elastic) reads. SOC 2 and ISO 27001
 auditors ask for both.
 

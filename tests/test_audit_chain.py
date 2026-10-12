@@ -133,7 +133,12 @@ class KeyedTests(ChainTestCase):
         self.write(2)
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_KEY': ''}):
             report = self.verify()
+            out = io.StringIO()
+            with contextlib.redirect_stderr(out), contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(['audit', 'verify'])
         self.assertEqual((report['intact'], report['unchecked_without_key']), (True, 2))
+        self.assertEqual(code, 2)  # nothing was checked: not "intact"
+        self.assertIn('Not checked: all 2 entries are keyed', out.getvalue())
 
     def test_setting_a_key_is_recorded_and_rotating_it_too(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_KEY': ''}):

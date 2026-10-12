@@ -345,6 +345,12 @@ const DOCS = [
     path: 'how-to/52-give-a-partner-a-quota-and-a-concurrency-cap.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-53',
+    title: 'Send the audit log to your SIEM, and prove nobody edited it',
+    path: 'how-to/53-send-the-audit-log-to-your-siem.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

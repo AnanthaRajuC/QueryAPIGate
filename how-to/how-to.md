@@ -64,6 +64,8 @@ guide covers one scenario end to end, and every command and response in it was r
     working until the partner has switched, then ended.
 52. [**Give a partner a quota and a concurrency cap**](52-give-a-partner-a-quota-and-a-concurrency-cap.md) - queries
     at once, rows a call and calls a day, across instances; how exact a quota is, measured.
+53. [**Send the audit log to your SIEM, and prove nobody edited it**](53-send-the-audit-log-to-your-siem.md) - the
+    signed hash chain, syslog over mutual TLS, the SIEM down and back, `audit verify`.
 
 ## MCP (AI agent access)
 

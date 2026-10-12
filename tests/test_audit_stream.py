@@ -250,6 +250,13 @@ class LeaseTests(StreamTestCase):
         self.receiver.wait_for(3)
         self.assertEqual([e['seq'] for e in self.receiver.entries()], [1, 2, 3])
 
+    def test_a_clean_exit_gives_the_lease_back(self):
+        self.write(1)
+        auditstream.deliver_once('syslog', me='one')
+        auditstream.release_leases(me='one')
+        self.write(1, start=1)
+        self.assertEqual(auditstream.deliver_once('syslog', me='two'), 1)  # at once, not when the lease lapses
+
     def test_a_batch_that_fails_partway_is_sent_again_at_least_once(self):
         self.write(3)
         sent = []
