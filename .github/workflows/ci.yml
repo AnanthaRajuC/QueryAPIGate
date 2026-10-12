@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # The release before this one: the rolling-upgrade test serves beside it on an upgraded store, and the Helm chart is
+  # upgraded from it on a real cluster. Bumped after each release (CONTRIBUTING.md, Releasing).
+  PREVIOUS_RELEASE: "0.25.0"
+  # Pinned tools for the Helm chart's jobs (ADR 0013), each download checked against its published checksum.
+  KIND_VERSION: v0.33.0
+  KUBECTL_VERSION: v1.37.0
+
 jobs:
   test:
     name: Tests (Python ${{ matrix.python }})
@@ -167,7 +175,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q postgresql-client
       - run: pip install -e ".[dev]"
       - name: The previous release, for the rolling-upgrade test (BACKLOG #58)
-        run: python -m venv /tmp/previous-release && /tmp/previous-release/bin/pip install -q "queryapigate[postgres]==0.25.0"
+        run: python -m venv /tmp/previous-release && /tmp/previous-release/bin/pip install -q "queryapigate[postgres]==$PREVIOUS_RELEASE"
       - run: python -m unittest discover -s tests -t . -v
 
   console-e2e:
@@ -268,3 +276,55 @@ jobs:
           docker run -d --name s2a -p 5000:5000 queryapigate
           for i in $(seq 1 20); do curl -fs localhost:5000/health && exit 0; sleep 1; done
           docker logs s2a; exit 1
+
+  helm-chart:
+    # The Helm chart (ADR 0013) with both Helm majors: lint, then rendered with each shape and option and checked
+    # (tests/test_helm.py) - refusals, hardening, routes, and the plain manifests kept in step with it.
+    name: Helm chart (Helm ${{ matrix.helm }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        helm: [v3.22.0, v4.3.0]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Helm ${{ matrix.helm }}, checked against its checksum
+        run: |
+          curl -sfL -o helm.tgz "https://get.helm.sh/helm-${{ matrix.helm }}-linux-amd64.tar.gz"
+          echo "$(curl -sfL "https://get.helm.sh/helm-${{ matrix.helm }}-linux-amd64.tar.gz.sha256sum" | cut -d' ' -f1)  helm.tgz" | sha256sum -c
+          tar xzf helm.tgz && sudo mv linux-amd64/helm /usr/local/bin/helm && helm version
+      - run: helm lint deploy/helm/queryapigate --set secret.create=true --set secret.values.QUERYAPIGATE_API_KEY=k
+      - run: pip install -e .
+      - run: python -m unittest tests.test_helm -v
+
+  helm-kind:
+    # The chart on a real cluster: both shapes, and an upgrade from the previous release - its published chart once
+    # there is one - to this commit's image while a pod keeps calling it. No request may fail.
+    name: Helm chart on kind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: kind, kubectl and Helm, checked against their checksums
+        run: |
+          curl -sfL -o kind "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+          echo "$(curl -sfL "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64.sha256sum" | cut -d' ' -f1)  kind" | sha256sum -c
+          curl -sfL -o kubectl "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+          echo "$(curl -sfL "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl.sha256")  kubectl" | sha256sum -c
+          curl -sfL -o helm.tgz https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz
+          echo "$(curl -sfL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum | cut -d' ' -f1)  helm.tgz" | sha256sum -c
+          tar xzf helm.tgz && chmod +x kind kubectl && sudo mv kind kubectl linux-amd64/helm /usr/local/bin/
+      - run: docker build -t queryapigate:chart-test .
+      - name: The previous release's chart, if it was published
+        run: |
+          if helm show chart "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/queryapigate" --version "$PREVIOUS_RELEASE" >/dev/null 2>&1; then
+            echo "PREVIOUS_CHART=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/queryapigate --version $PREVIOUS_RELEASE" >> "$GITHUB_ENV"
+          fi
+      - name: Install, smoke-test, upgrade under load
+        run: .github/scripts/kind_chart_test.sh
+        env:
+          IMAGE: queryapigate:chart-test
+          PREVIOUS_IMAGE: ghcr.io/anantharajuc/queryapigate:${{ env.PREVIOUS_RELEASE }}

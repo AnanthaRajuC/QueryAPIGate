@@ -194,6 +194,16 @@ class LoadTests(ExamplesTestCase):
                 self.assertTrue(8 <= len(history) <= 20, file['filename'])
                 self.assertTrue(all(e['status'] == 'success' for e in history), file['filename'])
 
+    def test_an_instance_without_the_database_file_makes_its_own(self):
+        # Several instances share one store but each has a home (a pod's) of its own: the connection is already in the
+        # store, and this instance's home has no examples.db - which made every example query answer 404 here.
+        examples.load(FIXED_NOW)
+        os.remove(os.path.join(self.home, examples.DB_FILE))
+        again = examples.load(FIXED_NOW)
+        self.assertFalse(again['connection'])  # the store already had it: nothing added there
+        self.assertTrue(os.path.isfile(os.path.join(self.home, examples.DB_FILE)))
+        self.assertEqual(store.get_connection(examples.CONNECTION)['database'], examples.DB_FILE)
+
     def test_it_is_idempotent_and_never_adds_versions(self):
         examples.load(FIXED_NOW)
         again = examples.load(FIXED_NOW)

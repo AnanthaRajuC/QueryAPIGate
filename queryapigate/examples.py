@@ -421,13 +421,16 @@ def load(now=None):
         added = {'connection': False, 'queries': [], 'roles': [], 'key_secrets': {}}
         config.home().mkdir(parents=True, exist_ok=True)
         db_path = config.home() / DB_FILE
+        # The example database is a file in this instance's home, not in the store: with several instances on one
+        # store (each with a home of its own - a pod's), the first to load the examples marks the connection, and
+        # every other one must still make its own copy, or the example queries answer 404 from all but one.
+        if not db_path.exists():
+            try:
+                build_database(str(db_path), now)
+            except sqlite3.Error as error:  # SQLite's own error type - not an OSError, so callers would miss it
+                raise ApiError(f'Could not create the example database in {config.home()} ({error}). Is the data '
+                               'folder writable by the user QueryAPIGate runs as?', 500) from None
         if _marked_connection() is None:
-            if not db_path.exists():
-                try:
-                    build_database(str(db_path), now)
-                except sqlite3.Error as error:  # SQLite's own error type - not an OSError, so callers would miss it
-                    raise ApiError(f'Could not create the example database in {config.home()} ({error}). Is the data '
-                                   'folder writable by the user QueryAPIGate runs as?', 500) from None
             store.update_connections({CONNECTION: {'db': 'sqlite', 'database': DB_FILE, 'active': True,
                                                    'example': True}})
             added['connection'] = True

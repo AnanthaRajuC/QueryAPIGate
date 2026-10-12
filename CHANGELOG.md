@@ -70,6 +70,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   capabilities, no service account token - and gives the events server a liveness probe. A test keeps it in step
   with what the chart renders.
 
+### Fixed
+- **On several instances, the example queries answered 404 from every instance but the one that loaded them**: the
+  store said they were there, but their SQLite database was a file only that instance had. Each instance now makes
+  its own copy when it's missing. Found by the new Kubernetes test in CI.
+
 ## [0.25.0] - 2026-10-12
 
 An audit trail an auditor can rely on: every administrative change chained to the one before and signed, checked in

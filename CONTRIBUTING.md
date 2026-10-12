@@ -182,7 +182,8 @@ mkdocs serve
 
 ### Releasing
 
-1. Bump `__version__` in `queryapigate/__init__.py` and turn `## [Unreleased]` in CHANGELOG.md into a dated
+1. Bump `__version__` in `queryapigate/__init__.py`, and `version` and `appVersion` in
+   `deploy/helm/queryapigate/Chart.yaml` with it (a test fails if they differ), and turn `## [Unreleased]` in CHANGELOG.md into a dated
    `## [X.Y.Z] - YYYY-MM-DD` section, with what upgraders must know first. Commit on `main`, push, and wait for CI.
 2. Tag that commit `vX.Y.Z` and push the tag: the Release workflow checks the tag against the version and the
    changelog, builds the Console into the wheel and publishes to PyPI; the Docker workflow publishes the image.
@@ -195,6 +196,6 @@ mkdocs serve
    python tests/fixtures/stores/generate.py --postgres postgresql://postgres:pw@localhost:5432/postgres \
      /tmp/qag-X.Y.Z/bin/queryapigate   # a scratch database; needs pg_dump on PATH
    ~~~
-4. Point the rolling-upgrade test at it: set `queryapigate[postgres]==X.Y.Z` in CI's "previous release" step
-   (`.github/workflows/ci.yml`), so the next version is tested serving beside this one on an upgraded store.
+4. Point the upgrade tests at it: set `PREVIOUS_RELEASE: "X.Y.Z"` in `.github/workflows/ci.yml`, so the next version is
+   tested serving beside this one on an upgraded store, and its Helm chart upgraded from this one's on a cluster.
 5. Retake the screenshots (`npm run screenshots`, above) - the Console's Help now reads that release's docs.
