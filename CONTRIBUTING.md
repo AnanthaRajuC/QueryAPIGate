@@ -183,8 +183,8 @@ mkdocs serve
 ### Releasing
 
 1. Bump `__version__` in `queryapigate/__init__.py`, and `version` and `appVersion` in
-   `deploy/helm/queryapigate/Chart.yaml` with it (a test fails if they differ), and turn `## [Unreleased]` in CHANGELOG.md into a dated
-   `## [X.Y.Z] - YYYY-MM-DD` section, with what upgraders must know first. Commit on `main`, push, and wait for CI.
+   `deploy/helm/queryapigate/Chart.yaml` with it (a test fails if they differ), and turn `## [Unreleased]` in
+   CHANGELOG.md into a dated `## [X.Y.Z] - YYYY-MM-DD` section, with what upgraders must know first. Commit on `main`, push, and wait for CI.
 2. Tag that commit `vX.Y.Z` and push the tag: the Release workflow checks the tag against the version and the
    changelog, builds the Console into the wheel and publishes to PyPI; the Docker workflow publishes the image.
 3. Add the release's upgrade fixtures (`tests/fixtures/stores/`, BACKLOG #65) from the published package, so every
