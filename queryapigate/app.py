@@ -103,10 +103,12 @@ def apply_config_at_startup():
         doc = configcode.load(path.read_text())
         result = configcode.apply(doc, prune=config.config_prune(), actor='startup', once=True)
     except OSError as error:
+        log.error('QUERYAPIGATE_CONFIG_FILE %s could not be read: %s', path, error)
         raise ValueError(f'QUERYAPIGATE_CONFIG_FILE {path} could not be read: {error}') from None
     except configcode.ConfigInvalid as error:
-        raise ValueError(f'QUERYAPIGATE_CONFIG_FILE {path} was not applied - nothing in it was. '
-                         + '; '.join(error.problems)) from None
+        message = f'QUERYAPIGATE_CONFIG_FILE {path} was not applied - nothing in it was. ' + '; '.join(error.problems)
+        log.error('%s', message)  # one line in the log, whatever prints the exception after (gunicorn: a traceback)
+        raise ValueError(message) from None
     if result.get('already_applied'):
         log.info('QUERYAPIGATE_CONFIG_FILE %s (sha256 %s) is already applied', path, result['file_sha256'][:12])
     else:

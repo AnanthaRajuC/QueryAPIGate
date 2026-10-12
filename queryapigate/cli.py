@@ -390,9 +390,40 @@ def _config_export(args):
     return 0
 
 
+def _remote(args, operation, **flags):
+    """POST the file to a running server's /api/v1/config/<operation> (`--server`), with the key in QAG_API_KEY - an
+    environment variable, so it never shows in a CI log or a process list."""
+    import urllib.error
+    import urllib.request
+    key = os.environ.get('QAG_API_KEY', '').strip()
+    if not key:
+        raise ApiError('--server needs the API key in the QAG_API_KEY environment variable')
+    doc = _read_config_file(args.file)
+    query = '&'.join(f'{k}=true' for k, v in flags.items() if v)
+    url = args.server.rstrip('/') + f'/api/v1/config/{operation}' + (f'?{query}' if query else '')
+    request = urllib.request.Request(url, data=json.dumps(doc).encode(), method='POST',
+                                     headers={'X-API-Key': key, 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            body = json.load(error)
+        except ValueError:
+            raise ApiError(f'{url} answered {error.code}') from None
+        if body.get('code') == 'invalid_config':
+            raise configcode.ConfigInvalid(body.get('problems') or [body.get('error')]) from None
+        raise ApiError(f"{url} answered {error.code}: {body.get('error')}") from None
+    except urllib.error.URLError as error:
+        raise ApiError(f'{url}: {error.reason}') from None
+
+
 @_config_command
 def _config_diff(args):
-    result = configcode.diff(_read_config_file(args.file), prune=args.prune)
+    if args.server:
+        result = _remote(args, 'diff', prune=args.prune)
+    else:
+        result = configcode.diff(_read_config_file(args.file), prune=args.prune)
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
@@ -402,11 +433,12 @@ def _config_diff(args):
 
 @_config_command
 def _config_apply(args):
-    doc = _read_config_file(args.file)
-    if args.dry_run:
-        result = {**configcode.diff(doc, prune=args.prune), 'applied': False}
+    if args.server:
+        result = _remote(args, 'apply', prune=args.prune, dry_run=args.dry_run)
+    elif args.dry_run:
+        result = {**configcode.diff(_read_config_file(args.file), prune=args.prune), 'applied': False}
     else:
-        result = configcode.apply(doc, prune=args.prune, actor='cli')
+        result = configcode.apply(_read_config_file(args.file), prune=args.prune, actor='cli')
     if args.json:
         print(json.dumps(result, indent=2, default=str))
         return 0
@@ -798,6 +830,8 @@ def build_parser():
     config_diff.add_argument('file', help='a configuration file (YAML or JSON), or - for stdin')
     config_diff.add_argument('--json', action='store_true', help='the changes as JSON, for a script')
     config_diff.add_argument('--prune', action='store_true', help='also show what --prune would delete')
+    config_diff.add_argument('--server', metavar='URL', help="a running server's base URL, instead of this home's "
+                                                             'store - the key in QAG_API_KEY (CI against prod)')
     config_diff.set_defaults(func=_config_diff)
     config_apply = config_actions.add_parser(
         'apply', help='make the server match FILE, all or nothing - every change through the same rules as the API, '
@@ -808,6 +842,8 @@ def build_parser():
                                    'no longer has - never what was made in the Console or the API')
     config_apply.add_argument('--dry-run', action='store_true', help='say what would change; change nothing')
     config_apply.add_argument('--json', action='store_true', help='the result as JSON, for a script')
+    config_apply.add_argument('--server', metavar='URL', help="a running server's base URL, instead of this home's "
+                                                              'store - the key in QAG_API_KEY (an owner\'s)')
     config_apply.set_defaults(func=_config_apply)
     config_new_key = config_actions.add_parser(
         'new-key', help="a fresh API key secret and its secret_sha256, for a key declared in a file - nothing stored")
@@ -886,6 +922,8 @@ def main(argv=None):
         args = parser.parse_args(['serve', *(argv or [])])
     if getattr(args, 'home', None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
+    if getattr(args, 'server', None) or getattr(args, 'func', None) is _config_new_key:
+        return args.func(args)  # nothing of this home's: no store opened, so none made in a CI checkout
     try:
         config.check_database_url()
         db.init_schema()

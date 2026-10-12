@@ -329,6 +329,30 @@ no credential for it. The server writes only to `/data` (the store's volume, or 
 - **The chart and image are as trusted as ghcr and this repository's release workflow.** The chart is pushed by the
   same tag-triggered workflow as the image. Neither is signed yet, so pin the version, and a digest if you mirror them.
 
+### Configuration as code (ADR 0014, experimental)
+
+A configuration file can change anything an owner can - connections, grants, keys - so applying one is an owner's
+capability (`config.apply`), and so is reading what applying one would do. What keeps a file safe to put in git, and
+what's still the deployer's:
+
+- **A file never holds a secret.** A password must be a `${VAR}` reference - a literal is refused - and a reference to
+  the server's own `QUERYAPIGATE_*` or `OTEL_*` settings is refused, as through the API (a connection pointed at a
+  host of the author's would otherwise send it there). Export turns stored values into references. Not checked: a
+  secret inside another field - a JDBC URL with `password=` in it - which is in the file as it is in the store.
+- **A key is in a file by its secret's hash.** That's safe to publish only because the secret is 32 random bytes:
+  `config new-key` makes one. A key someone gave a guessable secret could be found from its hash, offline. Two keys
+  can't share a secret.
+- **Who can change the file can change the server.** With `QUERYAPIGATE_CONFIG_FILE` (the chart's `configAsCode`),
+  anyone who can edit the file - the repository's main branch, the ConfigMap - has an owner's reach at the next
+  start. Protect the branch and require review; that is the control this feature exists to give.
+- **Applying is all or nothing, and audited** - each change `via: config`, under one `config_applied` entry with the
+  file's hash and who applied it. A rolled-back apply leaves no audit entry, in the store or the export file.
+- **`QUERYAPIGATE_CONFIG_LOCKED`** keeps what a file manages to the file for the API and the Console. It doesn't bind
+  someone with a shell on the server: the CLI works on the store directly, as it always has.
+- **Pruning deletes only what a file manages**, and what the API deletes is no longer managed - so a later object of
+  the same name, made in the Console, isn't pruned as the file's.
+- **A file is capped at a million values**, YAML aliases counted as they expand, so a small file can't be a huge one.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without

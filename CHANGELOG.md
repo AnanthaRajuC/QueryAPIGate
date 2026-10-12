@@ -54,6 +54,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-12
+
+A server's setup as a file in git: connections, saved queries, roles, keys' grants and the rest, with no secret in it,
+reviewed as a pull request against what the server holds now, and applied all or nothing - by CI, or by the server
+itself as it starts, which with the Helm chart makes a merge the deploy. Experimental in 0.27.
+
 ### Upgrading from 0.26
 - **Schema 15** adds two tables, `config_managed` (what a configuration file manages) and `config_applied` (every
   file applied, by its hash). Additive - 0.26 instances keep working on the upgraded store.
@@ -74,7 +80,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   then too. `QUERYAPIGATE_CONFIG_LOCKED` keeps what a file manages to the file: the API and the Console answer
   `409 config_managed`. `GET /api/v1/config/managed`, and the Console tags what's managed. The Helm chart's
   `configAsCode` mounts the file and rolls the pods when it changes - checked on kind, a file that can't be applied
-  stopping the rollout at its first pod.
+  stopping the rollout at its first pod. `config diff|apply --server URL` runs against a running server, for CI.
+  Guide 55,
+  [Promote a setup from dev to prod through a pull request](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md),
+  run against two real servers.
+
+### Security
+- **A connection or destination can't reference the server's own `OTEL_*` settings** (`${OTEL_EXPORTER_OTLP_HEADERS}`
+  often holds a collector token), as it already couldn't `QUERYAPIGATE_*` ones: an administrator could otherwise
+  have one sent to a host of theirs as a password. One saved with such a reference stops working; give it a
+  variable of its own.
+- **An audit entry's copy in the export file is written once its transaction commits**, so an entry rolled back -
+  a configuration file that didn't apply - never appears there.
 
 ## [0.26.0] - 2026-10-12
 

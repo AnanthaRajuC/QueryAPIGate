@@ -48,7 +48,16 @@ def admin_only():
     QUERYAPIGATE_CONFIG_LOCKED, nothing a configuration file manages changed but through a file (ADR 0014)."""
     adminroles.authorize(g.permission, request.endpoint)
     from . import configcode
-    configcode.refuse_if_locked(request.endpoint, request.view_args)
+    configcode.refuse_if_locked(request.endpoint, request.view_args, request.get_json(silent=True))
+
+
+@bp.after_request
+def forget_what_was_deleted(response):
+    """What the API deleted, no configuration file manages any more (ADR 0014)."""
+    if request.method == 'DELETE' and 200 <= response.status_code < 300:
+        from . import configcode
+        configcode.forget_deleted(request.endpoint, request.view_args)
+    return response
 
 
 def _check_if_match(content):

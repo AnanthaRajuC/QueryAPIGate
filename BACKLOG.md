@@ -89,7 +89,8 @@ documentation. #99 workspaces only if asked for.
 13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
     ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)). (Released as 0.25.0 on 2026-10-12.)
 14. **0.26: #100 a Helm chart** ([ADR 0013](documentation/adr/0013-helm-chart.md)). (Released as 0.26.0 on 2026-10-12.)
-15. **0.27: #97 configuration as code** ([ADR 0014](documentation/adr/0014-configuration-as-code.md)).
+15. **0.27: #97 configuration as code** ([ADR 0014](documentation/adr/0014-configuration-as-code.md)). (Released as
+    0.27.0 on 2026-10-12.)
 16. **Then, in an order set by who asks:** #98 secrets managers, #101 compliance documentation; #99 workspaces only
     on demand.
 17. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
@@ -3014,7 +3015,11 @@ in the store's transaction.
 
 ## 97. Configuration as code: export, diff and apply
 
-**Status: open; planned for 0.27** ([ADR 0014](documentation/adr/0014-configuration-as-code.md)).
+**Status: shipped (0.27, experimental).** [ADR 0014](documentation/adr/0014-configuration-as-code.md): `configcode.py` -
+`queryapigate config export|diff|apply|new-key` (and `--server` for CI), `POST /api/v1/config/diff|apply`, all or
+nothing in one transaction (`db.transaction()` nesting as savepoints), `config_managed` and pruning, startup with
+`QUERYAPIGATE_CONFIG_FILE`, `QUERYAPIGATE_CONFIG_LOCKED`, the Console's *managed* tag and the chart's `configAsCode`,
+checked on kind. Guide 55. A Terraform provider over the same endpoints only if asked for.
 
 **Impact:** collections of saved queries move between environments as bundles (`queryapigate collection export|import`),
 but roles, API keys' grants, connections and destinations don't - so dev → staging → prod is done by hand, or by scripts

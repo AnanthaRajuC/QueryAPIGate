@@ -175,14 +175,15 @@ def read_connections():
 
 
 def _server_setting(name):
-    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL... - are never a
-    # connection's or destination's to read: an administrator could put one in a password sent to a host of theirs.
-    return name.upper().startswith('QUERYAPIGATE_')
+    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL, and the OpenTelemetry
+    # exporter's (OTEL_EXPORTER_OTLP_HEADERS often carries a collector token)... - are never a connection's or
+    # destination's to read: an administrator could put one in a password sent to a host of theirs.
+    return name.upper().startswith(('QUERYAPIGATE_', 'OTEL_'))
 
 
 def refuse_server_settings(fields):
     """Refuse - when a connection or destination is saved or tried - a ${VAR} reference to one of the server's own
-    QUERYAPIGATE_* settings."""
+    QUERYAPIGATE_* or OTEL_* settings."""
     for value in (fields or {}).values():
         if isinstance(value, str):
             for name in _ENV_REF_RE.findall(value):

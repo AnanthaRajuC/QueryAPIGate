@@ -607,7 +607,14 @@ queryapigate config new-key                               # a secret and its sec
 
 Against a running server, for CI: `POST /api/v1/config/diff` and `POST /api/v1/config/apply` (`?prune=true`,
 `?dry_run=true`), with the file as JSON or as YAML (`Content-Type: application/yaml`). Owners only - the
-`config.apply` capability, since a file can change anything.
+`config.apply` capability, since a file can change anything. Or the CLI, with `--server`: it posts the file and shows
+the answer as it would locally, the key from `QAG_API_KEY` (never an argument, so never in a log), and opens no
+store of its own:
+
+~~~sh
+QAG_API_KEY=<owner key> queryapigate config diff  --server https://prod.example.com queryapigate.yaml
+QAG_API_KEY=<owner key> queryapigate config apply --server https://prod.example.com queryapigate.yaml
+~~~
 
 ~~~yaml
 format: queryapigate-config
@@ -1632,7 +1639,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.26.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.27.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

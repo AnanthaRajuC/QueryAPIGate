@@ -73,12 +73,32 @@ def _env_ref(value):
 # Reading a file
 # --------------------------------------------------------------------------------------
 
+MAX_NODES = 1_000_000  # values in a document, aliases counted each time they're used
+
+
+def _check_size(doc):
+    """Refuse a document of more than MAX_NODES values. YAML's aliases let a small file name a huge one (the
+    "billion laughs"): counted as they expand, with a stop at the limit, before anything else walks it."""
+    count, stack = 0, [doc]
+    while stack:
+        node = stack.pop()
+        count += 1
+        if count > MAX_NODES:
+            raise ConfigInvalid([f'The file holds more than {MAX_NODES:,} values - with YAML aliases expanded'])
+        if isinstance(node, dict):
+            stack.extend(node.keys())
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+
+
 def load(text):
     """A file's text (YAML, or JSON - which YAML reads too) as the decoded document, its format checked."""
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise ConfigInvalid([f'Not valid YAML or JSON: {error}']) from None
+    _check_size(doc)
     if not isinstance(doc, dict) or doc.get('format') != FORMAT:
         raise ConfigInvalid([f"Not a QueryAPIGate configuration file (expected format: {FORMAT})"])
     if doc.get('format_version') != FORMAT_VERSION:
@@ -813,14 +833,16 @@ def managed_listing():
             'items': [{'kind': r[0], 'name': r[1], 'applied_at': r[2], 'file_sha256': r[3]} for r in rows]}
 
 
-def refuse_if_locked(endpoint, view_args):
+def refuse_if_locked(endpoint, view_args, body=None):
     """409 config_managed when QUERYAPIGATE_CONFIG_LOCKED is on and this request would change what a file manages - a
     managed object, or a collection a managed query is in or a managed key or role is granted (renaming it moves
-    both)."""
+    both). An export's watermark alone is no file's: moving it stays allowed."""
     from . import config
     if not config.config_locked():
         return
     name = (view_args or {}).get('name')
+    if endpoint == 'v1.update_export' and isinstance(body, dict) and set(body) == {'watermark'}:
+        return
     if endpoint == 'v1.rename_collection':
         managed = _managed()
         touched = [('queries', q) for q in store.collection_members().get(name, [])]
@@ -837,6 +859,20 @@ def refuse_if_locked(endpoint, view_args):
     if (kind, name) in _managed():
         raise ApiError(f'{kind}[{name}] is managed by a configuration file - change it there; this server takes '
                        'changes to it only from a file (QUERYAPIGATE_CONFIG_LOCKED)', 409, code='config_managed')
+
+
+_DELETES = {'v1.delete_connection': 'connections', 'v1.delete_query': 'queries', 'v1.delete_version': 'queries',
+            'v1.delete_api_key': 'api_keys', 'v1.delete_role': 'roles', 'v1.delete_destination': 'destinations',
+            'v1.delete_export': 'exports'}
+
+
+def forget_deleted(endpoint, view_args):
+    """After the API deleted something: no file manages it any more. Left marked, a later one of the same name made in
+    the Console would be pruned as if a file had made it."""
+    kind, name = _DELETES.get(endpoint), (view_args or {}).get('name')
+    if kind is None or name is None or (kind == 'queries' and store.saved_query_exists(name)):
+        return  # a version deleted, and the query still there
+    db.connection().execute('DELETE FROM config_managed WHERE kind = ? AND name = ?', (kind, name))
 
 
 _APPLY = {'connections': _apply_connection, 'destinations': _apply_destination, 'queries': _apply_query,

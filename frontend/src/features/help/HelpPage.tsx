@@ -357,6 +357,12 @@ const DOCS = [
     path: 'how-to/54-install-on-kubernetes-with-helm.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-55',
+    title: 'Promote a setup from dev to prod through a pull request',
+    path: 'how-to/55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

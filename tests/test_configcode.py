@@ -807,3 +807,118 @@ class LockTests(ConfigTestCase):
             body = self.client.get('/api/v1/config/managed', headers=self.admin).get_json()
         self.assertTrue(body['locked'])
         self.assertIn(('roles', 'partner'), [(i['kind'], i['name']) for i in body['items']])
+
+
+# --------------------------------------------------------------------------------------
+# Slice 4: what the security review changed
+# --------------------------------------------------------------------------------------
+
+class ReviewTests(ConfigTestCase):
+    def test_a_reference_to_the_servers_own_opentelemetry_settings_is_refused(self):
+        problems = self.problems(self.file(connections=[
+            {'name': 'c', 'db': 'mysql', 'host': 'theirs.example', 'password': '${OTEL_EXPORTER_OTLP_HEADERS}'}]))
+        self.assertIn("one of this server's own settings", problems[0])
+        from queryapigate.errors import ApiError
+        with self.assertRaises(ApiError):  # through the API too, as for QUERYAPIGATE_*
+            connections.create({'name': 'c', 'db': 'mysql', 'password': '${OTEL_EXPORTER_OTLP_HEADERS}'}, 't')
+
+    def test_yaml_aliases_cant_make_a_small_file_huge(self):
+        lines = ['format: queryapigate-config', 'format_version: 1', 'a: &a ["x","x","x","x","x","x","x","x","x"]']
+        for i in range(1, 9):
+            lines.append(f'{chr(97 + i)}: &{chr(97 + i)} [' + ','.join(['*' + chr(96 + i)] * 9) + ']')
+        with self.assertRaises(configcode.ConfigInvalid) as caught:
+            configcode.load('\n'.join(lines))
+        self.assertIn('more than 1,000,000 values', caught.exception.problems[0])
+
+    def test_a_failed_startup_is_one_line_in_the_log(self):
+        from queryapigate import create_app
+        path = os.path.join(self.tmp.name, 'bad.yaml')
+        with open(path, 'w') as f:
+            yaml.safe_dump(self.file(roles=[{'name': 'r', 'x': 1}]), f)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CONFIG_FILE': path}), \
+                self.assertLogs('queryapigate', 'ERROR') as logs, self.assertRaises(ValueError):
+            create_app()
+        self.assertIn('was not applied - nothing in it was. roles[r]: unknown field(s): x', logs.output[0])
+
+
+class ReviewApiTests(ConfigTestCase):
+    def setUp(self):
+        super().setUp()
+        self.build()
+        configcode.apply(configcode.export(kinds=('queries', 'exports'))[0])
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        from queryapigate import create_app
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin-key'}
+
+    def test_locked_an_exports_watermark_still_moves(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CONFIG_LOCKED': '1'}):
+            moved = self.client.patch('/api/v1/exports/daily', json={'watermark': None}, headers=self.admin)
+            changed = self.client.patch('/api/v1/exports/daily', json={'format': 'parquet'}, headers=self.admin)
+        self.assertEqual((moved.status_code, changed.status_code), (200, 409))
+
+    def test_what_the_api_deletes_no_file_manages_any_more(self):
+        self.assertEqual(self.client.delete('/api/v1/exports/daily', headers=self.admin).status_code, 204)
+        self.assertEqual(self.client.delete('/api/v1/queries/loose', headers=self.admin).status_code, 204)
+        managed = {(i['kind'], i['name']) for i in configcode.managed_listing()['items']}
+        self.assertNotIn(('exports', 'daily'), managed)
+        self.assertNotIn(('queries', 'loose'), managed)
+        self.assertIn(('queries', 'monthly_revenue'), managed)
+        # one made again in the Console, of the same name, is the Console's: a prune leaves it alone
+        store.save_version('loose', {'sql_query': 'SELECT 1', 'author': 'a', 'description': 'd', 'tags': [],
+                                     'query_parameters': {}})
+        doc = self.file(queries=[])
+        self.assertEqual(configcode.diff(doc, prune=True)['changes'][0]['name'], 'monthly_revenue')
+        self.assertNotIn('loose', [c['name'] for c in configcode.diff(doc, prune=True)['changes']])
+
+
+class RemoteCliTests(ConfigTestCase):
+    """`config diff|apply --server URL`: the file posted to a running server, the key from QAG_API_KEY, and nothing of
+    the local home touched - CI runs it in a checkout."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        from queryapigate import create_app
+        self.client = create_app().test_client()
+        self.path = os.path.join(self.tmp.name, 'queryapigate.yaml')
+        with open(self.path, 'w') as f:
+            yaml.safe_dump(self.file(roles=[{'name': 'r', 'connections': []}]), f)
+
+    def urlopen(self, request, timeout=None):
+        from urllib.error import HTTPError
+        path = request.full_url.replace('http://prod.example', '')
+        response = self.client.post(path, data=request.data, headers=dict(request.header_items()))
+        body = io.BytesIO(response.data)
+        if response.status_code >= 400:
+            raise HTTPError(request.full_url, response.status_code, 'error', {}, body)
+        body.__enter__ = lambda *a: body
+        return body
+
+    def remote(self, *argv, key='admin-key'):
+        with mock.patch('urllib.request.urlopen', self.urlopen), mock.patch.dict(os.environ, {'QAG_API_KEY': key}), \
+                mock.patch.object(cli.db, 'init_schema', side_effect=AssertionError('opened a local store')):
+            return self.cli('config', *argv, '--server', 'http://prod.example', self.path)  # none made where CI runs
+
+    def test_diff_then_apply_against_the_server(self):
+        code, out, _ = self.remote('diff')
+        self.assertEqual(code, 2)
+        self.assertIn('+ roles[r]', out)
+        code, out, _ = self.remote('apply')
+        self.assertEqual(code, 0)
+        self.assertIn('Applied: the server matches the file', out)
+        self.assertIn('r', apikeys.list_roles())
+        self.assertEqual(self.remote('diff')[0], 0)
+
+    def test_its_problems_and_a_wrong_key(self):
+        with open(self.path, 'w') as f:
+            yaml.safe_dump(self.file(roles=[{'name': 'r', 'x': 1}]), f)
+        code, _, err = self.remote('diff')
+        self.assertEqual(code, 1)
+        self.assertIn('1 problem(s) in the file:\n  roles[r]: unknown field(s): x', err)
+        code, _, err = self.remote('diff', key='wrong')
+        self.assertEqual(code, 1)
+        self.assertIn('answered 401', err)
+        with mock.patch.dict(os.environ, {'QAG_API_KEY': ''}):
+            code, _, err = self.cli('config', 'diff', '--server', 'http://prod.example', self.path)
+        self.assertIn('QAG_API_KEY', err)
