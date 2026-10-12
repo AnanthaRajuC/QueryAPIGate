@@ -117,16 +117,29 @@ kubectl create namespace lite
 helm install lite "$CHART" --namespace lite --set secret.create=true --set secret.values.QUERYAPIGATE_API_KEY=ci-key \
   --set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAGE")" --set resources.requests.cpu=50m \
   --wait --timeout 4m
-kubectl -n lite run make --rm -i --restart=Never --image="$IMAGE" --command -- python -c "
-import json, urllib.request
+# A Service just created, or a pod just replaced, can refuse connections for a few seconds: retry those (a refused
+# request never reached the server, so retrying the POST can't make the key twice).
+CALL="
+import json, time, urllib.error, urllib.request
+def call(request):
+    for attempt in range(30):
+        try:
+            return json.load(urllib.request.urlopen(request, timeout=10))
+        except urllib.error.HTTPError:
+            raise
+        except OSError:
+            if attempt == 29:
+                raise
+            time.sleep(1)
+"
+kubectl -n lite run make --rm -i --restart=Never --image="$IMAGE" --command -- python -c "$CALL
 r = urllib.request.Request('http://lite-queryapigate/api/v1/api-keys', method='POST', data=json.dumps(
     {'name': 'kept', 'connections': []}).encode(), headers={'X-API-Key': 'ci-key', 'Content-Type': 'application/json'})
-print('created', json.load(urllib.request.urlopen(r, timeout=10))['name'])"
+print('created', call(r)['name'])"
 kubectl -n lite delete pod -l app.kubernetes.io/component=server --wait=true
 kubectl -n lite rollout status deploy/lite-queryapigate --timeout=180s
-kubectl -n lite run check --rm -i --restart=Never --image="$IMAGE" --command -- python -c "
-import json, urllib.request
+kubectl -n lite run check --rm -i --restart=Never --image="$IMAGE" --command -- python -c "$CALL
 r = urllib.request.Request('http://lite-queryapigate/api/v1/api-keys/kept', headers={'X-API-Key': 'ci-key'})
-print('still there after the pod was replaced:', json.load(urllib.request.urlopen(r, timeout=10))['name'])"
+print('still there after the pod was replaced:', call(r)['name'])"
 
 say "passed"
