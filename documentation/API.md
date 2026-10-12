@@ -408,7 +408,7 @@ owner.
 
 | Method and path | What it does |
 |---|---|
-| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
+| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 | `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance` (experimental). |
@@ -1727,7 +1727,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.28.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.29.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

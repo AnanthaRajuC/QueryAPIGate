@@ -94,7 +94,8 @@ documentation. #99 workspaces only if asked for.
 16. **0.28: #98 secrets managers and short-lived credentials**
     ([ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md)). (Released as 0.28.0 on
     2026-10-12.)
-17. **0.29: #101 where data goes, and FIPS** ([ADR 0016](documentation/adr/0016-data-flows-and-fips.md)).
+17. **0.29: #101 where data goes, and FIPS** ([ADR 0016](documentation/adr/0016-data-flows-and-fips.md)). (Released as
+    0.29.0 on 2026-10-12.)
 18. **Then, only on demand:** #99 workspaces.
 19. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 20. **1.0.0.**
@@ -3077,7 +3078,12 @@ on a PostgreSQL store and Redis (DEPLOYMENT.md's scale-out shape); CI installs i
 
 ## 101. Compliance documentation: data flows, and FIPS-validated cryptography
 
-**Status: open; planned for 0.29** ([ADR 0016](documentation/adr/0016-data-flows-and-fips.md)).
+**Status: shipped (0.29).** [ADR 0016](documentation/adr/0016-data-flows-and-fips.md): `documentation/DATA_PROTECTION.md`,
+kept true by tests (every table, retention setting and outbound flow; the periods read from the code); the access log
+without query strings (`gunicorn_conf`, `QUERYAPIGATE_ACCESS_LOG_QUERY`); statements logged by hash with
+`QUERYAPIGATE_HISTORY_ADHOC_SQL`; `history forget` and `DELETE /api/v1/history?caller=`; only FIPS-approved
+algorithms, enforced by `tests/test_fips.py`; the suite under OpenSSL's FIPS provider in UBI 9, in CI. Guide 57. A
+FIPS image when someone asks for one.
 
 **Impact:** security questionnaires ask where personal data flows and is kept, for how long, and whether cryptography is
 FIPS 140 validated. Answering means reading the code today.

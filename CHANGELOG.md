@@ -55,6 +55,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-12
+
+The answers a security review asks for, written down and kept true: where every kind of data goes, for how long and
+who reads it; values kept out of the logs; a person's data erased on request; and cryptography that is FIPS-approved
+throughout, tested under OpenSSL's FIPS provider.
+
+### Upgrading from 0.28
+- **The image's access log no longer has query strings or referrers.** A log pipeline that parsed them:
+  `QUERYAPIGATE_ACCESS_LOG_QUERY=1` brings the query string back. A `command:` override of the image needs
+  `-c python:queryapigate.gunicorn_conf` to keep the new format.
+- **No schema change.**
+
 ### Added
 - **Where data goes** (BACKLOG #101, [ADR 0016](documentation/adr/0016-data-flows-and-fips.md)):
   [documentation/DATA_PROTECTION.md](documentation/DATA_PROTECTION.md) - every place QueryAPIGate keeps or sends data:
@@ -68,7 +80,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   runs the whole suite in Red Hat UBI 9 with OpenSSL's FIPS provider forced, and first checks that it is.
 - **Forgetting a person:** `queryapigate history forget CALLER` (`--dry-run`) and `DELETE /api/v1/history?caller=`
   delete every run by a caller - `jwt:alice@example.com` - and their usage counts, in the store and in Redis.
-  Audited as `forget_caller` by the caller's SHA-256, not their name. Owners only (`history.forget`).
+  Audited as `forget_caller` by the caller's SHA-256, not their name. Owners only (`history.forget`). Guide 57,
+  [Answer a security questionnaire about data and cryptography](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/57-answer-a-security-questionnaire-about-data-and-cryptography.md),
+  every answer checked on a running server.
 
 ### Changed
 - **The access log leaves query strings out.** The image's gunicorn (`-c python:queryapigate.gunicorn_conf`) and

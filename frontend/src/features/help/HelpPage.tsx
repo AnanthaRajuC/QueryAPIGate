@@ -369,6 +369,12 @@ const DOCS = [
     path: 'how-to/56-use-short-lived-database-credentials-from-vault.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-57',
+    title: 'Answer a security questionnaire about data and cryptography',
+    path: 'how-to/57-answer-a-security-questionnaire-about-data-and-cryptography.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

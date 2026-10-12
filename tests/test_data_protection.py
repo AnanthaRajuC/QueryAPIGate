@@ -21,7 +21,7 @@ SETTINGS = ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_ADHOC_LIMIT', 'Q
             'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'QUERYAPIGATE_AUDIT_SYSLOG_URL', 'QUERYAPIGATE_AUDIT_OTLP',
             'QUERYAPIGATE_SSO_SESSION_HOURS', 'QUERYAPIGATE_ACCESS_LOG_QUERY', 'QUERYAPIGATE_JSON_LOGS',
             'QUERYAPIGATE_REDIS_URL', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'QUERYAPIGATE_SECRET_KEY',
-            'QUERYAPIGATE_MCP_MAX_ROWS', 'QUERYAPIGATE_MASK_KEY')
+            'QUERYAPIGATE_MCP_MAX_ROWS', 'QUERYAPIGATE_MASK_KEY', 'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL')
 # Every way data leaves the process - each must have a row under "Where data is sent".
 FLOWS = ('The log (stdout)', 'The access log', 'Traces', '`/metrics`', "The audit log's copies", 'Live events',
          'AI agents (MCP)', 'Exports (destinations)', 'Secret providers')

@@ -382,6 +382,25 @@ to be sent whatever it fetches. So:
 - **Leases are revoked when a process stops** (on SIGTERM too), so a stopped instance's database users don't linger;
   one that crashes leaves them to their TTL.
 
+### What is kept, and the cryptography it rests on (ADR 0016)
+
+[Where data goes](DATA_PROTECTION.md) is the inventory; what bears on threats:
+
+- **Values stay out of what's kept by default.** Run history keeps parameter names, never values; traces never hold
+  one; the access log has paths without query strings and no referrer (`QUERYAPIGATE_ACCESS_LOG_QUERY` puts the query
+  string back - then the log platform holds whatever callers put in URLs). What can still carry a value: an ad-hoc
+  statement's text in history and the log (`QUERYAPIGATE_HISTORY_ADHOC_SQL=hash` keeps both to its SHA-256), a
+  database's own error message in the log, an agent's write arguments for 30 days, an export's watermark, and the
+  response cache's rows. Treat the log platform and the store as holding personal data.
+- **Erasure is an owner's, and it isn't silent.** `history forget` deletes a caller's runs and usage counts - any
+  caller, a key's too, so an owner could clear the record of what a key ran. The audit log records each erasure, its
+  counts and the caller's SHA-256 (key names are few: the hash names the key to anyone who has the list), so it can be
+  seen, not undone. The audit log itself can't be erased from without breaking its chain (ADR 0012).
+- **The cryptography is FIPS-approved algorithms only**, enforced by a test over the code; whether it runs in a
+  validated module is the platform's (a FIPS-mode OpenSSL, the distribution's `cryptography`). The page names what is
+  outside that boundary - the PostgreSQL and MySQL drivers' binary wheels, DuckDB's TLS, a JDBC or H2 connection's Java
+  runtime - and CI runs the whole suite under OpenSSL's FIPS provider.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without

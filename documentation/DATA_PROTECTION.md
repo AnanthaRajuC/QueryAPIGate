@@ -3,7 +3,9 @@
 What QueryAPIGate keeps, where, for how long, who can read it - and what it never keeps. For a record of processing
 (GDPR Article 30), a data-classification review, or a security questionnaire's data section
 ([ADR 0016](adr/0016-data-flows-and-fips.md)). Every table of the store, every setting that bounds what is kept, and
-every place data leaves the process is on this page: a test fails if one isn't.
+every place data leaves the process is on this page: a test fails if one isn't. Walkthrough, answering a
+questionnaire from a running server:
+[Answer a security questionnaire about data and cryptography](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/57-answer-a-security-questionnaire-about-data-and-cryptography.md).
 
 ## What passes through, and isn't kept
 
@@ -96,8 +98,13 @@ queryapigate history forget jwt:alice@example.com
 
 or `DELETE /api/v1/history?caller=jwt:alice@example.com` (owners only, `history.forget`). Their runs and usage counts -
 in the store and in Redis - are deleted, and the erasure is recorded in the audit log as `forget_caller` with the
-caller's SHA-256, not their name: the record of an erasure keeps nothing of what was erased. Their quota's count for
-the period starts again.
+caller's SHA-256 and the counts, not their name. That record is pseudonymous: someone who already knows the name can
+confirm that it was erased - which is how you show a request was met - but it names no one to anyone who doesn't.
+Their quota's count for the period starts again.
+
+**With several instances**, runs another instance has queued but not yet written - for at most
+`QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, a second by default - can land just after. Check with `--dry-run` a few seconds
+later, or run it again: it finds what arrived since.
 
 What isn't erased, and what to say:
 
