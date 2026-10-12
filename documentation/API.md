@@ -587,6 +587,69 @@ part-way, re-run with `--on-conflict skip` to finish. `--collection NAME` import
 than the bundle's. Like `queryapigate export`, it runs in-process against `QUERYAPIGATE_HOME` with the same reach
 as the admin key - no server needs to be running.
 
+## Configuration as code
+
+> **Experimental** - new in 0.27 ([ADR 0014](adr/0014-configuration-as-code.md)): the file's `format_version` 1,
+> and the commands, may change in a minor release, always noted in the changelog.
+
+One file describes what a server holds - connections, destinations, roles, saved queries, API keys' grants,
+descriptions and exports - so it can be reviewed as a pull request, kept in git, and promoted from one environment to
+the next. `queryapigate config export` writes a server's file; `queryapigate config diff` says, field by field, what
+applying one would change.
+
+~~~sh
+queryapigate config export --out queryapigate.yaml        # or stdout; --kinds roles,api_keys for some of it
+queryapigate config diff queryapigate.yaml                # exit 0: no changes, 2: changes, 1: problems in the file
+queryapigate config diff --json queryapigate.yaml         # the same, for a script
+queryapigate config new-key                               # a secret and its secret_sha256, for a new key
+~~~
+
+~~~yaml
+format: queryapigate-config
+format_version: 1
+connections:
+  - name: warehouse
+    db: postgres
+    host: db1
+    port: 5432
+    user: reporting_ro
+    password: ${WAREHOUSE_PASSWORD}   # a reference, never the password
+    database: analytics
+roles:
+  - {name: partner, connections: [], collections: [finance], rate_limit: 60/minute}
+queries:
+  - name: monthly_revenue
+    collection: finance
+    connection_name: warehouse
+    description: Revenue per month
+    sql: SELECT month, revenue FROM revenue_by_month WHERE month >= :since
+    parameters: {since: string}
+api_keys:
+  - {name: partner-a, role: partner, secret_sha256: 50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c}
+descriptions:
+  warehouse:
+    - {table: revenue_by_month, description: "Revenue per calendar month, net of refunds"}
+~~~
+
+Write `${VAR}` references in block style, as above: inside `{...}` on one line, YAML reads the braces as its own.
+
+- **Each object takes the Management API's fields** - what `POST /api/v1/connections`, `/roles`, `/queries` (with
+  `sql` and `parameters`), `/api-keys`, `/destinations` and `/exports` take, and the items of
+  `/connections/{name}/descriptions`, keyed by connection. Each is checked by the API's own rules, and every problem
+  in a file is reported at once, naming the object and the field (`invalid_config`).
+- **No secret is ever in it.** A connection's or destination's `password` must be a `${VAR}` reference, expanded where
+  the server runs; a value is refused. An API key carries `secret_sha256`, the hash the store keeps - required for a
+  new key, and a different one is a new secret. An export turns a password the store held as a value into a reference
+  named for it (`${QAG_LEGACY_PASSWORD}`) and lists the variables to set; applying that file reads the password from
+  the server's environment from then on, and the diff says so.
+- **A key's `role` stays live**: `role: partner` means the key has `partner`'s grants, so a change to the role in the
+  file changes its keys too (through the API, a role is a template copied once).
+- **A section left out is left alone**, and so is what the server has that the file doesn't - the diff lists it.
+  A saved query whose definition changes gets a new version, published; one whose collection alone changes is moved.
+  The examples (`queryapigate examples load`) are exported only with `--examples`.
+- **Not in the file:** the server's settings (environment variables), administrators and their tokens, run history,
+  usage counters, the audit log, and a query's earlier versions.
+
 ## Example APIs
 
 Four worked scenarios (reporting, dashboard, export, partner) ship with the package and can be loaded into a home
@@ -1853,6 +1916,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_stream` | 400 | `stream=true` with a format it can't stream, or with `page`/`page_size` |
 | `invalid_filter` | 400 | A bad history/audit filter (`status`, `kind`, `since`, `until`, `limit`, `cursor`) or Mongo filter |
 | `invalid_bundle` | 400 | A collection bundle that isn't one, or is malformed |
+| `invalid_config` | 400 | A configuration file (ADR 0014) that isn't one, or has problems - each one listed in `problems` |
 | `sql_required` | 400 | No SQL given |
 | `connection_required` | 400 | No connection named, and the saved query has none |
 | `collection_required` | 400 | No collection named |

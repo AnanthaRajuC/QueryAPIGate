@@ -93,6 +93,11 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
         'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
     },
+    'config_as_code': {
+        'name': 'Configuration as code',
+        'why': 'new in 0.27 - the file format and the commands may change as teams use them (ADR 0014)',
+        'docs': ('documentation/API.md', 'Configuration as code'),
+    },
     'sso': {
         'name': 'Console sign-in through SSO',
         'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',

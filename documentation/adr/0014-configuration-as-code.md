@@ -1,6 +1,6 @@
 # ADR 0014: Configuration as code
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Backlog:** #97 (configuration as code: export, diff and apply).
 
@@ -56,22 +56,23 @@ queries:
   - name: monthly_revenue
     collection: finance
     connection_name: warehouse
-    sql_query: SELECT month, revenue FROM revenue_by_month WHERE month >= :since
-    query_parameters: [{name: since, type: date}]
+    description: Revenue per month
+    sql: SELECT month, revenue FROM revenue_by_month WHERE month >= :since
+    parameters: {since: {type: string, pattern: "^[0-9]{4}-[0-9]{2}$"}}
     cache_ttl: 300
 roles:
   - name: partner
     collections: [finance]
     rate_limit: 60/minute
+    quota: {calls: 10000, per: month}
     mask: [{column: customers.email, action: hash}]
 api_keys:
   - name: partner-a
-    role: partner
-    secret_sha256: 3b4f...e91c      # the hash, never the secret
-    quota: {calls: 10000, per: month}
+    role: partner                     # the role's grants, kept in step with it
+    secret_sha256: 50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c   # the hash, never the secret
 descriptions:
   warehouse:                          # by connection, as /api/v1/connections/<name>/descriptions takes them
-    - {table: revenue_by_month, description: Revenue per calendar month, net of refunds}
+    - {table: revenue_by_month, description: "Revenue per calendar month, net of refunds"}
 destinations:
   - name: partner-bucket
     url: s3://partner-a-drop/daily/

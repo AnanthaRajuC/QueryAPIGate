@@ -417,6 +417,29 @@ def _validate_allowed_tables(allowed_tables):
     return sorted({v.lower() for v in allowed_tables})
 
 
+def normalize_grants(connections=None, allow_writes=False, queries=None, collections=None, rate_limit=None,
+                     allowed_ips=None, allowed_write_ops=None, allowed_tables=None, mask=None, max_concurrent=None,
+                     query_timeout=None, max_rows=None, quota=None):
+    """A key's or role's grants, checked and normalised as they're stored - without writing anything, or checking that
+    the collections named exist (_require_existing_collections() does, where they're saved). The one place a grant's
+    rules are applied: creating a key or role, and reading one from a configuration file (configcode.py)."""
+    return {
+        'connections': _normalize_connections(connections),
+        'allow_writes': bool(allow_writes),
+        'queries': _normalize_queries(queries),
+        'collections': _normalize_collections(collections),
+        'rate_limit': _validate_rate_limit(rate_limit),
+        'allowed_ips': _validate_allowed_ips(allowed_ips),
+        'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
+        'allowed_tables': _validate_allowed_tables(allowed_tables),
+        'mask': masking.validate_rules(mask),
+        'max_concurrent': _validate_limit('max_concurrent', max_concurrent),
+        'query_timeout': _validate_limit('query_timeout', query_timeout),
+        'max_rows': _validate_limit('max_rows', max_rows),
+        'quota': quotas.validate(quota),
+    }
+
+
 def is_expired(entry):
     """Whether a stored key entry's expires_at date has passed - checked live on every authenticate() call,
     not swept by a background job: an expired key simply stops matching, the same way flipping `active` to
@@ -476,6 +499,13 @@ def list_keys():
             for name, entry in _read().items()}
 
 
+def secret_hashes():
+    """{name: SHA-256 of the key's secret} - for a configuration file only (ADR 0014), which declares a key by its
+    hash. Not a secret: a generated secret is 32 random bytes, so its hash can't be reversed. The API never shows it
+    anyway, like the rest of what authenticates a key."""
+    return {name: entry['hash'] for name, entry in _read().items()}
+
+
 def create_key(name, connections=None, allow_writes=None, queries=None, expires_at=None, rate_limit=None,
                allowed_ips=None, allowed_write_ops=None, role=None, collections=None, allowed_tables=None,
                example=False, mask=None, max_concurrent=None, query_timeout=None, max_rows=None, quota=None):
@@ -517,20 +547,10 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
             raise ApiError(f"An API key named '{name}' already exists", 409, code='key_exists')
         entry = {
             'hash': _hash(secret),
-            'connections': _normalize_connections(connections),
-            'allow_writes': bool(allow_writes),
-            'queries': _normalize_queries(queries),
-            'collections': collections,
+            **normalize_grants(connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+                               allowed_write_ops, allowed_tables, mask, max_concurrent, query_timeout, max_rows,
+                               quota),
             'expires_at': _validate_expiry(expires_at),
-            'rate_limit': _validate_rate_limit(rate_limit),
-            'allowed_ips': _validate_allowed_ips(allowed_ips),
-            'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
-            'allowed_tables': _validate_allowed_tables(allowed_tables),
-            'mask': masking.validate_rules(mask),
-            'max_concurrent': _validate_limit('max_concurrent', max_concurrent),
-            'query_timeout': _validate_limit('query_timeout', query_timeout),
-            'max_rows': _validate_limit('max_rows', max_rows),
-            'quota': quotas.validate(quota),
             'created_from_role': role,
             'active': True,
             'created_at': store.now(),
@@ -685,19 +705,9 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
         if conn.execute('SELECT 1 FROM roles WHERE name = ?', (name,)).fetchone() is not None:
             raise ApiError(f"A role named '{name}' already exists", 409, code='role_exists')
         entry = {
-            'connections': _normalize_connections(connections),
-            'allow_writes': bool(allow_writes),
-            'queries': _normalize_queries(queries),
-            'collections': collections,
-            'rate_limit': _validate_rate_limit(rate_limit),
-            'allowed_ips': _validate_allowed_ips(allowed_ips),
-            'allowed_write_ops': _validate_allowed_write_ops(allowed_write_ops),
-            'allowed_tables': _validate_allowed_tables(allowed_tables),
-            'mask': masking.validate_rules(mask),
-            'max_concurrent': _validate_limit('max_concurrent', max_concurrent),
-            'query_timeout': _validate_limit('query_timeout', query_timeout),
-            'max_rows': _validate_limit('max_rows', max_rows),
-            'quota': quotas.validate(quota),
+            **normalize_grants(connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+                               allowed_write_ops, allowed_tables, mask, max_concurrent, query_timeout, max_rows,
+                               quota),
             'created_at': store.now(),
             **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
         }

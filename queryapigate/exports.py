@@ -122,8 +122,11 @@ def using_destination(destination):
     return [e['name'] for e in list_all() if e.get('destination') == destination]
 
 
-def validate(fields):
-    """An export's stored fields, checked against the destination and the saved query as they are now."""
+def check_fields(fields):
+    """An export's fields, checked and normalised on their own - not yet against the destination and the saved query
+    they name (validate() does both). A configuration file is checked this way before anything it creates exists."""
+    if not isinstance(fields, dict):
+        raise _invalid('An export must be an object')
     unknown = sorted(set(fields) - set(FIELDS))
     if unknown:
         raise ApiError(f"Unknown field(s): {', '.join(unknown)}", code='unknown_field')
@@ -145,9 +148,7 @@ def validate(fields):
         raise _invalid('timeout must be a positive number of seconds')
     if 'description' in out and not isinstance(out['description'], str):
         raise _invalid('description must be text')
-    destinations.get(out['destination'])
     incremental = out.get('incremental')
-    raw = dict(out['params'])
     if incremental is not None:
         if not isinstance(incremental, dict) or set(incremental) - {'column', 'parameter', 'start'} \
                 or not all(isinstance(incremental.get(k), str) and incremental[k] for k in ('column', 'parameter')):
@@ -155,6 +156,20 @@ def validate(fields):
                            'naming a result column and one of the query\'s parameters')
         if incremental['parameter'] in out['params']:
             raise _invalid(f"'{incremental['parameter']}' is the incremental parameter - it can't also be in params")
+    if 'mask' in out:
+        out['mask'] = masking.validate_rules(out['mask']) or None
+        if out['mask'] is None:
+            del out['mask']
+    return out
+
+
+def validate(fields):
+    """An export's stored fields, checked against the destination and the saved query as they are now."""
+    out = check_fields(fields)
+    destinations.get(out['destination'])
+    incremental = out.get('incremental')
+    raw = dict(out['params'])
+    if incremental is not None:
         raw[incremental['parameter']] = incremental.get('start')
     # The query as it is published now: it must exist, use the incremental parameter, and take these values.
     if incremental is not None:
@@ -166,10 +181,6 @@ def validate(fields):
                            f":{incremental['parameter']}")
     _, _, connection_name, sql, values = prepare(out['query'], {k: v for k, v in raw.items() if v is not None})
     exporting.render_path(out['path'], out['query'], values)  # every placeholder must fill in
-    if 'mask' in out:
-        out['mask'] = masking.validate_rules(out['mask']) or None
-        if out['mask'] is None:
-            del out['mask']
     if out.get('mask'):
         # The export's own rules, traced now against the published query - a query they can't follow is refused
         # when the export is saved, not at the first run - and never on the incremental column, whose values the

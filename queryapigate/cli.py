@@ -2,9 +2,11 @@
 ``collection export|import``."""
 import argparse
 import contextlib
+import hashlib
 import json
 import logging
 import os
+import secrets
 import sys
 import time
 from datetime import datetime, timedelta
@@ -15,6 +17,7 @@ from . import (
     admins,
     bundle,
     config,
+    configcode,
     db,
     examples,
     experimental,
@@ -330,6 +333,80 @@ def _collection_import(args):
                                   dry_run=args.dry_run)
     for line in bundle.summary_lines(result, args.dry_run):
         print(line)
+    return 0
+
+
+def _config_command(action):
+    """Shared shell for the config subcommands (ADR 0014). Every failure exits 1, settings included: `config diff`
+    exits 2 for "there are changes", so a script can tell the two apart."""
+    def run(args):
+        try:
+            config.check_settings()
+            return action(args)
+        except configcode.ConfigInvalid as error:
+            print(f'queryapigate config {args.action}: {len(error.problems)} problem(s) in the file:', file=sys.stderr)
+            for problem in error.problems:
+                print(f'  {problem}', file=sys.stderr)
+            return 1
+        except ApiError as error:
+            print(f'queryapigate config {args.action}: {error.message}', file=sys.stderr)
+            return 1
+        except (OSError, ValueError) as error:
+            print(f'queryapigate config {args.action}: {error}', file=sys.stderr)
+            return 1
+    return run
+
+
+def _read_config_file(path):
+    if path == '-':
+        return configcode.load(sys.stdin.read())
+    with open(path) as f:
+        return configcode.load(f.read())
+
+
+@_config_command
+def _config_export(args):
+    kinds = tuple(k.strip() for k in args.kinds.split(',')) if args.kinds else configcode.KINDS
+    doc, variables, skipped = configcode.export(kinds, examples=args.examples)
+    text = configcode.dump(doc, variables)
+    if args.out is None:
+        sys.stdout.write(text)
+    else:
+        out_dir = os.path.dirname(args.out) or '.'
+        tmp_path = os.path.join(out_dir, f'.{os.path.basename(args.out)}.part')
+        try:
+            with open(tmp_path, 'w') as f:
+                f.write(text)
+            os.replace(tmp_path, args.out)  # a failed run never leaves a partial file at the destination
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        print(f'Wrote the configuration to {args.out}', file=sys.stderr)
+    for variable in variables:
+        print(f"Set {variable['name']} where the server runs: {variable['for']}'s password, stored "
+              f"{variable['stored']} here", file=sys.stderr)
+    for name in skipped:
+        print(f'Left out saved query {name}: it has no published version', file=sys.stderr)
+    return 0
+
+
+@_config_command
+def _config_diff(args):
+    result = configcode.diff(_read_config_file(args.file))
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(configcode.render(result))
+    return 2 if result['changes'] else 0
+
+
+def _config_new_key(args):
+    """A fresh API key secret and its SHA-256, for a key declared in a configuration file. Nothing is stored."""
+    secret = 'sk_' + secrets.token_urlsafe(32)
+    print(f'secret:        {secret}')
+    print(f'secret_sha256: {hashlib.sha256(secret.encode()).hexdigest()}')
+    print('Give the secret to whoever uses the key, keep it in your secrets manager, and put only secret_sha256 in '
+          'the file.', file=sys.stderr)
     return 0
 
 
@@ -685,6 +762,27 @@ def build_parser():
     collection_import.add_argument('--collection', help="import into this collection instead of the bundle's own")
     collection_import.add_argument('--dry-run', action='store_true', help='report what would happen; write nothing')
     collection_import.set_defaults(func=_collection_import)
+
+    config_parser = commands.add_parser('config', help="the server's configuration as a file (ADR 0014, experimental): "
+                                                       'export it, and see what applying one would change')
+    config_parser.set_defaults(func=lambda a: config_parser.print_help() or 2)
+    config_actions = config_parser.add_subparsers(dest='action')
+    config_export = config_actions.add_parser(
+        'export', help='write connections, destinations, roles, saved queries, API keys, descriptions and exports as '
+                       'one YAML file - passwords as ${VAR} references, keys as their hashes, never a secret')
+    config_export.add_argument('--kinds', help=f"only these, comma-separated (of: {', '.join(configcode.KINDS)})")
+    config_export.add_argument('--examples', action='store_true', help='include the bundled examples too')
+    config_export.add_argument('--out', help='write to this file instead of stdout')
+    config_export.set_defaults(func=_config_export)
+    config_diff = config_actions.add_parser(
+        'diff', help='what applying FILE would create and change, field by field - writes nothing. Exit 0: no '
+                     'changes; 2: changes; 1: the file has problems')
+    config_diff.add_argument('file', help='a configuration file (YAML or JSON), or - for stdin')
+    config_diff.add_argument('--json', action='store_true', help='the changes as JSON, for a script')
+    config_diff.set_defaults(func=_config_diff)
+    config_new_key = config_actions.add_parser(
+        'new-key', help="a fresh API key secret and its secret_sha256, for a key declared in a file - nothing stored")
+    config_new_key.set_defaults(func=_config_new_key)
 
     example_parser = commands.add_parser('examples', help='load, remove or check the bundled example APIs '
                                                           '(reporting, dashboard, export, partner)')

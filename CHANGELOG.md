@@ -25,8 +25,9 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
 (`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
 (`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`),
-usage quotas (`quota`, `/api/v1/usage/quotas`), and the audit log streamed to a SIEM
-(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`). The list is `queryapigate/experimental.py`.
+usage quotas (`quota`, `/api/v1/usage/quotas`), the audit log streamed to a SIEM
+(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), and configuration as code (`queryapigate config`).
+The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -52,6 +53,15 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Added
+- **Configuration as code** (BACKLOG #97, [ADR 0014](documentation/adr/0014-configuration-as-code.md), experimental),
+  first part: `queryapigate config export` writes a server's connections, destinations, roles, saved queries, API
+  keys' grants, descriptions and exports as one YAML file, with no secret in it - passwords as `${VAR}` references,
+  keys as their hashes. `queryapigate config diff FILE` says, field by field, what applying a file would change, and
+  reports every problem in it at once (exit 0, 2 or 1, as `terraform plan -detailed-exitcode`). `config new-key`
+  makes a key's secret and its hash. See
+  [Configuration as code](documentation/API.md#configuration-as-code). Applying a file comes next.
 
 ## [0.26.0] - 2026-10-12
 
