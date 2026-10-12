@@ -347,6 +347,7 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_SECRET_CACHE_SECONDS', '').strip()
     if raw and (not raw.isdigit() or not 1 <= int(raw) <= 86400):
         raise ValueError('QUERYAPIGATE_SECRET_CACHE_SECONDS must be a whole number of seconds from 1 to 86400')
+    _check_vault()
     for folder in os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '').split(','):
         if folder.strip() and not os.path.isabs(folder.strip()):
             raise ValueError(f"QUERYAPIGATE_SECRET_FILE_DIRS: '{folder.strip()}' must be an absolute path")
@@ -475,11 +476,109 @@ def secret_cache_seconds():
     return int(raw) if raw.isdigit() and 1 <= int(raw) <= 86400 else 300
 
 
+# ---- Vault (ADR 0015): what secretrefs.py and vault.py read ----
+
+VAULT_AUTH_METHODS = ('token', 'kubernetes', 'approle')
+
+
+def _setting(name, default=''):
+    return os.environ.get(name, '').strip() or default
+
+
+def vault_addr():
+    """QUERYAPIGATE_VAULT_ADDR: Vault's address, e.g. https://vault.example.com:8200 - unset, ${vault:...} and
+    vault-database are refused."""
+    return _setting('QUERYAPIGATE_VAULT_ADDR') or None
+
+
+def vault_auth():
+    """QUERYAPIGATE_VAULT_AUTH: how the server signs in to Vault - token (default), kubernetes or approle."""
+    return _setting('QUERYAPIGATE_VAULT_AUTH', 'token').lower()
+
+
+def vault_auth_mount():
+    """QUERYAPIGATE_VAULT_AUTH_MOUNT: where the auth method is mounted - by default its own name."""
+    return _setting('QUERYAPIGATE_VAULT_AUTH_MOUNT', vault_auth()).strip('/')
+
+
+def vault_token():
+    return _setting('QUERYAPIGATE_VAULT_TOKEN') or None
+
+
+def vault_token_file():
+    """QUERYAPIGATE_VAULT_TOKEN_FILE: a token read again at each sign-in - the file Vault Agent keeps current."""
+    return _setting('QUERYAPIGATE_VAULT_TOKEN_FILE') or None
+
+
+def vault_k8s_role():
+    return _setting('QUERYAPIGATE_VAULT_K8S_ROLE') or None
+
+
+def vault_k8s_token_file():
+    return _setting('QUERYAPIGATE_VAULT_K8S_TOKEN_FILE', '/var/run/secrets/kubernetes.io/serviceaccount/token')
+
+
+def vault_role_id():
+    return _setting('QUERYAPIGATE_VAULT_ROLE_ID') or None
+
+
+def vault_secret_id():
+    return _setting('QUERYAPIGATE_VAULT_SECRET_ID') or None
+
+
+def vault_namespace():
+    """QUERYAPIGATE_VAULT_NAMESPACE: a Vault Enterprise namespace, or None."""
+    return _setting('QUERYAPIGATE_VAULT_NAMESPACE') or None
+
+
+def vault_cacert():
+    """QUERYAPIGATE_VAULT_CACERT: the CA Vault's certificate is checked against, when it isn't a public one."""
+    return _setting('QUERYAPIGATE_VAULT_CACERT') or None
+
+
+def vault_paths():
+    """QUERYAPIGATE_VAULT_PATHS: the path prefixes ${vault:...} may read, comma-separated (secret/data/reporting/) -
+    unset, none: the server's token may reach far more than any connection should."""
+    return [p.strip().strip('/') + '/' for p in os.environ.get('QUERYAPIGATE_VAULT_PATHS', '').split(',') if p.strip()]
+
+
+def vault_database_roles():
+    """QUERYAPIGATE_VAULT_DATABASE_ROLES: the database secrets engine roles a connection may ask for, comma-separated -
+    unset, none."""
+    return [r.strip() for r in os.environ.get('QUERYAPIGATE_VAULT_DATABASE_ROLES', '').split(',') if r.strip()]
+
+
+def vault_database_mount():
+    """QUERYAPIGATE_VAULT_DATABASE_MOUNT: where the database secrets engine is mounted (default: database)."""
+    return _setting('QUERYAPIGATE_VAULT_DATABASE_MOUNT', 'database').strip('/')
+
+
+def _check_vault():
+    if not vault_addr():
+        return
+    if not re.match(r'^https?://[^/]+', vault_addr()):
+        raise ValueError('QUERYAPIGATE_VAULT_ADDR must be an http:// or https:// address')
+    method = vault_auth()
+    if method not in VAULT_AUTH_METHODS:
+        raise ValueError(f"QUERYAPIGATE_VAULT_AUTH must be one of: {', '.join(VAULT_AUTH_METHODS)} - not '{method}'")
+    if method == 'kubernetes' and not vault_k8s_role():
+        raise ValueError('QUERYAPIGATE_VAULT_AUTH is kubernetes: set QUERYAPIGATE_VAULT_K8S_ROLE to the Vault role')
+    if method == 'approle' and not (vault_role_id() and vault_secret_id()):
+        raise ValueError('QUERYAPIGATE_VAULT_AUTH is approle: set QUERYAPIGATE_VAULT_ROLE_ID and '
+                         'QUERYAPIGATE_VAULT_SECRET_ID')
+    if method == 'token' and not (vault_token() or vault_token_file()):
+        raise ValueError('QUERYAPIGATE_VAULT_AUTH is token: set QUERYAPIGATE_VAULT_TOKEN or '
+                         'QUERYAPIGATE_VAULT_TOKEN_FILE')
+    if vault_cacert() and not os.path.isfile(vault_cacert()):
+        raise ValueError(f'QUERYAPIGATE_VAULT_CACERT: {vault_cacert()} is not a file')
+
+
 # The settings that are secrets: each can also be read from a file, NAME_FILE (ADR 0015) - Docker's and most images'
 # convention - read at startup, as the environment variable would be.
 SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
                    'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
-                   'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET')
+                   'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID')
+# QUERYAPIGATE_VAULT_TOKEN_FILE isn't one of them: vault.py reads it again at each sign-in, as Vault Agent rotates it.
 _from_files: dict[str, str] = {}  # setting -> the file it was read from
 
 
@@ -1105,6 +1204,13 @@ def describe_settings():
                 'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused'),
             row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
                 'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
+            row('Vault', 'Where ${vault:...} references and vault-database credentials come from, and how this server '
+                'signs in to it.', 'QUERYAPIGATE_VAULT_ADDR',
+                f'{vault_addr()} ({vault_auth()})' if vault_addr() else 'off'),
+            row('Vault paths', 'Path prefixes ${vault:...} may read.', 'QUERYAPIGATE_VAULT_PATHS',
+                ', '.join(vault_paths()) or 'none - ${vault:...} refused'),
+            row('Vault database roles', 'Roles of the database secrets engine a connection\'s credentials may ask for.',
+                'QUERYAPIGATE_VAULT_DATABASE_ROLES', ', '.join(vault_database_roles()) or 'none'),
             row('Admin API key', 'Key with full access to this UI and the admin API. Unset means open access.',
                 'QUERYAPIGATE_API_KEY', 'configured' if api_key() else 'not set - open access', secret=True),
             row('Allow writes', 'When off, statements that modify data are rejected.',

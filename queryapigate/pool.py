@@ -25,11 +25,16 @@ VALIDATE_AFTER = 5.0  # seconds
 class Session:
     """A connection plus what the driver wants to remember about it (e.g. limits already applied)."""
 
-    def __init__(self, conn, driver):
+    def __init__(self, conn, driver, expires_at=None):
         self.conn = conn
         self.driver = driver
         self.state = {}
         self.idle_since = time.monotonic()
+        # when its credentials stop being usable - a lease from Vault (ADR 0015) - or None: retired before then
+        self.expires_at = expires_at
+
+    def expired(self, now=None):
+        return self.expires_at is not None and (now or time.monotonic()) >= self.expires_at
 
     def close(self):
         try:
@@ -55,7 +60,8 @@ class ConnectionPool:
         key = fingerprint(details, read_only)
         session = self._acquire(key)
         if session is None:
-            session = Session(driver.connect(details, read_only), driver)
+            from . import secretrefs
+            session = Session(driver.connect(details, read_only), driver, secretrefs.credential_expiry(details))
         with self._lock:
             self._active += 1
         try:
@@ -80,8 +86,8 @@ class ConnectionPool:
                 if not queue:
                     del self._idle[key]
             idle_for = time.monotonic() - session.idle_since
-            if idle_for > config.pool_idle_timeout():
-                session.close()
+            if idle_for > config.pool_idle_timeout() or session.expired():
+                session.close()  # idle too long - or its credentials' lease is about to end
                 continue
             if idle_for > VALIDATE_AFTER:
                 try:
@@ -114,12 +120,17 @@ class ConnectionPool:
 
     def _expired_locked(self):
         """Remove and return idle sessions past the idle timeout, across every key (caller holds the lock)."""
-        cutoff = time.monotonic() - config.pool_idle_timeout()
+        now = time.monotonic()
+        cutoff = now - config.pool_idle_timeout()
         expired = []
         for key in list(self._idle):
             queue = self._idle[key]
             while queue and queue[0].idle_since < cutoff:
                 expired.append(queue.popleft())
+            leased = [s for s in queue if s.expired(now)]  # its credentials' lease about to end, however recently used
+            for session in leased:
+                queue.remove(session)
+            expired.extend(leased)
             if not queue:
                 del self._idle[key]
         return expired

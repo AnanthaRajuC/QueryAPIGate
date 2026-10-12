@@ -63,7 +63,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   Only inside `QUERYAPIGATE_SECRET_FILE_DIRS`, never the server's home, checked when saved and when used. Resolved
   values are kept in memory at most `QUERYAPIGATE_SECRET_CACHE_SECONDS`; past that a failing provider fails the
   connection with `503 secret_unavailable`, never a stale secret. Every secret setting can be read from a file too:
-  `QUERYAPIGATE_SECRET_KEY_FILE` and the like. See
+  `QUERYAPIGATE_SECRET_KEY_FILE` and the like. **Vault:** `${vault:secret/data/warehouse#password}` from the KV
+  engine, and a connection's `credentials: {source: vault-database, role: ...}` - a username and password from the
+  database secrets engine for each lease, shared by the connections opened during it, every pooled connection retired
+  before its lease ends, and the leases revoked when the process exits. The server signs in with a token (or Vault
+  Agent's token file), Kubernetes auth or AppRole; `QUERYAPIGATE_VAULT_PATHS` and `QUERYAPIGATE_VAULT_DATABASE_ROLES`
+  say what it may ask for. Tested in CI against Vault 1.21. See
   [Secrets from files and secrets managers](documentation/API.md#secrets-from-files-and-secrets-managers).
 
 ## [0.27.0] - 2026-10-12

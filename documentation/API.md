@@ -808,6 +808,7 @@ show the reference as written.
 |---|---|
 | `${VAR}` | The server's environment, as always. |
 | `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
+| `${vault:secret/data/warehouse#password}` | A field of a secret in Vault's KV engine, version 1 or 2: the path as Vault's API names it (`secret/data/...` for version 2), `#`, the field. |
 
 A reference can stand alone (`"password": "${file:/run/secrets/warehouse}"`) or sit inside a value
 (`"jdbc_url": "jdbc:...;password=${file:/run/secrets/warehouse}"`).
@@ -824,6 +825,34 @@ reference.
 fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
 up - with a warning in the log - and never after: the connection fails with `503 secret_unavailable`, naming the
 provider's error, never the secret.
+
+**Short-lived database credentials.** Instead of a user and password, a connection can say where they come from:
+
+~~~json
+{"name": "warehouse", "db": "postgres", "host": "warehouse.internal", "database": "analytics",
+ "credentials": {"source": "vault-database", "role": "reporting-ro"}}
+~~~
+
+The server asks Vault's database secrets engine for a username and password when a connection is first opened, uses
+the pair for every connection opened during its lease, and asks again at 80% of it. Each pooled connection is
+retired before its lease ends - a tenth of the lease, between 5 seconds and 5 minutes, before - so a query never runs
+on a connection whose user Vault is about to drop. Leases the process took are revoked when it exits cleanly. Any
+type with a user and password (not SQLite, DuckDB or H2); with `credentials`, leave out `user` and `password`.
+
+**Vault.** `QUERYAPIGATE_VAULT_ADDR` (with `QUERYAPIGATE_VAULT_CACERT` for a private CA, and
+`QUERYAPIGATE_VAULT_NAMESPACE`), and the way this server signs in, `QUERYAPIGATE_VAULT_AUTH`:
+
+| | Needs |
+|---|---|
+| `token` (default) | `QUERYAPIGATE_VAULT_TOKEN`, or `QUERYAPIGATE_VAULT_TOKEN_FILE` - read again at each sign-in, so the token Vault Agent keeps current there is the one used |
+| `kubernetes` | `QUERYAPIGATE_VAULT_K8S_ROLE`; the pod's service account token, from `QUERYAPIGATE_VAULT_K8S_TOKEN_FILE` (the usual path by default) |
+| `approle` | `QUERYAPIGATE_VAULT_ROLE_ID` and `QUERYAPIGATE_VAULT_SECRET_ID` (or `_SECRET_ID_FILE`) |
+
+`QUERYAPIGATE_VAULT_AUTH_MOUNT` if the method isn't mounted at its own name, `QUERYAPIGATE_VAULT_DATABASE_MOUNT` if
+the database engine isn't at `database`. What Vault lets this server's token read is more than any connection should:
+`${vault:...}` reads only under `QUERYAPIGATE_VAULT_PATHS` (comma-separated prefixes, `secret/data/reporting/`), and
+`credentials` asks only for `QUERYAPIGATE_VAULT_DATABASE_ROLES` - unset, neither is allowed. Tested in CI against
+Vault 1.21 and PostgreSQL.
 
 **The server's own secrets, from files.** Each setting that is a secret - `QUERYAPIGATE_API_KEY`, `_SECRET_KEY`,
 `_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, `_MASK_KEY`, `_JWT_SECRET`, `_SSO_CLIENT_SECRET` - can be read from a

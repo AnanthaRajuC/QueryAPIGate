@@ -30,6 +30,11 @@ ENV_REF_RE = re.compile(r'\$\{(\w+)\}')
 # ${VAR}, or ${provider:what} - the provider's name lowercase, what follows it anything but braces and a nested ${
 REF_RE = re.compile(r'\$\{(?:([a-z][a-z0-9-]*):([^{}$]+)|(\w+))\}')
 REFRESH_AT = 0.8  # of a value's time: fetched again from then on, so a slow or failing provider is noticed early
+
+
+def lease_margin(lasts):
+    """How long before a lease ends its credentials stop being used: a tenth of it, between 5 and 300 seconds."""
+    return min(300.0, max(5.0, lasts * 0.1))
 MAX_FILE_BYTES = 64 * 1024
 
 
@@ -107,7 +112,126 @@ class FileProvider:
         return text[:-2] if text.endswith('\r\n') else text[:-1] if text.endswith('\n') else text, None
 
 
-PROVIDERS = {provider.name: provider for provider in (FileProvider(),)}
+_VAULT_PATH_RE = re.compile(r'^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$')
+
+
+class VaultProvider:
+    """`${vault:secret/data/warehouse#password}`: a field of a secret in Vault's KV engine, version 1 or 2 - the path
+    as Vault's API names it, then the field."""
+
+    name = 'vault'
+
+    def check(self, what):
+        path, _, field = what.partition('#')
+        if not config.vault_addr():
+            return 'QUERYAPIGATE_VAULT_ADDR is not set'
+        if not field:
+            return "name the field after the path: ${vault:secret/data/warehouse#password}"
+        if not _VAULT_PATH_RE.match(path) or '..' in path.split('/'):
+            return f"'{path}' isn't a Vault path"
+        prefixes = config.vault_paths()
+        if not prefixes:
+            return 'QUERYAPIGATE_VAULT_PATHS is not set: no Vault path may be read'
+        if not any((path + '/').startswith(prefix) for prefix in prefixes):
+            return f"'{path}' isn't under a path QUERYAPIGATE_VAULT_PATHS allows"
+        return None
+
+    def fetch(self, what):
+        from . import vault
+        path, _, field = what.partition('#')
+        try:
+            return vault.client.kv(path, field)
+        except vault.VaultError as error:
+            raise _FetchError(str(error)) from None
+
+
+PROVIDERS = {provider.name: provider for provider in (FileProvider(), VaultProvider())}
+
+
+# --------------------------------------------------------------------------------------
+# Short-lived database credentials: a connection's `credentials`
+# --------------------------------------------------------------------------------------
+
+class VaultDatabaseCredentials:
+    """`"credentials": {"source": "vault-database", "role": "reporting-ro"}`: a username and password from Vault's
+    database secrets engine, for the lease's length - the same pair for every connection opened meanwhile."""
+
+    name = 'vault-database'
+    lease = True  # kept for its lease, not QUERYAPIGATE_SECRET_CACHE_SECONDS: a new pair is a new lease in Vault
+
+    def check(self, role):
+        if not config.vault_addr():
+            return 'QUERYAPIGATE_VAULT_ADDR is not set'
+        allowed = config.vault_database_roles()
+        if not allowed:
+            return 'QUERYAPIGATE_VAULT_DATABASE_ROLES is not set: no database role may be asked for'
+        if role not in allowed:
+            return f"'{role}' isn't a role QUERYAPIGATE_VAULT_DATABASE_ROLES allows"
+        return None
+
+    def fetch(self, role):
+        from . import vault
+        try:
+            return vault.client.database_credentials(role)
+        except vault.VaultError as error:
+            raise _FetchError(str(error)) from None
+
+
+CREDENTIAL_SOURCES = {source.name: source for source in (VaultDatabaseCredentials(),)}
+# Connections that have no user and password to replace, so nothing to ask a credential source for.
+_NO_CREDENTIALS = ('sqlite', 'duckdb', 'h2')
+
+
+def check_credentials(spec, fields):
+    """A connection's `credentials`, when it's saved (invalid_body)."""
+    if not isinstance(spec, dict) or set(spec) != {'source', 'role'} or not all(
+            isinstance(spec[k], str) and spec[k] for k in ('source', 'role')):
+        raise ApiError('credentials is {"source": ..., "role": ...} - and nothing else', code='invalid_body')
+    if spec['source'] not in CREDENTIAL_SOURCES:
+        raise ApiError(f"credentials.source must be one of: {', '.join(sorted(CREDENTIAL_SOURCES))}",
+                       code='invalid_body')
+    if fields.get('db') in _NO_CREDENTIALS:
+        raise ApiError(f"A {fields['db']} connection has no user and password for credentials to give",
+                       code='invalid_body')
+    given = sorted(k for k in ('user', 'password') if fields.get(k) not in (None, ''))
+    if given:
+        raise ApiError(f"credentials gives the user and password - leave out {', '.join(given)}", code='invalid_body')
+    reason = CREDENTIAL_SOURCES[spec['source']].check(spec['role'])
+    if reason:
+        raise ApiError(f"credentials {spec['source']} '{spec['role']}' is refused: {reason}", code='invalid_body')
+
+
+_expiries: dict[str, float] = {}  # sha256 of (user, password) -> when they stop being usable (monotonic)
+_expiries_lock = threading.Lock()
+
+
+def _pair_key(user, password):
+    import hashlib
+    return hashlib.sha256(f'{user}\0{password}'.encode()).hexdigest()
+
+
+def resolve_credentials(details):
+    """`details` with its `credentials` replaced by the user and password they name - at the moment of use."""
+    spec = details.get('credentials')
+    if not isinstance(spec, dict):
+        return details
+    source = CREDENTIAL_SOURCES.get(spec.get('source'))
+    if source is None:
+        raise ApiError(f"There is no credential source '{spec.get('source')}'", 500, code='connection_misconfigured')
+    (user, password), until = cache.resolve_credentials(source, spec.get('role'))
+    with _expiries_lock:
+        now = time.monotonic()
+        for gone in [k for k, v in _expiries.items() if v < now]:
+            del _expiries[gone]  # past their lease: no pooled connection still uses them
+        _expiries[_pair_key(user, password)] = until
+    return {**{k: v for k, v in details.items() if k != 'credentials'}, 'user': user, 'password': password}
+
+
+def credential_expiry(details):
+    """When the user and password in `details` stop being usable (monotonic) - for credentials from a lease - else
+    None. The pool retires a connection opened with them before then."""
+    with _expiries_lock:
+        return _expiries.get(_pair_key(details.get('user'), details.get('password')))
 
 
 # --------------------------------------------------------------------------------------
@@ -137,6 +261,8 @@ def check_value(value):
 def check_fields(fields):
     for value in (fields or {}).values():
         check_value(value)
+    if 'credentials' in (fields or {}):
+        check_credentials(fields['credentials'], fields)
 
 
 # --------------------------------------------------------------------------------------
@@ -180,6 +306,36 @@ class _Cache:
         with self._lock:
             self._entries[key] = (value, version, now + keep * REFRESH_AT, now + keep)
         return value
+
+    def resolve_credentials(self, source, role):
+        """((user, password), usable until - monotonic) for a credential source, kept for its lease: fetched again
+        from REFRESH_AT of it, and never used within LEASE_MARGIN of its end - so a connection opened with it has
+        time to be used and retired before the lease is revoked."""
+        reason = source.check(role)
+        if reason:
+            raise ApiError(f"credentials {source.name} '{role}' is refused: {reason}", 500,
+                           code='connection_misconfigured')
+        key = (source.name, role)
+        now = time.monotonic()
+        with self._lock:
+            held = self._entries.get(key)
+        if held is not None and now < held[2]:
+            return held[0], held[3]
+        try:
+            pair, ttl = source.fetch(role)
+        except _FetchError as error:
+            self._note(source.name, error)
+            if held is not None and now < held[3]:
+                log.warning('The credential source %s failed (%s) - using the credentials it gave before, good for '
+                            '%ds more', source.name, error, int(held[3] - now))
+                return held[0], held[3]
+            raise unavailable(f"credentials {source.name} '{role}' could not be resolved: {error}") from None
+        self._note(source.name, None)
+        lasts = float(ttl) if ttl else float(config.secret_cache_seconds())
+        usable = max(0.0, lasts - lease_margin(lasts))
+        with self._lock:  # a short lease's margin can reach past REFRESH_AT: fetched again by the time it's unusable
+            self._entries[key] = (pair, None, now + min(lasts * REFRESH_AT, usable), now + usable)
+        return pair, now + usable
 
     @staticmethod
     def _keep(ttl):

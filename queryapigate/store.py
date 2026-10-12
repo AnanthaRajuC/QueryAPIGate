@@ -280,7 +280,8 @@ def resolve_ad_hoc(details):
     into the form) passes through unchanged."""
     refuse_server_settings(details)
     refuse_store_access(details)
-    resolved = {key: _expand_env(value) for key, value in details.items()}
+    from . import secretrefs
+    resolved = secretrefs.resolve_credentials({key: _expand_env(value) for key, value in details.items()})
     password = resolved.get('password')
     if password and _is_encrypted(password):
         resolved['password'] = _decrypt_password(password)
@@ -303,10 +304,11 @@ def get_connection(connection_name):
         raise ApiError('Unsupported database type', code='unsupported_database')
     details = _connection_row_to_dict(row)
     refuse_store_access(details)  # one saved before this check existed, too
+    from . import secretrefs
     resolved = {key: _expand_env(value) for key, value in details.items()}
     if 'password' in resolved:
         resolved['password'] = _decrypt_password(resolved['password'])
-    return resolved
+    return secretrefs.resolve_credentials(resolved)  # a lease's user and password, when it names a source
 
 
 def _is_plaintext_password(password):
