@@ -103,6 +103,8 @@ def record_audit(actor, action, target, changes=None, via=None):
             link = auditchain.append(conn, entry, config.audit_log_limit())
     except (OSError, *db.Error):
         pass
+    from . import auditstream
+    auditstream.wake()  # to the SIEM soon, not at the next round
     export_path = config.audit_log_export_file()
     if export_path is not None:
         chain = {'seq': link[0], 'prev_hash': link[1], 'hash': link[2]} if link else {}

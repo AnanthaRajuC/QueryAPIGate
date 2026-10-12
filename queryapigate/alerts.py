@@ -58,7 +58,7 @@ KINDS = ('open_server', 'break_glass_used', 'connection_failing', 'key_expired',
          'query_timeouts', 'query_slow', 'key_rate_limited', 'client_rate_limited', 'history_failed', 'history_dropped',
          'instances_not_shared', 'instances_versions_differ', 'rate_limits_not_shared', 'export_failing', 'key_unused',
          'agent_unusual_volume', 'sso_unreachable', 'writes_awaiting_approval', 'encryption_key_rotation_incomplete',
-         'quota_nearly_used', 'audit_chain_broken')
+         'quota_nearly_used', 'audit_chain_broken', 'audit_delivery_behind')
 
 
 def _alert(severity, kind, subject, title, detail, target=None, since=None):
@@ -75,9 +75,8 @@ def _plural(n, word):
 def collect(now=None):
     """Every alert that holds now, most severe first."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_encryption(), *_audit_chain(), *_writes(), *_quotas(), *_keys(now), *_runs(now),
-             *_rate_limited(),
-             *_history_health()]
+    found = [*_server(now), *_sso(), *_encryption(), *_audit_chain(), *_audit_delivery(now), *_writes(),
+             *_quotas(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
@@ -137,6 +136,27 @@ def _audit_chain():
                    f"Its hash chain breaks at {where}: {problem}. Compare it with your SIEM's copy, or the export "
                    'file (queryapigate audit verify --file).', {'type': 'audit', 'name': 'verify'},
                    found.get('timestamp'))]
+
+
+def _audit_delivery(now):
+    """A SIEM output more than five minutes behind, or failing (ADR 0012)."""
+    from . import auditstream
+    if not auditstream.outputs():
+        return []
+    found = []
+    for out in auditstream.status():
+        oldest = out['oldest_undelivered_at'] if out['behind'] else None
+        late = oldest is not None and oldest < (now - timedelta(minutes=5)).strftime('%Y-%m-%d %H:%M:%S')
+        if not late and not (out['behind'] and out['last_error']):
+            continue
+        severity = 'critical' if late and out['last_error'] else 'warning'
+        detail = (f"{out['behind']} audit entries are waiting, the oldest since {oldest}. "
+                  + (f"Last error: {out['last_error']} ({out['last_error_at']}). " if out['last_error'] else '')
+                  + 'They are kept, past the rolling cap, until delivered.')
+        found.append(_alert(severity, 'audit_delivery_behind', out['output'],
+                            f"The audit log isn't reaching {out['target'] or out['output']}", detail,
+                            {'type': 'audit', 'name': 'delivery'}, oldest))
+    return found
 
 
 _CHAIN_PROBLEMS = {'changed': 'it was changed after it was written',

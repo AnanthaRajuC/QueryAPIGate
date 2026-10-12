@@ -87,6 +87,10 @@ def append(conn, entry, limit):
     conn.execute('INSERT INTO audit_log (timestamp, entry_json, seq, prev_hash, hash) VALUES (?, ?, ?, ?, ?)',
                  (entry['timestamp'], json.dumps(entry, default=str), seq, prev_hash, digest))
     cut = seq - limit  # keep the newest `limit`: everything up to `cut` goes, and `cut` becomes the anchor
+    from . import auditstream
+    floor = auditstream.delivery_floor(conn)
+    if floor is not None and floor < cut:  # not delivered to a SIEM yet: kept - up to ten times the cap
+        cut = max(floor, seq - limit * auditstream.MAX_BACKLOG_FACTOR)
     if cut > 0:
         row = conn.execute('SELECT seq, hash FROM audit_log WHERE seq = ?', (cut,)).fetchone()
         if row is not None:

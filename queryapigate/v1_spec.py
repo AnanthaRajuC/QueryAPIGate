@@ -1111,6 +1111,20 @@ PATHS = {
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
              'description': 'Matches the time, actor or target.'}]),
     },
+    '/api/v1/audit/delivery': {
+        'get': _op("Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",
+                   {'200': _ok({'type': 'object', 'required': ['items'], 'properties': {'items': {
+                       'type': 'array', 'items': {'type': 'object', 'properties': {
+                           'output': {'type': 'string', 'enum': ['syslog', 'otlp']},
+                           'target': {'type': 'string'}, 'delivered_seq': {'type': 'integer', 'nullable': True},
+                           'head_seq': {'type': 'integer'}, 'behind': {'type': 'integer'},
+                           'oldest_undelivered_at': {'type': 'string', 'nullable': True},
+                           'last_delivered_at': {'type': 'string', 'nullable': True},
+                           'last_error': {'type': 'string', 'nullable': True},
+                           'last_error_at': {'type': 'string', 'nullable': True},
+                           'instance': {'type': 'string', 'nullable': True,
+                                        'description': 'The instance delivering it now.'}}}}}})}),
+    },
     '/api/v1/audit/verify': {
         'get': _op("Walk the audit log's hash chain: intact, or the first entry that isn't",
                    {'200': _ok(_ref('AuditVerify'))}),

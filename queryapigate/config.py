@@ -395,9 +395,10 @@ def check_settings():
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_MCP_MAX_ROWS must be a positive integer')
     check_secret_keys()
-    from . import auditchain, tracing
+    from . import auditchain, auditstream, tracing
     tracing.check()
     auditchain.check_keys()
+    auditstream.check()
     raw = os.environ.get('QUERYAPIGATE_HSTS_MAX_AGE', '').strip()
     if raw and not (raw.isdigit() and 0 < int(raw) <= MAX_HSTS_SECONDS):
         raise ValueError('QUERYAPIGATE_HSTS_MAX_AGE must be a whole number of seconds from 1 to '
@@ -1086,6 +1087,18 @@ def describe_settings():
                 str(audit_log_limit())),
             row('Audit export file', 'Append-only JSON-lines copy of every audit entry, never rolled off.',
                 'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE', 'not set' if export is None else str(export)),
+            row('Audit to syslog', 'Stream every audit entry to a SIEM over syslog (RFC 5424): tls://host:6514, or '
+                'tcp://host:514. Unset: no stream.', 'QUERYAPIGATE_AUDIT_SYSLOG_URL',
+                redact_url(os.environ['QUERYAPIGATE_AUDIT_SYSLOG_URL'])
+                if os.environ.get('QUERYAPIGATE_AUDIT_SYSLOG_URL', '').strip() else 'off'),
+            row('Audit syslog CA', "CA certificate to trust the syslog server's with. Unset: the system's.",
+                'QUERYAPIGATE_AUDIT_SYSLOG_CA', _env('QUERYAPIGATE_AUDIT_SYSLOG_CA') or 'system'),
+            row('Audit syslog client certificate', 'For mutual TLS, with its key below.',
+                'QUERYAPIGATE_AUDIT_SYSLOG_CERT', _env('QUERYAPIGATE_AUDIT_SYSLOG_CERT') or 'none'),
+            row('Audit syslog client key', 'The client certificate\'s key.', 'QUERYAPIGATE_AUDIT_SYSLOG_KEY',
+                'configured' if _env('QUERYAPIGATE_AUDIT_SYSLOG_KEY') else 'none', secret=True),
+            row('Audit to OTLP logs', 'Stream every audit entry as OpenTelemetry log records, to the OTLP logs '
+                'endpoint.', 'QUERYAPIGATE_AUDIT_OTLP', on_off(env_flag('QUERYAPIGATE_AUDIT_OTLP'))),
             row('Audit chain key', 'HMAC key the audit log is chained with, so an edit made without it shows. Unset: '
                 'plain SHA-256 - consistent, but anyone with the store can recompute it.', 'QUERYAPIGATE_AUDIT_KEY',
                 _audit_key_state(), secret=True),

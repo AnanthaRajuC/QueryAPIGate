@@ -272,7 +272,10 @@ names the first. Against someone who can write to the store, a plain hash is onl
 it - so with `QUERYAPIGATE_AUDIT_KEY` set the chain is HMAC-signed with a key kept outside the store, and a key once set
 means every newer entry must carry it. What the chain can't show alone: the newest entries deleted (its end can't know
 what came after it), and a rewrite by someone holding both the store and the key. Both are why a copy outside - the
-SIEM stream, or the export file shipped elsewhere - matters.
+SIEM stream, or the export file shipped elsewhere - matters. The stream (experimental) sends each entry with its
+`seq` and `hash` over TLS - the server's certificate verified, the client's optional - so a later rewrite of the
+store contradicts what the SIEM already has; its delivery is at least once, and syslog over TCP can lose the batch
+sent to a SIEM that dies without closing the connection (OTLP, acknowledged per batch, doesn't).
 
 ### Transport
 

@@ -71,7 +71,7 @@ OPERATIONS = {
     'v1.clear_cache': 'cache.write', 'v1.delete_cache_entry': 'cache.write',
     'v1.load_examples': 'examples.write', 'v1.unload_examples': 'examples.write',
     'v1.list_alerts': 'observe', 'v1.list_audit': 'observe', 'v1.search_history': 'observe',
-    'v1.verify_audit': 'observe',
+    'v1.verify_audit': 'observe', 'v1.audit_delivery': 'observe',
     'v1.list_instances': 'observe', 'v1.agent_usage': 'observe', 'v1.quota_usage': 'observe',
     'v1.list_write_requests': 'writes.approve', 'v1.get_write_request': 'writes.approve',
     'v1.approve_write_request': 'writes.approve', 'v1.reject_write_request': 'writes.approve',

@@ -410,6 +410,7 @@ owner.
 |---|---|
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
+| `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance` (experimental). |
 | `GET /api/v1/audit/verify` | Walk the audit log's hash chain from its anchor: `{"intact": true, "first_seq", "last_seq", "keyed", ...}`, or `{"intact": false, "break": {"seq", "action", "timestamp", "problem"}}` - `problem` is `changed`, `changed_before`, `missing`, `out_of_order` or `unkeyed_after_keyed`. |
 
 ### Collections and the example APIs
@@ -1473,6 +1474,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
 | `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
+| `audit_delivery_behind` | warning, critical | An audit log output to a SIEM is more than five minutes behind (critical while delivery is also failing); the entries wait, past the rolling cap |
 | `audit_chain_broken` | critical | The audit log's hash chain doesn't verify: an entry was changed, removed, inserted or reordered (checked every 5 minutes) |
 | `quota_nearly_used` | warning, critical | An API key has used 80% of a usage quota this period (warning), or all of it - its calls are refused until it resets (critical) |
 | `writes_awaiting_approval` | warning | AI agents' writes are waiting for a person to approve them; each expires unapproved after `QUERYAPIGATE_WRITE_APPROVAL_MINUTES` |
@@ -1686,6 +1688,35 @@ both and the entry. Change, remove, insert or reorder an entry, and every hash f
   rewrite by someone holding both the store and the key. A copy outside the store, in your SIEM, is what shows those.
 - **Upgrading to 0.25** chains the entries already stored, as they are, and records `audit_chain_started`: the chain
   proves nothing about them before that moment.
+
+### Streaming the audit log to a SIEM
+
+> **Experimental** - new in 0.25 ([ADR 0012](adr/0012-tamper-evident-audit-log-and-siem.md)); its settings and message
+> format may change in any minor release, always noted in the changelog, as it meets real SIEMs.
+
+Every entry, as it's written, to your SIEM - Splunk, Microsoft Sentinel, Elastic, QRadar, or a log forwarder:
+
+- **Syslog:** `QUERYAPIGATE_AUDIT_SYSLOG_URL=tls://siem.example.com:6514` (TLS, RFC 5425) or `tcp://host:514`; UDP is
+  refused - it loses entries silently. RFC 5424 messages, octet-counted: facility 13 (log audit), the `action` as MSGID,
+  `[meta sequenceId="<seq>"]`, and the entry as JSON with `seq`, `prev_hash` and `hash`. The server's certificate is
+  checked against the system's CAs, or `QUERYAPIGATE_AUDIT_SYSLOG_CA`; `QUERYAPIGATE_AUDIT_SYSLOG_CERT` and `_KEY` give
+  a client certificate, for mutual TLS.
+- **OTLP logs:** `QUERYAPIGATE_AUDIT_OTLP=1` - OTLP/HTTP with JSON encoding to `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` (or
+  `OTEL_EXPORTER_OTLP_ENDPOINT` + `/v1/logs`), with `OTEL_EXPORTER_OTLP[_LOGS]_HEADERS`. No extra package. Each entry a
+  log record: the entry as its body, `queryapigate.audit.seq`, `.hash`, `.action`, `.actor`, `.target` as attributes.
+
+**Delivery survives the SIEM being down.** Each output's cursor - the last `seq` delivered - is in the store, and one
+instance delivers at a time (whichever holds the output's lease; another takes over if it stops). While an output is
+behind, the entries it hasn't had are kept past `QUERYAPIGATE_AUDIT_LOG_LIMIT` - up to ten times it. A new output
+starts with every entry the store holds. **At least once:** a batch that failed partway is sent again, so the SIEM may
+see an entry twice - drop the repeat by `seq` and `hash`. A batch counts as delivered once the OTLP endpoint answered
+2xx, or syslog's connection took it; syslog over TCP has no acknowledgement, so a SIEM that dies without closing the
+connection can lose the batch sent into it (one that closes it, or refuses the client certificate, is noticed before
+anything is written). Where that matters, use OTLP, or a log forwarder next to QueryAPIGate.
+
+`GET /api/v1/audit/delivery` shows each output: `delivered_seq`, `head_seq`, `behind`, `oldest_undelivered_at`,
+`last_delivered_at`, `last_error` and the `instance` delivering it. The `audit_delivery_behind` alert says when an
+output is more than five minutes behind (critical while it's also failing).
 
 The admin UI's Audit Log tab filters this client-side over what it already fetched - an action dropdown
 (populated from whatever actions actually appear) and a search box matching actor, target or timestamp -

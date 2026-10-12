@@ -188,6 +188,8 @@ def create_app():
                     "or set QUERYAPIGATE_SECRET_KEY to encrypt it at rest automatically.",
                     ', '.join(plaintext), config.db_file())
     _note_audit_key_rotation()
+    from . import auditstream
+    auditstream.start()  # the audit log to a SIEM, when an output is set (ADR 0012)
     if config.load_examples():
         load_examples_at_startup()
     app.json = JSONProvider(app)

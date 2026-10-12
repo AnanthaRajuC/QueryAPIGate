@@ -589,6 +589,8 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
 | `QUERYAPIGATE_RATE_LIMIT` | unset | Requests allowed per client address, e.g. `60/minute` (also `second`, `hour`, `day`). Off by default; a malformed value stops startup. |
 | `QUERYAPIGATE_TRUST_PROXY` | `0` | Number of reverse proxies in front of the app whose `X-Forwarded-*` headers are trusted. Set it (usually `1`) behind nginx, a load balancer or a platform router, or every client looks like the proxy. |
+| `QUERYAPIGATE_AUDIT_SYSLOG_URL` | *(unset)* | Stream every audit entry to a SIEM over syslog: `tls://host:6514` or `tcp://host:514` (experimental). With `QUERYAPIGATE_AUDIT_SYSLOG_CA`, and `_CERT`/`_KEY` for mutual TLS. |
+| `QUERYAPIGATE_AUDIT_OTLP` | `false` | Stream every audit entry as OTLP log records to the OTLP logs endpoint (experimental). |
 | `QUERYAPIGATE_AUDIT_KEY` | *(unset)* | HMAC key (32+ characters) the audit log's hash chain is signed with, so an edit made with only the store can't be re-signed. Several, comma-separated, while rotating it. Unset: plain SHA-256. |
 | `QUERYAPIGATE_HSTS_MAX_AGE` | *(unset)* | Seconds browsers should use only HTTPS for this host (`Strict-Transport-Security`), sent only on requests that arrived over HTTPS. Unset: not sent - set it once every client reaches the server over HTTPS. |
 | `QUERYAPIGATE_POOL_SIZE` | `5` | Idle connections kept per distinct connection setting. `0` turns pooling off. |

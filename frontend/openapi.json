@@ -394,7 +394,8 @@
               "writes_awaiting_approval",
               "encryption_key_rotation_incomplete",
               "quota_nearly_used",
-              "audit_chain_broken"
+              "audit_chain_broken",
+              "audit_delivery_behind"
             ],
             "type": "string"
           },
@@ -4922,6 +4923,122 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/audit/delivery": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "behind": {
+                            "type": "integer"
+                          },
+                          "delivered_seq": {
+                            "nullable": true,
+                            "type": "integer"
+                          },
+                          "head_seq": {
+                            "type": "integer"
+                          },
+                          "instance": {
+                            "description": "The instance delivering it now.",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "last_delivered_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "last_error": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "last_error_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "oldest_undelivered_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "output": {
+                            "enum": [
+                              "syslog",
+                              "otlp"
+                            ],
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/audit/verify": {

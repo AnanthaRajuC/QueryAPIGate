@@ -24,8 +24,9 @@ its rows in the Console's Settings, and a warning in the log at startup while on
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
 (`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
 (`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
-(`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and
-usage quotas (`quota`, `/api/v1/usage/quotas`). The list is `queryapigate/experimental.py`.
+(`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`),
+usage quotas (`quota`, `/api/v1/usage/quotas`), and the audit log streamed to a SIEM
+(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -66,6 +67,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   changed, missing, out of order, or re-written without the key - and the `audit_chain_broken` alert says so. The
   export file's lines carry the chain too. See
   [A tamper-evident chain](documentation/API.md#a-tamper-evident-chain).
+- **The audit log streamed to a SIEM** (ADR 0012, experimental): syslog (RFC 5424) over TLS - mutual TLS too - or
+  TCP, with `QUERYAPIGATE_AUDIT_SYSLOG_URL`; OTLP logs with `QUERYAPIGATE_AUDIT_OTLP=1`. A cursor per output in the
+  store and a lease, so one instance delivers and another takes over; at least once; entries not yet delivered kept
+  past the rolling cap, up to ten times it. `GET /api/v1/audit/delivery` and the `audit_delivery_behind` alert. See
+  [Streaming the audit log to a SIEM](documentation/API.md#streaming-the-audit-log-to-a-siem).
 
 ## [0.24.0] - 2026-10-11
 

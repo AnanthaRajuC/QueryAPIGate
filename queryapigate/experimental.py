@@ -78,6 +78,14 @@ FEATURES: dict[str, dict[str, Any]] = {
         'operations': (('get', '/api/v1/usage/quotas'),),
         'docs': ('documentation/API.md', 'Usage quotas'),
     },
+    'audit_stream': {
+        'name': 'The audit log streamed to a SIEM',
+        'why': 'new in 0.25 - its settings and message format may change as it meets real SIEMs (ADR 0012)',
+        'settings': ('QUERYAPIGATE_AUDIT_SYSLOG_URL', 'QUERYAPIGATE_AUDIT_SYSLOG_CA', 'QUERYAPIGATE_AUDIT_SYSLOG_CERT',
+                     'QUERYAPIGATE_AUDIT_SYSLOG_KEY', 'QUERYAPIGATE_AUDIT_OTLP'),
+        'operations': (('get', '/api/v1/audit/delivery'),),
+        'docs': ('documentation/API.md', 'Streaming the audit log to a SIEM'),
+    },
     'tracing': {
         'name': 'Tracing with OpenTelemetry',
         'why': 'new in 0.23 - span names and attributes may change as the OpenTelemetry conventions for databases and '
