@@ -86,7 +86,8 @@ documentation. #99 workspaces only if asked for.
     before it made cached responses private.)
 12. **0.24: #94 per-key limits on simultaneous queries, time and rows, then #95 quotas**
     ([ADR 0011](documentation/adr/0011-per-key-limits-and-quotas.md)). (Released as 0.24.0 on 2026-10-11.)
-13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM.**
+13. **0.25: #96 a tamper-evident audit log, streamed to a SIEM**
+    ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)).
 14. **Then, in an order set by who asks:** #97 configuration as code, #100 the Helm chart, #98 secrets managers, #101
     compliance documentation; #99 workspaces only on demand.
 15. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
@@ -2993,7 +2994,7 @@ in `/api/v1/api-keys/{name}` and the Console; an alert at 80%. Builds on run his
 
 ## 96. A tamper-evident audit log, streamed to a SIEM
 
-**Status: open; planned for 0.25.**
+**Status: open; planned for 0.25** ([ADR 0012](documentation/adr/0012-tamper-evident-audit-log-and-siem.md)).
 
 **Impact:** the audit log can be appended to a file (`QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`, #30), but an entry can be
 edited or removed without trace, and there's no stream a SIEM (Splunk, Sentinel, Elastic) reads. SOC 2 and ISO 27001

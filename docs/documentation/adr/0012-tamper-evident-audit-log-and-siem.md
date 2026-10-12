@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0012-tamper-evident-audit-log-and-siem.md"
