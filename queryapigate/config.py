@@ -544,7 +544,8 @@ def vault_paths():
 
 def vault_database_roles():
     """QUERYAPIGATE_VAULT_DATABASE_ROLES: the database secrets engine roles a connection may ask for, comma-separated -
-    unset, none."""
+    each optionally bound to the host its credentials may go to: reporting-ro@warehouse.internal[:5432]. Unset,
+    none."""
     return [r.strip() for r in os.environ.get('QUERYAPIGATE_VAULT_DATABASE_ROLES', '').split(',') if r.strip()]
 
 

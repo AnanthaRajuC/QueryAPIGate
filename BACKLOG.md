@@ -92,7 +92,8 @@ documentation. #99 workspaces only if asked for.
 15. **0.27: #97 configuration as code** ([ADR 0014](documentation/adr/0014-configuration-as-code.md)). (Released as
     0.27.0 on 2026-10-12.)
 16. **0.28: #98 secrets managers and short-lived credentials**
-    ([ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md)).
+    ([ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md)). (Released as 0.28.0 on
+    2026-10-12.)
 17. **Then, in an order set by who asks:** #101 compliance documentation; #99 workspaces only on demand.
 18. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
 19. **1.0.0.**
@@ -3033,7 +3034,12 @@ for; it would use the same diff.
 
 ## 98. Secrets from a secrets manager, and short-lived database credentials
 
-**Status: open; planned for 0.28** ([ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md)).
+**Status: shipped (0.28, experimental).** [ADR 0015](documentation/adr/0015-secrets-managers-and-short-lived-credentials.md):
+`secretrefs.py` - `${file:...}`, `${vault:...}`, `${aws-sm:...}`, allow-lists checked when saved and used, a cache that
+fails closed; `vault.py` (token, Kubernetes, AppRole) and `vault-database` credentials, each pooled connection retired
+before its lease ends, roles bound to hosts; `aws.py` and `aws-rds-iam`; `QUERYAPIGATE_*_FILE`; the chart's
+`vaultToken`; the `secret_provider_failing` alert. Tested in CI against Vault 1.21 and a Secrets Manager stand-in.
+Guide 56. Google Secret Manager, Azure Key Vault, Cloud SQL and Azure Database IAM when asked for.
 
 **Impact:** a connection's password is stored (encrypted, #90) or read from `${VAR}` at startup - so a secret that changes
 needs a restart, and short-lived credentials (Vault's database secrets engine, IAM authentication to RDS, Cloud SQL or

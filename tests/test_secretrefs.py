@@ -84,6 +84,21 @@ class AllowListTests(SecretTestCase):
         os.symlink(outside, link)  # a link inside, to a file outside: what it points to is what's read
         self.assertIn("isn't inside a folder", self.refused('${file:' + link + '}'))
 
+    def test_the_file_read_is_the_one_checked(self):
+        path = self.secret('pw', 'right')
+        link = os.path.join(self.secrets, 'link')
+        os.symlink(path, link)
+        ref = '${file:' + link + '}'
+        secretrefs.check_value(ref)
+        outside = os.path.join(self.tmp.name, 'outside')
+        with open(outside, 'w') as f:
+            f.write('wrong')
+        os.remove(link)
+        os.symlink(outside, link)  # swapped after the check
+        with self.assertRaises(ApiError) as caught:
+            secretrefs.expand(ref)
+        self.assertNotIn('wrong', caught.exception.message)
+
     def test_never_the_servers_own_home(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_FILE_DIRS': self.tmp.name}):
             message = self.refused('${file:' + os.path.join(self.home, 'queryapigate.db') + '}')
@@ -137,6 +152,47 @@ class FailingClosedTests(SecretTestCase):
         self.assertIn('could not be resolved: the provider is down', caught.exception.message)
         self.assertEqual((caught.exception.status, caught.exception.code), (503, 'secret_unavailable'))
         self.assertNotIn('held', caught.exception.message)
+
+    def test_a_failing_provider_isnt_asked_again_for_a_while(self):
+        calls = []
+
+        def fetch(what):
+            calls.append(what)
+            raise secretrefs._FetchError('the provider is down')
+
+        self.clock[0] += 90
+        with mock.patch.object(secretrefs.PROVIDERS['file'], 'fetch', fetch), \
+                self.assertLogs('queryapigate', 'WARNING'):
+            for _ in range(5):  # within its time: what's held, without waiting on the provider each time
+                self.assertEqual(secretrefs.expand(self.ref), 'held')
+            self.assertEqual(len(calls), 1)
+            self.clock[0] += 11  # past its time now, and past the retry interval: asked once more, then failing fast
+            for _ in range(3):
+                with self.assertRaises(ApiError):
+                    secretrefs.expand(self.ref)
+            self.assertEqual(len(calls), 2)
+
+    def test_the_retry_interval_counts_from_the_failure_not_the_attempt(self):
+        def slow_fail(what):
+            self.clock[0] += 10  # a fetch that times out after 10 s
+            raise secretrefs._FetchError('timed out')
+
+        self.clock[0] += 90
+        with mock.patch.object(secretrefs.PROVIDERS['file'], 'fetch', slow_fail), self.assertLogs('queryapigate'):
+            self.assertEqual(secretrefs.expand(self.ref), 'held')  # 1090 -> 1100: held, good until 1100
+            self.clock[0] += 1
+            with self.assertRaises(ApiError):  # past its time; within 10 s of the failure: refused at once
+                secretrefs.expand(self.ref)
+        self.assertEqual(self.clock[0], 1101)  # nothing waited on the provider again
+
+    def test_while_one_request_fetches_the_others_get_whats_held(self):
+        self.clock[0] += 90
+        key = ('file', self.path)
+        secretrefs.cache._fetching.add(key)  # another request is waiting on the provider
+        self.addCleanup(secretrefs.cache._fetching.discard, key)
+        with self.failing():
+            self.assertEqual(secretrefs.expand(self.ref), 'held')
+        self.assertIsNone(secretrefs.cache.status['file']['failing_since'])  # it didn't ask the failing provider
 
     def test_before_the_refresh_point_the_provider_isnt_asked(self):
         self.clock[0] += 50

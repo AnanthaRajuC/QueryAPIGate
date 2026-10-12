@@ -363,6 +363,12 @@ const DOCS = [
     path: 'how-to/55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-56',
+    title: 'Use short-lived database credentials from Vault',
+    path: 'how-to/56-use-short-lived-database-credentials-from-vault.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

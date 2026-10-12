@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import secrets
+import signal
 import sys
 import time
 from datetime import datetime, timedelta
@@ -44,6 +45,9 @@ def _serve(args):
             'Listening on %s without QUERYAPIGATE_API_KEY set: anyone who can reach this port can run SQL '
             'on your active connections.', args.host)
     logging.getLogger('queryapigate').info('Using %s (metadata: %s)', config.home(), db.describe())
+    # SIGTERM - what a container runtime or `kill` sends - as a clean exit, so what runs at exit does: Vault leases
+    # revoked (ADR 0015), the audit stream's lease given back. Python's default ends the process without it.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     app.run(host=args.host, port=args.port, debug=args.debug, request_handler=_handler())
     return 0
 

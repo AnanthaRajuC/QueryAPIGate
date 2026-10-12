@@ -285,6 +285,22 @@ class CredentialTests(VaultTestCase):
                                 'credentials': self.details['credentials']}, 't')
         self.assertIn('no user and password for credentials to give', caught.exception.message)
 
+    def test_a_role_bound_to_a_host_gives_its_credentials_to_no_other(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_VAULT_DATABASE_ROLES': 'reporting-ro@warehouse.internal:5432'}):
+            connections.create({'name': 'w', 'db': 'postgres', 'host': 'warehouse.internal', 'port': 5432,
+                                'credentials': self.details['credentials']}, 't')
+            with self.assertRaises(ApiError) as caught:
+                connections.create({'name': 'x', 'db': 'postgres', 'host': 'theirs.example', 'port': 5432,
+                                    'credentials': self.details['credentials']}, 't')
+            self.assertIn("is bound to warehouse.internal:5432 by QUERYAPIGATE_VAULT_DATABASE_ROLES - not "
+                          'theirs.example:5432', caught.exception.message)
+            # moved to another host after it was saved: refused when used, before Vault is asked
+            with self.assertRaises(ApiError) as caught:
+                secretrefs.resolve_credentials({**self.details, 'host': 'theirs.example', 'port': 5432})
+            self.assertEqual(caught.exception.code, 'connection_misconfigured')
+            self.assertEqual(self.vault.issued, 0)
+            self.assertEqual(store.get_connection('w')['user'], 'v-user-1')
+
     def test_a_connection_resolves_to_them(self):
         connections.create({'name': 'w', 'db': 'postgres', 'host': 'h', 'credentials': self.details['credentials']},
                            't')

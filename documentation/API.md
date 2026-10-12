@@ -825,7 +825,8 @@ reference.
 **It fails closed.** A resolved value is kept for at most `QUERYAPIGATE_SECRET_CACHE_SECONDS` (default 300) and
 fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
 up - with a warning in the log - and never after: the connection fails with `503 secret_unavailable`, naming the
-provider's error, never the secret.
+provider's error, never the secret. A provider that failed isn't asked again for 10 seconds, and while one request
+waits on it the others get what's held - so an outage doesn't make every call wait on a timeout.
 
 **Short-lived database credentials.** Instead of a user and password, a connection can say where they come from:
 
@@ -858,8 +859,12 @@ connection's own `user` - PostgreSQL or MySQL, good for 15 minutes, signed by th
 `QUERYAPIGATE_VAULT_AUTH_MOUNT` if the method isn't mounted at its own name, `QUERYAPIGATE_VAULT_DATABASE_MOUNT` if
 the database engine isn't at `database`. What Vault lets this server's token read is more than any connection should:
 `${vault:...}` reads only under `QUERYAPIGATE_VAULT_PATHS` (comma-separated prefixes, `secret/data/reporting/`), and
-`credentials` asks only for `QUERYAPIGATE_VAULT_DATABASE_ROLES` - unset, neither is allowed. Tested in CI against
-Vault 1.21 and PostgreSQL.
+`credentials` asks only for `QUERYAPIGATE_VAULT_DATABASE_ROLES` - unset, neither is allowed. **Bind each role to
+its database's host** - `reporting-ro@warehouse.internal` or `reporting-ro@warehouse.internal:5432` - and its
+credentials go to no other: a connection naming it with another host is refused when saved, tested or used.
+Unbound, a role's credentials go to whatever host a connection names. Tested in CI against Vault 1.21 and
+PostgreSQL; walkthrough:
+[Use short-lived database credentials from Vault](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/56-use-short-lived-database-credentials-from-vault.md).
 
 **AWS.** Through boto3 (`pip install "queryapigate[aws]"`; in the image already), with the standard credential
 chain - IRSA on EKS (the chart's `serviceAccount.annotations`), an instance or task role, the usual `AWS_*`
@@ -1721,7 +1726,7 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?since=2026-10-10' -H "X-API-Key:
 `mcp` and `events` process seen in the last 90 seconds - and what looks wrong about them:
 
 ~~~json
-{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.27.0",
+{"items": [{"id": "3f9c2a1b7d4e-4242", "host": "api-1", "pid": 4242, "role": "serve", "version": "0.28.0",
             "shared_limits": true, "started_at": "2026-10-04 09:00:12", "last_seen": "2026-10-04 12:47:03",
             "this": true}],
  "problems": []}

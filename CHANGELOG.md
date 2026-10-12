@@ -55,6 +55,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-12
+
+No database password anywhere: a connection's secrets come from where they live - a file the CSI driver or Vault
+Agent keeps current, Vault, AWS Secrets Manager - and its credentials can be short-lived, made by Vault per lease or
+as RDS IAM tokens, rotated with no failed call. Nothing is reachable until the deployer lists it, and a provider
+that fails is forgiven only within what it gave before. Experimental in 0.28.
+
+### Upgrading from 0.27
+- **No schema change.** Nothing changes for a deployment that sets none of the new settings - except the TLS fix
+  below: a PostgreSQL or MySQL connection whose `sslmode` or `ssl_*` asked for more than its server gives now fails
+  instead of connecting without it.
+
 ### Security
 - **A PostgreSQL or MySQL connection's TLS settings are now given to its driver.** `sslmode` (with `sslrootcert`,
   `sslcert`, `sslkey`, `sslcrl`) and MySQL's `ssl_ca`, `ssl_cert`, `ssl_key`, `ssl_verify_cert`,
@@ -62,6 +74,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `verify-full` connected without checking the server's certificate - with libpq's default, `prefer`, even without
   TLS when the server didn't offer it. They are passed now, and only these: a connection that asks for TLS the
   server can't give, or a certificate that doesn't verify, now fails instead.
+
+### Fixed
+- **`queryapigate serve` now exits cleanly on SIGTERM**, so what runs at exit does - the audit stream's lease given
+  back (0.25), Vault leases revoked. It used to be ended without it. (The image's gunicorn already exited cleanly.)
 
 ### Added
 - **Secrets from files** (BACKLOG #98,
@@ -81,7 +97,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   - an IAM token as the password for RDS and Aurora, PostgreSQL or MySQL, only over TLS - with IRSA through the
   chart's `serviceAccount.annotations`; `QUERYAPIGATE_AWS_SECRET_PREFIXES` and `QUERYAPIGATE_AWS_RDS_HOSTS`. The
   chart's `vaultToken` mounts a projected token for Vault's Kubernetes auth. The `secret_provider_failing` alert, and
-  each provider's last answer in Settings. See
+  each provider's last answer in Settings. A Vault database role can be bound to its database's host
+  (`reporting-ro@warehouse.internal`), so its credentials go to no other. Guide 56,
+  [Use short-lived database credentials from Vault](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/56-use-short-lived-database-credentials-from-vault.md),
+  run against Vault 1.21: 861 calls across four leases, none failed. See
   [Secrets from files and secrets managers](documentation/API.md#secrets-from-files-and-secrets-managers).
 
 ## [0.27.0] - 2026-10-12

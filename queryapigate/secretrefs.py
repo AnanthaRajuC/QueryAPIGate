@@ -32,6 +32,9 @@ REF_RE = re.compile(r'\$\{(?:([a-z][a-z0-9-]*):([^{}$]+)|(\w+))\}')
 REFRESH_AT = 0.8  # of a value's time: fetched again from then on, so a slow or failing provider is noticed early
 
 
+RETRY_SECONDS = 10.0  # after a provider fails, it isn't asked again for this long: no request waits on one that's down
+
+
 def lease_margin(lasts):
     """How long before a lease ends its credentials stop being used: a tenth of it, between 5 and 300 seconds."""
     return min(300.0, max(5.0, lasts * 0.1))
@@ -97,9 +100,15 @@ class FileProvider:
         return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
 
     def fetch(self, what):
-        """(value, seconds it may be kept, or None for the cache's own limit)."""
+        """(value, seconds it may be kept, or None for the cache's own limit) - from the file check() let through:
+        where the path really leads, checked again here, then opened as that, so a link changed in between can't
+        point it elsewhere."""
+        real = os.path.realpath(what)
+        reason = self.check(real)
+        if reason:
+            raise _FetchError(reason)
         try:
-            with open(what, 'rb') as f:
+            with open(real, 'rb') as f:
                 data = f.read(MAX_FILE_BYTES + 1)
         except OSError as error:
             raise _FetchError(error.strerror or str(error)) from None
@@ -205,14 +214,27 @@ class VaultDatabaseCredentials:
             raise _refused(f"credentials gives the user and password - leave out {', '.join(given)}")
 
     def reason(self, spec, details):
+        """A role may be bound to a host (`reporting-ro@warehouse.internal`, or with :port): its credentials then go
+        to no other - otherwise an administrator could point a connection elsewhere and have the server log in there
+        with the warehouse's."""
         if not config.vault_addr():
             return 'QUERYAPIGATE_VAULT_ADDR is not set'
         allowed = config.vault_database_roles()
         if not allowed:
             return 'QUERYAPIGATE_VAULT_DATABASE_ROLES is not set: no database role may be asked for'
-        if spec['role'] not in allowed:
+        bound = [entry.partition('@')[2] for entry in allowed if entry.partition('@')[0] == spec['role']]
+        if not bound:
             return f"'{spec['role']}' isn't a role QUERYAPIGATE_VAULT_DATABASE_ROLES allows"
-        return None
+        if '' in bound:
+            return None  # allowed for any host
+        host = str(details.get('host') or '').lower()
+        port = str(details.get('port') or '')
+        for entry in bound:
+            want_host, _, want_port = entry.lower().partition(':')
+            if host == want_host and (not want_port or port == want_port):
+                return None
+        return (f"'{spec['role']}' is bound to {', '.join(bound)} by QUERYAPIGATE_VAULT_DATABASE_ROLES - not "
+                f"{host}{':' + port if port else ''}")
 
     def key(self, spec, details):
         return spec['role']
@@ -371,12 +393,41 @@ class _Cache:
     def __init__(self):
         self._lock = threading.Lock()
         self._entries = {}  # (provider, what) -> (value, version, refresh after, usable until) - monotonic times
+        self._failed = {}  # (provider, what) -> (ask again after - monotonic, the error): a failure, remembered
+        self._fetching = set()  # keys a fetch is under way for: meanwhile, what's held is served
         self.status = {}  # provider -> {'last_ok', 'last_error', 'failing_since'} (wall-clock times)
 
     def clear(self):
         with self._lock:
             self._entries.clear()
+            self._failed.clear()
             self.status.clear()
+
+    def _remembered_failure(self, key, now):
+        with self._lock:
+            failed = self._failed.get(key)
+        return failed[1] if failed is not None and now < failed[0] else None
+
+    def _start_fetch(self, key, usable):
+        """Whether to fetch now: not while another request is fetching the same and something usable is held."""
+        with self._lock:
+            if key in self._fetching and usable:
+                return False
+            self._fetching.add(key)
+            return True
+
+    def _end_fetch(self, key):
+        with self._lock:
+            self._fetching.discard(key)
+
+    def _held_after_failure(self, key, held, error):
+        """A fetch failed: remember it for RETRY_SECONDS from now - not from when it started, which may have been a
+        timeout ago - and serve what's held until then, if it's still usable."""
+        now = time.monotonic()
+        with self._lock:
+            self._failed[key] = (now + RETRY_SECONDS, error)
+            if held is not None:
+                self._entries[key] = (*held[:2], min(held[3], now + RETRY_SECONDS), held[3])
 
     def resolve(self, name, what):
         provider = PROVIDERS[name]
@@ -390,16 +441,27 @@ class _Cache:
             held = self._entries.get(key)
         if held is not None and now < held[2] and held[1] == version:
             return held[0]
+        usable = held is not None and now < held[3] and held[1] == version
+        remembered = self._remembered_failure(key, now)
+        if remembered is not None and not usable:
+            raise unavailable(f'${{{name}:{what}}} could not be resolved: {remembered}')
+        if not self._start_fetch(key, usable):
+            return held[0]
         try:
             value, ttl = provider.fetch(what)
         except _FetchError as error:
             self._note(name, error)
-            if held is not None and now < held[3] and held[1] == version:
+            self._held_after_failure(key, held if usable else None, error)
+            if usable:
                 log.warning('The secret provider %s failed (%s) - using the value it gave before, good for %ds more',
-                            name, error, int(held[3] - now))
+                            name, error, int(held[3] - time.monotonic()))
                 return held[0]
             raise unavailable(f'${{{name}:{what}}} could not be resolved: {error}') from None
+        finally:
+            self._end_fetch(key)
         self._note(name, None)
+        with self._lock:
+            self._failed.pop(key, None)
         keep = self._keep(ttl)
         with self._lock:
             self._entries[key] = (value, version, now + keep * REFRESH_AT, now + keep)
@@ -418,16 +480,27 @@ class _Cache:
             held = self._entries.get(key)
         if held is not None and now < held[2]:
             return held[0], held[3]
+        usable = held is not None and now < held[3]
+        remembered = self._remembered_failure(key, now)
+        if remembered is not None and not usable:
+            raise unavailable(f'credentials {source.name} could not be resolved: {remembered}')
+        if not self._start_fetch(key, usable):
+            return held[0], held[3]
         try:
             pair, ttl = source.fetch(spec, details)
         except _FetchError as error:
             self._note(source.name, error)
-            if held is not None and now < held[3]:
+            self._held_after_failure(key, held if usable else None, error)
+            if usable:
                 log.warning('The credential source %s failed (%s) - using the credentials it gave before, good for '
-                            '%ds more', source.name, error, int(held[3] - now))
+                            '%ds more', source.name, error, int(held[3] - time.monotonic()))
                 return held[0], held[3]
             raise unavailable(f'credentials {source.name} could not be resolved: {error}') from None
+        finally:
+            self._end_fetch(key)
         self._note(source.name, None)
+        with self._lock:
+            self._failed.pop(key, None)
         lasts = float(ttl) if ttl else float(config.secret_cache_seconds())
         usable = max(0.0, lasts - lease_margin(lasts))
         with self._lock:  # a short lease's margin can reach past REFRESH_AT: fetched again by the time it's unusable

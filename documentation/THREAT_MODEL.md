@@ -353,6 +353,35 @@ what's still the deployer's:
   the same name, made in the Console, isn't pruned as the file's.
 - **A file is capped at a million values**, YAML aliases counted as they expand, so a small file can't be a huge one.
 
+### Secrets from secrets managers (ADR 0015, experimental)
+
+A reference - `${file:...}`, `${vault:...}`, `${aws-sm:...}` - or a connection's `credentials` lets an administrator
+make the server fetch a secret and use it as a password. The server's identity (its files, Vault token, IAM role)
+reaches far more than any one connection should, and an administrator could point a connection at a host of theirs
+to be sent whatever it fetches. So:
+
+- **Nothing is reachable until the deployer says so**: `QUERYAPIGATE_SECRET_FILE_DIRS`, `QUERYAPIGATE_VAULT_PATHS`,
+  `QUERYAPIGATE_VAULT_DATABASE_ROLES`, `QUERYAPIGATE_AWS_SECRET_PREFIXES` and `QUERYAPIGATE_AWS_RDS_HOSTS`, checked
+  when a reference is saved and again when it's used. The store's own folder is never readable, and the server's own
+  `QUERYAPIGATE_*`/`OTEL_*` settings never reachable, by any reference. A file is opened at the real path that was
+  checked, so a symbolic link changed in between can't point it elsewhere.
+- **A Vault database role can be bound to the host its credentials may go to** (`reporting-ro@warehouse.internal`),
+  and an RDS IAM token is made only for the listed hosts. **Bind every role**: an unbound one hands its credentials
+  to whatever host a connection names - including through `POST /api/v1/connections/test`, without saving anything.
+- **What an allowed reference names, an administrator can still send elsewhere** - a `${vault:...}` password to a
+  host of theirs - exactly as with `${VAR}`: an administrator is trusted with the credentials of the connections they
+  manage (as above). The allow-lists bound which; short-lived credentials bound for how long; a bound role, where.
+- **Resolved values are held in memory only**, for at most their lease or `QUERYAPIGATE_SECRET_CACHE_SECONDS`, and
+  never written to the store, a log, a response, a trace or the audit log; errors name the provider and its reason,
+  never a value. A provider that fails is forgiven only within what it gave before; past that, `secret_unavailable`.
+- **IAM tokens and Vault credentials are passwords**: `aws-rds-iam` is refused without TLS, and a PostgreSQL or
+  MySQL connection's TLS settings now reach its driver (before 0.28 they were dropped).
+- **The Vault token, AppRole secret ID and the chart's projected token** are the server's to protect like
+  `QUERYAPIGATE_SECRET_KEY`. Vault's policy for that identity is the outer limit of what any reference can reach -
+  keep it to the paths and roles connections need. The same goes for the IAM role.
+- **Leases are revoked when a process stops** (on SIGTERM too), so a stopped instance's database users don't linger;
+  one that crashes leaves them to their TTL.
+
 ### Rate limiting and abuse prevention
 
 The rate limiter throttles both by source IP (server-wide) and, additively, by API key (`rate_limit` grant). Without
