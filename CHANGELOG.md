@@ -50,6 +50,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-13
+
 Live events get a log of their own ([ADR 0020](documentation/adr/0020-the-event-log.md)). Until now an event was a row
 of run history, so history's settings decided which runs became events and how far back a client could resume. Now
 every run is written to the event log in the same batch as its history row, and kept for a set time. The payload says
@@ -2430,7 +2432,15 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.32.0...v0.33.0
+[0.32.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.31.0...v0.32.0
+[0.31.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.30.0...v0.31.0
+[0.30.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.29.0...v0.30.0
+[0.29.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.28.0...v0.29.0
+[0.28.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.27.0...v0.28.0
+[0.27.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.22.1...v0.23.0

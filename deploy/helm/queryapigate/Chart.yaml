@@ -5,8 +5,8 @@ description: >-
   endpoints and MCP tools for AI agents, with keys, roles, masking, quotas and a tamper-evident audit log.
 type: application
 # Released in lockstep with the server (ADR 0013): chart X.Y.Z runs QueryAPIGate X.Y.Z. Set by the release workflow.
-version: 0.32.0
-appVersion: "0.32.0"
+version: 0.33.0
+appVersion: "0.33.0"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/AnanthaRajuC/QueryAPIGate
 sources:
