@@ -1,4 +1,4 @@
-"""Usage quotas: calls and rows per day or month (ADR 0011, BACKLOG #95) - stable since 1.0.0-rc1 (ADR 0017).
+"""Usage quotas: calls and rows per day or month (ADR 0011, BACKLOG #95) - stable since 0.30 (ADR 0017).
 
 A key or role can carry `"quota": {"calls": 100000, "rows": 10000000, "per": "month"}`. Each caller has its own
 counter - a key's, or for signed-in users one per user (`jwt:<subject>`), so a role's quota is each user's allowance.

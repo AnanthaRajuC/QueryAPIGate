@@ -65,13 +65,18 @@ class MarkedEverywhereTests(unittest.TestCase):
                 note = read(path)[match.start():match.start() + 900].replace('\n>', ' ')
                 self.assertIn('may still be added', ' '.join(note.split()))
 
-    def test_features_graduated_for_1_0_0_rc1_say_what_may_be_added_and_their_limits(self):
+    def test_features_graduated_in_0_30_say_what_may_be_added_and_their_limits(self):
         """ADR 0017: each section opens with the promise, what may still be added, and its limits."""
-        for heading in ('Descriptions', 'Agent usage', 'Usage quotas', 'Configuration as code'):
+        api = 'documentation/API.md'
+        for path, heading in ((api, 'Descriptions'), (api, 'Agent usage'), (api, 'Usage quotas'),
+                              (api, 'Configuration as code'), (api, 'Console sign-in through SSO'),
+                              ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
+                              ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
+                              ('documentation/DEPLOYMENT.md', 'Kubernetes (Helm)')):
             with self.subTest(heading=heading):
-                text = read('documentation/API.md')
+                text = read(path)
                 match = re.search(rf'^#+ {re.escape(heading)}\n+(.+)', text, re.M)
-                self.assertTrue(match.group(1).startswith('> **Stable** since 1.0.0-rc1'), match.group(1))
+                self.assertTrue(match.group(1).startswith('> **Stable** since 0.30'), match.group(1))
                 callout = text[match.start(1):].split('\n\n', 1)[0].replace('\n>', ' ')
                 self.assertIn('may still be added', ' '.join(callout.split()))
                 self.assertIn('Limits:', callout)

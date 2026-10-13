@@ -46,7 +46,7 @@ class ShapeTests(unittest.TestCase):
     def test_the_default_is_one_pod_on_sqlite_with_its_store_on_a_volume(self):
         docs = render(*SECRET)
         self.assertEqual(sorted(d['kind'] for d in docs),
-                         ['Deployment', 'PersistentVolumeClaim', 'Secret', 'Service', 'ServiceAccount'])
+                         ['Deployment', 'PersistentVolumeClaim', 'Secret', 'Secret', 'Service', 'ServiceAccount'])
         deployment = by_kind(docs, 'Deployment')[0]
         self.assertEqual((deployment['spec']['replicas'], deployment['spec']['strategy']['type']), (1, 'Recreate'))
         volumes = {v['name']: v for v in deployment['spec']['template']['spec']['volumes']}
@@ -54,7 +54,7 @@ class ShapeTests(unittest.TestCase):
         claim = by_kind(docs, 'PersistentVolumeClaim')[0]
         self.assertEqual(claim['metadata']['annotations']['helm.sh/resource-policy'], 'keep')
         self.assertEqual(container(deployment)['image'], f'ghcr.io/anantharajuc/queryapigate:{__version__}')
-        self.assertEqual(by_kind(docs, 'Secret')[0]['stringData'], {'QUERYAPIGATE_API_KEY': 'k'})
+        self.assertEqual(by_kind(docs, 'Secret', 'qag-queryapigate')[0]['stringData'], {'QUERYAPIGATE_API_KEY': 'k'})
 
     def test_postgres_runs_several_rolled_one_at_a_time(self):
         docs = render(*POSTGRES)
@@ -63,7 +63,7 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(deployment['spec']['strategy'],
                          {'type': 'RollingUpdate', 'rollingUpdate': {'maxUnavailable': 0, 'maxSurge': 1}})
         self.assertEqual(by_kind(docs, 'PodDisruptionBudget')[0]['spec']['minAvailable'], 2)
-        self.assertFalse(by_kind(docs, 'Secret') or by_kind(docs, 'PersistentVolumeClaim'))
+        self.assertFalse(by_kind(docs, 'Secret', 'qag-queryapigate') or by_kind(docs, 'PersistentVolumeClaim'))
         self.assertEqual(container(deployment)['envFrom'], [{'secretRef': {'name': 'qag'}}])
 
     def test_events_mcp_and_the_ingress(self):
@@ -147,6 +147,29 @@ class ShapeTests(unittest.TestCase):
         self.assertFalse(any(v['name'] == 'vault-token' for d in by_kind(render(*SECRET), 'Deployment')
                              for v in d['spec']['template']['spec']['volumes']))
 
+    def test_metrics_need_a_token_the_chart_makes_and_prometheus_sends(self):
+        """metricsAuth (ADR 0017's review): the ingress routes every path, /metrics included, and its labels name keys,
+        queries and connections - so every pod gets QUERYAPIGATE_METRICS_TOKEN from a Secret of the chart's own."""
+        docs = render(*POSTGRES, '--set', 'mcp.enabled=true', '--set', 'events.enabled=true',
+                      '--set', 'serviceMonitor.enabled=true')
+        [secret] = by_kind(docs, 'Secret', 'qag-queryapigate-metrics')
+        self.assertGreaterEqual(len(secret['data']['token']), 48)
+        for deployment in by_kind(docs, 'Deployment'):
+            env = {e['name']: e for e in container(deployment)['env']}
+            self.assertEqual(env['QUERYAPIGATE_METRICS_TOKEN']['valueFrom'],
+                             {'secretKeyRef': {'name': 'qag-queryapigate-metrics', 'key': 'token'}})
+        endpoint = by_kind(docs, 'ServiceMonitor')[0]['spec']['endpoints'][0]
+        self.assertEqual(endpoint['authorization'],
+                         {'type': 'Bearer', 'credentials': {'name': 'qag-queryapigate-metrics', 'key': 'token'}})
+        mine = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'metricsAuth.existingSecret=mine')
+        self.assertEqual(by_kind(mine, 'Secret', 'qag-queryapigate-metrics'), [])
+        self.assertEqual(by_kind(mine, 'ServiceMonitor')[0]['spec']['endpoints'][0]['authorization']['credentials'],
+                         {'name': 'mine', 'key': 'token'})
+        off = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'metricsAuth.enabled=false')
+        self.assertNotIn('authorization', by_kind(off, 'ServiceMonitor')[0]['spec']['endpoints'][0])
+        self.assertFalse(any(e['name'] == 'QUERYAPIGATE_METRICS_TOKEN' for d in by_kind(off, 'Deployment')
+                             for e in container(d)['env']))
+
     def test_the_optional_parts(self):
         docs = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'networkPolicy.enabled=true',
                       '--set', 'autoscaling.enabled=true')
@@ -204,7 +227,9 @@ class RefusalTests(unittest.TestCase):
                 ((*SECRET, '--set', 'configAsCode.enabled=true'), 'configAsCode.enabled needs the file'),
                 ((*SECRET, '--set', 'configAsCode.enabled=true', '--set', 'configAsCode.file=x',
                   '--set', 'configAsCode.existingConfigMap=y'), 'choose one'),
-                ((*SECRET, '--set', 'config.QUERYAPIGATE_CONFIG_FILE=/x'), 'through configAsCode')):
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_CONFIG_FILE=/x'), 'through configAsCode'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_METRICS_TOKEN=x'), 'comes from metricsAuth'),
+                ((*SECRET, '--set', 'secret.values.QUERYAPIGATE_METRICS_TOKEN=x'), 'comes from metricsAuth')):
             failed, stderr = refused(*args)
             self.assertTrue(failed, args)
             self.assertIn(words, stderr, args)

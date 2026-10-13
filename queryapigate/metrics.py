@@ -6,6 +6,7 @@ for a multi-process deployment, which would need a shared backing store instead 
 in its multiprocess mode) - nothing here does that.
 """
 import bisect
+import hmac
 import threading
 
 from . import pool
@@ -33,6 +34,37 @@ _history_runs: dict[tuple, int] = {}  # (outcome,) -> runs: recorded / sampled_o
 
 def _bucket_index(elapsed):
     return bisect.bisect_left(_BUCKETS, elapsed)
+
+
+def authorized(authorization):
+    """Whether a request may read /metrics: always, unless QUERYAPIGATE_METRICS_TOKEN is set - then only with
+    `Authorization: Bearer <that token>`. The Helm chart sets one, since its ingress would otherwise publish the
+    counts, and the key, query and connection names in their labels (ADR 0017's review). REST's and the MCP server's
+    /metrics both ask this."""
+    from . import config
+    token = config.metrics_token()
+    if token is None:
+        return True
+    scheme, _, supplied = (authorization or '').strip().partition(' ')
+    return scheme.lower() == 'bearer' and hmac.compare_digest(supplied.strip().encode(), token.encode())
+
+
+UNAUTHORIZED = 'Unauthorized - /metrics needs its token (QUERYAPIGATE_METRICS_TOKEN)'
+
+
+ADMINISTRATOR_VIAS = ('sso', 'token', 'break-glass')  # how a named administrator signs in (admins.permission_for())
+
+
+def label_for(permission):
+    """The `key` label a caller is counted under: an API key's name - an application's - but `admin` for every named
+    administrator, as `jwt` is for every signed-in user. An administrator is a person, often named after themselves
+    (an SSO sign-in takes their username); /metrics is no place for a person's name, and the audit log already says
+    which administrator did what (ADR 0017's review)."""
+    if permission is None:
+        return '-'
+    if getattr(permission, 'via', None) in ADMINISTRATOR_VIAS:
+        return 'admin'
+    return permission.name or '-'
 
 
 def _key_label(key):

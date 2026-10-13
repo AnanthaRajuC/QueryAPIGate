@@ -4,9 +4,8 @@
 its store on a volume, then three pods on PostgreSQL and Redis with the events and MCP servers, changed while serving
 without a single failed request.
 
-> **Experimental** - the chart is new in 0.26; its value names may change in any minor release, always noted in the
-> changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)). The server it installs is the same one
-> as everywhere else.
+> **Stable** - the chart's values are under the compatibility promise since 0.30 ([what that means](../CHANGELOG.md#versioning-and-compatibility)). The server it installs is
+> the same one as everywhere else.
 
 Every command and output below was run on a **kind** cluster (Kubernetes 1.37) with **Helm 4.3**, using the chart and
 the image of the 0.26.0 release commit, built and loaded into the cluster before they were published. Helm 3 works

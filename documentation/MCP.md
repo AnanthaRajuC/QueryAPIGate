@@ -95,8 +95,11 @@ with a `WWW-Authenticate` header (until 0.17 it was a tool error inside a `200`)
 
 ## Sign-in for AI clients (OAuth)
 
-> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); its settings and answers may change in any
-> minor release, always noted in the changelog.
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Settings, and
+> scopes and claims it reads, may still be added as the MCP authorization specification grows; the answers to a
+> refused token stay as they are. Limits: QueryAPIGate checks tokens and issues none, so registering clients and
+> revoking tokens are the provider's; a token must be a JWT signed with an asymmetric key - an opaque one, which only
+> introspection could check, is refused; and a token is valid until it expires.
 
 A hosted AI client - a connector in an assistant - doesn't take an API key: it follows the MCP specification's
 authorization, OAuth 2.1. The MCP server takes the part the specification gives it, a **resource server**: it checks
@@ -142,7 +145,7 @@ The step by step, with Keycloak: [let AI clients sign in through your identity p
 
 ## Descriptions and the data dictionary
 
-> **Stable** since 1.0.0-rc1, with [descriptions](API.md#descriptions) themselves - what may still be added, and the
+> **Stable** since 0.30, with [descriptions](API.md#descriptions) themselves - what may still be added, and the
 > limits, are there.
 
 What an agent is told the data means:
@@ -159,8 +162,10 @@ The step by step: [tell AI agents what your data means, and see what they did](h
 
 ## Write tools: agents that write, approved by a person
 
-> **Experimental** - new in 0.21 ([ADR 0008](adr/0008-mcp-write-tools-with-approval.md)); how agents ask for writes
-> and how people approve them may change in any minor release, always noted in the changelog.
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields of
+> a write request, and modes, may still be added; `approval` and `idempotency_key` stay as they are. Limits: one
+> `INSERT`, `UPDATE` or `DELETE` per tool, on PostgreSQL, MySQL (transactional tables), SQLite or DuckDB; and an
+> approver sees the SQL and the arguments, not which rows will change.
 
 Agents read only - except through a saved query whose author marked it **`agent_writes`**, for a caller whose grant
 allows that write (`{"name": "close_ticket", "allow_writes": true}`, as over REST), with `QUERYAPIGATE_ALLOW_WRITES`
@@ -212,8 +217,8 @@ run history (and live events) with `"transport": "mcp"`.
 **Limits are shared through Redis.** With `QUERYAPIGATE_REDIS_URL` set (the same value for both processes), a key's
 `rate_limit` of 100/minute is 100 calls a minute over REST and MCP together. Without it, each process counts on its
 own: 100 over REST *and* 100 over MCP, as two instances would. Metrics are per process either way: `queryapigate mcp` serves its own
-`GET /metrics` (and `GET /health`) on its port, beside `/mcp`, with no key needed - the same as the REST server's.
-Scrape both.
+`GET /metrics` (and `GET /health`) on its port, beside `/mcp` - open, or with `QUERYAPIGATE_METRICS_TOKEN` set, to a
+scraper sending it as a bearer token, as the REST server's. Scrape both.
 
 **The CLI is a local operator, not a caller.** `queryapigate export` reads the store directly with no key, so no
 grant or rate limit applies - whoever can run it can already read `QUERYAPIGATE_HOME`. Its runs are still recorded

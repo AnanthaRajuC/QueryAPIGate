@@ -5,8 +5,7 @@ connecting to your MCP server by signing its user in through your identity provi
 out: the user's role decides what the agent can reach, its masking rules apply, every run is recorded under the
 user's name, and a token issued for anything else is refused.
 
-> **Experimental** - OAuth for the MCP server is new in 0.18 and may change in any minor release, always noted in the
-> changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - OAuth for the MCP server is under the compatibility promise since 0.30 ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every command and response below was run against a real MCP server and a real Keycloak 26 (in Docker), with the
 [example APIs](05-try-the-built-in-example-apis.md) loaded, and a real MCP client - the Python SDK's - going through
@@ -75,7 +74,6 @@ Here, against the local Keycloak:
 
 ```
 MCP sign-in through http://localhost:58080/realms/qag-test, for tokens issued to http://127.0.0.1:5001/mcp (scope queryapigate.mcp)
-Experimental: OAuth for the MCP server (...)
 INFO:     Uvicorn running on http://127.0.0.1:5001 (Press CTRL+C to quit)
 ```
 

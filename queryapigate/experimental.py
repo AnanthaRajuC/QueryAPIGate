@@ -8,8 +8,9 @@ docs say so at each feature's own section.
 
 A feature graduates - its entry deleted here, its callout replaced by a note that it's stable and what may still be
 added - when it meets every one of GRADUATION. Alerts, remote files through DuckDB, exports and column masking did in
-0.20; descriptions, agent usage, usage quotas and configuration as code in 1.0.0-rc1 (ADR 0017). The connection
-types have their own terms (databases.GRADUATION).
+0.20; descriptions, agent usage, usage quotas, configuration as code, OAuth for the MCP server, write tools and
+Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart. The connection types have their own terms
+(databases.GRADUATION).
 """
 from typing import Any
 
@@ -40,24 +41,6 @@ FEATURES: dict[str, dict[str, Any]] = {
         'db_types': ('h2', 'jdbc', 'mongo'),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and mongo'),
     },
-    'mcp_oauth': {
-        'name': 'OAuth for the MCP server',
-        'why': 'new in 0.18 - its settings, the scope and the answers to refused tokens may change as AI clients use '
-               'it (ADR 0006)',
-        'settings': ('QUERYAPIGATE_MCP_RESOURCE_URL', 'QUERYAPIGATE_MCP_AUTH_SERVER', 'QUERYAPIGATE_MCP_SCOPE',
-                     'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM'),
-        'docs': ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
-    },
-    'agent_writes': {
-        'name': 'Write tools over MCP',
-        'why': 'new in 0.21 - how agents ask for writes, and how people approve them, may change as it is used '
-               '(ADR 0008)',
-        'operations': (('get', '/api/v1/write-requests'), ('get', '/api/v1/write-requests/{id}'),
-                       ('post', '/api/v1/write-requests/{id}/approve'),
-                       ('post', '/api/v1/write-requests/{id}/reject')),
-        'settings': ('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', 'QUERYAPIGATE_CONSOLE_URL'),
-        'docs': ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
-    },
     'audit_stream': {
         'name': 'The audit log streamed to a SIEM',
         'why': 'new in 0.25 - its settings and message format may change as it meets real SIEMs (ADR 0012)',
@@ -81,15 +64,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                      'QUERYAPIGATE_VAULT_PATHS', 'QUERYAPIGATE_VAULT_DATABASE_ROLES', 'QUERYAPIGATE_AWS_REGION',
                      'QUERYAPIGATE_AWS_SECRET_PREFIXES', 'QUERYAPIGATE_AWS_RDS_HOSTS'),
         'docs': ('documentation/API.md', 'Secrets from files and secrets managers'),
-    },
-    'sso': {
-        'name': 'Console sign-in through SSO',
-        'why': 'new in 0.19 - its settings and the session may change as it is used (ADR 0007)',
-        'settings': ('QUERYAPIGATE_SSO_ISSUER', 'QUERYAPIGATE_SSO_CLIENT_ID', 'QUERYAPIGATE_SSO_CLIENT_SECRET',
-                     'QUERYAPIGATE_SSO_REDIRECT_URL', 'QUERYAPIGATE_SSO_ROLES', 'QUERYAPIGATE_SSO_GROUPS_CLAIM',
-                     'QUERYAPIGATE_SSO_SESSION_HOURS', 'QUERYAPIGATE_SSO_ONLY', 'QUERYAPIGATE_SSO_DEFAULT_ROLE',
-                     'QUERYAPIGATE_SSO_ALLOWED_DOMAINS'),
-        'docs': ('documentation/API.md', 'Console sign-in through SSO'),
     },
 }
 

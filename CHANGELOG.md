@@ -21,11 +21,9 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
-(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
-(`QUERYAPIGATE_MCP_RESOURCE_URL`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
-(`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`),
-the audit log streamed to a SIEM (`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), and secrets from
-files and secrets managers (`${file:...}`).
+(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, tracing with OpenTelemetry
+(`OTEL_EXPORTER_OTLP_ENDPOINT`), the audit log streamed to a SIEM (`QUERYAPIGATE_AUDIT_SYSLOG_URL`,
+`QUERYAPIGATE_AUDIT_OTLP`), and secrets from files and secrets managers (`${file:...}`).
 The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -61,24 +59,44 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   and `KUBERNETES_*` are refused too, when saved and when used; and **`QUERYAPIGATE_SECRET_ENV_VARS`** (names, or
   prefixes ending in `*`) limits `${VAR}` to what it lists, like the other references' allow-lists. Unset, any other
   variable may still be referenced - the server warns at startup while references are in use - so nothing breaks on
-  upgrade unless a connection used one of those names. Found in the security review for 1.0.0-rc1
+  upgrade unless a connection used one of those names. Found in the security review for 0.30
   ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)).
+- **The Helm chart published `/metrics` through its ingress.** The ingress routes every path to the API server, and
+  `/metrics` was open, with API keys', queries' and connections' names in its labels - and each administrator's own
+  name, often their username. Now **`QUERYAPIGATE_METRICS_TOKEN`** (at least 16 characters) makes `/metrics` - the API
+  server's and the MCP server's - answer only `Authorization: Bearer <the token>`, and an administrator who may
+  observe (the Console's Metrics screen); unset, it stays open, for setups no one outside reaches. The chart sets one
+  (`metricsAuth`, on by default): made in a Secret of its own, kept across upgrades, and sent by its ServiceMonitor. And
+  administrators are counted under one `admin` label, as signed-in users are under `jwt`, so no person's name is a
+  label anywhere. Found in the security review for 0.30.
+- **The Console showed what a sign-in link said.** A refused sign-in through SSO came back to the Console as
+  `?sso_error=...&sso_message=...`, and the Console showed `sso_message` as written - so anyone could send an
+  administrator a Console link whose error banner said what they liked. Now only the code travels, and the Console
+  says what each one means in its own words; the reason stays in the audit log. Found in the security review for 0.30.
 
 ### Upgrading from 0.29
+- **On the Helm chart, `/metrics` needs a token** (`metricsAuth`, on by default). The ServiceMonitor sends it; any
+  other scraper reads it from the `<release>-metrics` Secret. Rendered without the cluster (`helm template`, Argo CD),
+  set `metricsAuth.existingSecret` to a Secret of yours - the chart can't see the one it made, and would make another.
+  `metricsAuth.enabled: false` keeps `/metrics` open, as before.
+- **In `/metrics`, administrators are `key="admin"`** - each one used to be under their own name. A dashboard that
+  split by administrator: the audit log says which one did what.
 - **Higher minimum versions:** Flask 3.0 (was 2.2), Werkzeug 3.0 (now listed: QueryAPIGate imports it), PyYAML 6.0.1
   (was 6.0), and for the `mcp` extra, mcp 1.21.1 (was 1.10). None of the old minimums could actually be used: Flask
   2.x can't be imported beside the Werkzeug 3 that pip installs with it, PyYAML 6.0 can't be installed on Python 3.12
   or later, and mcp before 1.21.1 can't be imported beside the pydantic pip installs with it.
 
 ### Changed
-- **Stable now, under the compatibility promise:** descriptions, agent usage, usage quotas and configuration as code
-  ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). Each met every one of
-  `experimental.GRADUATION`; each one's documentation now says what may still be added and its limits. No longer
-  marked experimental in `/openapi.json`, Settings, the Console's Agents screen and quota fields, or the startup log.
+- **Stable now, under the compatibility promise:** descriptions, agent usage, usage quotas, configuration as code,
+  OAuth for the MCP server, Console sign-in through SSO, write tools over MCP, and the Helm chart's values
+  ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). Each met every one of `experimental.GRADUATION`, and each one's documentation
+  now says what may still be added and its limits. No longer marked experimental in `/openapi.json`, Settings, the
+  Console's Agents and Approvals screens and quota fields, the chart's `Chart.yaml` and notes, or the startup log.
   Usage quotas' documentation now says what doesn't count - exports, live events, MCP resources, the Management API -
   and that an agent's write request does.
 - **`config diff` and `config apply --server`** are tested against a real `queryapigate serve`, over HTTP.
 - **OpenAPI no longer calls column masking experimental** - two field descriptions left over from before 0.20.
+- **A test holds the MCP server's key fetching to no redirects** - PyJWT's own behaviour, from 2.14, the floor.
 - **CI tests the lowest version allowed of every core dependency, and of the `mcp`, `jwt` and `redis` extras**
   ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)) - the whole suite on Python 3.11, with Redis.
   It tested only DuckDB's and sqlglot's before. A test fails if a minimum in pyproject.toml and the version CI pins

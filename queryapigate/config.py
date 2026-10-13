@@ -357,6 +357,9 @@ def check_settings():
     for folder in os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '').split(','):
         if folder.strip() and not os.path.isabs(folder.strip()):
             raise ValueError(f"QUERYAPIGATE_SECRET_FILE_DIRS: '{folder.strip()}' must be an absolute path")
+    if metrics_token() is not None and len(metrics_token()) < METRICS_TOKEN_MIN:
+        raise ValueError(f'QUERYAPIGATE_METRICS_TOKEN must be at least {METRICS_TOKEN_MIN} characters - '
+                         '`openssl rand -hex 32` makes one')
     for name in secret_env_vars():
         if not SECRET_ENV_VAR_RE.fullmatch(name):
             raise ValueError(f"QUERYAPIGATE_SECRET_ENV_VARS: '{name}' must be a variable's name, or a prefix "
@@ -617,7 +620,8 @@ def _check_vault():
 # convention - read at startup, as the environment variable would be.
 SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
                    'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
-                   'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID')
+                   'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID',
+                   'QUERYAPIGATE_METRICS_TOKEN')
 # QUERYAPIGATE_VAULT_TOKEN_FILE isn't one of them: vault.py reads it again at each sign-in, as Vault Agent rotates it.
 _from_files: dict[str, str] = {}  # setting -> the file it was read from
 
@@ -646,6 +650,15 @@ def load_secret_files():
 def secret_source(name):
     """Where a secret setting came from, for Settings: its file, or None for the environment."""
     return _from_files.get(name)
+
+
+METRICS_TOKEN_MIN = 16
+
+
+def metrics_token():
+    """QUERYAPIGATE_METRICS_TOKEN: the bearer token /metrics needs, or None - then /metrics is open, as it was before
+    0.30 (metrics.authorized()). Validated by check_settings()."""
+    return os.environ.get('QUERYAPIGATE_METRICS_TOKEN', '').strip() or None
 
 
 def mask_key():
@@ -1288,6 +1301,9 @@ def describe_settings():
             row('Encryption at rest', 'Fernet key used to encrypt connection and destination passwords on disk; '
                 'several, comma-separated, while rotating it - the first encrypts.',
                 'QUERYAPIGATE_SECRET_KEY', _encryption_state(), secret=True),
+            row('Metrics token', 'The bearer token /metrics needs. Unset: /metrics is open to whoever can reach it.',
+                'QUERYAPIGATE_METRICS_TOKEN', 'configured' if metrics_token() else 'not set - /metrics is open',
+                secret=True),
             row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
                 'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
             row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',

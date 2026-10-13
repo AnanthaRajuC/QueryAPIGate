@@ -4,8 +4,7 @@
 person has approved that exact change - each write limited to the rows it may change, run once, and on record with who
 asked and who approved.
 
-> **Experimental** - write tools over MCP are new in 0.21 and may change in any minor release, always noted in the
-> changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - write tools over MCP are under the compatibility promise since 0.30 ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every command and response below was run against a real server, its MCP server and a PostgreSQL 16 `tickets` table,
 with a real MCP client (the Python SDK) as the agent - the Console at `http://localhost:5098` in this run.

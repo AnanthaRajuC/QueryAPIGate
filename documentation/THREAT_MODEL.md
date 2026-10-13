@@ -141,7 +141,7 @@ What this buys, and what it doesn't:
 - **Residual risks**: tokens are bearer secrets with day-granularity expiry; there is no MFA or SSO yet (BACKLOG
   #84 Phase 2), so a token is only as safe as where it's kept.
 
-#### Console sign-in through SSO (ADR 0007, experimental)
+#### Console sign-in through SSO (ADR 0007)
 
 With `QUERYAPIGATE_SSO_*` set, administrators sign in through the organisation's identity provider; the server runs
 the authorization code flow with PKCE as a confidential client, so the browser never holds a token.
@@ -164,6 +164,16 @@ the authorization code flow with PKCE as a confidential client, so the browser n
   QueryAPIGate ends it at once. `QUERYAPIGATE_SSO_ONLY` takes personal tokens from people who sign in through SSO, so
   they can't route around the provider's MFA; the break-glass key stays, audited and alerted, for when the provider is
   down.
+
+*Reviewed for 0.30 (ADR 0017).* Looked at: PKCE with S256, the state bound to the browser and taken once, the nonce,
+`azp`, the ID token's algorithm from the provider's key and never from the token; `return_to` only ever a Console
+page; linking only to an administrator an owner invited for that verified email; the role from the provider's groups
+every sign-in; the session cookie (`__Host-`, `SameSite=Strict`) and its CSRF token, reads included; signing in again
+ending the session the browser had. **Found:** a refused sign-in sent the Console its reason in the address -
+`?sso_error=...&sso_message=...` - and the Console showed `sso_message` as it was written, so anyone could send an
+administrator a Console link that said what they liked in the Console's own error banner ("call this number").
+Now only the code travels, and the Console says what each one means in its own words; the reason, with whatever the
+provider said, is in the audit log.
 
 ### Column masking: which values leave
 
@@ -228,7 +238,7 @@ This is the part worth being the most precise about, because it's also the part 
 - **A `${VAR}` reference can't name one of the server's own `QUERYAPIGATE_*` settings** in a connection or
   destination - otherwise an administrator could carry the admin key or secret key out in a password sent to a host
   of theirs. **Nor a credential the server itself may run with** - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
-  `VAULT_*`, `KUBERNETES_*` - which would reach beyond every allow-list (found in the review for 1.0.0-rc1:
+  `VAULT_*`, `KUBERNETES_*` - which would reach beyond every allow-list (found in the review for 0.30:
   `${AWS_SECRET_ACCESS_KEY}` was accepted, and with it the server's whole AWS identity, not just the secret prefixes
   `QUERYAPIGATE_AWS_SECRET_PREFIXES` opens). Any other variable is reachable until `QUERYAPIGATE_SECRET_ENV_VARS`
   lists the ones that may be: **set it**, or a credential under a name no rule knows (`DB_ADMIN_PW`) is an
@@ -314,7 +324,7 @@ caller's address (`client.address`) and who called (`queryapigate.caller` - for 
 which may be an email address) - keep the collector's retention to what that allows. An MCP client's tool name is
 recorded only if it has the shape a saved query's name can have; anything else is `(invalid)`.
 
-### On Kubernetes (the Helm chart, ADR 0013, experimental)
+### On Kubernetes (the Helm chart, ADR 0013)
 
 The chart's pods run as UID 1000, with a read-only root filesystem, every capability dropped, the RuntimeDefault
 seccomp profile, and no service account token: QueryAPIGate never calls the Kubernetes API, so a compromised pod has
@@ -328,11 +338,19 @@ no credential for it. The server writes only to `/data` (the store's volume, or 
 - **The chart refuses a secret setting in `config`**: the keys, the database and Redis URLs, the SSO client secret
   and OTLP headers. `config` is plain text in the Deployment, where `get deployments` reads it.
 - **NetworkPolicy is off by default**, because the right rules depend on the cluster. Without it, any pod in the
-  cluster can reach the API, `/metrics` (unauthenticated, as above) and the MCP server. `networkPolicy.enabled`
+  cluster can reach the API and the MCP server. `networkPolicy.enabled`
   limits who can connect in, and narrows what a pod can reach out to, to `egress` - so a stolen admin key can't point
   a new connection at an internal address it doesn't list.
 - **The chart and image are as trusted as ghcr and this repository's release workflow.** The chart is pushed by the
   same tag-triggered workflow as the image. Neither is signed yet, so pin the version, and a digest if you mirror them.
+
+*Reviewed for 0.30 (ADR 0017).* Looked at: every pod's security context, the service account token left unmounted,
+`vaultToken` a projected token for Vault alone, the secret settings refused in `config`, the routes, what the
+NetworkPolicy allows. **Found:** the ingress routes every path to the API server, `/metrics` included - and
+`/metrics` was open, with API keys', queries' and connections' names in its labels, and each administrator's own
+name (often their username, for one signed in through SSO). So an install with the ingress on published them. Now
+`metricsAuth` (on by default) gives `/metrics` a token from a Secret of the chart's own, kept across upgrades, and the
+ServiceMonitor sends it; and administrators are counted under one `admin` label, as signed-in users are under `jwt`.
 
 ### Configuration as code (ADR 0014)
 
@@ -359,7 +377,7 @@ what's still the deployer's:
   the same name, made in the Console, isn't pruned as the file's.
 - **A file is capped at a million values**, YAML aliases counted as they expand, so a small file can't be a huge one.
 
-*Reviewed for 1.0.0-rc1 (ADR 0017).* Looked at: who may diff and apply (`config.apply`, owners); every object checked
+*Reviewed for 0.30 (ADR 0017).* Looked at: who may diff and apply (`config.apply`, owners); every object checked
 by the function the API uses for it, so a file can't do what the API refuses; the `--server` CLI, now tested against
 a real `queryapigate serve` - its key only from `QAG_API_KEY`, no store opened locally; startup apply under the
 store's write lock, once per file; pruning only what a file manages; the lock's reach. **Found:** a `${VAR}`
@@ -437,7 +455,7 @@ cap a caller's calls and rows per day or month. They're a contract's meter, not 
 boundary: a caller overshoots by its calls in flight, and with several instances but no Redis by up to a quota per
 instance in a short burst. `max_concurrent` and the rate limit are what bound a burst.
 
-*Reviewed for 1.0.0-rc1 (ADR 0017).* Looked at: who sets a quota (`access.write`, never the caller; a configuration
+*Reviewed for 0.30 (ADR 0017).* Looked at: who sets a quota (`access.write`, never the caller; a configuration
 file's role through the same validation); that it's checked before the response cache, so a cached answer counts and
 is refused when used up; that MCP tool calls and REST calls share one counter per caller, and per user for a role's
 signed-in callers; the Redis keys (`qag:quota:<caller>:<period>`), where a period always ends in its date, so two
@@ -490,7 +508,7 @@ server doesn't read `QUERYAPIGATE_TRUST_PROXY`: behind a proxy it sees the proxy
 Every request to `/mcp` is authenticated before the MCP session sees it, and refused at the HTTP level (`401`,
 `403`, `429`) - nothing of the protocol is reachable without a credential once one is required.
 
-#### OAuth for AI clients (ADR 0006, experimental)
+#### OAuth for AI clients (ADR 0006)
 
 With `QUERYAPIGATE_MCP_RESOURCE_URL` and `QUERYAPIGATE_MCP_AUTH_SERVER` set, the MCP server is an OAuth 2.1 resource
 server: it checks tokens; the organisation's identity provider issues them. What that protects, and what it doesn't:
@@ -517,7 +535,14 @@ server: it checks tokens; the organisation's identity provider issues them. What
 - **Revocation** is the provider's too: a token is valid until it expires. Keep access tokens short-lived; disabling
   or narrowing the role in QueryAPIGate takes effect on the next request.
 
-#### Agents that write (ADR 0008, experimental)
+*Reviewed for 0.30 (ADR 0017).* Looked at: the algorithm taken from the provider's published key, never the token's
+header, and only an asymmetric one; `iss`, `aud` and `exp` required; tokens for REST and for the MCP server kept
+apart in both directions; the metadata's issuer and `https://` endpoints, and no redirect off `https://`; one name per
+person across two issuers (`mcp:<sub>`); the role claim naming only roles that exist. The signing keys come through
+PyJWT's own client, which follows no redirect at all - from 2.14, the floor CI tests; a test now holds it to that.
+Found nothing to fix.
+
+#### Agents that write (ADR 0008)
 
 - **Only what an author marked, only data changes.** A write tool is a saved query marked `agent_writes` - one
   `INSERT`, `UPDATE` or `DELETE`, never DDL, checked when saved - for a caller whose per-query grant allows the write,
@@ -537,6 +562,12 @@ server: it checks tokens; the organisation's identity provider issues them. What
   that stops.
 - **What's recorded:** every request 30 days, with who decided and how they signed in; the run in history with its
   approver; the audit log with the arguments' names and hash, never their values, since auditors read it.
+
+*Reviewed for 0.30 (ADR 0017).* Looked at: an approval bound to the caller, the query's version and the arguments'
+hash; approved to running in one conditional update, so it runs once however many calls race; deciding guarded the
+same way; the credential that asked never the one that approves; the grant, the mark and the server's setting checked
+again on the call that runs it, before the approval is claimed; at most 100 pending per caller; insert-only's
+idempotency key scoped to the caller and the tool. Found nothing to fix.
 
 #### What agents are told, and what they did
 
@@ -581,8 +612,10 @@ Being explicit about these is as important as everything above:
 - **An agent may be steered by what it reads.** Data in results, descriptions and notes all become part of an AI
   agent's context. QueryAPIGate limits what an agent can reach and hides what masking covers; it can't make an agent
   ignore instructions planted in data it is allowed to read.
-- **`/metrics` is intentionally unauthenticated**, on the assumption that a metrics scraper shouldn't need
-  a credential either - treat it as public within whatever network can reach the service at all.
+- **`/metrics` needs no API key** - a scraper shouldn't hold one - **and is open until `QUERYAPIGATE_METRICS_TOKEN` is
+  set**: then only a request with that bearer token, or an administrator who may observe, reads it. Its labels name
+  API keys, queries and connections (administrators and signed-in users only as `admin` and `jwt`): set the token
+  wherever the server can be reached from outside. The Helm chart does.
 
 ## Where to go from here
 

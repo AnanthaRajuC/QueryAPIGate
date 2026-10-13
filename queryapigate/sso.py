@@ -312,10 +312,12 @@ def _off():
 
 
 def _refused_page(refused):
+    """Back to the Console with the code only: the Console says what each code means in words of its own, so a link
+    someone else made - `?sso_error=...&sso_message=call this number` - can't put their words in the Console's mouth.
+    The reason, with whatever the provider said, is in the audit log."""
     store.record_audit('-', 'sign_in_refused', refused.who or '-', {'code': refused.code, 'reason': refused.message},
                        via='sso')
-    response = redirect(f'{CONSOLE}?' + urllib.parse.urlencode({'sso_error': refused.code,
-                                                               'sso_message': refused.message}))
+    response = redirect(f'{CONSOLE}?' + urllib.parse.urlencode({'sso_error': refused.code}))
     response.delete_cookie(STATE_COOKIE, path='/', secure=True, httponly=True, samesite='Lax')
     return response
 

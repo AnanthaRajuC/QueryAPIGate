@@ -336,7 +336,7 @@ def create_app():
             deprecations.warn(rule)
         elapsed = time.monotonic() - g.get('request_started', time.monotonic())
         endpoint = request.endpoint or 'unmatched'
-        governance.observe(request.method, endpoint, response.status_code, elapsed, caller_key_name())
+        governance.observe(request.method, endpoint, response.status_code, elapsed, metrics_key_name())
         cache_status = response.headers.get('X-Cache')
         if cache_status == 'HIT':
             metrics.inc_cache_hit()
@@ -455,6 +455,11 @@ def caller_key_name():
     return (permission.name if permission else None) or '-'
 
 
+def metrics_key_name():
+    """The caller as /metrics counts it (metrics.label_for()): an API key's name, `admin` for any administrator."""
+    return metrics.label_for(g.get('permission'))
+
+
 def get_json_body(required=True):
     data = request.get_json(silent=True)
     if data is None and not required:
@@ -552,7 +557,7 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
                        code='invalid_stream')
     if request.args.get('page') or request.args.get('page_size'):
         raise ApiError('stream=true exports the whole result and does not accept page/page_size', code='invalid_stream')
-    key_name = caller_key_name()
+    key_name = metrics_key_name()
     columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
                                       allowed_tables=allowed_tables, mask=mask)
     # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the response
@@ -679,7 +684,7 @@ def execute_sql_endpoint():
     try:
         result, elapsed_ms = engine.timed(engine.execute_sql, data['sql'], data['connection_name'], limit, offset,
                                           params, timeout, allow_writes=g.permission.allow_writes,
-                                          key_name=caller_key_name(), allowed_write_ops=g.permission.allowed_write_ops,
+                                          key_name=metrics_key_name(), allowed_write_ops=g.permission.allowed_write_ops,
                                           database=database, allowed_tables=g.permission.allowed_tables,
                                           mask=g.permission.mask)
     except ApiError as error:
@@ -714,7 +719,7 @@ def execute_mongo_endpoint():
         result, elapsed_ms = engine.timed(engine.execute_mongo, data['collection'], filter_doc,
                                           data['connection_name'], limit, offset, params, timeout,
                                           projection=data.get('projection'), sort=data.get('sort'),
-                                          key_name=caller_key_name(), mask=g.permission.mask)
+                                          key_name=metrics_key_name(), mask=g.permission.mask)
     except ApiError as error:
         _record_adhoc_and_broadcast(statement, params, data['connection_name'],
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -906,7 +911,7 @@ def _run_saved(ref, body, url_params):
     entry = run_entry(connection_name)
     try:
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, limit, offset, values, timeout,
-                                          allow_writes=effective_allow_writes, key_name=caller_key_name(),
+                                          allow_writes=effective_allow_writes, key_name=metrics_key_name(),
                                           allowed_write_ops=g.permission.allowed_write_ops,
                                           allowed_tables=g.permission.allowed_tables, mask=g.permission.mask)
     except ApiError as error:
@@ -963,7 +968,7 @@ def _execute_agent_write(request, saved, path, number, connection_name, values, 
              **({'approved_by': request['decided_by']} if request['decided_by'] else {})}
     try:
         result, affected = engine.execute_agent_write(sql, connection_name, values, saved.get('max_affected_rows') or 1,
-                                                      timeout, key_name=caller_key_name(),
+                                                      timeout, key_name=metrics_key_name(),
                                                       allowed_write_ops=g.permission.allowed_write_ops,
                                                       allowed_tables=g.permission.allowed_tables,
                                                       mask=g.permission.mask)
@@ -1014,7 +1019,7 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
         result, elapsed_ms = engine.timed(engine.execute_mongo, saved['mongo_collection'], filter_doc,
                                           connection_name, limit, offset, timeout=timeout,
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
-                                          key_name=caller_key_name(), mask=g.permission.mask)
+                                          key_name=metrics_key_name(), mask=g.permission.mask)
     except ApiError as error:
         _record_and_broadcast(path, number, connection_name,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -1157,6 +1162,18 @@ def health():
 
 @bp.route('/metrics', methods=['GET'])
 def metrics_endpoint():
+    """Open, unless QUERYAPIGATE_METRICS_TOKEN is set: then for `Authorization: Bearer <that token>` - a scraper's -
+    or an administrator whose role may observe, as the Console's Metrics screen reads it. What the Helm chart sets,
+    since its ingress would otherwise publish the counts and the key, query and connection names in them (ADR 0017's
+    review)."""
+    from . import adminroles
+    role = getattr(g.get('permission'), 'role', None)
+    observer = role in adminroles.ROLES and 'observe' in adminroles.ROLES[role]
+    if not (observer or metrics.authorized(request.headers.get('Authorization'))):
+        response = jsonify(error_body(metrics.UNAUTHORIZED, 401))
+        response.status_code = 401
+        response.headers['WWW-Authenticate'] = 'Bearer realm="metrics"'
+        return response
     return Response(metrics.render(current_app.extensions.get('queryapigate_cache')),
                     mimetype='text/plain; version=0.0.4; charset=utf-8')
 

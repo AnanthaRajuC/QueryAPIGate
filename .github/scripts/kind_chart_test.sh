@@ -111,6 +111,23 @@ echo "$RESULT" | grep -q '^RESULT ok=[1-9][0-9]* failed=0$' || { echo 'requests 
 kubectl -n pg get pods -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].image}{"\n"}{end}' \
   | grep qag-queryapigate
 
+say "/metrics needs the chart's own token (metricsAuth, ADR 0017): 401 without it, the counts with it"
+METRICS_TOKEN=$(kubectl -n pg get secret qag-queryapigate-metrics -o jsonpath='{.data.token}' | base64 -d)
+[ "${#METRICS_TOKEN}" -ge 48 ] || { echo 'no metrics token in qag-queryapigate-metrics'; exit 1; }
+kubectl -n pg run metrics-check --rm -i --restart=Never --image="$IMAGE" --env="METRICS_TOKEN=$METRICS_TOKEN" \
+  --command -- python -c "
+import os, urllib.error, urllib.request
+for url in ('http://qag-queryapigate/metrics', 'http://qag-queryapigate-mcp/metrics'):
+    try:
+        urllib.request.urlopen(url, timeout=10)
+        raise SystemExit(url + ' answered without its token')
+    except urllib.error.HTTPError as error:
+        assert error.code == 401, (url, error.code)
+    request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['METRICS_TOKEN']})
+    assert 'queryapigate_' in urllib.request.urlopen(request, timeout=10).read().decode(), url
+    print(url, '- 401 without the token, the counts with it')
+"
+
 # ---- configuration as code (ADR 0014) ----
 say "a configuration file through the chart: applied once, by the first new pod, and locked to the file"
 CONFIG_DIR=$(mktemp -d)
@@ -127,6 +144,9 @@ CURRENT=(--set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAG
 helm upgrade qag "$CHART" "${COMMON[@]}" "${CURRENT[@]}" --set configAsCode.enabled=true \
   --set-file configAsCode.file="$CONFIG_DIR/good.yaml" --set configAsCode.locked=true --wait --timeout 6m
 kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
+[ "$(kubectl -n pg get secret qag-queryapigate-metrics -o jsonpath='{.data.token}' | base64 -d)" = "$METRICS_TOKEN" ] \
+  || { echo 'helm upgrade changed the metrics token - lookup should have kept it'; exit 1; }
+echo 'the metrics token is the one from before this upgrade'
 LOGS=$(kubectl -n pg logs -l app.kubernetes.io/component=server --tail=-1)
 APPLIED=$(echo "$LOGS" | grep -c 'Applied QUERYAPIGATE_CONFIG_FILE' || true)
 ALREADY=$(echo "$LOGS" | grep -c 'is already applied' || true)

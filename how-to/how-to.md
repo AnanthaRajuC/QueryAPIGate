@@ -57,7 +57,7 @@ guide covers one scenario end to end, and every command and response in it was r
 43. [**Give your team their own admin access**](43-give-your-team-their-own-admin-access.md) - named administrators
     with roles, their own tokens, and the shared key retired.
 48. [**Sign in to the Console through your identity provider**](48-sign-in-to-the-console-through-your-identity-provider.md)
-    (experimental) - SSO for administrators: roles from groups, people who had tokens linked, SSO only.
+    - SSO for administrators: roles from groups, people who had tokens linked, SSO only.
 45. [**Hide personal data from a partner or an AI agent**](45-hide-personal-data-from-a-partner-or-an-ai-agent.md)
     - column masking: hash, mask or drop values, whatever the SQL calls them.
 50. [**Rotate an API key without downtime**](50-rotate-an-api-key-without-downtime.md) - a new secret, the old one
@@ -79,12 +79,12 @@ guide covers one scenario end to end, and every command and response in it was r
     error codes.
 27. [**Check whether your MCP server is running, from the Console**](27-check-the-mcp-server-from-the-console.md).
 46. [**Let AI clients sign in through your identity provider**](46-let-ai-clients-sign-in-through-your-identity-provider.md)
-    (experimental) - OAuth for the MCP server: a hosted assistant connects as the signed-in user, with that user's
+    - OAuth for the MCP server: a hosted assistant connects as the signed-in user, with that user's
     role and masking.
 47. [**Tell AI agents what your data means, and see what they did**](47-tell-agents-what-your-data-means-and-see-what-they-did.md)
     - descriptions imported from database comments or written, the data dictionary, and the Agents screen.
 49. [**Let an AI agent write - with a person approving each write**](49-let-an-agent-write-with-a-person-approving-each-write.md)
-    (experimental) - write tools over MCP: inserts on their own, other writes approved, a row limit, on record.
+    - write tools over MCP: inserts on their own, other writes approved, a row limit, on record.
 
 ## Live updates (SSE)
 
@@ -135,7 +135,7 @@ guide covers one scenario end to end, and every command and response in it was r
 
 42. [**Run several instances behind a load balancer**](42-run-several-instances.md) - Docker Compose or Kubernetes,
     PostgreSQL and Redis shared, failover and rolling updates.
-54. [**Install on Kubernetes with Helm**](54-install-on-kubernetes-with-helm.md) (experimental) - one pod on SQLite
+54. [**Install on Kubernetes with Helm**](54-install-on-kubernetes-with-helm.md) - one pod on SQLite
     or several on PostgreSQL, what the chart refuses and keeps, changed while serving with no failed request.
 55. [**Promote a setup from dev to prod through a pull request**](55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md)
     - configuration as code: export, review the diff against prod, apply on merge, locked.

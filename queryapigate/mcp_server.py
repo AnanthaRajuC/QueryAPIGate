@@ -476,8 +476,7 @@ def _finish(name, permission, result, started):
     from . import governance
     status = result.pop('_status', 200)
     elapsed = time.monotonic() - started
-    key = (permission.name if permission else None) or '-'
-    governance.observe('MCP', _tool_kind(name), status, elapsed, key)
+    governance.observe('MCP', _tool_kind(name), status, elapsed, metrics.label_for(permission))
     log.info('MCP tools/call %s -> %s in %.1fms', name, status, elapsed * 1000,
              extra={'method': 'MCP', 'path': f'tools/call {name}', 'status': status,
                     'duration_ms': round(elapsed * 1000, 1)})
@@ -650,7 +649,10 @@ def build_asgi_app(flask_app):
         async with session_manager.run():
             yield
 
-    async def metrics_endpoint(_request):
+    async def metrics_endpoint(request):
+        if not metrics.authorized(request.headers.get('authorization')):
+            return JSONResponse({'error': metrics.UNAUTHORIZED, 'code': 'unauthorized'}, status_code=401,
+                                headers={'WWW-Authenticate': 'Bearer realm="metrics"'})
         return PlainTextResponse(metrics.render(flask_app.extensions.get('queryapigate_cache')),
                                  media_type='text/plain; version=0.0.4; charset=utf-8')
 

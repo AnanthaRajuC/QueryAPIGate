@@ -39,6 +39,20 @@ metadata:
 type: Opaque
 stringData: {{- toYaml .Values.secret.values | nindent 2 }}
 {{- end }}
+{{- if and .Values.metricsAuth.enabled (not .Values.metricsAuth.existingSecret) }}
+---
+# /metrics' bearer token (metricsAuth): made once, then kept - lookup finds the one already in the cluster
+{{- $metricsSecret := printf "%s-metrics" $fullname }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $metricsSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $metricsSecret }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{ .Values.metricsAuth.key }}: {{ if and $existing $existing.data (hasKey $existing.data .Values.metricsAuth.key) }}{{ index $existing.data .Values.metricsAuth.key }}{{ else }}{{ randAlphaNum 48 | b64enc }}{{ end }}
+{{- end }}
 {{- if and .Values.configAsCode.enabled .Values.configAsCode.file }}
 ---
 # The configuration file (ADR 0014): no secret in it - passwords are ${VAR} references to the Secret above
@@ -104,7 +118,12 @@ spec:
   selector:
     matchLabels: {{- include "queryapigate.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}
   endpoints:
-    - {port: http, path: /metrics, interval: {{ .Values.serviceMonitor.interval }}}
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      {{- if .Values.metricsAuth.enabled }}
+      authorization: {type: Bearer, credentials: {name: {{ include "queryapigate.metricsSecretName" . }}, key: {{ .Values.metricsAuth.key }}}}
+      {{- end }}
 {{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---

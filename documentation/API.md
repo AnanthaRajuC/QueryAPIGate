@@ -4,8 +4,9 @@ Base URL when running locally: `http://127.0.0.1:5000`. The same information is 
 and as an OpenAPI document at `/openapi.json`.
 
 If the server has any key configured - `QUERYAPIGATE_API_KEY` or a scoped key created through `/api/v1/api-keys` - send it
-with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` are always
-public; `/openapi.json`'s saved-query section still varies with who's asking). See
+with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/console` and `/openapi.json` are always public, and
+`/metrics` unless `QUERYAPIGATE_METRICS_TOKEN` is set; `/openapi.json`'s saved-query section still varies with who's
+asking). See
 [Authentication and permissions](#authentication-and-permissions).
 
 | Endpoint | Method | Purpose |
@@ -590,7 +591,7 @@ as the admin key - no server needs to be running.
 
 ## Configuration as code
 
-> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Kinds and
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Kinds and
 > fields may still be added to `format_version` 1, and commands and options to the CLI; anything else would be a new
 > `format_version`, with this one still read. Limits: the file doesn't hold the server's settings, administrators or
 > their roles (*Not in the file*, below).
@@ -890,7 +891,7 @@ would be; setting both is refused. Settings says which came from a file.
 
 ## Descriptions
 
-> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields - of a
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields - of a
 > description, and where descriptions are served - may still be added; none is removed or renamed except through the
 > deprecation process. Limits: comments are imported from PostgreSQL, DuckDB, MySQL and ClickHouse only; a table's or
 > column's description is up to 2,000 characters and a connection's notes up to 20,000; and another database browsed
@@ -973,8 +974,11 @@ history means one caller; `admin` and `cli` are reserved.
 
 ### Console sign-in through SSO
 
-> **Experimental** - new in 0.19 ([ADR 0007](adr/0007-console-sign-in-through-sso.md)); its settings and the session's
-> shape may change in any minor release, always noted in the changelog.
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Settings, the
+> claims it reads, and fields of `/auth/session` may still be added. Limits: one identity provider at a time, through
+> OpenID Connect (no SAML); and a role comes from the provider's groups at sign-in, so a change there reaches an open
+> session when it ends - `QUERYAPIGATE_SSO_SESSION_HOURS` - unless the administrator is switched off here, which ends
+> it at once.
 
 Administrators sign in to the Console through the organisation's identity provider (OpenID Connect) - its MFA and
 policies apply, and their role comes from their groups:
@@ -1164,7 +1168,7 @@ give one caller less than the server allows - each **narrows** the server's own 
 
 ### Usage quotas
 
-> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). What counts as a
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). What counts as a
 > call is fixed, as below; periods, counts and fields may still be added. Limits: a caller can overshoot by the calls
 > it has in flight, and several instances without Redis count apart (*Precision*, below).
 
@@ -1454,8 +1458,12 @@ can be told apart from `duration_ms` (query execution time) - useful for XLSX or
 where encoding cost can rival query time but was previously invisible, folded into "whatever's left over"
 between total request latency and query latency.
 
-`GET /metrics` (always public, like `/health`) serves [Prometheus text exposition
-format](https://prometheus.io/docs/instrumenting/exposition_formats/):
+`GET /metrics` serves [Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/).
+It's open to whoever can reach it unless **`QUERYAPIGATE_METRICS_TOKEN`** is set (at least 16 characters): then it
+answers `401` to anyone but a scraper sending `Authorization: Bearer <the token>` and an administrator whose role may
+observe - the Console's Metrics screen. Set it wherever the server is reachable from outside: the labels name your API
+keys, queries and connections. The Helm chart sets one (`metricsAuth`). Administrators are counted under one `admin`
+label, and signed-in users under one `jwt`, so no person's name is a label.
 
 - `queryapigate_requests_total` - HTTP requests by method, endpoint, status and the calling key's name.
   `queryapigate_request_duration_seconds` - the same latency, by method and endpoint only (not by key, to keep
@@ -1492,9 +1500,9 @@ The admin UI's **Metrics** tab reads `/metrics` itself and renders it as stat ti
 (requests by status, queries by connection) and a per-connection table (queries, errors, average latency,
 rows) - a zero-setup live view for a deployment with no Prometheus/Grafana stack in front of it at all.
 It's deliberately a *snapshot*, not a dashboard: the numbers are this process's own totals since it started,
-with no history and no trends, the same limits [above](#observability) already describe. It never needs an
-API key - `/metrics` is public - and reading it again just re-fetches the current numbers; there's no
-polling or auto-refresh.
+with no history and no trends, the same limits [above](#observability) already describe. It reads `/metrics` as
+the administrator signed in to the Console, so it works with `QUERYAPIGATE_METRICS_TOKEN` set too; reading it again
+just re-fetches the current numbers - there's no polling or auto-refresh.
 
 For real history, trends and alerting, scrape `/metrics` with Prometheus and import
 [`documentation/grafana-dashboard.json`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/grafana-dashboard.json)
@@ -1697,7 +1705,7 @@ running QueryAPIGate day to day, not a replacement for an on-call alerting syste
 
 ## Agent usage
 
-> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields per agent,
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields per agent,
 > and kinds of `refusals` and `writes`, may still be added - a client should ignore one it doesn't know. Limits: it
 > holds what run history holds (below) - calls refused before they ran aren't in it, a sampled history is a sample, and
 > one summary reads at most 100,000 runs.

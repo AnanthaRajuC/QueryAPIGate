@@ -1,6 +1,6 @@
 """The lowest dependency versions pyproject.toml allows are the ones CI's oldest-dependencies job tests: a minimum
 raised in one place and not the other would claim a version nothing checks (0.19.1: DuckDB said 1.0, and every
-DuckDB connection needed 1.2; 1.0.0-rc1: Flask said 2.2, which can't be imported beside the Werkzeug pip installs
+DuckDB connection needed 1.2; 0.30: Flask said 2.2, which can't be imported beside the Werkzeug pip installs
 with it, and PyYAML said 6.0, which can't be installed on Python 3.12 or later)."""
 import os
 import re

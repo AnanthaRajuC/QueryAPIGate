@@ -1,7 +1,7 @@
 # QueryAPIGate Helm chart
 
-> **Experimental** in 0.26: value names may still change, always noted in the
-> [changelog](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CHANGELOG.md).
+> **Stable** since 0.30: values may be added; none is renamed or removed except through the deprecation process
+> ([changelog](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CHANGELOG.md#versioning-and-compatibility)).
 
 Saved SQL as REST endpoints and MCP tools for AI agents, governed - on Kubernetes. Chart *X.Y.Z* runs QueryAPIGate
 *X.Y.Z* ([ADR 0013](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/adr/0013-helm-chart.md)).
@@ -53,7 +53,8 @@ database URL, a secret setting in `config` instead of the secret, a misspelt val
 | `resources` | 250m / 256Mi, 1Gi limit | Per API server pod |
 | `podSecurityContext`, `securityContext` | non-root, read-only root filesystem, no capabilities, RuntimeDefault seccomp | |
 | `podDisruptionBudget.*` | on with more than one pod | All but one kept up |
-| `serviceMonitor.*` | off | Prometheus Operator, `/metrics` |
+| `metricsAuth.*` | on | `/metrics` needs a bearer token, made in the chart's own Secret (`<release>-metrics`) and kept across upgrades; `existingSecret` for yours (`helm template`, Argo CD) |
+| `serviceMonitor.*` | off | Prometheus Operator, `/metrics` - sending `metricsAuth`'s token |
 | `networkPolicy.*` | off | In only from `ingressFrom`, out only to `egress` and DNS |
 | `autoscaling.*` | off | PostgreSQL and Redis only |
 | `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`, `serviceAccount.*`, `podAnnotations`, `podLabels`, `imagePullSecrets` | | As usual |

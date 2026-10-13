@@ -5,8 +5,7 @@
 they're in there; someone leaving, or moving team, changes their access at their next sign-in, without anyone
 touching QueryAPIGate. Administrators who had tokens keep their names and history.
 
-> **Experimental** - Console sign-in through SSO is new in 0.19 and may change in any minor release, always noted in
-> the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - Console sign-in through SSO is under the compatibility promise since 0.30 ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every step below was run against a real Keycloak 26 (in Docker) and a real server, signing in through the Console in a
 real browser (Chromium) - the provider at `http://localhost:58080/realms/qag-sso-test` and the Console at

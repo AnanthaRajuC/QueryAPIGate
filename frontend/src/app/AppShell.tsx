@@ -5,6 +5,7 @@ import { DrawerHost, ErrorBanner, FeedbackProvider, Toasts, useFeedback } from '
 import { Header } from './Header';
 import { usePrefs } from './prefs';
 import { activeItem, Sidebar } from './Sidebar';
+import { ssoRefusal } from '@/auth/ssoRefusal';
 
 /** The classic page frame (ui.py <body>): sidebar, then content (header, error banner, main), then the drawer,
  * palette and toasts. #root is display:contents, so these lay out exactly as the classic body grid. */
@@ -32,8 +33,8 @@ export function AppShell() {
   );
 }
 
-/** A sign-in through SSO the server refused comes back as ?sso_error=...&sso_message=...: said once, in the error
- * banner, and taken off the address so a reload doesn't say it again. */
+/** A sign-in through SSO the server refused comes back as ?sso_error=...: said once, in the error banner, and taken
+ * off the address so a reload doesn't say it again. */
 function SignInRefused() {
   const { showError } = useFeedback();
   const location = useLocation();
@@ -42,7 +43,7 @@ function SignInRefused() {
     const params = new URLSearchParams(location.search);
     const code = params.get('sso_error');
     if (!code) return;
-    showError(`Sign-in through SSO didn't go ahead: ${params.get('sso_message') || code} (${code})`);
+    showError(ssoRefusal(code));
     params.delete('sso_error');
     params.delete('sso_message');
     const rest = params.toString();

@@ -147,6 +147,7 @@ class SsoTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 302)
         query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(res.headers['Location']).query))
         self.assertTrue(res.headers['Location'].startswith('/console/?'), res.headers['Location'])
+        self.assertEqual(set(query), {'sso_error'})  # the code only: the Console has its own words for it
         return query.get('sso_error')
 
 

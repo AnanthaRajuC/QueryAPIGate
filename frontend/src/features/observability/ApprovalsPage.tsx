@@ -6,7 +6,6 @@ import { ApiError, api, unwrap, type Schemas } from '@/api/client';
 import { useGate } from '@/app/data';
 import { Field, Loading, useFeedback } from '@/app/feedback';
 import { CodeBox } from '@/components/CodeBox';
-import { ExperimentalTag } from '@/components/Experimental';
 import { Time } from '@/components/Time';
 
 // Writes AI agents asked to make over MCP (ADR 0008): a person approves or rejects each one before it runs. The link an
@@ -252,9 +251,7 @@ export function ApprovalsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>
-            Approvals <ExperimentalTag />
-          </h1>
+          <h1>Approvals</h1>
           <span className="sub">
             Writes AI agents asked to make over MCP. Each runs only once a person approves it - with exactly
             the arguments shown.

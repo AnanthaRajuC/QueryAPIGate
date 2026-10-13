@@ -240,6 +240,7 @@ dashboard:
 # prometheus.yml
 scrape_configs:
   - job_name: queryapigate
+    authorization: {credentials_file: /etc/prometheus/queryapigate-metrics-token}   # with QUERYAPIGATE_METRICS_TOKEN
     static_configs:
       - targets: ["queryapigate:5000"]
 ~~~
@@ -248,7 +249,10 @@ Then *Dashboards → New → Import* in Grafana, uploading
 [`documentation/grafana-dashboard.json`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/grafana-dashboard.json)
 from this repo - panels for request/query rate and latency (p50/p95/p99), error rate, rows returned, active
 queries, pool occupancy and rate-limit rejections, built on exactly the metric names `/metrics` already
-exposes. `/metrics` is public (no API key needed) precisely so a scraper doesn't need one either.
+exposes. `/metrics` needs no API key - a scraper shouldn't hold one. It's open to whoever can reach the server,
+until you set `QUERYAPIGATE_METRICS_TOKEN`: then only a request with `Authorization: Bearer <the token>` - and an
+administrator, the Console's Metrics screen - reads it. Set it whenever the server can be reached from outside your
+network: the labels name your API keys, queries and connections.
 
 **With several instances, scrape each one** - every process keeps its own counters, as Prometheus expects - and the
 bundled dashboard sums across them. The Console's Metrics screen shows only the instance that served it.
@@ -381,8 +385,10 @@ standby restored from backups.
 
 ## Kubernetes (Helm)
 
-> **Experimental** in 0.26 ([ADR 0013](adr/0013-helm-chart.md)): the chart's value names may change in a minor
-> release, always noted in the changelog.
+> **Stable** since 0.30, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> Values may still be added; none is renamed or removed except through the deprecation process. Limits: chart X.Y.Z
+> runs QueryAPIGate X.Y.Z; it makes no PostgreSQL or Redis of its own; and its NetworkPolicy is off until you give it
+> your cluster's rules.
 
 The chart is published with every release, at the server's version: chart 0.26.0 installs QueryAPIGate 0.26.0.
 
@@ -404,7 +410,7 @@ on the PostgreSQL store with Redis. They roll one at a time, and a new pod must 
 | Refusals | `helm install` fails, before anything changes, on more than one pod on SQLite, more than one without Redis, PostgreSQL without a database URL, a secret setting in `config`, or a value not in `values.schema.json`. |
 | Routing | `ingress.*` sends `/events` to the events server (`events.enabled`) and the rest to the API pods, and sets `QUERYAPIGATE_TRUST_PROXY=1`. `mcp.enabled` runs the MCP server; `mcp.ingress.host` gives it its own host. The default annotations are ingress-nginx's no-buffering for `/events`; replace them for another controller. |
 | Pod security | Non-root (UID 1000), a read-only root filesystem, every capability dropped, the RuntimeDefault seccomp profile, no service account token. The server writes only to `/data` and `/tmp`. |
-| Observability | `serviceMonitor.enabled` for the Prometheus Operator ([section 6](#6-observability)). Tracing through `config` (`OTEL_EXPORTER_OTLP_ENDPOINT`). |
+| Observability | `serviceMonitor.enabled` for the Prometheus Operator ([section 6](#6-observability)), sending the token `/metrics` needs: `metricsAuth` makes one in a Secret of the chart's own, kept across upgrades - or name yours, `metricsAuth.existingSecret`, where the chart is rendered without the cluster (`helm template`, Argo CD). Tracing through `config` (`OTEL_EXPORTER_OTLP_ENDPOINT`). |
 | Network | `networkPolicy.enabled`: in only from `networkPolicy.ingressFrom`, out only to `networkPolicy.egress` and DNS. List your databases, Redis and the SIEM there. |
 | Scale | `autoscaling.enabled`, CPU-based, PostgreSQL shape only. |
 | Secrets managers | `${vault:...}`, `${aws-sm:...}` and short-lived database credentials ([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers), experimental): `vaultToken.enabled` for Vault's Kubernetes auth, `serviceAccount.annotations` for IRSA, and the `QUERYAPIGATE_VAULT_*` / `QUERYAPIGATE_AWS_*` settings through `config`. |

@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
+- **Amended 2026-10-13:** the graduations below ship in **0.30**, not 1.0.0-rc1. rc1 comes later, after more
+  improvements; what this ADR decides is unchanged - only the release they land in.
 - **Backlog:** #64 (what is experimental), and each feature's own entry below.
 
 ## Context

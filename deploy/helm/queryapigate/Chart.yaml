@@ -13,6 +13,3 @@ sources:
   - https://github.com/AnanthaRajuC/QueryAPIGate
 icon: https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/frontend/public/favicon.svg
 keywords: [sql, api, rest, mcp, gateway, postgresql, duckdb]
-annotations:
-  # Experimental in 0.26: value names may still change, always noted in the changelog.
-  queryapigate.dev/experimental: "true"

@@ -39,6 +39,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 
+{{- define "queryapigate.metricsSecretName" -}}
+{{- .Values.metricsAuth.existingSecret | default (printf "%s-metrics" (include "queryapigate.fullname" .)) -}}
+{{- end -}}
+
 {{- define "queryapigate.secretName" -}}
 {{- .Values.existingSecret | default (include "queryapigate.fullname" .) -}}
 {{- end -}}
@@ -83,6 +87,9 @@ app.kubernetes.io/component: {{ .component }}
 {{- fail (printf "Set %s through configAsCode, not config - the chart mounts the file and sets it." $name) -}}
 {{- end -}}
 {{- end -}}
+{{- if or (hasKey .Values.config "QUERYAPIGATE_METRICS_TOKEN") (and .Values.metricsAuth.enabled (hasKey .Values.secret.values "QUERYAPIGATE_METRICS_TOKEN")) -}}
+{{- fail "QUERYAPIGATE_METRICS_TOKEN comes from metricsAuth - the chart's own Secret, or yours as metricsAuth.existingSecret - not config or secret.values." -}}
+{{- end -}}
 {{- /* config is plain env in the Deployment, read by anyone who can get deployments: no secrets there. */ -}}
 {{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
 {{- if hasKey $.Values.config $name -}}
@@ -106,6 +113,10 @@ env:
   {{- end }}
   {{- if $root.Values.vaultToken.enabled }}
   - {name: QUERYAPIGATE_VAULT_K8S_TOKEN_FILE, value: /var/run/secrets/vault/token}
+  {{- end }}
+  {{- if $root.Values.metricsAuth.enabled }}
+  - name: QUERYAPIGATE_METRICS_TOKEN   # /metrics needs it (metricsAuth)
+    valueFrom: {secretKeyRef: {name: {{ include "queryapigate.metricsSecretName" $root }}, key: {{ $root.Values.metricsAuth.key }}}}
   {{- end }}
   {{- if and .server $root.Values.configAsCode.enabled }}
   # the API server applies the file as it starts, once per file (ADR 0014)

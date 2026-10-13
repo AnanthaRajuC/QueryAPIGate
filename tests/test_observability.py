@@ -15,7 +15,7 @@ from flask import g
 
 from queryapigate import apikeys, create_app, logging_setup, metrics
 from queryapigate import app as app_module
-from tests.helpers import save_query, write_connections
+from tests.helpers import create_key, save_query, secret_of, write_connections
 
 
 class AppTestCase(unittest.TestCase):
@@ -333,6 +333,44 @@ class MetricsEndpointTests(AppTestCase):
     def test_public_even_with_an_api_key_set(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         self.assertEqual(self.client.get('/metrics').status_code, 200)
+
+    def test_with_a_token_set_only_a_request_carrying_it_reads_them(self):
+        """QUERYAPIGATE_METRICS_TOKEN (ADR 0017's review): what the Helm chart sets, since its ingress routes /metrics
+        to the world. A scraper sends the token; an administrator who may observe - the Console's Metrics screen - needs
+        none; a scoped API key isn't enough."""
+        token = 'm' * 32
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
+        app_key = secret_of(create_key(self.client, headers={'X-API-Key': 'k3y'}, name='app', connections=['lite']))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METRICS_TOKEN': token}):
+            self.assertEqual(self.client.get('/metrics', headers={'X-API-Key': 'k3y'}).status_code, 200)
+            for headers in ({}, {'X-API-Key': app_key}, {'Authorization': 'Bearer wrong'},
+                            {'Authorization': 'Basic ' + token}):
+                with self.subTest(headers=headers):
+                    res = self.client.get('/metrics', headers=headers)
+                    self.assertEqual(res.status_code, 401)
+                    self.assertEqual(res.headers['WWW-Authenticate'], 'Bearer realm="metrics"')
+                    self.assertNotIn('queryapigate_', res.get_data(as_text=True))
+            res = self.client.get('/metrics', headers={'Authorization': f'Bearer {token}'})
+            self.assertEqual(res.status_code, 200)
+            self.assertIn('queryapigate_requests_total', res.get_data(as_text=True))
+
+    def test_a_short_token_stops_startup(self):
+        from queryapigate import config
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METRICS_TOKEN': 'short'}), \
+                self.assertRaises(ValueError) as caught:
+            config.check_settings()
+        self.assertIn('at least 16 characters', str(caught.exception))
+
+    def test_administrators_are_counted_under_one_label(self):
+        """A named administrator is a person - often named after themselves. /metrics counts them all as `admin`, as it
+        counts signed-in users as `jwt`; an API key, an application, keeps its own name."""
+        person = apikeys.Permission(name='alice.smith', admin=True, connections=apikeys.ALL_CONNECTIONS,
+                                    allow_writes=True, queries=apikeys.ALL_QUERIES, rate_limit=None,
+                                    allowed_write_ops=None, via='sso', role='owner')
+        for via in ('sso', 'token', 'break-glass'):
+            self.assertEqual(metrics.label_for(person._replace(via=via)), 'admin')
+        self.assertEqual(metrics.label_for(person._replace(name='partner-acme', via=None, role=None)), 'partner-acme')
+        self.assertEqual(metrics.label_for(None), '-')
 
     def test_request_and_query_metrics_appear_after_use(self):
         self.run_sql()

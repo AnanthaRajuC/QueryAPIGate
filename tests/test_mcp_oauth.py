@@ -260,6 +260,42 @@ class RedirectTests(unittest.TestCase):
         with mock.patch('urllib.request.urlopen', return_value=response), self.assertRaises(ValueError):
             oidc.fetch_json('https://idp.example.com/.well-known/openid-configuration')
 
+    def test_signing_keys_are_never_fetched_through_a_redirect(self):
+        """The keys come through PyJWT's client, which follows no redirect at all - from 2.14, the floor CI tests. A
+        jwks_uri sent elsewhere (to plain HTTP, say) yields no key, so every token is refused (ADR 0017's review)."""
+        def serve(handler):
+            server = http.server.HTTPServer(('127.0.0.1', 0), handler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.shutdown)
+            return f'http://127.0.0.1:{server.server_port}'
+
+        class Quiet(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+        numbers = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key().public_numbers()
+        jwk = {'kty': 'RSA', 'kid': 'k1', 'use': 'sig', 'alg': 'RS256', 'n': b64(numbers.n), 'e': b64(numbers.e)}
+
+        class Keys(Quiet):  # what a redirect followed would get: a key set that works
+            def do_GET(self):
+                body = json.dumps({'keys': [jwk]}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+
+        keys = serve(Keys)
+        jwt.PyJWKClient(keys + '/certs', cache_keys=False).fetch_data()  # fetched directly, they're fine
+
+        class Redirect(Quiet):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header('Location', keys + '/certs')
+                self.end_headers()
+
+        with self.assertRaises(jwt.PyJWKClientConnectionError):
+            jwt.PyJWKClient(serve(Redirect) + '/certs', cache_keys=False).fetch_data()
+
 
 class DiscoveryTests(unittest.TestCase):
     def test_where_metadata_is_looked_for(self):
@@ -308,6 +344,15 @@ class HttpTests(McpOAuthTestCase):
     def post(self, headers=None):
         return self.http.post('/mcp/', headers={'Accept': 'application/json, text/event-stream', **(headers or {})},
                               json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'})
+
+    def test_its_metrics_need_the_token_too(self):
+        token = 't' * 32
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METRICS_TOKEN': token}):
+            refused = self.http.get('/metrics')
+            self.assertEqual(refused.status_code, 401)
+            self.assertEqual(refused.headers['WWW-Authenticate'], 'Bearer realm="metrics"')
+            self.assertEqual(self.http.get('/metrics', headers={'Authorization': f'Bearer {token}'}).status_code, 200)
+        self.assertEqual(self.http.get('/metrics').status_code, 200)  # unset: open, as before
 
     def test_the_protected_resource_metadata(self):
         for path in ('/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'):

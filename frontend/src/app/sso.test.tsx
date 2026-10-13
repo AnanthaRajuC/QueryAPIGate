@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { setApiKey } from '@/auth/apiKey';
+import { ssoRefusal } from '@/auth/ssoRefusal';
 import { fakeBackend } from '@/test/fakeBackend';
 import { baseRoutes } from '@/test/fixtures';
 import { renderAt } from '@/test/renderApp';
@@ -106,10 +107,24 @@ describe('Console sign-in through SSO', () => {
       ...baseRoutes(),
       'GET /auth/session': () => ({ sso: true, signed_in: false, sso_only: false }),
     });
-    renderAt('/?sso_error=sso_no_role&sso_message=You%20are%20in%20no%20group');
+    renderAt('/?sso_error=sso_no_role&sso_message=Call%20us%20at%20555-0100');
     expect(
-      await screen.findByText("Sign-in through SSO didn't go ahead: You are in no group (sso_no_role)"),
+      await screen.findByText(
+        "Sign-in through SSO didn't go ahead: you signed in, but you're in no group that's given a role here - ask " +
+          'an owner to add you to one (sso_no_role)',
+      ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/555-0100/)).toBeNull();
+  });
+
+  it("shows no one's words from the address, whatever the code", () => {
+    expect(ssoRefusal('sso_role_taken')).toBe(
+      "Sign-in through SSO didn't go ahead (sso_role_taken) - an owner can see why in the audit log",
+    );
+    expect(ssoRefusal('Your account is locked, call 555-0100')).toBe(
+      "Sign-in through SSO didn't go ahead - an owner can see why in the audit log",
+    );
+    expect(ssoRefusal('toString')).toContain('an owner can see why');
   });
 
   it('a linked administrator has their role from their groups; another can be linked', async () => {

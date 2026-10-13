@@ -4,7 +4,7 @@
 to match it by CI after a reviewed pull request, all or nothing; and prod refusing changes made any other way.
 
 > **Stable** - configuration as code, its file's `format_version` 1 and the commands, are under the compatibility
-> promise since 1.0.0-rc1 ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> promise since 0.30 ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every command and output below was run against two real servers: **dev** and **prod**, each with its own store and
 its own SQLite database of sales, with prod started with `QUERYAPIGATE_CONFIG_LOCKED=1`. The pull request was a

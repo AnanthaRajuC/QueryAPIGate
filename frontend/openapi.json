@@ -10823,7 +10823,6 @@
     },
     "/api/v1/write-requests": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "description": "pending, approved, running, done, failed, rejected or expired.",
@@ -10890,13 +10889,11 @@
         "summary": "Writes AI agents asked to make over MCP, newest first (ADR 0008)",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/write-requests/{id}": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -10962,13 +10959,11 @@
         "summary": "One write request: who asked, the SQL, the exact arguments, what happened",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/write-requests/{id}/approve": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -11034,13 +11029,11 @@
         "summary": "Approve a pending write: the agent may run it once, with these arguments, before it expires",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/write-requests/{id}/reject": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -11122,8 +11115,7 @@
         "summary": "Reject a pending write, with an optional reason the agent is told",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/auth/session": {

@@ -21,4 +21,3 @@ then open http://127.0.0.1:8080/console/
 The MCP server: {{ if .Values.mcp.ingress.host }}https://{{ .Values.mcp.ingress.host }}/mcp{{ else }}http://{{ include "queryapigate.fullname" . }}-mcp.{{ .Release.Namespace }}.svc/mcp, in the cluster{{ end }}
 {{- end }}
 
-The chart is experimental in this release: value names may change, always noted in the changelog.
