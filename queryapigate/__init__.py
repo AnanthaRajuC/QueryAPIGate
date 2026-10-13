@@ -1,5 +1,5 @@
 """QueryAPIGate - expose SQL databases as a REST API."""
-__version__ = "0.34.1"
+__version__ = "0.34.2"
 
 from .app import create_app  # noqa: E402  (app imports __version__)
 

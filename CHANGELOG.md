@@ -49,6 +49,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-10-13
+
 ### Security
 - **A MongoDB parameter's value could be query operators** (0.9.0 to 0.34.1). A `:name` placeholder took whatever
   JSON was sent: for a saved `mongo` query whose placeholder wasn't declared with a type, `{"params": {"u": {"$ne":
@@ -2498,7 +2500,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...HEAD
+[0.34.2]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.32.0...v0.33.0
