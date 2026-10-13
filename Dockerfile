@@ -1,6 +1,7 @@
 # Stage 1: build the QueryAPIGate Console (frontend/, ADR 0001). Only its static output is carried into the final
 # image, so the image itself contains no Node.js. frontend/openapi.json is committed, so this stage needs no Python.
-FROM node:22-slim AS console
+# Base images by digest (ADR 0018): a rebuild uses the same bytes; Dependabot proposes each new digest as a commit.
+FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS console
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -8,7 +9,7 @@ COPY frontend/ ./
 # vite.config.ts writes to ../queryapigate/console_dist
 RUN npm run build
 
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 # Build with --build-arg WITH_H2=true to add Java and the H2 driver.
 ARG WITH_H2=false

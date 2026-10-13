@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0018-signed-releases.md"

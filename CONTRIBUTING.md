@@ -119,6 +119,11 @@ against service containers. `tests/test_sql_guard_fuzz.py` property-tests the SQ
 it only catches genuine static errors, not missing annotations. `coverage run -m unittest discover -s tests -t .`
 followed by `coverage report` shows local coverage; CI uploads it to [Codecov](https://codecov.io/gh/AnanthaRajuC/QueryAPIGate).
 
+**Workflows and the Dockerfile are pinned** ([ADR 0018](documentation/adr/0018-signed-releases.md)): an action as
+`owner/repo@<full commit SHA> # vX.Y.Z`, a base image as `name:tag@sha256:<digest>`. `git ls-remote --tags
+https://github.com/<owner>/<repo>` gives a tag's commit. Dependabot proposes the updates, and `tests/test_supply_chain.py`
+fails on anything unpinned.
+
 ### Console (frontend)
 
 The QueryAPIGate Console - the admin UI at `/console` - lives in `frontend/` (React + TypeScript + Vite; see

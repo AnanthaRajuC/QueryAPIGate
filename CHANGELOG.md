@@ -51,6 +51,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+- **What a release is built from is pinned** ([ADR 0018](documentation/adr/0018-signed-releases.md)): every GitHub
+  Action by commit SHA - the PyPI publishing one followed a branch, `release/v1` - and the image's base images,
+  `python:3.12-slim` and `node:22-slim`, by digest. Dependabot proposes each update as a commit; a test fails on an
+  action or a base image that isn't pinned.
+
 ## [0.30.0] - 2026-10-13
 
 Eight features come under the compatibility promise - descriptions, agent usage, usage quotas, configuration as code,

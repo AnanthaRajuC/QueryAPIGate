@@ -22,8 +22,8 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]  # requires-python; see CHANGELOG.md for the policy
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -35,7 +35,7 @@ jobs:
       - if: matrix.python == '3.12'
         run: coverage xml
       - if: matrix.python == '3.12'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
         with:
           files: coverage.xml
           # v4 needs the repository's upload token (Codecov -> the repo's Settings -> General, saved as the
@@ -76,12 +76,12 @@ jobs:
       QUERYAPIGATE_IT_CLICKHOUSE: '{"host": "localhost", "port": 9000, "user": "default", "password": "pw", "database": "default"}'
       QUERYAPIGATE_IT_H2: '{"host": "localhost", "user": "SA", "password": "", "database": "it"}'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
@@ -149,7 +149,7 @@ jobs:
         OPENSSL_FORCE_FIPS_MODE: "1"
     steps:
       - run: dnf -q -y install python3.12 python3.12-pip python3.12-cryptography git
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: A virtualenv that keeps the distribution's cryptography (PyPI's wheel carries an unvalidated OpenSSL)
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -177,8 +177,8 @@ jobs:
     env:
       QUERYAPIGATE_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -212,8 +212,8 @@ jobs:
       # The previous release, for tests/test_rolling_upgrade.py - bump it with each release (RELEASING in CONTRIBUTING.md)
       QUERYAPIGATE_TEST_OLD_BIN: /tmp/previous-release/bin/queryapigate
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -230,15 +230,15 @@ jobs:
     name: Console end-to-end
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
       # The optional packages the screens under test use, as the Docker image has them: DuckDB (exports, Parquet,
       # files) and sqlglot (column masking). Without them those features refuse, saying what to install.
       - run: pip install -e ".[duckdb,flow]"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -254,7 +254,7 @@ jobs:
         run: npm run e2e
       - name: Keep the report of a failed run
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: |
@@ -266,11 +266,11 @@ jobs:
     name: Build package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -290,7 +290,7 @@ jobs:
     name: Compose demo
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start the demo (QueryAPIGate and a seeded PostgreSQL)
         # --wait treats a container that exits as a failure, even a one-shot one exiting 0, so the seed runs on its
         # own once the server is healthy - failing this step if it fails.
@@ -315,7 +315,7 @@ jobs:
     name: Docker image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t queryapigate .
       - name: Container starts and answers
         run: |
@@ -333,8 +333,8 @@ jobs:
       matrix:
         helm: [v3.22.0, v4.3.0]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -353,7 +353,7 @@ jobs:
     name: Helm chart on kind
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: kind, kubectl and Helm, checked against their checksums
         run: |
           curl -sfL -o kind "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
