@@ -55,6 +55,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Upgrading from 0.29
+- **Higher minimum versions:** Flask 3.0 (was 2.2), Werkzeug 3.0 (now listed: QueryAPIGate imports it), PyYAML 6.0.1
+  (was 6.0), and for the `mcp` extra, mcp 1.21.1 (was 1.10). None of the old minimums could actually be used: Flask
+  2.x can't be imported beside the Werkzeug 3 that pip installs with it, PyYAML 6.0 can't be installed on Python 3.12
+  or later, and mcp before 1.21.1 can't be imported beside the pydantic pip installs with it.
+
+### Changed
+- **CI tests the lowest version allowed of every core dependency, and of the `mcp`, `jwt` and `redis` extras**
+  ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)) - the whole suite on Python 3.11, with Redis.
+  It tested only DuckDB's and sqlglot's before. A test fails if a minimum in pyproject.toml and the version CI pins
+  for it differ, or if a core dependency has no pin.
+
 ## [0.29.0] - 2026-10-12
 
 The answers a security review asks for, written down and kept true: where every kind of data goes, for how long and

@@ -25,6 +25,7 @@ one it supersedes.
 | [0014](0014-configuration-as-code.md) | Configuration as code | Accepted |
 | [0015](0015-secrets-managers-and-short-lived-credentials.md) | Secrets managers and short-lived credentials | Accepted |
 | [0016](0016-data-flows-and-fips.md) | Where data goes, and FIPS-validated cryptography | Accepted |
+| [0017](0017-what-graduates-for-1-0-0-rc1.md) | What graduates for 1.0.0-rc1 | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

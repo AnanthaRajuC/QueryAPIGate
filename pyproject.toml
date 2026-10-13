@@ -26,7 +26,9 @@ classifiers = [
     "Topic :: Database",
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
 ]
-dependencies = ["Flask>=2.2", "PyYAML>=6.0", "openpyxl>=3.1"]
+# Werkzeug is imported directly (ProxyFix, ClosingIterator), so it has its own floor. Flask 2.x can't be imported beside
+# Werkzeug 3, which pip installs with it; PyYAML 6.0 has no wheel for Python 3.12 and later, and doesn't build there.
+dependencies = ["Flask>=3.0", "Werkzeug>=3.0", "PyYAML>=6.0.1", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 mysql = ["mysql-connector-python>=8.0"]
@@ -38,9 +40,9 @@ mongo = ["pymongo>=4.0"]
 flow = ["sqlglot>=25.2,<26"]  # the Access tab's tables and joins (sqlflow.py) and column masking's tracing (masking.py)
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
-mcp = ["mcp>=1.10,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. 1.10 is the floor because
-                        # that's where outputSchema/structuredContent support landed in the SDK (1.9 doesn't
-                        # have it).
+mcp = ["mcp>=1.21.1,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. Structured tool output arrived
+                          # in 1.10, but nothing before 1.21.1 can be imported beside the pydantic pip installs
+                          # with it (a private pydantic function they used is gone).
 jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL is set - see jwtauth.py.
                                # 2.14 is the floor because that is where PyJWKClient stops refetching the JWKS for
                                # every unknown key id: before it, forged tokens could make the server hammer the provider.
