@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Signed releases** ([ADR 0018](documentation/adr/0018-signed-releases.md)): each image variant and the Helm chart
+  are signed keyless with cosign, by digest - the certificate names this repository's `docker.yml` at the release's
+  tag - with SLSA provenance and an SPDX SBOM on each image, and a GitHub attestation for each; the workflow verifies
+  them before it ends, so a release that doesn't verify fails. `Publish Docker image` run by hand with `rehearse`
+  does all of it under `-rehearsal` names, never the real ones.
+
 ### Changed
 - **What a release is built from is pinned** ([ADR 0018](documentation/adr/0018-signed-releases.md)): every GitHub
   Action by commit SHA - the PyPI publishing one followed a branch, `release/v1` - and the image's base images,

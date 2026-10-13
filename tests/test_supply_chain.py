@@ -43,5 +43,50 @@ class PinnedTests(unittest.TestCase):
         self.assertLessEqual({'github-actions', 'docker'}, ecosystems)
 
 
+class SignedTests(unittest.TestCase):
+    """Everything docker.yml publishes is signed keyless by digest, attested, and verified as a deployer would before
+    the job ends (ADR 0018) - a release whose signature doesn't verify fails."""
+
+    def setUp(self):
+        with open(os.path.join(ROOT, '.github', 'workflows', 'docker.yml')) as f:
+            self.workflow = yaml.safe_load(f)
+
+    def test_each_publishing_job_signs_attests_and_verifies(self):
+        for name in ('image', 'chart'):
+            with self.subTest(job=name):
+                job = self.workflow['jobs'][name]
+                self.assertEqual(job['permissions'].get('id-token'), 'write')
+                self.assertEqual(job['permissions'].get('attestations'), 'write')
+                runs = '\n'.join(step.get('run', '') for step in job['steps'])
+                uses = [step.get('uses', '') for step in job['steps']]
+                self.assertIn('cosign sign --yes "$REF"', runs)
+                self.assertIn('--certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER"', runs)
+                self.assertIn('gh attestation verify', runs)
+                self.assertTrue(any(u.startswith('actions/attest-build-provenance@') for u in uses))
+                signing = next(s for s in job['steps'] if 'cosign sign' in s.get('run', ''))
+                # by digest, never a tag that can move: the image's from the build, the chart's from what helm pushed
+                self.assertTrue('@${{ steps.build.outputs.digest }}' in signing['env']['REF']
+                                or ('ref=$registry/queryapigate@$digest' in runs
+                                    and signing['env']['REF'] == '${{ steps.push.outputs.ref }}'), signing['env'])
+
+    def test_the_identity_is_this_workflow_at_its_ref_and_cosign_one_exact_version(self):
+        self.assertEqual(self.workflow['env']['OIDC_ISSUER'], 'https://token.actions.githubusercontent.com')
+        self.assertRegex(self.workflow['env']['COSIGN_VERSION'], r'^v\d+\.\d+\.\d+$')
+        for name in ('image', 'chart'):
+            verify = next(s for s in self.workflow['jobs'][name]['steps'] if 'cosign verify' in s.get('run', ''))
+            self.assertEqual(verify['env']['IDENTITY'], 'https://github.com/${{ github.workflow_ref }}')
+
+    def test_images_carry_provenance_and_an_sbom(self):
+        build = next(s for s in self.workflow['jobs']['image']['steps'] if s.get('id') == 'build')
+        self.assertIn('mode=max', build['with']['provenance'])
+        self.assertIn('push', build['with']['sbom'])
+
+    def test_a_rehearsal_never_uses_the_real_names(self):
+        steps = self.workflow['jobs']['image']['steps'] + self.workflow['jobs']['chart']['steps']
+        runs = '\n'.join(step.get('run', '') for step in steps)
+        self.assertIn('image="$image-rehearsal"', runs)
+        self.assertIn('registry="$registry-rehearsal"', runs)
+
+
 if __name__ == '__main__':
     unittest.main()

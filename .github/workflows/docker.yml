@@ -1,8 +1,13 @@
 name: Publish Docker image
 
-# Builds the image (plain and H2 variants) and publishes it to GitHub Container Registry when a version tag is pushed.
-# To try the build without publishing anything, run it by hand: Actions -> Publish Docker image -> Run workflow
-# (on a branch it never pushes). Images: ghcr.io/<owner>/queryapigate:<version>, :latest, :<version>-h2, :latest-h2.
+# Builds the image (plain and H2 variants) and the Helm chart and publishes them to GitHub Container Registry when a
+# version tag is pushed - each signed keyless with cosign, with SLSA provenance, an SBOM and a GitHub attestation, and
+# verified before the job ends (ADR 0018). Images: ghcr.io/<owner>/queryapigate:<version>, :latest, :<version>-h2,
+# :latest-h2; the chart: oci://ghcr.io/<owner>/charts/queryapigate.
+#
+# By hand (Actions -> Publish Docker image -> Run workflow): on a branch it builds and pushes nothing; with `rehearse`,
+# it does everything a release does - push, sign, attest, verify - to queryapigate-rehearsal and charts-rehearsal,
+# never the real names, so signing is tried end to end before a tag.
 on:
   push:
     tags: ["v*"]
@@ -12,6 +17,15 @@ on:
         description: "Also push the images (only takes effect when run on a tag)"
         type: boolean
         default: false
+      rehearse:
+        description: "Push, sign and verify everything under -rehearsal names (on a branch)"
+        type: boolean
+        default: false
+
+env:
+  COSIGN_VERSION: v3.1.3
+  # Who a signature says built it: this workflow, at the ref it ran on - refs/tags/vX.Y.Z for a release
+  OIDC_ISSUER: https://token.actions.githubusercontent.com
 
 jobs:
   image:
@@ -20,6 +34,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write       # the OIDC token cosign trades for a signing certificate - no key is stored anywhere
+      attestations: write   # GitHub's own attestation of the build
     strategy:
       fail-fast: false
       matrix:
@@ -42,18 +58,22 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"   # registry names must be lower case
           suffix="${{ matrix.variant }}"
+          push=false
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             tags="$image:${version}${suffix}"
             case "$version" in *-*) ;; *) tags="$tags,$image:latest${suffix}" ;; esac  # pre-releases never become latest
+            if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "${{ inputs.push }}" = "true" ]; then push=true; fi
+          elif [ "${{ inputs.rehearse }}" = "true" ]; then
+            image="$image-rehearsal"              # never the real name: a rehearsal can't be mistaken for a release
+            version="dev"
+            tags="$image:rehearsal-${GITHUB_SHA::12}${suffix}"
+            push=true
           else
             version="dev"
             tags="$image:dry-run${suffix}"
           fi
-          push=false
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && { [ "$GITHUB_EVENT_NAME" = "push" ] || [ "${{ inputs.push }}" = "true" ]; }; then
-            push=true
-          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "push=$push" >> "$GITHUB_OUTPUT"
@@ -100,12 +120,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build for amd64 and arm64${{ steps.meta.outputs.push == 'true' && ' and push' || ' (not pushing)' }}
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ steps.meta.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
+          # SLSA provenance (how, from what, by which workflow) and an SPDX SBOM, attached to the image index
+          provenance: ${{ steps.meta.outputs.push == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ steps.meta.outputs.push == 'true' }}
           build-args: WITH_H2=${{ matrix.with_h2 }}
           labels: |
             org.opencontainers.image.version=${{ steps.meta.outputs.version }}
@@ -113,20 +137,55 @@ jobs:
           cache-from: type=gha,scope=image${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=image${{ matrix.variant }}
 
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: steps.meta.outputs.push == 'true'
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign the image, keyless, by digest
+        if: steps.meta.outputs.push == 'true'
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$REF"
+
+      - name: Attest how it was built (GitHub)
+        if: steps.meta.outputs.push == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify it, as a deployer would
+        if: steps.meta.outputs.push == 'true'
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cosign verify "$REF" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          echo "signed by $IDENTITY"
+          gh attestation verify "oci://$REF" --owner "$GITHUB_REPOSITORY_OWNER"
+          echo "### $REF" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed by \`$IDENTITY\`" >> "$GITHUB_STEP_SUMMARY"
+
   chart:
     # The Helm chart (ADR 0013), released in lockstep: chart X.Y.Z runs image X.Y.Z, pushed to ghcr as an OCI artifact
     # beside it - oci://ghcr.io/<owner>/charts/queryapigate.
     name: Helm chart
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.rehearse
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Check the tag before publishing
+        if: github.ref_type == 'tag'
         run: python3 .github/scripts/check_release.py "$GITHUB_REF_NAME"
       - name: Helm, checked against its checksum
         run: |
@@ -134,10 +193,58 @@ jobs:
           echo "$(curl -sfL https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz.sha256sum | cut -d' ' -f1)  helm.tgz" | sha256sum -c
           tar xzf helm.tgz && sudo mv linux-amd64/helm /usr/local/bin/helm
       - name: Package and push
+        id: push
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          helm package deploy/helm/queryapigate --version "$version" --app-version "$version"
-          if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "${{ inputs.push }}" = "true" ]; then
-            echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-            helm push "queryapigate-$version.tgz" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            push=false
+            if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "${{ inputs.push }}" = "true" ]; then push=true; fi
+          else
+            registry="$registry-rehearsal"; version="0.0.0-rehearsal.${GITHUB_RUN_NUMBER}"; push=true
           fi
+          helm package deploy/helm/queryapigate --version "$version" --app-version "$version"
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+          if [ "$push" = "true" ]; then
+            echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+            helm push "queryapigate-$version.tgz" "oci://$registry" 2>&1 | tee push.log
+            digest=$(grep -oE 'sha256:[0-9a-f]{64}' push.log | tail -1)
+            [ -n "$digest" ] || { echo "::error::helm push printed no digest"; exit 1; }
+            echo "ref=$registry/queryapigate@$digest" >> "$GITHUB_OUTPUT"
+            echo "name=$registry/queryapigate" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: steps.push.outputs.push == 'true'
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign the chart, keyless, by digest
+        if: steps.push.outputs.push == 'true'
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
+          cosign sign --yes "$REF"
+
+      - name: Attest how it was built (GitHub)
+        if: steps.push.outputs.push == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify it, as a deployer would
+        if: steps.push.outputs.push == 'true'
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cosign verify "$REF" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          echo "signed by $IDENTITY"
+          gh attestation verify "oci://$REF" --owner "$GITHUB_REPOSITORY_OWNER"
+          echo "### $REF" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signed by \`$IDENTITY\`" >> "$GITHUB_STEP_SUMMARY"
