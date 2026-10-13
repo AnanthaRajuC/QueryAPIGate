@@ -1,7 +1,7 @@
 # Stage 1: build the QueryAPIGate Console (frontend/, ADR 0001). Only its static output is carried into the final
 # image, so the image itself contains no Node.js. frontend/openapi.json is committed, so this stage needs no Python.
 # Base images by digest (ADR 0018): a rebuild uses the same bytes; Dependabot proposes each new digest as a commit.
-FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS console
+FROM node:26-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS console
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
