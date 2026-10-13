@@ -4,8 +4,8 @@
 database user for each lease, QueryAPIGate moves to the next one before the last expires, and not one call fails
 while it does; when Vault is down, it keeps serving while it safely can, then fails closed.
 
-> **Experimental** - secrets from secrets managers are new in 0.28; the settings and the `credentials` field may
-> change in a minor release, always noted in the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - secrets from Vault, and its short-lived database credentials, are under the compatibility promise since
+> 0.34 ([what that means](../CHANGELOG.md#versioning-and-compatibility)). AWS's are still experimental.
 
 Every command and output below was run against **Vault 1.21** (dev mode) and **PostgreSQL 16**, with QueryAPIGate
 signing in to Vault through **AppRole**. The leases last **60 seconds** so that a few rotations fit in the guide; an

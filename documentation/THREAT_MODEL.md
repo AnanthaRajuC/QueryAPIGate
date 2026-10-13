@@ -399,7 +399,7 @@ reference could name the server's own cloud credentials - `${AWS_SECRET_ACCESS_K
 through a file as through the API. Fixed in both (Query execution, above): those credentials are always refused,
 and `QUERYAPIGATE_SECRET_ENV_VARS` limits the rest to what the deployer lists.
 
-### Secrets from secrets managers (ADR 0015, experimental)
+### Secrets from secrets managers (ADR 0015)
 
 A reference - `${file:...}`, `${vault:...}`, `${aws-sm:...}` - or a connection's `credentials` lets an administrator
 make the server fetch a secret and use it as a password. The server's identity (its files, Vault token, IAM role)
@@ -409,8 +409,9 @@ to be sent whatever it fetches. So:
 - **Nothing is reachable until the deployer says so**: `QUERYAPIGATE_SECRET_FILE_DIRS`, `QUERYAPIGATE_VAULT_PATHS`,
   `QUERYAPIGATE_VAULT_DATABASE_ROLES`, `QUERYAPIGATE_AWS_SECRET_PREFIXES` and `QUERYAPIGATE_AWS_RDS_HOSTS`, checked
   when a reference is saved and again when it's used. The store's own folder is never readable, and the server's own
-  `QUERYAPIGATE_*`/`OTEL_*` settings never reachable, by any reference. A file is opened at the real path that was
-  checked, so a symbolic link changed in between can't point it elsewhere.
+  `QUERYAPIGATE_*`/`OTEL_*` settings never reachable, by any reference - nor, through `${file:...}`, a file one of
+  them or the server's own credentials name, the Kubernetes and EKS service account tokens, or `/proc`. A file is
+  opened at the real path that was checked, so a symbolic link changed in between can't point it elsewhere.
 - **A Vault database role can be bound to the host its credentials may go to** (`reporting-ro@warehouse.internal`),
   and an RDS IAM token is made only for the listed hosts. **Bind every role**: an unbound one hands its credentials
   to whatever host a connection names - including through `POST /api/v1/connections/test`, without saving anything.
@@ -427,6 +428,19 @@ to be sent whatever it fetches. So:
   keep it to the paths and roles connections need. The same goes for the IAM role.
 - **Leases are revoked when a process stops** (on SIGTERM too), so a stopped instance's database users don't linger;
   one that crashes leaves them to their TTL.
+- **Why a secret couldn't be had is the operator's, not the caller's**: `secret_unavailable` says only that, and the
+  reference and the provider's error go to the log and to `detail`, which a scoped key calling a saved query doesn't
+  get - they name where the server's secrets live, and its Vault's address.
+
+*Reviewed for 0.34 (ADR 0021)* - `${VAR}`, `${file:...}`, `${vault:...}` and `vault-database`, against Vault 1.21.
+Looked at: each allow-list checked when saved and again when used, and Vault paths and roles matched whole (a
+`reporting` prefix doesn't reach `reporting-admin`); a file opened at the path that was checked; the cache failing
+closed, and a failing provider asked at most every 10 seconds; the Vault token's sign-in and renewal, a forbidden
+answer signing in again only once; what an error tells whom. **Found, and fixed:** a `${file:...}` could read the server's own secrets wherever they were files inside an allowed
+folder - `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet` beside `QUERYAPIGATE_SECRET_FILE_DIRS=/run/secrets`, as
+the docs suggest - and so have the server's key sent to an administrator's host as a password; and, with a broad
+folder, `/proc/self/environ` or the service account's token. And `secret_unavailable` told any caller the reference
+and Vault's own answer. AWS (`${aws-sm:...}`, `aws-rds-iam`) stays experimental, tested only against a stand-in.
 
 ### What is kept, and the cryptography it rests on (ADR 0016)
 
@@ -446,6 +460,30 @@ to be sent whatever it fetches. So:
   validated module is the platform's (a FIPS-mode OpenSSL, the distribution's `cryptography`). The page names what is
   outside that boundary - the PostgreSQL and MySQL drivers' binary wheels, DuckDB's TLS, a JDBC or H2 connection's Java
   runtime - and CI runs the whole suite under OpenSSL's FIPS provider.
+
+### Live events (ADR 0020)
+
+`GET /events` - on the main server, and `queryapigate events` for many clients - streams each run as it happens:
+which query, on which connection, by which key, how it went, and an ad-hoc run's SQL as history keeps it. So:
+
+- **Never public.** A real key or a signed-in user's token, in a header - never the URL, where it would reach access
+  logs - unless the server runs with no keys at all. A stream is checked again every minute, so a revoked key or an
+  expired token loses it within about a minute and a quarter.
+- **The admin key and data administrators see every run; anyone else only their own** - the runs made with that key,
+  or by that user, since the key was created. Filters only narrow that, and their values are bound, never SQL.
+  Key names can't hold the `:` of `jwt:<subject>`, and an administrator's name can't be a key's.
+- **Resource use is bounded**: `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` streams a process, `QUERYAPIGATE_EVENTS_MAX_STREAMS`
+  on the main server (each a request thread), `QUERYAPIGATE_RATE_LIMIT` before a key is even checked, 10 seconds and
+  100 headers for a request, and a client that stops reading cut off once 1,000 events wait for it. Not bounded: how
+  many of those streams one key holds.
+- **Kept for a while, and forgettable**: the event log keeps `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default),
+  and `history forget` erases a caller's events with their runs.
+
+*Reviewed for 0.34 (ADR 0021).* Looked at: authentication on both endpoints and the recheck; who sees what, live and
+on a resume, for keys, signed-in users and each administrator role; the filters' SQL; the request parser's limits;
+CORS and the security headers; `/metrics` behind its token. **Found, and fixed:** a deleted key's name can be given to
+a new key, and the event log kept the old key's runs under it - the new key could resume from 0 and read its
+predecessor's runs of the last day. A key now sees no event from before it was created.
 
 ### Rate limiting and abuse prevention
 

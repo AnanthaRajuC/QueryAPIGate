@@ -32,7 +32,7 @@ dependencies = ["Flask>=3.0", "Werkzeug>=3.0", "PyYAML>=6.0.1", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 mysql = ["mysql-connector-python>=8.0"]
-postgres = ["psycopg2-binary>=2.9"]
+postgres = ["psycopg2-binary>=2.9.5"]  # 2.9.5 is the first with wheels for Python 3.11, the oldest supported
 clickhouse = ["clickhouse-driver>=0.2"]
 h2 = ["JayDeBeApi>=1.2", "JPype1>=1.4"]  # also needs a Java runtime
 duckdb = ["duckdb>=1.2"]  # allowed_directories/allowed_paths, which lock every connection (duckfiles.py), arrived in 1.2

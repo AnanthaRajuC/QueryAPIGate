@@ -319,7 +319,7 @@ Without it, any can but the server's own settings and the credentials it may run
 use. `GET /api/v1/connections/{name}` masks plain-text passwords as
 `********` and shows `${VAR}` references as written. A secret kept in a file - the CSI driver's, Docker's, Vault
 Agent's - is `${file:/run/secrets/name}`, read inside the folders `QUERYAPIGATE_SECRET_FILE_DIRS` allows
-([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers), experimental).
+([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers)).
 
 ## Best practice
 

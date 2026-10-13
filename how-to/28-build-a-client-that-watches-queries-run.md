@@ -4,8 +4,9 @@
 receives a live event the moment any saved query - or ad-hoc SQL - runs, with real reconnect-on-drop handling. Both
 examples below are verified against a real running server, including a real mid-stream server drop and reconnect.
 
-> **Experimental** - live events (`GET /events`) may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - live events (`GET /events`) are under the compatibility promise since 0.34
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): new event types and fields may be added, so skip
+> one you don't know.
 
 This is about building your *own* consumer of `GET /events` - if you just want to know what the endpoint
 does and how per-key filtering works, see

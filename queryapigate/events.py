@@ -159,10 +159,20 @@ def _rows(ids):
     return rows
 
 
-def _replay_page(after, key_name, filters):
+def _key_since(key_name):
+    """When the API key named ``key_name`` was created, or None (a signed-in user, an administrator). A key sees no
+    event from before then: a deleted key's name can be given to a new one, and its runs aren't the new key's
+    (ADR 0021)."""
+    row = db.connection().execute('SELECT created_at FROM api_keys WHERE name = ?', (key_name,)).fetchone()
+    return row[0] if row else None
+
+
+def _replay_page(after, key_name, filters, since=None):
     """One page of the events after ``after`` that ``key_name`` may see (None: every event) and ``filters`` ask for,
-    oldest first."""
+    from ``since`` on, oldest first."""
     where, params = _filter_sql(filters)
+    if since is not None:
+        where, params = ' AND occurred_at >= ?' + where, [since, *params]
     if key_name is not None:
         where, params = ' AND key_name = ?' + where, [key_name, *params]
     return db.connection().execute(
@@ -219,12 +229,13 @@ def _lag(occurred_at):
 
 
 class _Client:
-    __slots__ = ('queue', 'key_name', 'filters', 'writer', 'too_slow')
+    __slots__ = ('queue', 'key_name', 'filters', 'since', 'writer', 'too_slow')
 
-    def __init__(self, key_name, writer, filters=None):
+    def __init__(self, key_name, writer, filters=None, since=None):
         self.queue = asyncio.Queue(maxsize=_QUEUE_SIZE)
         self.key_name = key_name  # None: sees every event
         self.filters = filters or {}
+        self.since = since  # an API key's created_at: nothing older is its (_key_since())
         self.writer = writer
         self.too_slow = False
 
@@ -319,7 +330,8 @@ class EventServer:
     def _deliver(self, rowid, key_name, event_fields, data, occurred_at=None):
         self._remember(rowid)
         for client in (*self.by_key.get(None, ()), *self.by_key.get(key_name, ())):
-            if client.too_slow or not matches(client.filters, event_fields):
+            if client.too_slow or not matches(client.filters, event_fields) \
+                    or (client.since is not None and (occurred_at or '') < client.since):
                 continue
             try:
                 client.queue.put_nowait((rowid, data))
@@ -444,7 +456,8 @@ class EventServer:
             return
         last_id = _last_event_id(headers, query)
         key_name = None if permission.admin else permission.name
-        client = _Client(key_name, writer, filters)
+        since = None if key_name is None else await asyncio.to_thread(_key_since, key_name)
+        client = _Client(key_name, writer, filters, since)
         self.clients.add(client)
         self.by_key.setdefault(key_name, set()).add(client)  # live events queue up from here on...
         try:
@@ -457,7 +470,7 @@ class EventServer:
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
                 after = last_id  # only what is replayed moves `sent`: an id from another store mustn't mute live events
                 while not client.too_slow:  # every page, up to the live stream (ADR 0020 §7)
-                    page = await asyncio.to_thread(_replay_page, after, key_name, filters)
+                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since)
                     for event_id, payload_json in page:
                         writer.write(_chunk(_format(event_id, payload_json)))
                         sent = after = event_id

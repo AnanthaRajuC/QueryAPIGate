@@ -49,6 +49,7 @@ nav:
       - 0018 Signed releases: documentation/adr/0018-signed-releases.md
       - 0019 The SIEM stream against real receivers: documentation/adr/0019-the-siem-stream-against-real-receivers.md
       - 0020 The event log: documentation/adr/0020-the-event-log.md
+      - 0021 Live events and secrets graduate: documentation/adr/0021-live-events-and-secrets-graduate.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

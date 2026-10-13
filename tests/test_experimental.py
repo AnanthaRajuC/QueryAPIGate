@@ -42,7 +42,7 @@ class MarkedEverywhereTests(unittest.TestCase):
     def test_settings_rows_flag_exactly_the_experimental_settings(self):
         rows = [row for section in config.describe_settings() for row in section['rows']]
         self.assertEqual({r['env'] for r in rows if r['experimental'] and r['env']}, set(experimental.SETTINGS))
-        self.assertTrue(next(r for r in rows if r['label'] == 'Live updates')['experimental'])  # GET /events itself
+        self.assertFalse(next(r for r in rows if r['label'] == 'Live updates')['experimental'])  # stable since 0.34
 
     def test_each_feature_says_so_in_its_own_section_of_the_docs(self):
         for key, feature in experimental.FEATURES.items():
@@ -73,6 +73,8 @@ class MarkedEverywhereTests(unittest.TestCase):
                                      (api, 'Usage quotas', '0.30'), (api, 'Configuration as code', '0.30'),
                                      (api, 'Console sign-in through SSO', '0.30'),
                                      (api, 'Streaming the audit log to a SIEM', '0.32'),
+                                     (api, 'Live events (Server-Sent Events)', '0.34'),
+                                     (api, 'Secrets from files and secrets managers', '0.34'),
                                      ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)', '0.30'),
                                      ('documentation/MCP.md', 'Write tools: agents that write, approved by a person',
                                       '0.30'),
@@ -116,9 +118,11 @@ class StartupWarningTests(unittest.TestCase):
         self.assertEqual(self.warnings(), [])
 
     def test_a_setting_of_one_names_it(self):
-        [line] = self.warnings(QUERYAPIGATE_EVENTS_MAX_STREAMS='2')
-        self.assertIn('Experimental: Live events (QUERYAPIGATE_EVENTS_MAX_STREAMS)', line)
+        [line] = self.warnings(QUERYAPIGATE_AWS_SECRET_PREFIXES='prod/reporting/')
+        self.assertIn('Experimental: Secrets and credentials from AWS (QUERYAPIGATE_AWS_SECRET_PREFIXES)', line)
         self.assertEqual(self.warnings(QUERYAPIGATE_ALERT_ERROR_RATE='30'), [])  # graduated in 0.20
+        self.assertEqual(self.warnings(QUERYAPIGATE_EVENTS_MAX_STREAMS='2', QUERYAPIGATE_VAULT_PATHS='secret/data/r/',
+                                       QUERYAPIGATE_SECRET_FILE_DIRS=self.tmp.name), [])  # graduated in 0.34
 
     def test_a_connection_of_an_experimental_type_names_it(self):
         write_connections({'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})
@@ -130,11 +134,10 @@ class StartupWarningTests(unittest.TestCase):
         write_connections({'example-h2': {'db': 'h2', 'host': 'h', 'database': 'd', 'active': False}})
         self.assertEqual(self.warnings(), [])
 
-    def test_the_events_server_always_says_so(self):
+    def test_the_events_server_starting_is_no_longer_news(self):  # live events graduated in 0.34 (ADR 0021)
         log = logging.getLogger('queryapigate')
-        with self.assertLogs(log, level=logging.WARNING) as logs:
-            experimental.warn_in_use(log, {}, {}, also=('live_events',))
-        self.assertIn('Experimental: Live events (started)', logs.output[0])
+        with self.assertNoLogs(log, level=logging.WARNING):
+            experimental.warn_in_use(log, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '48'}, {})
 
 
 if __name__ == '__main__':

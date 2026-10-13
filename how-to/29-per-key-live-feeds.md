@@ -3,7 +3,7 @@
 **Time:** 15 minutes. **You'll end up with:** a live stream per user - in a mobile app, say - showing that user's own
 queries completing, and nobody else's, verified with two users side by side.
 
-> **Experimental** - live events may change in any minor release, always noted in the changelog
+> **Stable** - live events are under the compatibility promise since 0.34
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 The rule that makes this work: **a stream shows only the runs made with the same credential that opened it.** The

@@ -168,10 +168,18 @@ jobs:
     # The lowest versions pyproject.toml allows, so a minimum can't quietly stop being true again: every core
     # dependency, and every extra a stable feature needs (ADR 0017). DuckDB 1.2 is the first that can lock a
     # connection to its paths, sqlglot 25.2 the first masking's tracing works on, mcp 1.21.1 the first that imports
-    # beside the pydantic pip installs with it. tests/test_dependency_floors.py keeps these pins equal to pyproject.toml's minimums.
+    # beside the pydantic pip installs with it, psycopg2-binary 2.9.5 the first with wheels for Python 3.11.
+    # tests/test_dependency_floors.py keeps these pins equal to pyproject.toml's minimums.
     name: Tests (oldest supported dependencies)
     runs-on: ubuntu-latest
     services:
+      postgres:  # psycopg2's floor, against a real store: live events' notifications among it (ADR 0021)
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
       redis:  # redis 5's client, against a real server: quotas and shared rate limits
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -188,7 +196,12 @@ jobs:
       - run: >-
           pip install -e ".[dev]" "Flask==3.0.0" "Werkzeug==3.0.0" "PyYAML==6.0.1" "openpyxl==3.1.0"
           "duckdb==1.2.0" "sqlglot==25.2.0" "mcp==1.21.1" "PyJWT[crypto]==2.14.0" "redis==5.0.0"
+          "psycopg2-binary==2.9.5"
       - run: python -m unittest discover -s tests -t . -v
+      - name: Again, on a PostgreSQL store
+        run: python -m unittest discover -s tests -t . -v
+        env:
+          QUERYAPIGATE_TEST_DATABASE_URL: postgresql://postgres:pw@localhost:5432/postgres
 
   postgres-metadata:
     # The whole suite again, with the metadata store (connections, saved queries, keys, roles, history, audit

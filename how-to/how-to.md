@@ -93,8 +93,8 @@ guide covers one scenario end to end, and every command and response in it was r
 ## Live updates (SSE)
 
 28. [**Build a client that watches your saved queries run in real time**](28-build-a-client-that-watches-queries-run.md)
-    (experimental) - parsing the stream, reconnecting.
-29. [**Give each user of your app their own private activity feed**](29-per-key-live-feeds.md) (experimental) -
+    - parsing the stream, reconnecting.
+29. [**Give each user of your app their own private activity feed**](29-per-key-live-feeds.md) -
     per-key and per-user streams, and resuming.
 
 ## Exporting and scheduling

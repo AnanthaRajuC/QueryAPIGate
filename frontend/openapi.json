@@ -11581,7 +11581,7 @@
     },
     "/events": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. One `data: {...}` line per event as it happens - today a run, `query.run`, of a saved query or of ad-hoc SQL - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every event; a scoped key sees only the runs it made itself (its own personal activity feed, filtered by API key name). The filters narrow that, never widen it; they combine with AND.",
+        "description": "One `data: {...}` line per event as it happens - today a run, `query.run`, of a saved query or of ad-hoc SQL - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every event; a scoped key sees only the runs it made itself (its own personal activity feed, filtered by API key name). The filters narrow that, never widen it; they combine with AND.",
         "parameters": [
           {
             "description": "Only events of this type, e.g. query.run.",
@@ -11673,8 +11673,7 @@
         "summary": "Live events (Server-Sent Events)",
         "tags": [
           "Saved queries"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/execute_mongo": {

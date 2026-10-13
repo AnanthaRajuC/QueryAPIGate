@@ -20,10 +20,9 @@ is a minor release, called out under **Breaking** - never a patch.
 **Experimental** features are outside that promise: they may change or be removed in any minor release (a patch
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
-its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
-(`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, tracing with OpenTelemetry
-(`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets from files and secrets managers (`${file:...}`).
-The list is `queryapigate/experimental.py`.
+its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and
+MongoDB connections, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
+(`${aws-sm:...}`, `aws-rds-iam`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -49,6 +48,46 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+Live events, and secrets from files and Vault, are stable: under the compatibility promise, each after a security
+review ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). The reviews found three things, fixed
+here. AWS's secrets and credentials stay experimental until they're tested against AWS.
+
+### Upgrading from 0.33
+- **`psycopg2-binary` 2.9.5 or later** (was 2.9): 2.9.0 has no wheel for Python 3.11, the oldest supported, so the
+  old floor was never one anybody could install from a wheel. CI now tests 2.9.5, on a PostgreSQL store.
+- **If a script reads why a secret was unavailable from `error`, read `detail`** (below). The `code` and status are
+  unchanged.
+- **A `${file:...}` naming one of the server's own secret files is refused** (below). Nothing documented ever
+  pointed one there; Settings lists which of the server's settings came from files.
+
+### Changed
+- **Live events are stable** ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)), with the 0.33
+  payload unchanged. Event types, payload fields, filters and settings may still be added; ids, the fields documented
+  and what each filter means stay as they are. Their limits are in the documentation. They're no longer marked
+  experimental in Settings, `/openapi.json` (`GET /events`) or the startup log, of either server.
+- **Secrets from files and Vault are stable** - `${VAR}`, `${file:...}`, `${vault:...}` and `vault-database`
+  credentials, tested on every push against Vault 1.21. Providers, credential sources, sign-in methods and settings may
+  still be added. **AWS stays experimental:** `${aws-sm:...}` and `aws-rds-iam`, documented under their own heading,
+  [Secrets and credentials from AWS](documentation/API.md#secrets-and-credentials-from-aws), and the startup warning
+  now names only the `QUERYAPIGATE_AWS_*` settings.
+- **`secret_unavailable` (503) says only that a secret is unavailable.** Why - the reference and the provider's
+  answer, a Vault address or path among them - is in the log and in the error's `detail`, which a scoped key calling a
+  saved query doesn't get, as with a database's own error text.
+- **The oldest-dependencies CI job runs the suite on a PostgreSQL store too**, with `psycopg2-binary` 2.9.5.
+
+### Security
+- **A new key with a deleted key's name saw the old key's runs.** The event log kept them under the name, so the new
+  key could resume from `Last-Event-ID: 0` and read its predecessor's runs of the last
+  `QUERYAPIGATE_EVENTS_RETENTION_HOURS`. A key now sees no event from before it was created.
+- **A `${file:...}` could read the server's own secrets** where they were files inside an allowed folder -
+  `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet` beside `QUERYAPIGATE_SECRET_FILE_DIRS=/run/secrets` - and so an
+  administrator could have the server's key sent to a host of theirs as a password. A file named by any of the
+  server's own settings or the credentials it runs with, the Kubernetes and EKS service account tokens, and `/proc`
+  are never readable now, whatever the allow-list says.
+- **`secret_unavailable` told any caller where the secrets live** - the file path, Vault's address, its path and its
+  answer - a partner's scoped key and MCP clients included. Now only `detail` says, and only to those who'd get a
+  database's own error text.
 
 ## [0.33.0] - 2026-10-13
 

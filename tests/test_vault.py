@@ -148,11 +148,11 @@ class KvTests(VaultTestCase):
         with self.assertRaises(ApiError) as caught:
             secretrefs.expand('${vault:secret/data/reporting/warehouse#username}')
         self.assertEqual(caught.exception.code, 'secret_unavailable')
-        self.assertIn("has no field 'username'", caught.exception.message)
+        self.assertIn("has no field 'username'", caught.exception.extra['detail'])
         self.vault.down = True
         with self.assertRaises(ApiError) as caught:
             secretrefs.expand('${vault:kv1/reporting/legacy#password}')
-        self.assertIn('Vault answered 503 for kv1/reporting/legacy: Vault is sealed', caught.exception.message)
+        self.assertIn('Vault answered 503 for kv1/reporting/legacy: Vault is sealed', caught.exception.extra['detail'])
 
 
 class SignInTests(VaultTestCase):

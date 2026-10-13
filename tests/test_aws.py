@@ -94,14 +94,14 @@ class SecretsManagerTests(AwsTestCase):
             with self.subTest(ref=ref), self.assertRaises(ApiError) as caught:
                 secretrefs.expand(ref)
             self.assertEqual(caught.exception.code, 'secret_unavailable')
-            self.assertIn(words, caught.exception.message)
+            self.assertIn(words, caught.exception.extra['detail'])
 
     def test_without_boto3_it_says_which_extra(self):
         aws.reset()
         with mock.patch.object(aws, '_client', _real_client), mock.patch.dict('sys.modules', {'boto3': None}):
             with self.assertRaises(ApiError) as caught:
                 secretrefs.expand('${aws-sm:prod/reporting/plain}')
-        self.assertIn('pip install "queryapigate[aws]"', caught.exception.message)
+        self.assertIn('pip install "queryapigate[aws]"', caught.exception.extra['detail'])
 
 
 _real_client = aws._client

@@ -104,11 +104,12 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)). (0.32.0, 2026-10-13.)
 21. **0.33: #59 the event log**, live events' own table, retention, filters and payload
     ([ADR 0020](documentation/adr/0020-the-event-log.md)). (0.33.0, 2026-10-13.)
-22. **Then, only on demand:** #99 workspaces.
-23. **Before 1.0.0-rc1:** what still keeps it from a freeze - AWS against AWS, and live events graduating once their
-    0.33 payload has gone a release unchanged - then rc1: freeze; invite external users to upgrade real stores and
-    report back.
-24. **1.0.0.**
+22. **0.34: live events, and secrets from files and Vault, graduate**, after a security review each
+    ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). AWS's stay experimental. (Unreleased.)
+23. **Then, only on demand:** #99 workspaces.
+24. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+    `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
+25. **1.0.0.**
 
 ## 1. Per-key API permissions
 

@@ -802,8 +802,16 @@ in which case the list was cut off.
 
 ### Secrets from files and secrets managers
 
-> **Experimental** - new in 0.28 ([ADR 0015](adr/0015-secrets-managers-and-short-lived-credentials.md)): the
-> reference forms and the providers' settings may change as they meet real setups, always noted in the changelog.
+> **Stable** since 0.34 for `${VAR}`, `${file:...}`, `${vault:...}` and `vault-database` credentials, under the
+> compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)), tested on every push against
+> Vault 1.21 ([ADR 0021](adr/0021-live-events-and-secrets-graduate.md)). Providers, credential sources, Vault sign-in
+> methods and settings may still be added; the reference forms, the `credentials` shape and the allow-lists stay as
+> they are. AWS - `${aws-sm:...}` and `aws-rds-iam` - is still experimental: see
+> [Secrets and credentials from AWS](#secrets-and-credentials-from-aws). Limits: a resolved value is used for up to
+> `QUERYAPIGATE_SECRET_CACHE_SECONDS` after it's rotated or revoked; what an allowed reference names, an administrator
+> can still send to a host of theirs (bind Vault roles to their hosts); whoever can write inside an allowed folder
+> decides what a `${file:...}` reads; over an `http://` `QUERYAPIGATE_VAULT_ADDR` the server's Vault token crosses the
+> network unencrypted; Vault leases are revoked when a process stops, not when it crashes.
 
 A connection's or destination's field can name where its secret lives instead of holding it - resolved when the
 connection is opened, kept in memory a while, and never written anywhere. Responses, diffs and configuration files
@@ -814,7 +822,7 @@ show the reference as written.
 | `${VAR}` | The server's environment - only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists, when it's set. |
 | `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
 | `${vault:secret/data/warehouse#password}` | A field of a secret in Vault's KV engine, version 1 or 2: the path as Vault's API names it (`secret/data/...` for version 2), `#`, the field. |
-| `${aws-sm:prod/warehouse#password}` | An AWS Secrets Manager secret, by name or ARN - with `#field`, that field of its JSON; without, the whole string. |
+| `${aws-sm:prod/warehouse#password}` | An AWS Secrets Manager secret, by name or ARN - with `#field`, that field of its JSON; without, the whole string. Experimental: [below](#secrets-and-credentials-from-aws). |
 
 A reference can stand alone (`"password": "${file:/run/secrets/warehouse}"`) or sit inside a value
 (`"jdbc_url": "jdbc:...;password=${file:/run/secrets/warehouse}"`).
@@ -826,14 +834,18 @@ absolute folders, symbolic links followed) - unset, it's refused - and never the
 A reference outside is refused when it's saved (`invalid_body`), and again when it's used, in case the list shrank
 (`connection_misconfigured`). The server's own `QUERYAPIGATE_*` and `OTEL_*` settings are never reachable, by any
 reference, and nor are the credentials it may itself run with - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
-`VAULT_*` and `KUBERNETES_*` - which reach far more than one connection's secret. `${VAR}` reads any other variable
+`VAULT_*` and `KUBERNETES_*` - which reach far more than one connection's secret. Nor, through `${file:...}`, is a
+file one of them names (`QUERYAPIGATE_SECRET_KEY_FILE`, `QUERYAPIGATE_VAULT_TOKEN_FILE`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`...), the Kubernetes and EKS service account tokens, or anything under `/proc` - whatever
+`QUERYAPIGATE_SECRET_FILE_DIRS` allows. `${VAR}` reads any other variable
 until `QUERYAPIGATE_SECRET_ENV_VARS` lists the ones it may: names, or prefixes ending in `*`
 (`WAREHOUSE_PASSWORD,QAG_*`). Set it: while references are in use without it, the server says so at startup.
 
 **It fails closed.** A resolved value is kept for at most `QUERYAPIGATE_SECRET_CACHE_SECONDS` (default 300) and
 fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
-up - with a warning in the log - and never after: the connection fails with `503 secret_unavailable`, naming the
-provider's error, never the secret. A provider that failed isn't asked again for 10 seconds, and while one request
+up - with a warning in the log - and never after: the connection fails with `503 secret_unavailable`. Why - the
+reference and the provider's error, never the secret - is in the log and in the error's `detail`, which a scoped key
+calling a saved query doesn't get, as with a database's own error text: it names where the server's secrets live. A provider that failed isn't asked again for 10 seconds, and while one request
 waits on it the others get what's held - so an outage doesn't make every call wait on a timeout.
 
 **Short-lived database credentials.** Instead of a user and password, a connection can say where they come from:
@@ -848,12 +860,6 @@ the pair for every connection opened during its lease, and asks again at 80% of 
 retired before its lease ends - a tenth of the lease, between 5 seconds and 5 minutes, before - so a query never runs
 on a connection whose user Vault is about to drop. Leases the process took are revoked when it exits cleanly. Any
 type with a user and password (not SQLite, DuckDB or H2); with `credentials`, leave out `user` and `password`.
-
-For RDS and Aurora, `"credentials": {"source": "aws-rds-iam"}` makes an IAM authentication token the password of the
-connection's own `user` - PostgreSQL or MySQL, good for 15 minutes, signed by the server from its own AWS credentials
-(nothing is sent to AWS to make it). A token is a password, so only over TLS: a PostgreSQL connection needs
-`sslmode` `verify-full` (with `sslrootcert`, the RDS CA bundle) or `require`, a MySQL one `ssl_ca`. Leave out the
-`password`. Tested in CI to the token's signature; whether RDS accepts it can only be tested against RDS.
 
 **Vault.** `QUERYAPIGATE_VAULT_ADDR` (with `QUERYAPIGATE_VAULT_CACERT` for a private CA, and
 `QUERYAPIGATE_VAULT_NAMESPACE`), and the way this server signs in, `QUERYAPIGATE_VAULT_AUTH`:
@@ -874,13 +880,6 @@ Unbound, a role's credentials go to whatever host a connection names. Tested in 
 PostgreSQL; walkthrough:
 [Use short-lived database credentials from Vault](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/56-use-short-lived-database-credentials-from-vault.md).
 
-**AWS.** Through boto3 (`pip install "queryapigate[aws]"`; in the image already), with the standard credential
-chain - IRSA on EKS (the chart's `serviceAccount.annotations`), an instance or task role, the usual `AWS_*`
-variables - and region (`QUERYAPIGATE_AWS_REGION`, else boto3's). `${aws-sm:...}` reads only secrets whose names
-begin with one of `QUERYAPIGATE_AWS_SECRET_PREFIXES`, and `aws-rds-iam` makes tokens only for
-`QUERYAPIGATE_AWS_RDS_HOSTS` (names, or suffixes starting with a dot: `.abc123.eu-west-1.rds.amazonaws.com`) - unset,
-neither is allowed. Tested in CI against a Secrets Manager stand-in.
-
 **When a provider keeps failing**, the `secret_provider_failing` alert (critical) says so after five minutes, and
 Settings shows how each provider this instance has used last answered.
 
@@ -888,6 +887,26 @@ Settings shows how each provider this instance has used last answered.
 `_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, `_MASK_KEY`, `_JWT_SECRET`, `_SSO_CLIENT_SECRET` - can be read from a
 file instead, with `_FILE` added: `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet`. Read at startup, as the variable
 would be; setting both is refused. Settings says which came from a file.
+
+#### Secrets and credentials from AWS
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): tested in CI against a Secrets Manager stand-in,
+> not AWS, and RDS IAM authentication against neither, so the reference form and settings may still change as they
+> meet real AWS ([ADR 0021](adr/0021-live-events-and-secrets-graduate.md)).
+
+Through boto3 (`pip install "queryapigate[aws]"`; in the image already), with the standard credential
+chain - IRSA on EKS (the chart's `serviceAccount.annotations`), an instance or task role, the usual `AWS_*`
+variables - and region (`QUERYAPIGATE_AWS_REGION`, else boto3's). `${aws-sm:...}` reads only secrets whose names
+begin with one of `QUERYAPIGATE_AWS_SECRET_PREFIXES`, and `aws-rds-iam` makes tokens only for
+`QUERYAPIGATE_AWS_RDS_HOSTS` (names, or suffixes starting with a dot: `.abc123.eu-west-1.rds.amazonaws.com`) - unset,
+neither is allowed.
+
+For RDS and Aurora, `"credentials": {"source": "aws-rds-iam"}` makes an IAM authentication token the password of the
+connection's own `user` - PostgreSQL or MySQL, good for 15 minutes, signed by the server from its own AWS credentials
+(nothing is sent to AWS to make it). A token is a password, so only over TLS: a PostgreSQL connection needs
+`sslmode` `verify-full` (with `sslrootcert`, the RDS CA bundle) or `require`, a MySQL one `ssl_ca`. Leave out the
+`password`. Tested in CI to the token's signature; whether RDS accepts it can only be tested against RDS.
 
 ## Descriptions
 
@@ -1556,9 +1575,15 @@ process - `serve`, `mcp`, `events`, an export - is its own `service.instance.id`
 
 ## Live events (Server-Sent Events)
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): the payload changed in 0.33, with the event log
-> ([ADR 0020](adr/0020-the-event-log.md)), and live events graduate once it has gone a release unchanged.
+> **Stable** since 0.34, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)),
+> with the payload the event log brought in 0.33 ([ADR 0021](adr/0021-live-events-and-secrets-graduate.md)). Event
+> types, payload fields, filters and settings may still be added - skip a type or field you don't know; ids, the
+> fields below and what each filter means stay as they are. Limits: an event is kept for
+> `QUERYAPIGATE_EVENTS_RETENTION_HOURS`, and a resume from further back starts at the oldest still kept; a run dropped
+> under back-pressure, before it was written, is no event; a revoked key's or expired token's stream is closed within
+> about a minute and a quarter, not at once; a key sees no event from before it was created; one key may hold as many
+> of `queryapigate events`' streams as it likes, up to `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS`; the main server's own
+> `/events` has no ids or resume, and sees only its own process.
 
 Every run - of a saved query, or of ad-hoc SQL - can be streamed to clients as it happens: a mobile app showing a user
 their own requests completing, a dashboard, the Console's Home. There are two ways to serve that stream, with the same
@@ -1574,7 +1599,8 @@ format:
 
 **Each key gets its own view, not a shared firehose.** Either way, a real API key is required (unless the server
 runs with no keys at all). The admin key sees every event; any other key sees only the runs made with that same
-key - its own personal activity feed:
+key since it was created - its own personal activity feed. (A deleted key's name can be given to a new key; the old
+one's runs don't come with it.) A stream looks like this:
 
 ```
 GET /events

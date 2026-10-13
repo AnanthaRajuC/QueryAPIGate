@@ -275,6 +275,23 @@ class ResumeTests(EventServerTestCase):
         self.assertEqual([p['entry']['key_name'] for _, p in resumed.events(1)], ['alice'])
         self.assertTrue(resumed.nothing_more())
 
+    def test_a_new_key_with_a_deleted_keys_name_gets_none_of_its_runs(self):
+        # Reviewed for 0.34 (ADR 0021): a key's name can be reused once it's deleted, and the event log kept the old
+        # key's runs under it - a partner given the name next could resume from 0 and read its predecessor's.
+        first = self.open('admin')
+        self.run_query(self.alice)
+        (old_run, _), = first.events(1)
+        with db.transaction() as tx:  # the old key's run, from before the new key existed
+            tx.execute("UPDATE events SET occurred_at = '2000-01-01 00:00:00' WHERE id = ?", (old_run,))
+        self.assertEqual(self.client.delete('/api/v1/api-keys/alice', headers=self.admin).status_code, 204)
+        new_alice = self.key('alice')
+        resumed = self.open(new_alice, **{'Last-Event-ID': '0'})
+        self.run_query(new_alice)  # its own runs still arrive - and are the first thing it gets
+        (event_id, payload), = resumed.events(1)
+        self.assertGreater(event_id, old_run)
+        self.assertEqual(payload['entry']['key_name'], 'alice')
+        self.assertTrue(resumed.nothing_more())
+
     def test_an_id_from_another_store_still_gets_live_events(self):
         stream = self.open('admin', **{'Last-Event-ID': '999999'})
         self.run_query(self.alice)

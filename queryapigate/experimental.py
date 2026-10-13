@@ -10,7 +10,8 @@ A feature graduates - its entry deleted here, its callout replaced by a note tha
 added - when it meets every one of GRADUATION. Alerts, remote files through DuckDB, exports and column masking did in
 0.20; descriptions, agent usage, usage quotas, configuration as code, OAuth for the MCP server, write tools and
 Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart; the audit log streamed to a SIEM in 0.32, once
-tested against real receivers (ADR 0019). The connection types have their own terms (databases.GRADUATION).
+tested against real receivers (ADR 0019); live events, and secrets from files and Vault, in 0.34 (ADR 0021) - AWS's
+stay, until tested against AWS. The connection types have their own terms (databases.GRADUATION).
 """
 from typing import Any
 
@@ -26,16 +27,6 @@ GRADUATION = (
 )
 
 FEATURES: dict[str, dict[str, Any]] = {
-    'live_events': {
-        'name': 'Live events',
-        'why': 'its payload changed in 0.33, with the event log (ADR 0020); it graduates once it has gone a release '
-               'unchanged',
-        'operations': (('get', '/events'),),
-        'settings': ('QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS',
-                     'QUERYAPIGATE_EVENTS_POLL_INTERVAL', 'QUERYAPIGATE_EVENTS_MAX_STREAMS',
-                     'QUERYAPIGATE_EVENTS_RETENTION_HOURS'),
-        'docs': ('documentation/API.md', 'Live events (Server-Sent Events)'),
-    },
     'connection_types': {
         'name': 'H2, JDBC and MongoDB connections',
         'why': 'they are tested less than the other types, and not every feature works on them (allowed_tables, '
@@ -50,14 +41,12 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
         'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
     },
-    'secret_providers': {
-        'name': 'Secrets from files and secrets managers',
-        'why': 'new in 0.28 - the reference forms and the providers\' settings may change as they meet real Vault '
-               'and AWS setups (ADR 0015)',
-        'settings': ('QUERYAPIGATE_SECRET_FILE_DIRS', 'QUERYAPIGATE_SECRET_CACHE_SECONDS', 'QUERYAPIGATE_VAULT_ADDR',
-                     'QUERYAPIGATE_VAULT_PATHS', 'QUERYAPIGATE_VAULT_DATABASE_ROLES', 'QUERYAPIGATE_AWS_REGION',
-                     'QUERYAPIGATE_AWS_SECRET_PREFIXES', 'QUERYAPIGATE_AWS_RDS_HOSTS'),
-        'docs': ('documentation/API.md', 'Secrets from files and secrets managers'),
+    'aws_secrets': {
+        'name': 'Secrets and credentials from AWS',
+        'why': 'tested against a Secrets Manager stand-in, not AWS, and RDS IAM authentication against neither - the '
+               'reference forms and settings may change as they meet real AWS (ADR 0021)',
+        'settings': ('QUERYAPIGATE_AWS_REGION', 'QUERYAPIGATE_AWS_SECRET_PREFIXES', 'QUERYAPIGATE_AWS_RDS_HOSTS'),
+        'docs': ('documentation/API.md', 'Secrets and credentials from AWS'),
     },
 }
 
@@ -84,12 +73,9 @@ def in_use(environ, connections):
     return used
 
 
-def warn_in_use(log, environ, connections, also=()):
-    """One warning per experimental feature in use (and per id in `also`, e.g. 'live_events' when the events server
-    itself starts), so nobody comes to depend on one without having been told."""
+def warn_in_use(log, environ, connections):
+    """One warning per experimental feature in use, so nobody comes to depend on one without having been told."""
     used = in_use(environ, connections)
-    for key in also:
-        used.setdefault(key, 'started')
     for key, evidence in sorted(used.items()):
         feature = FEATURES[key]
         log.warning('Experimental: %s (%s) - may change in any minor release, noted in the changelog - %s.',

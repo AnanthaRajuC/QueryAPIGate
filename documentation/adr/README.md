@@ -29,6 +29,7 @@ one it supersedes.
 | [0018](0018-signed-releases.md) | Signed releases, and what they're built from | Accepted |
 | [0019](0019-the-siem-stream-against-real-receivers.md) | The SIEM stream, against real receivers | Accepted |
 | [0020](0020-the-event-log.md) | The event log: events stop being a view on run history | Accepted |
+| [0021](0021-live-events-and-secrets-graduate.md) | Live events, and secrets from files and Vault, graduate | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

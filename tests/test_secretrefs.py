@@ -65,7 +65,7 @@ class ReferenceTests(SecretTestCase):
         big = self.secret('big', 'x' * (secretrefs.MAX_FILE_BYTES + 1))
         with self.assertRaises(ApiError) as caught:
             secretrefs.expand('${file:' + big + '}')
-        self.assertIn('larger than 64 KiB', caught.exception.message)
+        self.assertIn('larger than 64 KiB', caught.exception.extra['detail'])
         self.assertEqual((caught.exception.status, caught.exception.code), (503, 'secret_unavailable'))
 
 
@@ -103,6 +103,32 @@ class AllowListTests(SecretTestCase):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_FILE_DIRS': self.tmp.name}):
             message = self.refused('${file:' + os.path.join(self.home, 'queryapigate.db') + '}')
         self.assertIn("own home folder, where its store lives", message)
+
+    def test_never_a_file_the_servers_own_settings_or_credentials_name(self):
+        # Reviewed for 0.34 (ADR 0021): the server's own secrets are often files beside the connections' -
+        # QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet with QUERYAPIGATE_SECRET_FILE_DIRS=/run/secrets - and a
+        # reference to one, with a host of the administrator's, would send them the server's key as a password.
+        fernet, token, identity = self.secret('fernet', 'k'), self.secret('vault-token', 't'), self.secret('irsa', 'j')
+        syslog_key = self.secret('syslog.key', 'pem')
+        link = os.path.join(self.secrets, 'also-fernet')
+        os.symlink(fernet, link)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_KEY_FILE': fernet,
+                                          'QUERYAPIGATE_VAULT_TOKEN_FILE': token,
+                                          'QUERYAPIGATE_AUDIT_SYSLOG_KEY': syslog_key,
+                                          'AWS_WEB_IDENTITY_TOKEN_FILE': identity}):
+            for path in (fernet, token, syslog_key, identity, link):
+                with self.subTest(path=path):
+                    self.assertIn("a file this server's own settings or credentials name",
+                                  self.refused('${file:' + path + '}'))
+            self.assertEqual(secretrefs.expand('${file:' + self.secret('pw', 'fine') + '}'), 'fine')  # others still
+
+    def test_never_the_processes_own_memory_or_service_account(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_FILE_DIRS': '/'}):
+            for path in ('/proc/self/environ', '/proc/1/environ',
+                         '/var/run/secrets/kubernetes.io/serviceaccount/token',
+                         '/var/run/secrets/eks.amazonaws.com/serviceaccount/token'):
+                with self.subTest(path=path):
+                    self.assertIn('never readable as a secret', self.refused('${file:' + path + '}'))
 
     def test_a_provider_there_is_none_of_and_the_servers_own_settings(self):
         self.assertIn("no secret provider 'gcp-sm'", self.refused('${gcp-sm:projects/p/secrets/s}'))
@@ -219,7 +245,7 @@ class FailingClosedTests(SecretTestCase):
         self.clock[0] += 101
         with self.failing(), self.assertRaises(ApiError) as caught:
             secretrefs.expand(self.ref)
-        self.assertIn('could not be resolved: the provider is down', caught.exception.message)
+        self.assertIn('could not be resolved: the provider is down', caught.exception.extra['detail'])
         self.assertEqual((caught.exception.status, caught.exception.code), (503, 'secret_unavailable'))
         self.assertNotIn('held', caught.exception.message)
 
@@ -269,6 +295,32 @@ class FailingClosedTests(SecretTestCase):
         with self.failing():
             self.assertEqual(secretrefs.expand(self.ref), 'held')
         self.assertNotIn('failing_since', {k for k, v in secretrefs.cache.status['file'].items() if v})
+
+
+class WhoSeesWhyTests(SecretTestCase):
+    def test_a_scoped_key_isnt_told_where_the_secrets_live(self):
+        # Reviewed for 0.34 (ADR 0021): the reason names the reference, a Vault address or path - for the admin key and
+        # administrators, kept from a partner calling a saved query, as a database's own error text is.
+        from queryapigate import create_app
+        from tests.helpers import save_query
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_API_KEY': 'admin'}):
+            client = create_app().test_client()
+            admin = {'X-API-Key': 'admin'}
+            missing = os.path.join(self.secrets, 'warehouse-password')
+            self.assertEqual(client.post('/api/v1/connections', headers=admin, json={
+                'name': 'wh', 'db': 'postgres', 'host': 'db.internal', 'database': 'd', 'user': 'u',
+                'password': '${file:' + missing + '}'}).status_code, 201)
+            self.assertEqual(save_query(client, headers=admin, body={
+                'author': 'a', 'description': 'd', 'filename': 'q', 'connection_name': 'wh',
+                'sql_query': 'SELECT 1'}).status_code, 201)
+            partner = client.post('/api/v1/api-keys', headers=admin,
+                                  json={'name': 'partner', 'connections': ['wh'], 'queries': ['q']}).get_json()
+            scoped = client.get('/q/q', headers={'X-API-Key': partner['secret']})
+            full = client.get('/q/q', headers=admin)
+        self.assertEqual(scoped.status_code, 503)
+        self.assertEqual(scoped.get_json()['error'], secretrefs.UNAVAILABLE)
+        self.assertNotIn(missing, scoped.get_data(as_text=True))
+        self.assertIn(missing, full.get_json()['detail'])
 
 
 class StoreTests(SecretTestCase):

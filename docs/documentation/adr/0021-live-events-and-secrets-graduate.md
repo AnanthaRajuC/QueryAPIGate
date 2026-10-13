@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0021-live-events-and-secrets-graduate.md"

@@ -41,9 +41,14 @@ def lease_margin(lasts):
 MAX_FILE_BYTES = 64 * 1024
 
 
-def unavailable(message):
-    """A provider couldn't give a secret, and no value still within its time is held: the connection fails closed."""
-    return ApiError(message, 503, code='secret_unavailable')
+UNAVAILABLE = 'A secret this connection needs is unavailable'
+
+
+def unavailable(detail):
+    """A provider couldn't give a secret, and no value still within its time is held: the connection fails closed.
+    Why is `detail` - like a database's own error text, kept from a scoped key calling a saved query
+    (app.handle_api_error()): it names where the server's secrets live, and its Vault's address (ADR 0021)."""
+    return ApiError(UNAVAILABLE, 503, code='secret_unavailable', detail=detail)
 
 
 class _FetchError(Exception):
@@ -98,6 +103,25 @@ def _inside(path, folder):
     return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
 
 
+# Never a connection's to read, whatever QUERYAPIGATE_SECRET_FILE_DIRS says: the process's own memory and environment,
+# and the service account tokens Kubernetes and EKS mount for the server's own identity (ADR 0021).
+_NEVER_READABLE = ('/proc', '/var/run/secrets/kubernetes.io', '/run/secrets/kubernetes.io',
+                   '/var/run/secrets/eks.amazonaws.com', '/run/secrets/eks.amazonaws.com')
+
+
+def _server_files():
+    """The files the server's own settings and the credentials it may run with name - QUERYAPIGATE_SECRET_KEY_FILE,
+    QUERYAPIGATE_VAULT_TOKEN_FILE, AWS_WEB_IDENTITY_TOKEN_FILE... - as real paths. As with `${VAR}` (env_refusal()),
+    none is a connection's to read: an administrator could have one sent to a host of theirs (ADR 0021)."""
+    found = set()
+    for name, value in os.environ.items():
+        if name == 'QUERYAPIGATE_SECRET_FILE_DIRS' or not (server_setting(name)
+                                                           or name.upper().startswith(CREDENTIAL_PREFIXES)):
+            continue
+        found.update(os.path.realpath(part.strip()) for part in value.split(',') if os.path.isabs(part.strip()))
+    return found
+
+
 class FileProvider:
     """`${file:/run/secrets/name}`: a file's content, read again when it changes - what the Secrets Store CSI driver,
     Docker secrets and Vault Agent write, rotating it in place. One trailing newline is dropped."""
@@ -115,6 +139,10 @@ class FileProvider:
         home = os.path.realpath(config.home())
         if _inside(real, home) or _inside(home, real):
             return "the server's own home folder, where its store lives, is never readable as a secret"
+        if any(_inside(real, os.path.realpath(folder)) for folder in _NEVER_READABLE):
+            return f"'{what}' is the server's own process or service account, never readable as a secret"
+        if real in _server_files():
+            return f"'{what}' is a file this server's own settings or credentials name - never readable as a secret"
         if not any(_inside(real, folder) for folder in folders):
             return f"'{what}' isn't inside a folder QUERYAPIGATE_SECRET_FILE_DIRS allows"
         return None
@@ -485,6 +513,7 @@ class _Cache:
                 log.warning('The secret provider %s failed (%s) - using the value it gave before, good for %ds more',
                             name, error, int(held[3] - time.monotonic()))
                 return held[0]
+            log.warning('The secret provider %s failed for ${%s:%s}: %s', name, name, what, error)
             raise unavailable(f'${{{name}:{what}}} could not be resolved: {error}') from None
         finally:
             self._end_fetch(key)
@@ -524,6 +553,7 @@ class _Cache:
                 log.warning('The credential source %s failed (%s) - using the credentials it gave before, good for '
                             '%ds more', source.name, error, int(held[3] - time.monotonic()))
                 return held[0], held[3]
+            log.warning('The credential source %s failed: %s', source.name, error)
             raise unavailable(f'credentials {source.name} could not be resolved: {error}') from None
         finally:
             self._end_fetch(key)
