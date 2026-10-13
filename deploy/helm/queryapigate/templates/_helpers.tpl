@@ -28,7 +28,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "queryapigate.image" -}}
-{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}{{ with .Values.image.digest }}@{{ . }}{{ end }}
 {{- end -}}
 
 {{- define "queryapigate.serviceAccountName" -}}

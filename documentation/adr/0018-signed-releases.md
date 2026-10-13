@@ -2,6 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
+- **Amended 2026-10-13, from the rehearsal (guide 59):** each release is signed in **two forms** - the Sigstore
+  bundle cosign 3 writes by default, and the classic `.sig` tag (`--new-bundle-format=false`). Sigstore's
+  policy-controller 0.13.1 finds only the second: given the bundle alone it refused the signed image as unsigned. The
+  workflow verifies each form on its own. And Kyverno 1.19.1 needs Fulcio's current roots in the policy (`roots:`,
+  from `https://fulcio.sigstore.dev/api/v2/trustBundle`): its built-in root predates Fulcio's intermediate.
 - **Backlog:** the first item of "Before 1.0.0-rc1" in BACKLOG.md's roadmap.
 
 ## Context

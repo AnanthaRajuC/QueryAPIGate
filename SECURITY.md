@@ -14,6 +14,25 @@ or email arcswdev@gmail.com. You can expect an acknowledgement within a few days
 
 Security fixes are made against the latest released version.
 
+## Verify a release
+
+From 0.31, every image (`ghcr.io/anantharajuc/queryapigate`, and its `-h2` variant) and the Helm chart
+(`oci://ghcr.io/anantharajuc/charts/queryapigate`) is signed keyless with [cosign](https://docs.sigstore.dev/), by
+digest, by this repository's release workflow - and carries SLSA provenance, an SBOM and a GitHub attestation
+([ADR 0018](documentation/adr/0018-signed-releases.md)). A signature you can trust names exactly this identity:
+
+```bash
+cosign verify ghcr.io/anantharajuc/queryapigate:0.31.0 \
+  --certificate-identity https://github.com/AnanthaRajuC/QueryAPIGate/.github/workflows/docker.yml@refs/tags/v0.31.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify oci://ghcr.io/anantharajuc/queryapigate:0.31.0 --owner AnanthaRajuC
+```
+
+The same for the chart, `ghcr.io/anantharajuc/charts/queryapigate:0.31.0`. Anything else - another repository,
+another workflow, another tag, or no signature - isn't a release of this project. To have a cluster refuse it, and
+to read the SBOM: [guide 59](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/59-verify-a-release-before-you-run-it.md).
+Releases before 0.31 aren't signed.
+
 ## Hardening checklist for deployments
 
 - Set `QUERYAPIGATE_API_KEY`, and put the service behind TLS (a reverse proxy) - the key is sent in a header. It is the
@@ -30,6 +49,10 @@ Security fixes are made against the latest released version.
 - Keep database passwords out of the store: use `"password": "${ENV_VAR}"` references, or set
   `QUERYAPIGATE_SECRET_KEY` to encrypt them at rest
   ([guide 22](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md)).
+- Set `QUERYAPIGATE_SECRET_ENV_VARS` to the variables your connections reference, and `QUERYAPIGATE_METRICS_TOKEN`
+  wherever `/metrics` can be reached from outside
+  ([guide 58](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/58-keep-the-servers-own-secrets-and-metrics-in.md)).
+- Run only signed releases ([above](#verify-a-release)), by digest.
 - Do not enable `QUERYAPIGATE_DEBUG` on a reachable host.
 - Set `QUERYAPIGATE_RATE_LIMIT` on anything reachable beyond a trusted network; it also throttles API key guessing.
 - Behind a reverse proxy, set `QUERYAPIGATE_TRUST_PROXY` to the number of proxies so limits apply per real client - and

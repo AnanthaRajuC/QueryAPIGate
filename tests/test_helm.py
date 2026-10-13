@@ -147,6 +147,17 @@ class ShapeTests(unittest.TestCase):
         self.assertFalse(any(v['name'] == 'vault-token' for d in by_kind(render(*SECRET), 'Deployment')
                              for v in d['spec']['template']['spec']['volumes']))
 
+    def test_an_image_by_the_digest_that_was_verified(self):
+        """image.digest (ADR 0018): the bytes pulled are the ones signed - a tag can be moved, a digest can't."""
+        digest = 'sha256:' + 'a' * 64
+        docs = render(*POSTGRES, '--set', 'mcp.enabled=true', '--set', f'image.digest={digest}')
+        wanted = f'ghcr.io/anantharajuc/queryapigate:{__version__}@{digest}'
+        for deployment in by_kind(docs, 'Deployment'):
+            self.assertEqual(container(deployment)['image'], wanted)
+        failed, stderr = refused(*POSTGRES, '--set', 'image.digest=latest')
+        self.assertTrue(failed)
+        self.assertIn('digest', stderr)
+
     def test_metrics_need_a_token_the_chart_makes_and_prometheus_sends(self):
         """metricsAuth (ADR 0017's review): the ingress routes every path, /metrics included, and its labels name keys,
         queries and connections - so every pod gets QUERYAPIGATE_METRICS_TOKEN from a Secret of the chart's own."""

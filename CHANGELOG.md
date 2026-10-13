@@ -51,6 +51,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-13
+
+The first signed release: the image and the Helm chart, signed keyless by this repository's release workflow, with
+provenance naming the commit and an SBOM of what's inside - and checked before they're published, in the two forms
+cosign and today's admission controllers read. What a release is built from is pinned: base images by digest, every
+GitHub Action by commit.
+
+### Upgrading from 0.30
+- **Nothing to change.** No schema change, no setting. To run only signed releases from here on, see
+  [guide 59](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/59-verify-a-release-before-you-run-it.md);
+  0.30 and earlier aren't signed, so a policy that requires a signature refuses them.
+
 ### Added
 - **Signed releases** ([ADR 0018](documentation/adr/0018-signed-releases.md)): each image variant and the Helm chart
   are signed keyless with cosign, by digest - the certificate names this repository's `docker.yml` at the release's
@@ -58,6 +70,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   that admission controllers such as Sigstore's policy-controller still need. With SLSA provenance and an SPDX SBOM on each image, and a GitHub attestation for each; the workflow verifies
   them before it ends, so a release that doesn't verify fails. `Publish Docker image` run by hand with `rehearse`
   does all of it under `-rehearsal` names, never the real ones.
+- **`image.digest` in the Helm chart**: the digest you verified, so the image is pulled by it.
+- **Guide 59,** [Verify a release before you run it](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/59-verify-a-release-before-you-run-it.md):
+  `cosign verify`, the GitHub attestation, the provenance and the SBOM - and a kind cluster with Sigstore's
+  policy-controller 0.13.1, then Kyverno 1.19.1, admitting the signed image and refusing an unsigned one, all run
+  against the release workflow's rehearsal. SECURITY.md has the two commands, for a release.
 
 ### Changed
 - **What a release is built from is pinned** ([ADR 0018](documentation/adr/0018-signed-releases.md)): every GitHub

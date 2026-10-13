@@ -7,6 +7,8 @@ image:
   repository: ghcr.io/anantharajuc/queryapigate
   # Defaults to the chart's appVersion - the release this chart was made with. Pin it rather than use a moving tag.
   tag: ""
+  # The digest you verified (cosign verify - ADR 0018, guide 59): pulled by it, so the bytes are the ones signed
+  digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

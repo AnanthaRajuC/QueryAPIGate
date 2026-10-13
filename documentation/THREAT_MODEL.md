@@ -341,8 +341,13 @@ no credential for it. The server writes only to `/data` (the store's volume, or 
   cluster can reach the API and the MCP server. `networkPolicy.enabled`
   limits who can connect in, and narrows what a pod can reach out to, to `egress` - so a stolen admin key can't point
   a new connection at an internal address it doesn't list.
-- **The chart and image are as trusted as ghcr and this repository's release workflow.** The chart is pushed by the
-  same tag-triggered workflow as the image. Neither is signed yet, so pin the version, and a digest if you mirror them.
+- **The chart and image are signed by this repository's release workflow** (from 0.31, ADR 0018): keyless, by
+  digest, the certificate naming `docker.yml` at the release's tag, the signature in Sigstore's public log - with SLSA
+  provenance, an SBOM and a GitHub attestation naming the commit. So a mirror, a moved tag or a look-alike repository
+  can't pass for a release: verify before you run it, and have the cluster refuse anything else (guide 59). What a
+  signature doesn't say: that the code is right. Someone who can push a tag here can still sign a release - the log
+  then records it. What it's built on is pinned too: base images by digest, every action by commit. Releases before
+  0.31 aren't signed.
 
 *Reviewed for 0.30 (ADR 0017).* Looked at: every pod's security context, the service account token left unmounted,
 `vaultToken` a projected token for Vault alone, the secret settings refused in `config`, the routes, what the

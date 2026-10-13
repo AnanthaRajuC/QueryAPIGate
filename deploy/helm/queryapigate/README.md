@@ -53,6 +53,7 @@ database URL, a secret setting in `config` instead of the secret, a misspelt val
 | `resources` | 250m / 256Mi, 1Gi limit | Per API server pod |
 | `podSecurityContext`, `securityContext` | non-root, read-only root filesystem, no capabilities, RuntimeDefault seccomp | |
 | `podDisruptionBudget.*` | on with more than one pod | All but one kept up |
+| `image.digest` | `""` | `sha256:...` - the digest you verified with `cosign verify`; the image is then pulled by it ([guide 59](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/59-verify-a-release-before-you-run-it.md)) |
 | `metricsAuth.*` | on | `/metrics` needs a bearer token, made in the chart's own Secret (`<release>-metrics`) and kept across upgrades; `existingSecret` for yours (`helm template`, Argo CD) |
 | `serviceMonitor.*` | off | Prometheus Operator, `/metrics` - sending `metricsAuth`'s token |
 | `networkPolicy.*` | off | In only from `ingressFrom`, out only to `egress` and DNS |

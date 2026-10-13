@@ -70,6 +70,8 @@ guide covers one scenario end to end, and every command and response in it was r
     - what's logged, kept, encrypted and erasable, and whether it's FIPS - each answer checked on the running system.
 58. [**Keep the server's own secrets, and its metrics, in**](58-keep-the-servers-own-secrets-and-metrics-in.md)
     - `${VAR}` limited to the variables you list, never the server's credentials; `/metrics` behind a token.
+59. [**Verify a release before you run it**](59-verify-a-release-before-you-run-it.md)
+    - cosign, the build's provenance and SBOM, and a cluster - policy-controller or Kyverno - refusing anything else.
 
 ## MCP (AI agent access)
 

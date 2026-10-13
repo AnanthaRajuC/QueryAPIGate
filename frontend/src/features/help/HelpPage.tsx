@@ -381,6 +381,12 @@ const DOCS = [
     path: 'how-to/58-keep-the-servers-own-secrets-and-metrics-in.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-59',
+    title: 'Verify a release before you run it',
+    path: 'how-to/59-verify-a-release-before-you-run-it.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];
