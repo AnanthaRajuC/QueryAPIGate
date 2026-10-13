@@ -1,0 +1,13 @@
+{
+  "created": {
+    "connection": true,
+    "key": true,
+    "query v1": true,
+    "query v2": true,
+    "role": true,
+    "run": true
+  },
+  "data_db_path": "/tmp/qag-fixture-0.33.0-6782e3ww/data.db",
+  "skipped": [],
+  "version": "0.33.0"
+}
