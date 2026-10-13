@@ -49,12 +49,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-10-13
+
 ### Security
-- **`allowed_tables` wasn't checked on MongoDB connections.** A key narrowed to some tables read every collection of a
-  `mongo` connection it was granted - through `/execute_mongo`, and through any saved `mongo` query it could run -
-  though the documentation said such a key was refused there. On MongoDB the list is now the collections a key may
-  `find()` in: one outside it is refused with `403 table_not_allowed` before the server is asked anything. Keys
-  without `allowed_tables`, and every SQL connection, are unaffected. Affects every release with MongoDB support.
+- **`allowed_tables` wasn't checked on MongoDB connections** (0.11.0 to 0.34.0). A key narrowed to some tables read
+  every collection of a `mongo` connection it was granted - through `/execute_mongo`, and through any saved `mongo`
+  query it could run - though the documentation said such a key was refused there. On MongoDB the list is now the
+  collections a key may `find()` in: one outside it is refused with `403 table_not_allowed` before the server is asked
+  anything. Keys without `allowed_tables`, and every SQL connection, were never affected. To check whether it
+  happened: `GET /api/v1/history?key=<name>&kind=adhoc` for each key with `allowed_tables` and a `mongo` connection -
+  each ad-hoc run names its `mongo_collection` - and the saved `mongo` queries that key could run.
 
 ## [0.34.0] - 2026-10-13
 
@@ -2480,7 +2484,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...HEAD
+[0.34.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.31.0...v0.32.0
