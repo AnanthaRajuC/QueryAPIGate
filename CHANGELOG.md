@@ -51,6 +51,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **CI tests the SIEM stream against real receivers** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)):
+  rsyslog 8.2604 and syslog-ng 4.12.0 taking RFC 5425 syslog over mutual TLS, and an OpenTelemetry Collector 0.160.0
+  taking OTLP/HTTP logs, each pinned by digest - `tests/test_audit_siem.py` reads what each one parsed and wrote:
+  every entry, in order, as meant; a missing client certificate, and one from another CA, refused and noticed with
+  nothing lost; an outage - the receiver stopped with a connection still open - survived; and the receiver's copy
+  verified by `audit verify --file`, an edit in it found. `.github/scripts/siem_receivers.sh` starts the three, for
+  CI or for you.
+
 ### Changed
 - **`queryapigate audit verify --file` checks what your SIEM received** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)):
   syslog lines as a receiver writes them, as well as JSON lines; an entry repeated - delivery to a SIEM is at least

@@ -37,6 +37,15 @@ class PinnedTests(unittest.TestCase):
             with self.subTest(image=image):
                 self.assertRegex(image, r'@sha256:[0-9a-f]{64}$')
 
+    def test_the_siem_receivers_ci_tests_against_are_pinned_by_digest(self):
+        """ADR 0019: rsyslog, syslog-ng and the OpenTelemetry Collector, as siem_receivers.sh runs them."""
+        with open(os.path.join(ROOT, '.github', 'scripts', 'siem_receivers.sh')) as f:
+            images = dict(re.findall(r'^(RSYSLOG|SYSLOG_NG|OTELCOL)=(\S+)$', f.read(), re.M))
+        self.assertEqual(set(images), {'RSYSLOG', 'SYSLOG_NG', 'OTELCOL'})
+        for name, image in images.items():
+            with self.subTest(name=name):
+                self.assertRegex(image, r':[\w.-]+@sha256:[0-9a-f]{64}$')
+
     def test_dependabot_proposes_the_updates(self):
         with open(os.path.join(ROOT, '.github', 'dependabot.yml')) as f:
             ecosystems = {u['package-ecosystem'] for u in yaml.safe_load(f)['updates']}

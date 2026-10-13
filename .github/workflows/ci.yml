@@ -122,7 +122,9 @@ jobs:
         run: |
           docker run -d --name moto -p 5500:5000 motoserver/moto:5.1.18
           for i in $(seq 30); do curl -sf http://localhost:5500/moto-api/ > /dev/null && break; sleep 1; done
-      - name: Exports, files, OAuth, SSO, Vault and AWS against the real services - none may skip
+      - name: Real SIEM receivers - rsyslog and syslog-ng over mutual TLS, an OpenTelemetry Collector (ADR 0019)
+        run: .github/scripts/siem_receivers.sh start /tmp/qag-siem
+      - name: Exports, files, OAuth, SSO, Vault, AWS and the SIEM stream against the real services - none may skip
         env:
           QUERYAPIGATE_TEST_S3: localhost:8333,testkey,testsecret,qagtest
           QUERYAPIGATE_TEST_KEYCLOAK: http://localhost:8080
@@ -131,11 +133,12 @@ jobs:
           QUERYAPIGATE_TEST_VAULT_PG: localhost:5432
           QUERYAPIGATE_TEST_VAULT_PG_FROM_VAULT: host.docker.internal:5432
           QUERYAPIGATE_TEST_AWS_ENDPOINT: http://localhost:5500
+          QUERYAPIGATE_TEST_SIEM: /tmp/qag-siem
         run: |
           set -o pipefail  # the tests' own result, not tee's
           python -m unittest -v tests.test_duckdb_files tests.test_destinations tests.test_exports \
             tests.test_exporting tests.test_export_security tests.test_mcp_keycloak tests.test_sso_keycloak \
-            tests.test_vault tests.test_aws 2>&1 | tee /tmp/services.log
+            tests.test_vault tests.test_aws tests.test_audit_siem 2>&1 | tee /tmp/services.log
           ! grep -E "skipped '(set QUERYAPIGATE_TEST|DuckDB's httpfs)" /tmp/services.log
 
   fips:

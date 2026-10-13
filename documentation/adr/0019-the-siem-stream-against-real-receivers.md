@@ -2,6 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
+- **Amended 2026-10-13, from the first runs:** rsyslog 8.2604, syslog-ng 4.12.0 and the Collector 0.160.0 each parse
+  the stream as it is - APP-NAME, MSGID the action, `[meta sequenceId]`, the JSON message - so the format stays.
+  Both syslog receivers refuse a missing client certificate (TLS 1.3 `certificate required`) and one from another CA
+  (`unknown ca`), and QueryAPIGate notices each before counting anything delivered. A receiver stopped while
+  QueryAPIGate holds a connection to it closes its end, and the next batch notices that rather than writing into it.
 - **Backlog:** the "Before 1.0.0-rc1" item in BACKLOG.md's roadmap: the SIEM stream against a real receiver. Graduates
   `audit_stream` (ADR 0012), on ADR 0017's terms.
 
@@ -28,7 +33,8 @@ breaks it (`out_of_order`): the SIEM's copy of an untouched log fails the very c
 
 The integration job starts three, as containers, each pinned by digest:
 
-- **rsyslog** - `imtcp` with the `gtls` driver (RFC 5425), requiring a client certificate from the test CA
+- **rsyslog** - `imtcp` with its OpenSSL driver, `ossl` (RFC 5425; the `rsyslog/rsyslog-collector` image carries it,
+  not `gtls`), requiring a client certificate from the test CA
   (`StreamDriver.AuthMode="x509/certvalid"`), writing what it parsed - `APP-NAME`, `MSGID`, the structured data, the
   message - through a template, so the test reads rsyslog's parse, not ours.
 - **syslog-ng** - its `syslog()` source over TLS, the same way: the parser Splunk Connect for Syslog is built on.
