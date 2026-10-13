@@ -68,6 +68,8 @@ guide covers one scenario end to end, and every command and response in it was r
     signed hash chain, syslog over mutual TLS, the SIEM down and back, `audit verify`.
 57. [**Answer a security questionnaire about data and cryptography**](57-answer-a-security-questionnaire-about-data-and-cryptography.md)
     - what's logged, kept, encrypted and erasable, and whether it's FIPS - each answer checked on the running system.
+58. [**Keep the server's own secrets, and its metrics, in**](58-keep-the-servers-own-secrets-and-metrics-in.md)
+    - `${VAR}` limited to the variables you list, never the server's credentials; `/metrics` behind a token.
 
 ## MCP (AI agent access)
 

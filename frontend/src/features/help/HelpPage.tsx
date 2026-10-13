@@ -375,6 +375,12 @@ const DOCS = [
     path: 'how-to/57-answer-a-security-questionnaire-about-data-and-cryptography.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-58',
+    title: "Keep the server's own secrets, and its metrics, in",
+    path: 'how-to/58-keep-the-servers-own-secrets-and-metrics-in.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

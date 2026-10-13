@@ -96,8 +96,12 @@ documentation. #99 workspaces only if asked for.
     2026-10-12.)
 17. **0.29: #101 where data goes, and FIPS** ([ADR 0016](documentation/adr/0016-data-flows-and-fips.md)). (Released as
     0.29.0 on 2026-10-12.)
-18. **Then, only on demand:** #99 workspaces.
-19. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back.
+18. **0.30: eight features graduate**, after a security review each
+    ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). (0.30.0, 2026-10-13.)
+19. **Then, only on demand:** #99 workspaces.
+20. **Before 1.0.0-rc1:** what still keeps it from a freeze - signed images and charts, the SIEM stream against a real
+    receiver, AWS against AWS, the dedicated event log (#59) - then rc1: freeze; invite external users to upgrade real
+    stores and report back.
 20. **1.0.0.**
 
 ## 1. Per-key API permissions

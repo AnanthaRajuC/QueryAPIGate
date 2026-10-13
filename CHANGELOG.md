@@ -51,6 +51,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-13
+
+Eight features come under the compatibility promise - descriptions, agent usage, usage quotas, configuration as code,
+OAuth for the MCP server, Console sign-in through SSO, write tools over MCP and the Helm chart - each after a
+security review, tested on the oldest dependency versions it allows, its limits written down
+([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). The reviews closed three ways a server let out
+what it shouldn't: its own cloud credentials through a `${VAR}` reference, `/metrics` through the chart's ingress, and
+words of anyone's choosing in the Console's sign-in banner.
+
 ### Security
 - **A `${VAR}` reference could name the server's own cloud credentials.** Only its `QUERYAPIGATE_*` and `OTEL_*`
   settings were refused, so an administrator who may change connections - or the author of a configuration file -
@@ -81,6 +90,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `metricsAuth.enabled: false` keeps `/metrics` open, as before.
 - **In `/metrics`, administrators are `key="admin"`** - each one used to be under their own name. A dashboard that
   split by administrator: the audit log says which one did what.
+- **No schema change.**
+
+### Added
+- **Guide 58,** [Keep the server's own secrets, and its metrics, in](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/58-keep-the-servers-own-secrets-and-metrics-in.md):
+  `QUERYAPIGATE_SECRET_ENV_VARS` and `QUERYAPIGATE_METRICS_TOKEN` on a running server, with Prometheus 3.15 scraping
+  it - and refused without the token.
 - **Higher minimum versions:** Flask 3.0 (was 2.2), Werkzeug 3.0 (now listed: QueryAPIGate imports it), PyYAML 6.0.1
   (was 6.0), and for the `mcp` extra, mcp 1.21.1 (was 1.10). None of the old minimums could actually be used: Flask
   2.x can't be imported beside the Werkzeug 3 that pip installs with it, PyYAML 6.0 can't be installed on Python 3.12
