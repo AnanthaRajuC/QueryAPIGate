@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0019-the-siem-stream-against-real-receivers.md"

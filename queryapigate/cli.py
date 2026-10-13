@@ -716,12 +716,17 @@ def _audit_verify(args):
         how = ('keyed with QUERYAPIGATE_AUDIT_KEY' if report.get('keyed')
                else 'unkeyed (plain SHA-256: set QUERYAPIGATE_AUDIT_KEY so an edit cannot be re-signed)')
         print(f"Intact: entries {report['first_seq']} to {report['last_seq']}, {how}.")
+        if report.get('repeats'):
+            print(f"  {report['repeats']} repeated entries dropped - the same seq and hash, as at-least-once delivery "
+                  'can send them')
         if report.get('unchecked_without_key'):
             print(f"  {report['unchecked_without_key']} keyed entries not checked - QUERYAPIGATE_AUDIT_KEY is not set")
         return 0
     found = report['break']
     where = f"line {found['line']}" if 'line' in found else (
         f"entry {found['seq']} ({found.get('action')}, {found.get('timestamp')})")
+    if found['problem'] == 'conflicting_copies':
+        where += f" - lines {found['lines'][0]} and {found['lines'][1]} differ"
     print(f"BROKEN at {where}: {found['problem'].replace('_', ' ')}", file=sys.stderr)
     return 1
 
@@ -915,7 +920,9 @@ def build_parser():
     audit_actions = audit_parser.add_subparsers(dest='action')
     audit_verify = audit_actions.add_parser('verify', help='walk the chain and say whether it is intact, or where it '
                                                           'first breaks (exit 0 or 1)')
-    audit_verify.add_argument('--file', help='an export file (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE) instead of the store')
+    audit_verify.add_argument('--file', help='a copy instead of the store: an export file '
+                                             '(QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE), or what a SIEM received - JSON or '
+                                             'syslog lines, repeats allowed')
     audit_verify.set_defaults(func=_audit_verify)
 
     history_parser = commands.add_parser('history', help='run history: forget a person (ADR 0016)')

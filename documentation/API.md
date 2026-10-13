@@ -1895,8 +1895,12 @@ both and the entry. Change, remove, insert or reorder an entry, and every hash f
 - **The rolling cap still applies:** the chain's anchor remembers the newest entry trimmed, so the oldest kept must
   follow it - removing entries from the start isn't mistaken for a trim.
 - **Checking it:** `queryapigate audit verify` (exit 0 intact, 1 broken) or `GET /api/v1/audit/verify`, which name the
-  first entry that doesn't verify; `queryapigate audit verify --file` checks an export file on its own, whose lines
-  carry `seq`, `prev_hash` and `hash` too. Each server re-checks every 5 minutes: `audit_chain_broken` (critical).
+  first entry that doesn't verify; `queryapigate audit verify --file` checks a copy on its own - an export file, or
+  what your SIEM received, as JSON lines or as the syslog lines a receiver writes - whose entries carry `seq`,
+  `prev_hash` and `hash` too. Delivery to a SIEM is at least once, so its copy may hold an entry twice, or out of
+  order after a retry: an exact repeat (the same `seq` and `hash`) is dropped and counted, and entries are checked in
+  `seq` order; a repeat that differs is `conflicting_copies` - one of the two isn't what was written. Each server
+  re-checks every 5 minutes: `audit_chain_broken` (critical).
 - **What it can't show on its own:** the newest entries removed - the chain's end can't know what came after it - or a
   rewrite by someone holding both the store and the key. A copy outside the store, in your SIEM, is what shows those.
 - **Upgrading to 0.25** chains the entries already stored, as they are, and records `audit_chain_started`: the chain

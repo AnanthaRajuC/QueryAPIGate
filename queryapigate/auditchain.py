@@ -165,25 +165,64 @@ def verify(conn):
     return report
 
 
+def _entry_in(line):
+    """The JSON object a line holds: the whole line (an export file), or the message at its end - a syslog line, as
+    rsyslog or syslog-ng write what the stream sent (`<110>1 ... [meta sequenceId="7"] {...}`). None if it has none."""
+    try:
+        data = json.loads(line)
+        return data if isinstance(data, dict) else None
+    except ValueError:
+        pass
+    decoder = json.JSONDecoder()
+    start = line.find('{')
+    while start != -1:
+        try:
+            data, end = decoder.raw_decode(line, start)
+        except ValueError:
+            start = line.find('{', start + 1)
+            continue
+        if isinstance(data, dict) and not line[end:].strip():
+            return data
+        start = line.find('{', start + 1)
+    return None
+
+
 def verify_file(path):
-    """An export file (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE), one entry per line with its chain fields - from its first
-    line, whose `prev_hash` is taken as given (the file may have started after the chain did)."""
-    links = []
+    """A copy of the chain, one entry per line - an export file (QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE), or what a SIEM
+    received (ADR 0019): JSON lines, or syslog lines whose message is the entry. Walked in `seq` order from its first
+    entry, whose `prev_hash` is taken as given (the copy may have started after the chain did).
+
+    Delivery is at least once, so a SIEM's copy may hold an entry twice: an exact repeat - the same `seq` and `hash` -
+    is dropped, and counted (`repeats`). A repeat whose `hash` differs is never dropped: `conflicting_copies`, naming
+    both - one of them isn't what was written."""
+    by_seq = {}
+    repeats = 0
     with open(path) as f:
         for number, line in enumerate(f, 1):
             if not line.strip():
                 continue
-            try:
-                data = json.loads(line)
-            except ValueError:
+            data = _entry_in(line)
+            if data is None:
                 return {'intact': False, 'break': {'line': number, 'problem': 'not_json'}}
             if 'seq' not in data:
                 continue  # written before the chain existed
-            chain = (data.pop('seq'), data.pop('prev_hash', None), data.pop('hash', None))
-            links.append((*chain, data))
+            seq, prev_hash, digest = data.pop('seq'), data.pop('prev_hash', None), data.pop('hash', None)
+            seen = by_seq.get(seq)
+            if seen is None:
+                by_seq[seq] = (seq, prev_hash, digest, data, number)
+                continue
+            if (seen[1], seen[2], seen[3]) == (prev_hash, digest, data):
+                repeats += 1
+                continue
+            return {'intact': False, 'break': {'seq': seq, 'timestamp': data.get('timestamp'),
+                                               'action': data.get('action'), 'problem': 'conflicting_copies',
+                                               'lines': [seen[4], number]}}
+    links = [link[:4] for _seq, link in sorted(by_seq.items())]
     if not links:
-        return {'intact': True, 'entries': 0}
-    return _walk(links, (links[0][0] - 1, links[0][1]))
+        return {'intact': True, 'entries': 0, 'repeats': repeats}
+    report = _walk(links, (links[0][0] - 1, links[0][1]))
+    report['repeats'] = repeats
+    return report
 
 
 def head_keyed(conn):

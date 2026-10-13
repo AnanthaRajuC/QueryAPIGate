@@ -233,6 +233,70 @@ class ExportFileTests(ChainTestCase):
         self.assertEqual(auditchain.verify_file(path)['break']['problem'], 'changed')
 
 
+class SiemCopyTests(ChainTestCase):
+    """What a SIEM received (ADR 0019): delivery is at least once, so its copy may hold an entry twice, and after a
+    retry not in order - an untouched copy still verifies; a copy someone edited still doesn't."""
+
+    def copy(self, lines, name='siem.log'):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, 'w') as f:
+            f.writelines(line + '\n' for line in lines)
+        return path
+
+    def entries(self, n=5):
+        path = os.path.join(self.tmp.name, 'audit.jsonl')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE': path}):
+            self.write(n)
+        return [line.rstrip('\n') for line in open(path)]
+
+    @staticmethod
+    def as_syslog(line):
+        entry = json.loads(line)
+        return (f'2026-10-13T10:00:00+00:00 api-1 queryapigate[42]: <110>1 2026-10-13T10:00:00Z api-1 queryapigate 42 '
+                f'{entry["action"]} [meta sequenceId="{entry["seq"]}"] {line}')
+
+    def test_exact_repeats_are_dropped_and_counted(self):
+        lines = self.entries()
+        report = auditchain.verify_file(self.copy(lines[:3] + lines[1:3] + lines[3:]))  # 2 and 3 sent again
+        self.assertTrue(report['intact'], report)
+        self.assertEqual((report['first_seq'], report['last_seq'], report['repeats']), (1, 5, 2))
+
+    def test_entries_are_walked_in_seq_order_whatever_order_they_arrived_in(self):
+        lines = self.entries()
+        self.assertTrue(auditchain.verify_file(self.copy([lines[0], lines[3], lines[1], lines[2], lines[4]]))['intact'])
+
+    def test_a_repeat_that_differs_is_never_dropped(self):
+        lines = self.entries()
+        forged = json.loads(lines[2])
+        forged['target'] = 'forged'
+        report = auditchain.verify_file(self.copy([*lines, json.dumps(forged)]))
+        self.assertFalse(report['intact'])
+        self.assertEqual(report['break']['problem'], 'conflicting_copies')
+        self.assertEqual((report['break']['seq'], report['break']['lines']), (3, [3, 6]))
+
+    def test_syslog_lines_as_a_receiver_writes_them(self):
+        lines = [self.as_syslog(line) for line in self.entries()]
+        self.assertTrue(auditchain.verify_file(self.copy(lines + lines[:1]))['intact'])
+        edited = lines[1].replace('"seq": 2', '"seq": 2, "note": "added"')
+        self.assertNotEqual(edited, lines[1])
+        report = auditchain.verify_file(self.copy([lines[0], edited, *lines[2:]]))
+        self.assertEqual(report['break']['problem'], 'changed')
+
+    def test_a_missing_entry_is_still_missing(self):
+        lines = self.entries()
+        report = auditchain.verify_file(self.copy(lines[:2] + lines[3:]))
+        self.assertEqual((report['break']['problem'], report['break']['seq']), ('missing', 4))
+
+    def test_the_cli_says_how_many_repeats_it_dropped(self):
+        lines = self.entries(3)
+        path = self.copy(lines + lines[1:2])
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(cli.main(['audit', 'verify', '--file', path]), 0)
+        self.assertIn('Intact: entries 1 to 3', out.getvalue())
+        self.assertIn('1 repeated entries dropped', out.getvalue())
+
+
 class SurfaceTests(ChainTestCase):
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()

@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+- **`queryapigate audit verify --file` checks what your SIEM received** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)):
+  syslog lines as a receiver writes them, as well as JSON lines; an entry repeated - delivery to a SIEM is at least
+  once - is dropped when it's an exact repeat, and counted; entries are checked in `seq` order, however they arrived.
+  A repeat that differs from the first copy is reported, `conflicting_copies`, with the two lines. A SIEM's copy of
+  an untouched log used to fail with `out_of_order` as soon as it held one repeat.
+
 ## [0.31.0] - 2026-10-13
 
 The first signed release: the image and the Helm chart, signed keyless by this repository's release workflow, with
