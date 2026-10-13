@@ -100,9 +100,11 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). (0.30.0, 2026-10-13.)
 19. **0.31: signed releases**, and what they're built from pinned
     ([ADR 0018](documentation/adr/0018-signed-releases.md)). (0.31.0, 2026-10-13.)
-20. **Then, only on demand:** #99 workspaces.
-21. **Before 1.0.0-rc1:** what still keeps it from a freeze - the SIEM stream against a real receiver, AWS against
-    AWS, the dedicated event log (#59) - then rc1: freeze; invite external users to upgrade real
+20. **0.32: the SIEM stream against real receivers**, and stable
+    ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)). (0.32.0, 2026-10-13.)
+21. **Then, only on demand:** #99 workspaces.
+22. **Before 1.0.0-rc1:** what still keeps it from a freeze - AWS against AWS, the dedicated event log (#59) - then
+    rc1: freeze; invite external users to upgrade real
     stores and report back.
 20. **1.0.0.**
 

@@ -412,7 +412,7 @@ owner.
 | `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
-| `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance` (experimental). |
+| `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance`. |
 | `GET /api/v1/audit/verify` | Walk the audit log's hash chain from its anchor: `{"intact": true, "first_seq", "last_seq", "keyed", ...}`, or `{"intact": false, "break": {"seq", "action", "timestamp", "problem"}}` - `problem` is `changed`, `changed_before`, `missing`, `out_of_order` or `unkeyed_after_keyed`. |
 
 ### Collections and the example APIs
@@ -1908,8 +1908,11 @@ both and the entry. Change, remove, insert or reorder an entry, and every hash f
 
 ### Streaming the audit log to a SIEM
 
-> **Experimental** - new in 0.25 ([ADR 0012](adr/0012-tamper-evident-audit-log-and-siem.md)); its settings and message
-> format may change in any minor release, always noted in the changelog, as it meets real SIEMs.
+> **Stable** since 0.32, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)), tested on every push against rsyslog, syslog-ng and the OpenTelemetry Collector
+> (ADR 0019). Outputs, structured-data parameters and record attributes may still be added; the message's MSGID,
+> `[meta sequenceId]` and JSON body, and the attributes below, stay as they are. Limits: syslog over TCP has no
+> acknowledgement - a receiver that dies without closing the connection can lose the batch sent into it (OTLP's is
+> acknowledged); delivery is at least once; no UDP.
 
 Every entry, as it's written, to your SIEM - Splunk, Microsoft Sentinel, Elastic, QRadar, or a log forwarder:
 
@@ -1922,7 +1925,8 @@ Every entry, as it's written, to your SIEM - Splunk, Microsoft Sentinel, Elastic
   hand-rolled script may not (*certificate verify failed: Missing Authority Key Identifier*).
 - **OTLP logs:** `QUERYAPIGATE_AUDIT_OTLP=1` - OTLP/HTTP with JSON encoding to `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` (or
   `OTEL_EXPORTER_OTLP_ENDPOINT` + `/v1/logs`), with `OTEL_EXPORTER_OTLP[_LOGS]_HEADERS`. No extra package. Each entry a
-  log record: the entry as its body, `queryapigate.audit.seq`, `.hash`, `.action`, `.actor`, `.target` as attributes.
+  log record: the entry as its body, `queryapigate.audit.seq`, `.hash`, `.prev_hash`, `.action`, `.actor`, `.target`
+  as attributes; `service.name` `queryapigate`, scope `queryapigate.audit`.
 
 **Delivery survives the SIEM being down.** Each output's cursor - the last `seq` delivered - is in the store, and one
 instance delivers at a time (whichever holds the output's lease; another takes over if it stops). While an output is

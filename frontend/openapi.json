@@ -5126,7 +5126,6 @@
     },
     "/api/v1/audit/delivery": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -5236,8 +5235,7 @@
         "summary": "Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/audit/verify": {

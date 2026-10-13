@@ -1,4 +1,5 @@
-"""The audit log, streamed to a SIEM (ADR 0012, BACKLOG #96) - experimental.
+"""The audit log, streamed to a SIEM (ADR 0012, BACKLOG #96) - stable since 0.32, tested against real receivers
+(ADR 0019).
 
 Two outputs, each turned on by one setting:
 

@@ -22,8 +22,7 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, tracing with OpenTelemetry
-(`OTEL_EXPORTER_OTLP_ENDPOINT`), the audit log streamed to a SIEM (`QUERYAPIGATE_AUDIT_SYSLOG_URL`,
-`QUERYAPIGATE_AUDIT_OTLP`), and secrets from files and secrets managers (`${file:...}`).
+(`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets from files and secrets managers (`${file:...}`).
 The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -51,6 +50,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-13
+
+The audit log's stream to a SIEM, tested on every push against the software that receives it - rsyslog, syslog-ng and
+an OpenTelemetry Collector - and under the compatibility promise. And a SIEM's own copy of the log is something you can
+check on its own: the same command that checks the store.
+
+### Upgrading from 0.31
+- **Nothing to change.** No schema change, no setting; the stream's messages are exactly as before.
+
 ### Added
 - **CI tests the SIEM stream against real receivers** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)):
   rsyslog 8.2604 and syslog-ng 4.12.0 taking RFC 5425 syslog over mutual TLS, and an OpenTelemetry Collector 0.160.0
@@ -59,8 +67,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   nothing lost; an outage - the receiver stopped with a connection still open - survived; and the receiver's copy
   verified by `audit verify --file`, an edit in it found. `.github/scripts/siem_receivers.sh` starts the three, for
   CI or for you.
+- **Guide 53 re-run** against rsyslog and the OpenTelemetry Collector:
+  [Send the audit log to your SIEM, and prove nobody edited it](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/53-send-the-audit-log-to-your-siem.md) -
+  a refused client certificate, an outage with OTLP keeping up, and the SIEM's copy verified.
 
 ### Changed
+- **The audit log streamed to a SIEM is stable** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)),
+  under the compatibility promise: it met the last of `experimental.GRADUATION`, a real receiver in CI. Its
+  documentation says what may still be added and its limits; it's no longer marked experimental in Settings,
+  `/openapi.json` (`GET /api/v1/audit/delivery`) or the startup log. The OTLP records' attributes are documented in
+  full - `queryapigate.audit.prev_hash` was sent and not listed.
 - **`queryapigate audit verify --file` checks what your SIEM received** ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)):
   syslog lines as a receiver writes them, as well as JSON lines; an entry repeated - delivery to a SIEM is at least
   once - is dropped when it's an exact repeat, and counted; entries are checked in `seq` order, however they arrived.

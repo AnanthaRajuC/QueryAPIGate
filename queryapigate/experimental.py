@@ -9,8 +9,8 @@ docs say so at each feature's own section.
 A feature graduates - its entry deleted here, its callout replaced by a note that it's stable and what may still be
 added - when it meets every one of GRADUATION. Alerts, remote files through DuckDB, exports and column masking did in
 0.20; descriptions, agent usage, usage quotas, configuration as code, OAuth for the MCP server, write tools and
-Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart. The connection types have their own terms
-(databases.GRADUATION).
+Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart; the audit log streamed to a SIEM in 0.32, once
+tested against real receivers (ADR 0019). The connection types have their own terms (databases.GRADUATION).
 """
 from typing import Any
 
@@ -40,14 +40,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                'schema browsing, streaming)',
         'db_types': ('h2', 'jdbc', 'mongo'),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and mongo'),
-    },
-    'audit_stream': {
-        'name': 'The audit log streamed to a SIEM',
-        'why': 'new in 0.25 - its settings and message format may change as it meets real SIEMs (ADR 0012)',
-        'settings': ('QUERYAPIGATE_AUDIT_SYSLOG_URL', 'QUERYAPIGATE_AUDIT_SYSLOG_CA', 'QUERYAPIGATE_AUDIT_SYSLOG_CERT',
-                     'QUERYAPIGATE_AUDIT_SYSLOG_KEY', 'QUERYAPIGATE_AUDIT_OTLP'),
-        'operations': (('get', '/api/v1/audit/delivery'),),
-        'docs': ('documentation/API.md', 'Streaming the audit log to a SIEM'),
     },
     'tracing': {
         'name': 'Tracing with OpenTelemetry',

@@ -65,7 +65,7 @@ guide covers one scenario end to end, and every command and response in it was r
 52. [**Give a partner a quota and a concurrency cap**](52-give-a-partner-a-quota-and-a-concurrency-cap.md) - queries
     at once, rows a call and calls a day, across instances; how exact a quota is, measured.
 53. [**Send the audit log to your SIEM, and prove nobody edited it**](53-send-the-audit-log-to-your-siem.md) - the
-    signed hash chain, syslog over mutual TLS, the SIEM down and back, `audit verify`.
+    signed hash chain, syslog over mutual TLS and OTLP, the SIEM down and back, `audit verify` of the SIEM's copy.
 57. [**Answer a security questionnaire about data and cryptography**](57-answer-a-security-questionnaire-about-data-and-cryptography.md)
     - what's logged, kept, encrypted and erasable, and whether it's FIPS - each answer checked on the running system.
 58. [**Keep the server's own secrets, and its metrics, in**](58-keep-the-servers-own-secrets-and-metrics-in.md)

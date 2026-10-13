@@ -65,18 +65,22 @@ class MarkedEverywhereTests(unittest.TestCase):
                 note = read(path)[match.start():match.start() + 900].replace('\n>', ' ')
                 self.assertIn('may still be added', ' '.join(note.split()))
 
-    def test_features_graduated_in_0_30_say_what_may_be_added_and_their_limits(self):
-        """ADR 0017: each section opens with the promise, what may still be added, and its limits."""
+    def test_features_graduated_since_0_30_say_what_may_be_added_and_their_limits(self):
+        """ADR 0017 and after: each section opens with the promise and when it began, what may still be added, and its
+        limits."""
         api = 'documentation/API.md'
-        for path, heading in ((api, 'Descriptions'), (api, 'Agent usage'), (api, 'Usage quotas'),
-                              (api, 'Configuration as code'), (api, 'Console sign-in through SSO'),
-                              ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
-                              ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
-                              ('documentation/DEPLOYMENT.md', 'Kubernetes (Helm)')):
+        for path, heading, since in ((api, 'Descriptions', '0.30'), (api, 'Agent usage', '0.30'),
+                                     (api, 'Usage quotas', '0.30'), (api, 'Configuration as code', '0.30'),
+                                     (api, 'Console sign-in through SSO', '0.30'),
+                                     (api, 'Streaming the audit log to a SIEM', '0.32'),
+                                     ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)', '0.30'),
+                                     ('documentation/MCP.md', 'Write tools: agents that write, approved by a person',
+                                      '0.30'),
+                                     ('documentation/DEPLOYMENT.md', 'Kubernetes (Helm)', '0.30')):
             with self.subTest(heading=heading):
                 text = read(path)
                 match = re.search(rf'^#+ {re.escape(heading)}\n+(.+)', text, re.M)
-                self.assertTrue(match.group(1).startswith('> **Stable** since 0.30'), match.group(1))
+                self.assertTrue(match.group(1).startswith(f'> **Stable** since {since}'), match.group(1))
                 callout = text[match.start(1):].split('\n\n', 1)[0].replace('\n>', ' ')
                 self.assertIn('may still be added', ' '.join(callout.split()))
                 self.assertIn('Limits:', callout)

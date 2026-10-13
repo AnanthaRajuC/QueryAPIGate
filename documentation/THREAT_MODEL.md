@@ -287,10 +287,19 @@ names the first. Against someone who can write to the store, a plain hash is onl
 it - so with `QUERYAPIGATE_AUDIT_KEY` set the chain is HMAC-signed with a key kept outside the store, and a key once set
 means every newer entry must carry it. What the chain can't show alone: the newest entries deleted (its end can't know
 what came after it), and a rewrite by someone holding both the store and the key. Both are why a copy outside - the
-SIEM stream, or the export file shipped elsewhere - matters. The stream (experimental) sends each entry with its
+SIEM stream, or the export file shipped elsewhere - matters. The stream sends each entry with its
 `seq` and `hash` over TLS - the server's certificate verified, the client's optional - so a later rewrite of the
 store contradicts what the SIEM already has; its delivery is at least once, and syslog over TCP can lose the batch
-sent to a SIEM that dies without closing the connection (OTLP, acknowledged per batch, doesn't).
+sent to a SIEM that dies without closing the connection (OTLP, acknowledged per batch, doesn't). `queryapigate audit
+verify --file` checks the SIEM's copy on its own - repeats from at-least-once delivery dropped only when exact.
+
+*Reviewed for 0.32 (ADR 0019).* Looked at, against rsyslog, syslog-ng and the OpenTelemetry Collector rather than a
+receiver of our own: the server's certificate verified against the configured CA; a missing client certificate, and
+one from another CA, refused by the receiver and noticed before anything is counted delivered; a receiver stopped with
+a connection open, noticed rather than written into; the cursor and lease surviving it; nothing in a message but the
+entry as the store holds it - no parameter values, which entries never carry. **Found:** a SIEM's copy of an untouched
+log failed `audit verify --file` as soon as at-least-once delivery had repeated one entry; fixed - exact repeats are
+dropped and counted, a repeat that differs is `conflicting_copies`.
 
 The key's guarantee starts at the `audit_key_set` entry the server writes when it first starts with a key. Someone
 with write access to the store, while the server is stopped, could delete the keyed history and leave an unkeyed one:
