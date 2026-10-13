@@ -55,10 +55,20 @@ def fill_placeholders(filter_doc, values):
 
     Unlike sqltools.fill_placeholders, this never produces text to re-parse - the substituted value becomes
     a real value in the returned document, so it can be a number, bool or null, not just safe text.
+
+    A value is a scalar, or a list of them - never a document. An object there is an operator the query's author
+    didn't write: `{"name": ":u"}` given `{"$ne": null}` matches every document, and `{"$function": ...}` runs
+    JavaScript on the server, past validate_filter(), which saw only the placeholder.
     """
-    missing = sorted(set(placeholder_names(filter_doc)) - set(values))
+    used = set(placeholder_names(filter_doc))
+    missing = sorted(used - set(values))
     if missing:
         raise ApiError(f"No value provided for placeholder(s): {', '.join(missing)}", code='param_required')
+    for name in sorted(used):
+        value = values[name]
+        if isinstance(value, dict) or (isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value)):
+            raise ApiError(f"'{name}' must be a value or a list of values, not a document - it would be read as "
+                           'query operators', code='param_invalid')
     return _substitute(filter_doc, values)
 
 
@@ -81,3 +91,11 @@ def validate_filter(filter_doc):
         raise ApiError('filter must be a JSON object', code='invalid_filter')
     _check_forbidden(filter_doc)
     return filter_doc
+
+
+def validate_options(projection, sort):
+    """The same check over a find()'s projection and sort: MongoDB 4.4+ evaluates aggregation expressions in a
+    projection, so `{"x": {"$function": ...}}` there runs JavaScript on the server as surely as in the filter."""
+    for document in (projection, sort):
+        if document is not None:
+            _check_forbidden(document)

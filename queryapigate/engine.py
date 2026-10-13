@@ -151,6 +151,7 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     if details['db'] != 'mongo':
         raise ApiError(f"'{connection_name}' is not a mongo connection", code='wrong_connection_type')
     filter_doc = mongotools.validate_filter(filter_doc or {})
+    mongotools.validate_options(projection, sort)
     timeout, limit = limits.timeout(timeout), limits.rows(limit)
     if params:
         filter_doc = mongotools.fill_placeholders(filter_doc, params)

@@ -1780,6 +1780,35 @@ class MongoQueryTests(ApiTestCase):
             'collection': 'users', 'filter': {'$where': 'true'}, 'connection_name': 'mg'})
         self.assertEqual(res.status_code, 403)
 
+    def test_server_side_javascript_is_refused_in_a_projection_and_a_sort_too(self):
+        # Until 0.34.2 only the filter was checked: MongoDB 4.4+ evaluates aggregation expressions in a find()
+        # projection, so {"x": {"$function": ...}} there ran JavaScript on the database server.
+        js = {'$function': {'body': 'function() { return 1; }', 'args': [], 'lang': 'js'}}
+        for field in ('projection', 'sort'):
+            with self.subTest(field=field), mock.patch('pymongo.MongoClient') as connect:
+                res = self.client.post('/execute_mongo', json={
+                    'collection': 'users', 'connection_name': 'mg', field: {'x': js}})
+                self.assertEqual((res.status_code, res.get_json()['code']), (403, 'mongo_operator_forbidden'))
+                self.assertFalse(connect.called)
+        saved = save_query(self.client, {
+            'filename': 'js', 'author': 'a', 'description': 'd', 'query_type': 'mongo', 'mongo_collection': 'users',
+            'mongo_filter': {}, 'mongo_projection': {'x': {'$accumulator': {}}}, 'connection_name': 'mg'})
+        self.assertEqual((saved.status_code, saved.get_json()['code']), (403, 'mongo_operator_forbidden'))
+
+    def test_a_caller_cant_turn_a_parameter_into_operators(self):
+        # Until 0.34.2: a saved query's undeclared placeholder, given {"$ne": null}, matched every document.
+        self.assertEqual(save_query(self.client, {
+            'filename': 'by_name', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'users', 'mongo_filter': {'name': ':u'}, 'connection_name': 'mg'}).status_code, 201)
+        with mock.patch('pymongo.MongoClient') as connect:
+            saved = self.client.post('/q/by_name', json={'params': {'u': {'$ne': None}}})
+            adhoc = self.client.post('/execute_mongo', json={
+                'collection': 'users', 'connection_name': 'mg', 'filter': {'$expr': ':p'},
+                'params': {'p': {'$function': {'body': 'function() { return true; }', 'args': [], 'lang': 'js'}}}})
+        for res in (saved, adhoc):
+            self.assertEqual((res.status_code, res.get_json()['code']), (400, 'param_invalid'))
+        self.assertFalse(connect.called)
+
     def test_collection_is_required(self):
         res = self.client.post('/execute_mongo', json={'filter': {}, 'connection_name': 'mg'})
         self.assertEqual(res.status_code, 400)

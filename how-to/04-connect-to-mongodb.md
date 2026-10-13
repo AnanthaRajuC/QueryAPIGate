@@ -70,7 +70,9 @@ leaf anywhere in the filter document, including nested inside an operator:
 Two operators are rejected outright, on any request: `$where` and `$function`/`$accumulator` run arbitrary
 server-side JavaScript - the Mongo equivalent of SQL injection into a `WHERE` clause, and the one thing a
 find-only path must never allow through, so there's no configuration to get right here, they're simply
-never permitted.
+never permitted - in the filter, the projection or the sort. And a parameter's value is a value - a string, number,
+boolean, null, or a list of those - never a document: `{"name": ":u"}` given `{"$ne": null}` is refused
+(`param_invalid`), not run as an operator that matches everything.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/execute_mongo -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \

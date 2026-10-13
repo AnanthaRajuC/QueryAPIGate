@@ -35,6 +35,17 @@ class FillPlaceholdersTests(unittest.TestCase):
         self.assertEqual(result['age']['$gte'], 21)
         self.assertIsInstance(result['age']['$gte'], int)
 
+    def test_a_document_is_never_a_value(self):
+        # Until 0.34.2 an undeclared placeholder took whatever JSON was sent: {"$ne": null} matched every document,
+        # and {"$function": ...} ran server-side JavaScript past validate_filter(), which saw only ':u'.
+        for value in ({'$ne': None}, {'$function': {'body': 'function() {}', 'args': [], 'lang': 'js'}},
+                      [{'$gt': ''}], [['nested']]):
+            with self.subTest(value=value), self.assertRaises(ApiError) as caught:
+                mongotools.fill_placeholders({'name': ':u'}, {'u': value})
+            self.assertEqual(caught.exception.code, 'param_invalid')
+        self.assertEqual(mongotools.fill_placeholders({'name': {'$in': ':u'}}, {'u': ['a', 2, None]}),
+                         {'name': {'$in': ['a', 2, None]}})  # a list of values is still a value
+
     def test_substitutes_inside_a_list(self):
         result = mongotools.fill_placeholders({'status': {'$in': [':a', ':b']}}, {'a': 'x', 'b': 'y'})
         self.assertEqual(result['status']['$in'], ['x', 'y'])

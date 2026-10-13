@@ -49,6 +49,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+- **A MongoDB parameter's value could be query operators** (0.9.0 to 0.34.1). A `:name` placeholder took whatever
+  JSON was sent: for a saved `mongo` query whose placeholder wasn't declared with a type, `{"params": {"u": {"$ne":
+  null}}}` turned `{"name": ":u"}` into a filter that matched every document - any caller of that query read the
+  whole collection. Through `/execute_mongo`'s `params`, an object could carry `$function`, past the check that keeps
+  server-side JavaScript out of the filter. A value is now a string, number, boolean, null or a list of those; a
+  document is refused with `param_invalid`. Placeholders declared with a type were never affected. To check whether
+  it happened: history keeps parameter names, never values, so look at the `rows` of each run of a saved `mongo`
+  query with an undeclared placeholder - a run that returned far more than that query usually does.
+- **Server-side JavaScript in a MongoDB projection or sort** (0.9.0 to 0.34.1). `$where`, `$function` and
+  `$accumulator` were refused in a filter, but not in `projection` or `sort`, and MongoDB 4.4+ evaluates
+  `{"x": {"$function": ...}}` in a projection: any key with a MongoDB connection could run JavaScript on the database
+  server through `/execute_mongo`. They are refused there too, and when a saved `mongo` query is saved.
+
 ## [0.34.1] - 2026-10-13
 
 ### Security

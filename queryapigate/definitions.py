@@ -150,6 +150,7 @@ def validate_definition(data):
         for extra in ('mongo_projection', 'mongo_sort'):
             if data.get(extra) is not None:
                 fields[extra] = as_object(data.get(extra), extra)
+        mongotools.validate_options(fields.get('mongo_projection'), fields.get('mongo_sort'))
     else:
         fields['sql_query'] = data['sql_query']
     return fields, collection
