@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0017-what-graduates-for-1-0-0-rc1.md"
