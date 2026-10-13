@@ -44,7 +44,8 @@ def matrix():
         ('Writes, when allowed', {t: YES if _sql(t) else NO for t in TYPES}),
         ('Query time limit', {t: ('SELECT only' if t == 'mysql' else YES) if t in TIMEOUT_ENFORCED else NO
                               for t in TYPES}),  # MySQL's max_execution_time covers SELECT only (MariaDB: all)
-        ('`allowed_tables` (refused where not supported)', {t: YES if t in tableguard._DIALECT_MAP else NO
+        ('`allowed_tables` (refused where not supported)', {t: YES if t in tableguard._DIALECT_MAP else
+                                                            'collections' if t == 'mongo' else NO  # see execute_mongo()
                                                             for t in TYPES}),
         ('Schema browser, MCP `list_tables`', {t: YES if t in schema._QUERIES or t == 'mongo' else NO for t in TYPES}),
         ('Primary and foreign keys in the schema', {t: YES if t in schema._KEY_QUERIES or t == 'sqlite' else

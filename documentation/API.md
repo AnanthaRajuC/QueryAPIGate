@@ -1275,8 +1275,10 @@ table a statement actually touches - joins, subqueries and CTEs are all resolved
 is never mistaken for a real table), including the target table of a bare `DELETE`/`UPDATE`/`INSERT`. Only
 supported for `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb`
 connections, the dialects QueryAPIGate can actually parse for this - **a table-restricted key used against an
-`h2`, `jdbc` or `mongo` connection is refused on every query, with a `403` naming the unsupported connection
-type, never silently left unrestricted.** Table names are matched case-insensitively and bare (not
+`h2` or `jdbc` connection is refused on every query, with a `403` naming the unsupported connection type, never
+silently left unrestricted.** On a `mongo` connection the list is the collections the key may `find()` in - one
+outside it is refused with `403 table_not_allowed` before the server is asked anything (from 0.34.1; until then it
+wasn't checked on MongoDB at all). Table names are matched case-insensitively and bare (not
 schema-qualified), the same simplification `allowed_write_ops`'s keyword list already makes; a table-valued
 function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully restrict one.
 The key's view of the schema follows the same list: `GET /connections/<name>/schema` and MCP's `list_tables` leave

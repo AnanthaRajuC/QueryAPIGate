@@ -718,7 +718,8 @@ def execute_mongo_endpoint():
         result, elapsed_ms = engine.timed(engine.execute_mongo, data['collection'], filter_doc,
                                           data['connection_name'], limit, offset, params, timeout,
                                           projection=data.get('projection'), sort=data.get('sort'),
-                                          key_name=metrics_key_name(), mask=g.permission.mask)
+                                          key_name=metrics_key_name(), mask=g.permission.mask,
+                                          allowed_tables=g.permission.allowed_tables)
     except ApiError as error:
         _record_adhoc_and_broadcast(statement, params,
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -1018,7 +1019,8 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
         result, elapsed_ms = engine.timed(engine.execute_mongo, saved['mongo_collection'], filter_doc,
                                           connection_name, limit, offset, timeout=timeout,
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
-                                          key_name=metrics_key_name(), mask=g.permission.mask)
+                                          key_name=metrics_key_name(), mask=g.permission.mask,
+                                          allowed_tables=g.permission.allowed_tables)
     except ApiError as error:
         _record_and_broadcast(path, number,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})

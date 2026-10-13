@@ -49,6 +49,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+- **`allowed_tables` wasn't checked on MongoDB connections.** A key narrowed to some tables read every collection of a
+  `mongo` connection it was granted - through `/execute_mongo`, and through any saved `mongo` query it could run -
+  though the documentation said such a key was refused there. On MongoDB the list is now the collections a key may
+  `find()` in: one outside it is refused with `403 table_not_allowed` before the server is asked anything. Keys
+  without `allowed_tables`, and every SQL connection, are unaffected. Affects every release with MongoDB support.
+
 ## [0.34.0] - 2026-10-13
 
 Live events, and secrets from files and Vault, are stable: under the compatibility promise, each after a security

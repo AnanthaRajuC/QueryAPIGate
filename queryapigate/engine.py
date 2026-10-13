@@ -126,7 +126,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
 
 
 def execute_mongo(collection, filter_doc, connection_name, limit, offset, params=None, timeout=None,
-                  projection=None, sort=None, key_name='-', mask=None):
+                  projection=None, sort=None, key_name='-', mask=None, allowed_tables=None):
     """Run a Mongo find() on a named connection and return the requested page as a ResultSetDTO - the
     non-SQL sibling of execute_sql(). Always read-only: MongoDB support is find-only in this version (see
     mongotools.py and BACKLOG #36), so unlike execute_sql there is no allow_writes/allowed_write_ops
@@ -139,7 +139,13 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     page, in first-seen order, becomes ``columns``, and each document becomes a positionally-aligned row -
     lossy for wildly different document shapes, but keeps every existing exporter (json/ndjson/csv/xlsx/
     xml/yaml) working unmodified.
+
+    ``allowed_tables`` (a key's grant, lower-case names) is, on MongoDB, the collections it may read - checked
+    before anything is asked of the server, as validate_sql() checks a statement's tables.
     """
+    if allowed_tables is not None and str(collection).lower() not in allowed_tables:
+        raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed_tables))}. "
+                       f'Forbidden: {collection}.', 403, code='table_not_allowed')
     masking.prepare(mask, '', connection_name, 'mongo')  # refused for a caller with rules, for now
     details = store.get_connection(connection_name)
     if details['db'] != 'mongo':

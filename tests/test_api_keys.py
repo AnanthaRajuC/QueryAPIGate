@@ -698,6 +698,32 @@ class AllowedTablesTests(AppTestCase):
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
+    def test_on_mongo_it_is_the_collections_a_key_may_read(self):
+        # Until 0.34.1 neither /execute_mongo nor a saved mongo query looked at allowed_tables: a key allowed only
+        # `orders` read every collection of the connection.
+        write_connections({'mg': {'db': 'mongo', 'host': 'h', 'database': 'shop', 'active': True}})
+        key = self.create_key('reader', connections=['mg'], allowed_tables=['Orders'])
+        from tests.test_queryapigate import _mongo_client
+        client = _mongo_client(docs=[{'_id': 1}])
+
+        def find(collection):
+            return self.client.post('/execute_mongo', headers={'X-API-Key': key},
+                                    json={'connection_name': 'mg', 'collection': collection})
+        with mock.patch('pymongo.MongoClient', return_value=client):
+            refused, allowed = find('secrets'), find('orders')
+        self.assertEqual((refused.status_code, refused.get_json()['code']), (403, 'table_not_allowed'))
+        self.assertIn('secrets', refused.get_json()['error'])
+        self.assertEqual(allowed.status_code, 200, allowed.get_data(as_text=True))
+
+        self.assertEqual(save_query(self.client, headers=self.admin_headers, body={
+            'filename': 'leak', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'secrets', 'mongo_filter': {}, 'connection_name': 'mg'}).status_code, 201)
+        self.client.patch('/api/v1/api-keys/reader', headers=self.admin_headers, json={'queries': ['leak']})
+        with mock.patch('pymongo.MongoClient', return_value=client) as connect:
+            saved = self.client.get('/q/leak', headers={'X-API-Key': key})
+        self.assertEqual((saved.status_code, saved.get_json()['code']), (403, 'table_not_allowed'))
+        self.assertFalse(connect.called)  # refused before the database was asked anything
+
     def test_allowed_tables_appears_in_the_listing(self):
         self.create_key('reader', connections=['a'], allowed_tables=['b_table', 'a_table'])
         listed = self.keys()['reader']

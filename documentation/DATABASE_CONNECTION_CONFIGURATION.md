@@ -55,7 +55,7 @@ work, with the gaps below, and may change in a minor release.
 | Read-only enforced by the database too | yes | yes | yes | no | yes | no | no | n/a |
 | Writes, when allowed | yes | yes | yes | yes | yes | yes | yes | no |
 | Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes |
-| `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | no |
+| `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | collections |
 | Schema browser, MCP `list_tables` | yes | yes | yes | yes | yes | yes | no | yes |
 | Primary and foreign keys in the schema | yes | yes | yes | yes | no | no | no | n/a |
 | Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
@@ -150,7 +150,8 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 These three types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
-all three rather than guess (fail closed); H2 and JDBC rest their read-only default on the SQL check alone, and JDBC
+H2 and JDBC rather than guess (fail closed), and on MongoDB is the collections a key may read (from 0.34.1 - before it,
+it wasn't checked there at all); H2 and JDBC rest their read-only default on the SQL check alone, and JDBC
 has no query time limit and no schema browser; MongoDB runs `find()` queries only, with no streaming exports, and is
 the one type not yet tested against a real server in CI. A server with one configured logs a warning at startup
 saying so. The matrix also lists what each needs to become tier 1.
