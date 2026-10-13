@@ -105,7 +105,8 @@ documentation. #99 workspaces only if asked for.
 21. **0.33: #59 the event log**, live events' own table, retention, filters and payload
     ([ADR 0020](documentation/adr/0020-the-event-log.md)). (0.33.0, 2026-10-13.)
 22. **0.34: live events, and secrets from files and Vault, graduate**, after a security review each
-    ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). AWS's stay experimental. (Unreleased.)
+    ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). AWS's stay experimental.
+    (0.34.0, 2026-10-13.)
 23. **Then, only on demand:** #99 workspaces.
 24. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.

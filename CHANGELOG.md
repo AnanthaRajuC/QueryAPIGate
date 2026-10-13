@@ -49,6 +49,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-13
+
 Live events, and secrets from files and Vault, are stable: under the compatibility promise, each after a security
 review ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). The reviews found three things, fixed
 here. AWS's secrets and credentials stay experimental until they're tested against AWS.
@@ -2471,7 +2473,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.30.0...v0.31.0
