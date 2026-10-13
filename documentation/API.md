@@ -440,7 +440,7 @@ Clearing the cache is housekeeping, not a change, so it is not audited.
 
 | Method and path | What it does |
 |---|---|
-| `GET /api/v1/usage/quotas` | Every caller's `calls` and `rows` for this day and this month - what [usage quotas](#usage-quotas) count (experimental). |
+| `GET /api/v1/usage/quotas` | Every caller's `calls` and `rows` for this day and this month - what [usage quotas](#usage-quotas) count. |
 | `GET /api/v1/settings` | The server's effective configuration, as sections (`id`, `title`, `description`, `rows`). Each row has the `env` variable, its displayed `value`, its `source` (`env` or `default`) and `env_value`, the raw value for a `.env` export. A secret's `value` only says whether it is configured, and its `env_value` is always null. Read-only: change settings in the environment and restart. |
 | `POST /api/v1/settings/rekey` | Re-encrypt every stored password (connections and destinations) under the first key in `QUERYAPIGATE_SECRET_KEY`, so the others can be removed - all in one transaction, or nothing when one can't be decrypted. `{"check": true}` only reports: `keys`, `values`, `by_key` (how many under each listed key, in order), `under_old_keys`, `undecryptable`; a rekey adds `rekeyed`. Owners only (`secrets.rotate`); audited as `rekey`, counts only. See [Rotating the key](#rotating-the-key). |
 | `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
@@ -590,8 +590,10 @@ as the admin key - no server needs to be running.
 
 ## Configuration as code
 
-> **Experimental** - new in 0.27 ([ADR 0014](adr/0014-configuration-as-code.md)): the file's `format_version` 1,
-> and the commands, may change in a minor release, always noted in the changelog.
+> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Kinds and
+> fields may still be added to `format_version` 1, and commands and options to the CLI; anything else would be a new
+> `format_version`, with this one still read. Limits: the file doesn't hold the server's settings, administrators or
+> their roles (*Not in the file*, below).
 
 One file describes what a server holds - connections, destinations, roles, saved queries, API keys' grants,
 descriptions and exports - so it can be reviewed as a pull request, kept in git, and promoted from one environment to
@@ -653,7 +655,8 @@ Write `${VAR}` references in block style, as above: inside `{...}` on one line, 
 - **No secret is ever in it.** A connection's or destination's `password` must be a `${VAR}` reference, expanded where
   the server runs; a value is refused. An API key carries `secret_sha256`, the hash the store keeps - required for a
   new key, and a different one is a new secret. An export turns a password the store held as a value into a reference
-  named for it (`${QAG_LEGACY_PASSWORD}`) and lists the variables to set; applying that file reads the password from
+  named for it (`${QAG_LEGACY_PASSWORD}`) and lists the variables to set - and, if `QUERYAPIGATE_SECRET_ENV_VARS` is
+  set, for it to allow (`QAG_*`); applying that file reads the password from
   the server's environment from then on, and the diff says so.
 - **A key's `role` stays live**: `role: partner` means the key has `partner`'s grants, so a change to the role in the
   file changes its keys too (through the API, a role is a template copied once).
@@ -807,7 +810,7 @@ show the reference as written.
 
 | Reference | Resolved from |
 |---|---|
-| `${VAR}` | The server's environment, as always. |
+| `${VAR}` | The server's environment - only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists, when it's set. |
 | `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
 | `${vault:secret/data/warehouse#password}` | A field of a secret in Vault's KV engine, version 1 or 2: the path as Vault's API names it (`secret/data/...` for version 2), `#`, the field. |
 | `${aws-sm:prod/warehouse#password}` | An AWS Secrets Manager secret, by name or ARN - with `#field`, that field of its JSON; without, the whole string. |
@@ -821,7 +824,10 @@ secret meant for something else. So `${file:...}` reads only inside `QUERYAPIGAT
 absolute folders, symbolic links followed) - unset, it's refused - and never the server's home, where its store is.
 A reference outside is refused when it's saved (`invalid_body`), and again when it's used, in case the list shrank
 (`connection_misconfigured`). The server's own `QUERYAPIGATE_*` and `OTEL_*` settings are never reachable, by any
-reference.
+reference, and nor are the credentials it may itself run with - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
+`VAULT_*` and `KUBERNETES_*` - which reach far more than one connection's secret. `${VAR}` reads any other variable
+until `QUERYAPIGATE_SECRET_ENV_VARS` lists the ones it may: names, or prefixes ending in `*`
+(`WAREHOUSE_PASSWORD,QAG_*`). Set it: while references are in use without it, the server says so at startup.
 
 **It fails closed.** A resolved value is kept for at most `QUERYAPIGATE_SECRET_CACHE_SECONDS` (default 300) and
 fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
@@ -884,8 +890,11 @@ would be; setting both is refused. Settings says which came from a file.
 
 ## Descriptions
 
-> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); the shape and where descriptions are served
-> may change in any minor release, always noted in the changelog.
+> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields - of a
+> description, and where descriptions are served - may still be added; none is removed or renamed except through the
+> deprecation process. Limits: comments are imported from PostgreSQL, DuckDB, MySQL and ClickHouse only; a table's or
+> column's description is up to 2,000 characters and a connection's notes up to 20,000; and another database browsed
+> with `?database=` is shown without them.
 
 An AI agent - or a new colleague - sees `orders.amt` and `cust_tier`; it writes the right SQL only if it's told "net
 revenue in EUR, refunds excluded". A connection keeps a description for each table and column, and its own
@@ -1155,8 +1164,9 @@ give one caller less than the server allows - each **narrows** the server's own 
 
 ### Usage quotas
 
-> **Experimental** - new in 0.24 ([ADR 0011](adr/0011-per-key-limits-and-quotas.md)); what counts as a call, and how
-> precisely, may change in any minor release, always noted in the changelog.
+> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). What counts as a
+> call is fixed, as below; periods, counts and fields may still be added. Limits: a caller can overshoot by the calls
+> it has in flight, and several instances without Redis count apart (*Precision*, below).
 
 Partner and data-product contracts are written in quotas - "100,000 calls a month" - not per-minute rates. A key or
 role can carry one:
@@ -1169,7 +1179,10 @@ role can carry one:
   counter; signed-in users get their role's quota **each**, counted per user. Either count may be left out, not both.
 - **What counts:** successful calls that return data - saved queries, ad-hoc SQL, MCP tool calls (not `list_tables`),
   cached responses - and the rows they return (a page's `X-Row-Count`; a stream's rows as they leave, however it
-  ends). Refused calls don't: unauthorised, invalid, over a limit, or a database error.
+  ends). An agent's [write request](MCP.md#write-tools-agents-that-write-approved-by-a-person) counts as a call when
+  it's made, with no rows. Refused calls don't: unauthorised, invalid, over a limit, or a database error. Nor does
+  what isn't a caller asking for data: exports (they run as their schedule says), live events, MCP resources such as
+  the data dictionary, and the Management API.
 - **Used up:** `429 quota_exceeded`, naming which (`quota`: `calls` or `rows`), the `limit` and `resets_at`, with
   `Retry-After` until then. A cached response is refused too.
 - **Every response to a caller with a quota** carries `X-Quota-Remaining-Calls` and/or `X-Quota-Remaining-Rows`, and
@@ -1684,8 +1697,10 @@ running QueryAPIGate day to day, not a replacement for an on-call alerting syste
 
 ## Agent usage
 
-> **Experimental** - new in 0.18 ([ADR 0006](adr/0006-ai-agents.md)); what is summarised per agent may change in any
-> minor release, always noted in the changelog.
+> **Stable** since 1.0.0-rc1, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)). Fields per agent,
+> and kinds of `refusals` and `writes`, may still be added - a client should ignore one it doesn't know. Limits: it
+> holds what run history holds (below) - calls refused before they ran aren't in it, a sampled history is a sample, and
+> one summary reads at most 100,000 runs.
 
 What each AI agent did over MCP - for "what is this agent asking, and is it trying things it shouldn't?":
 

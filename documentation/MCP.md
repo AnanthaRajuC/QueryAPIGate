@@ -142,7 +142,8 @@ The step by step, with Keycloak: [let AI clients sign in through your identity p
 
 ## Descriptions and the data dictionary
 
-> **Experimental** - new in 0.18, with [descriptions](API.md#descriptions) themselves.
+> **Stable** since 1.0.0-rc1, with [descriptions](API.md#descriptions) themselves - what may still be added, and the
+> limits, are there.
 
 What an agent is told the data means:
 

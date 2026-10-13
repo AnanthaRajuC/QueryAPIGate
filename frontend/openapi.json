@@ -1939,7 +1939,7 @@
             "type": "object"
           },
           "mask": {
-            "description": "Column-masking rules applied to every row the export writes (experimental).",
+            "description": "Column-masking rules applied to every row the export writes.",
             "items": {
               "$ref": "#/components/schemas/MaskRule"
             },
@@ -2211,7 +2211,7 @@
             ]
           },
           "mask": {
-            "description": "Column-masking rules applied to everything this caller receives (experimental).",
+            "description": "Column-masking rules applied to everything this caller receives.",
             "items": {
               "$ref": "#/components/schemas/MaskRule"
             },
@@ -3108,7 +3108,7 @@
         "type": "object"
       },
       "Quota": {
-        "description": "Calls and/or rows per calendar day or month, per caller (experimental, ADR 0011).",
+        "description": "Calls and/or rows per calendar day or month, per caller (ADR 0011).",
         "nullable": true,
         "properties": {
           "calls": {
@@ -5777,7 +5777,7 @@
     },
     "/api/v1/config/apply": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. In one transaction: every change is made through the same rules as the rest of this API and audited (`via: config`), under one `config_applied` entry with the file's hash. A problem at any step changes nothing. Owners only (`config.apply`).",
+        "description": "In one transaction: every change is made through the same rules as the rest of this API and audited (`via: config`), under one `config_applied` entry with the file's hash. A problem at any step changes nothing. Owners only (`config.apply`).",
         "parameters": [
           {
             "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
@@ -5861,13 +5861,12 @@
         "summary": "Make the server match a configuration file, all or nothing",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/config/diff": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with problems answers 400 `invalid_config`, listing every one in `problems`. Owners only (`config.apply`).",
+        "description": "The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with problems answers 400 `invalid_config`, listing every one in `problems`. Owners only (`config.apply`).",
         "parameters": [
           {
             "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
@@ -5943,13 +5942,12 @@
         "summary": "What applying a configuration file would change, field by field - nothing is written",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/config/managed": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. With `locked` (QUERYAPIGATE_CONFIG_LOCKED), changing any of these through this API answers 409 `config_managed`.",
+        "description": "With `locked` (QUERYAPIGATE_CONFIG_LOCKED), changing any of these through this API answers 409 `config_managed`.",
         "responses": {
           "200": {
             "content": {
@@ -6005,8 +6003,7 @@
         "summary": "What a configuration file manages, and whether the server takes changes to it only from a file",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/connections": {
@@ -6658,7 +6655,6 @@
     },
     "/api/v1/connections/{name}/descriptions": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "in": "path",
@@ -6724,11 +6720,10 @@
         "summary": "What a connection's tables and columns mean",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       },
       "patch": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. `table` null is the connection's own notes (up to 20,000 characters); `column` null the table's description; a column's or table's is up to 2,000.",
+        "description": "`table` null is the connection's own notes (up to 20,000 characters); `column` null the table's description; a column's or table's is up to 2,000.",
         "parameters": [
           {
             "in": "path",
@@ -6834,13 +6829,12 @@
         "summary": "Set or remove descriptions",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/connections/{name}/descriptions/import": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. PostgreSQL, MySQL, ClickHouse and DuckDB. A description written by a person is kept unless overwrite is true.",
+        "description": "PostgreSQL, MySQL, ClickHouse and DuckDB. A description written by a person is kept unless overwrite is true.",
         "parameters": [
           {
             "in": "path",
@@ -6923,8 +6917,7 @@
         "summary": "Import the database's own table and column comments",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/connections/{name}/schema": {
@@ -10681,7 +10674,6 @@
     },
     "/api/v1/usage/agents": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "parameters": [
           {
             "description": "A date or a time, inclusive; default 24 hours ago.",
@@ -10766,13 +10758,11 @@
         "summary": "What each AI agent did over MCP - calls, rows, refusals, masking, its frequent statements",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/usage/quotas": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
         "responses": {
           "200": {
             "content": {
@@ -10828,8 +10818,7 @@
         "summary": "Every caller's calls and rows this day and this month - what usage quotas count",
         "tags": [
           "Management API v1"
-        ],
-        "x-experimental": true
+        ]
       }
     },
     "/api/v1/write-requests": {

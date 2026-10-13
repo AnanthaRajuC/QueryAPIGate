@@ -82,8 +82,7 @@ guide covers one scenario end to end, and every command and response in it was r
     (experimental) - OAuth for the MCP server: a hosted assistant connects as the signed-in user, with that user's
     role and masking.
 47. [**Tell AI agents what your data means, and see what they did**](47-tell-agents-what-your-data-means-and-see-what-they-did.md)
-    (experimental) - descriptions imported from database comments or written, the data dictionary, and the Agents
-    screen.
+    - descriptions imported from database comments or written, the data dictionary, and the Agents screen.
 49. [**Let an AI agent write - with a person approving each write**](49-let-an-agent-write-with-a-person-approving-each-write.md)
     (experimental) - write tools over MCP: inserts on their own, other writes approved, a row limit, on record.
 
@@ -139,6 +138,6 @@ guide covers one scenario end to end, and every command and response in it was r
 54. [**Install on Kubernetes with Helm**](54-install-on-kubernetes-with-helm.md) (experimental) - one pod on SQLite
     or several on PostgreSQL, what the chart refuses and keeps, changed while serving with no failed request.
 55. [**Promote a setup from dev to prod through a pull request**](55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md)
-    (experimental) - configuration as code: export, review the diff against prod, apply on merge, locked.
+    - configuration as code: export, review the diff against prod, apply on merge, locked.
 56. [**Use short-lived database credentials from Vault**](56-use-short-lived-database-credentials-from-vault.md)
     (experimental) - no database password anywhere: a user per lease, rotated without a failed call, failing closed.

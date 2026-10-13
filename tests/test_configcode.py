@@ -922,3 +922,88 @@ class RemoteCliTests(ConfigTestCase):
         with mock.patch.dict(os.environ, {'QAG_API_KEY': ''}):
             code, _, err = self.cli('config', 'diff', '--server', 'http://prod.example', self.path)
         self.assertIn('QAG_API_KEY', err)
+
+
+class RealServerTests(unittest.TestCase):
+    """`--server` against `queryapigate serve` in a process of its own, over real HTTP - what CI does with it. The CLI
+    runs in another process, its home an empty directory that must stay empty (ADR 0017)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import socket
+        import subprocess
+        import sys
+        import time
+        import urllib.request
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.server_home = os.path.join(cls.tmp.name, 'server')
+        cls.cli_home = os.path.join(cls.tmp.name, 'cli')
+        os.makedirs(cls.server_home)
+        os.makedirs(cls.cli_home)
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            port = s.getsockname()[1]
+        cls.base = f'http://127.0.0.1:{port}'
+        env = {k: v for k, v in os.environ.items() if not k.startswith('QUERYAPIGATE_')}
+        cls.process = subprocess.Popen(
+            [sys.executable, '-m', 'queryapigate', 'serve', '--port', str(port)],
+            env={**env, 'QUERYAPIGATE_HOME': cls.server_home, 'QUERYAPIGATE_API_KEY': 'owner-key'},
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                with urllib.request.urlopen(cls.base + '/health', timeout=2):
+                    break
+            except OSError:
+                if time.monotonic() > deadline or cls.process.poll() is not None:
+                    cls.tearDownClass()
+                    raise
+                time.sleep(0.2)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.process.terminate()
+        try:
+            cls.process.wait(timeout=10)
+        except Exception:
+            cls.process.kill()
+        cls.tmp.cleanup()
+
+    def cli(self, *argv, key='owner-key'):
+        import subprocess
+        import sys
+        env = {k: v for k, v in os.environ.items() if not k.startswith('QUERYAPIGATE_')}
+        return subprocess.run([sys.executable, '-m', 'queryapigate', 'config', *argv, '--server', self.base, self.path],
+                              env={**env, 'QUERYAPIGATE_HOME': self.cli_home, 'QAG_API_KEY': key},
+                              capture_output=True, text=True, timeout=60)
+
+    def setUp(self):
+        self.path = os.path.join(self.tmp.name, 'queryapigate.yaml')
+        with open(self.path, 'w') as f:
+            yaml.safe_dump({'format': 'queryapigate-config', 'format_version': 1,
+                            'roles': [{'name': 'from-file', 'connections': [], 'rate_limit': '60/minute'}]}, f)
+
+    def role(self):
+        import urllib.error
+        import urllib.request
+        request = urllib.request.Request(self.base + '/api/v1/roles/from-file', headers={'X-API-Key': 'owner-key'})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as res:
+                return json.load(res)
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    def test_diff_apply_diff_and_a_wrong_key(self):
+        refused = self.cli('diff', key='wrong')
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('answered 401', refused.stderr)
+        diff = self.cli('diff')
+        self.assertEqual(diff.returncode, 2, diff.stderr)
+        self.assertIn('+ roles[from-file]', diff.stdout)
+        self.assertEqual(self.role(), 404)
+        applied = self.cli('apply')
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        self.assertIn('Applied: the server matches the file', applied.stdout)
+        self.assertEqual(self.role()['rate_limit'], '60/minute')
+        self.assertEqual(self.cli('diff').returncode, 0)
+        self.assertEqual(os.listdir(self.cli_home), [], 'the CLI opened a store of its own')

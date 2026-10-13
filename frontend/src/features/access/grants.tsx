@@ -428,8 +428,8 @@ export function GrantFields({
           label="Quota: calls"
           hint={
             prefix === 'k'
-              ? 'Experimental. Successful data calls per period - then 429 until it resets.'
-              : 'Experimental. Each signed-in user gets this allowance of their own.'
+              ? 'Successful data calls per period - then 429 until it resets.'
+              : 'Each signed-in user gets this allowance of their own.'
           }
         >
           <input

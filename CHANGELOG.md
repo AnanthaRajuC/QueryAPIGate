@@ -22,12 +22,10 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: live events
 (`GET /events`, `queryapigate events`), H2, JDBC and MongoDB connections, OAuth for the MCP server
-(`QUERYAPIGATE_MCP_RESOURCE_URL`), descriptions (`/api/v1/connections/{name}/descriptions`), agent usage
-(`GET /api/v1/usage/agents`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
+(`QUERYAPIGATE_MCP_RESOURCE_URL`), Console sign-in through SSO (`QUERYAPIGATE_SSO_*`), write tools over MCP
 (`agent_writes`, `/api/v1/write-requests`), tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`),
-usage quotas (`quota`, `/api/v1/usage/quotas`), the audit log streamed to a SIEM
-(`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), configuration as code (`queryapigate config`), and
-secrets from files and secrets managers (`${file:...}`).
+the audit log streamed to a SIEM (`QUERYAPIGATE_AUDIT_SYSLOG_URL`, `QUERYAPIGATE_AUDIT_OTLP`), and secrets from
+files and secrets managers (`${file:...}`).
 The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -55,6 +53,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+- **A `${VAR}` reference could name the server's own cloud credentials.** Only its `QUERYAPIGATE_*` and `OTEL_*`
+  settings were refused, so an administrator who may change connections - or the author of a configuration file -
+  could save one whose password was `${AWS_SECRET_ACCESS_KEY}` and whose host was theirs, and receive the server's AWS
+  identity: more than every allow-list of 0.28 opens. Now `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`, `VAULT_*`
+  and `KUBERNETES_*` are refused too, when saved and when used; and **`QUERYAPIGATE_SECRET_ENV_VARS`** (names, or
+  prefixes ending in `*`) limits `${VAR}` to what it lists, like the other references' allow-lists. Unset, any other
+  variable may still be referenced - the server warns at startup while references are in use - so nothing breaks on
+  upgrade unless a connection used one of those names. Found in the security review for 1.0.0-rc1
+  ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)).
+
 ### Upgrading from 0.29
 - **Higher minimum versions:** Flask 3.0 (was 2.2), Werkzeug 3.0 (now listed: QueryAPIGate imports it), PyYAML 6.0.1
   (was 6.0), and for the `mcp` extra, mcp 1.21.1 (was 1.10). None of the old minimums could actually be used: Flask
@@ -62,6 +71,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   or later, and mcp before 1.21.1 can't be imported beside the pydantic pip installs with it.
 
 ### Changed
+- **Stable now, under the compatibility promise:** descriptions, agent usage, usage quotas and configuration as code
+  ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)). Each met every one of
+  `experimental.GRADUATION`; each one's documentation now says what may still be added and its limits. No longer
+  marked experimental in `/openapi.json`, Settings, the Console's Agents screen and quota fields, or the startup log.
+  Usage quotas' documentation now says what doesn't count - exports, live events, MCP resources, the Management API -
+  and that an agent's write request does.
+- **`config diff` and `config apply --server`** are tested against a real `queryapigate serve`, over HTTP.
+- **OpenAPI no longer calls column masking experimental** - two field descriptions left over from before 0.20.
 - **CI tests the lowest version allowed of every core dependency, and of the `mcp`, `jwt` and `redis` extras**
   ([ADR 0017](documentation/adr/0017-what-graduates-for-1-0-0-rc1.md)) - the whole suite on Python 3.11, with Redis.
   It tested only DuckDB's and sqlglot's before. A test fails if a minimum in pyproject.toml and the version CI pins

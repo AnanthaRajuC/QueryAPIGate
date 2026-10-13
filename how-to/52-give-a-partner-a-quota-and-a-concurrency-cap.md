@@ -3,8 +3,8 @@
 **Time:** 15 minutes. **You'll end up with:** a partner's key that can run at most two queries at once, get at most
 100 rows a call, and make 1,000 calls a day - enforced across every instance, with the partner told how much is left.
 
-> **Experimental** - quotas are new in 0.24 and what counts as a call may change in any minor release, always noted
-> in the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)). The three limits are stable.
+> **Stable** - quotas, like the three limits, are under the compatibility promise since 1.0.0-rc1
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every command and response below was run against two QueryAPIGate instances (gunicorn) sharing a PostgreSQL store and
 Redis, with a PostgreSQL `orders` table behind two saved queries: `orders_by_customer`, and `slow_report`

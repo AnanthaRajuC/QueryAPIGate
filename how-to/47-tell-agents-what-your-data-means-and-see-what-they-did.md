@@ -5,8 +5,8 @@ your database's own comments, or written in the Console - and the joins and metr
 the right SQL; and, afterwards, a view of what every agent asked, read and was refused, with an alert when one
 suddenly reads far more than it usually does.
 
-> **Experimental** - descriptions and agent usage are new in 0.18 and may change in any minor release, always noted
-> in the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** - descriptions and agent usage are under the compatibility promise since 1.0.0-rc1
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Every command and response below was run against a real server and its MCP server, with the
 [example APIs](05-try-the-built-in-example-apis.md) loaded, a PostgreSQL 16 database as a second connection, and a

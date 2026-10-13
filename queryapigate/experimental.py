@@ -8,7 +8,8 @@ docs say so at each feature's own section.
 
 A feature graduates - its entry deleted here, its callout replaced by a note that it's stable and what may still be
 added - when it meets every one of GRADUATION. Alerts, remote files through DuckDB, exports and column masking did in
-0.20. The connection types have their own terms (databases.GRADUATION).
+0.20; descriptions, agent usage, usage quotas and configuration as code in 1.0.0-rc1 (ADR 0017). The connection
+types have their own terms (databases.GRADUATION).
 """
 from typing import Any
 
@@ -47,20 +48,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                      'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM'),
         'docs': ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)'),
     },
-    'descriptions': {
-        'name': 'Descriptions',
-        'why': 'new in 0.18 - their shape, and where they are served to agents, may change as they are used (ADR 0006)',
-        'operations': (('get', '/api/v1/connections/{name}/descriptions'),
-                       ('patch', '/api/v1/connections/{name}/descriptions'),
-                       ('post', '/api/v1/connections/{name}/descriptions/import')),
-        'docs': ('documentation/API.md', 'Descriptions'),
-    },
-    'agent_usage': {
-        'name': 'Agent usage',
-        'why': 'new in 0.18 - what is summarised per agent may change as it is used (ADR 0006)',
-        'operations': (('get', '/api/v1/usage/agents'),),
-        'docs': ('documentation/API.md', 'Agent usage'),
-    },
     'agent_writes': {
         'name': 'Write tools over MCP',
         'why': 'new in 0.21 - how agents ask for writes, and how people approve them, may change as it is used '
@@ -70,13 +57,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                        ('post', '/api/v1/write-requests/{id}/reject')),
         'settings': ('QUERYAPIGATE_WRITE_APPROVAL_MINUTES', 'QUERYAPIGATE_CONSOLE_URL'),
         'docs': ('documentation/MCP.md', 'Write tools: agents that write, approved by a person'),
-    },
-    'quotas': {
-        'name': 'Usage quotas',
-        'why': 'new in 0.24 - what counts as a call, and how precisely, may change once quotas meet real contracts '
-               '(ADR 0011)',
-        'operations': (('get', '/api/v1/usage/quotas'),),
-        'docs': ('documentation/API.md', 'Usage quotas'),
     },
     'audit_stream': {
         'name': 'The audit log streamed to a SIEM',
@@ -92,14 +72,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                'AI agents settle (ADR 0010); what never goes into a span will not',
         'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
         'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
-    },
-    'config_as_code': {
-        'name': 'Configuration as code',
-        'why': 'new in 0.27 - the file format and the commands may change as teams use them (ADR 0014)',
-        'operations': (('post', '/api/v1/config/diff'), ('post', '/api/v1/config/apply'),
-                       ('get', '/api/v1/config/managed')),
-        'settings': ('QUERYAPIGATE_CONFIG_FILE', 'QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED'),
-        'docs': ('documentation/API.md', 'Configuration as code'),
     },
     'secret_providers': {
         'name': 'Secrets from files and secrets managers',

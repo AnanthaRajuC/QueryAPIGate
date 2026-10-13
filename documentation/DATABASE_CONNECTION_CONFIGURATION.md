@@ -312,7 +312,11 @@ publish saved queries or views and grant those instead.
 ## Keeping secrets out of the file
 
 Any string value may contain `${VAR}` references, replaced with the environment variable's value when the connection is
-used (a missing variable is reported as an error naming it). `GET /api/v1/connections/{name}` masks plain-text passwords as
+used (a missing variable is reported as an error naming it). Set `QUERYAPIGATE_SECRET_ENV_VARS` to the variables your
+connections use - names, or prefixes ending in `*`: `REPORTING_PASSWORD,ORACLE_*` - and no other can be referenced.
+Without it, any can but the server's own settings and the credentials it may run with
+([below](API.md#secrets-from-files-and-secrets-managers)), and the server warns at startup while references are in
+use. `GET /api/v1/connections/{name}` masks plain-text passwords as
 `********` and shows `${VAR}` references as written. A secret kept in a file - the CSI driver's, Docker's, Vault
 Agent's - is `${file:/run/secrets/name}`, read inside the folders `QUERYAPIGATE_SECRET_FILE_DIRS` allows
 ([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers), experimental).

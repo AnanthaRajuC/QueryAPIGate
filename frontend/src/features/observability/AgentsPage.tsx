@@ -4,7 +4,6 @@ import { Fragment, useState } from 'react';
 import { api, unwrap, type Schemas } from '@/api/client';
 import { Loading } from '@/app/feedback';
 import { CodeBox } from '@/components/CodeBox';
-import { ExperimentalTag } from '@/components/Experimental';
 import { Time } from '@/components/Time';
 
 // What each AI agent did over MCP (GET /api/v1/usage/agents, BACKLOG #87): calls, rows read, refusals by code, how
@@ -176,9 +175,7 @@ export function AgentsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>
-            Agents <ExperimentalTag />
-          </h1>
+          <h1>Agents</h1>
           <span className="sub">
             What each AI agent did over MCP - per API key or signed-in user, from run history.
           </span>

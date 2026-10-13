@@ -227,7 +227,12 @@ This is the part worth being the most precise about, because it's also the part 
   otherwise hand an administrator the key and token hashes. A PostgreSQL store is kept apart by its own credentials.
 - **A `${VAR}` reference can't name one of the server's own `QUERYAPIGATE_*` settings** in a connection or
   destination - otherwise an administrator could carry the admin key or secret key out in a password sent to a host
-  of theirs.
+  of theirs. **Nor a credential the server itself may run with** - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
+  `VAULT_*`, `KUBERNETES_*` - which would reach beyond every allow-list (found in the review for 1.0.0-rc1:
+  `${AWS_SECRET_ACCESS_KEY}` was accepted, and with it the server's whole AWS identity, not just the secret prefixes
+  `QUERYAPIGATE_AWS_SECRET_PREFIXES` opens). Any other variable is reachable until `QUERYAPIGATE_SECRET_ENV_VARS`
+  lists the ones that may be: **set it**, or a credential under a name no rule knows (`DB_ADMIN_PW`) is an
+  administrator's to send. The server warns at startup while references are in use without it.
 - **Exports write only under their destination's prefix** (ADR 0004). A destination is a bucket prefix or folder and
   write credentials, stored like a connection password. Each run writes through a fresh DuckDB connection locked the
   same way - `allowed_paths` is exactly the prefix plus the one temporary file the rows were staged in - and object
@@ -329,14 +334,15 @@ no credential for it. The server writes only to `/data` (the store's volume, or 
 - **The chart and image are as trusted as ghcr and this repository's release workflow.** The chart is pushed by the
   same tag-triggered workflow as the image. Neither is signed yet, so pin the version, and a digest if you mirror them.
 
-### Configuration as code (ADR 0014, experimental)
+### Configuration as code (ADR 0014)
 
 A configuration file can change anything an owner can - connections, grants, keys - so applying one is an owner's
 capability (`config.apply`), and so is reading what applying one would do. What keeps a file safe to put in git, and
 what's still the deployer's:
 
 - **A file never holds a secret.** A password must be a `${VAR}` reference - a literal is refused - and a reference to
-  the server's own `QUERYAPIGATE_*` or `OTEL_*` settings is refused, as through the API (a connection pointed at a
+  the server's own settings or credentials, or to a variable `QUERYAPIGATE_SECRET_ENV_VARS` doesn't list, is refused,
+  as through the API (a connection pointed at a
   host of the author's would otherwise send it there). Export turns stored values into references. Not checked: a
   secret inside another field - a JDBC URL with `password=` in it - which is in the file as it is in the store.
 - **A key is in a file by its secret's hash.** That's safe to publish only because the secret is 32 random bytes:
@@ -352,6 +358,14 @@ what's still the deployer's:
 - **Pruning deletes only what a file manages**, and what the API deletes is no longer managed - so a later object of
   the same name, made in the Console, isn't pruned as the file's.
 - **A file is capped at a million values**, YAML aliases counted as they expand, so a small file can't be a huge one.
+
+*Reviewed for 1.0.0-rc1 (ADR 0017).* Looked at: who may diff and apply (`config.apply`, owners); every object checked
+by the function the API uses for it, so a file can't do what the API refuses; the `--server` CLI, now tested against
+a real `queryapigate serve` - its key only from `QAG_API_KEY`, no store opened locally; startup apply under the
+store's write lock, once per file; pruning only what a file manages; the lock's reach. **Found:** a `${VAR}`
+reference could name the server's own cloud credentials - `${AWS_SECRET_ACCESS_KEY}` with a host of the author's -
+through a file as through the API. Fixed in both (Query execution, above): those credentials are always refused,
+and `QUERYAPIGATE_SECRET_ENV_VARS` limits the rest to what the deployer lists.
 
 ### Secrets from secrets managers (ADR 0015, experimental)
 
@@ -419,9 +433,18 @@ slow queries and starve everyone sharing them. A key's or role's own `max_concur
 (ADR 0011) bound that: queries running at once (a stream counts until its last row), how long each may run, how many
 rows a call returns - each only ever narrowing the server's limits. Counted in Redis across instances, with leases so
 a crashed process can't hold a caller's slots forever; without Redis, per process, as rate limits are. Usage quotas
-(experimental) cap a caller's calls and rows per day or month. They're a contract's meter, not a hard security
+cap a caller's calls and rows per day or month. They're a contract's meter, not a hard security
 boundary: a caller overshoots by its calls in flight, and with several instances but no Redis by up to a quota per
 instance in a short burst. `max_concurrent` and the rate limit are what bound a burst.
+
+*Reviewed for 1.0.0-rc1 (ADR 0017).* Looked at: who sets a quota (`access.write`, never the caller; a configuration
+file's role through the same validation); that it's checked before the response cache, so a cached answer counts and
+is refused when used up; that MCP tool calls and REST calls share one counter per caller, and per user for a role's
+signed-in callers; the Redis keys (`qag:quota:<caller>:<period>`), where a period always ends in its date, so two
+callers' keys can't meet whatever their names; that `forget` matches Redis keys with the caller's glob characters
+escaped; who reads every caller's counts (`GET /api/v1/usage/quotas`, `observe` - callers' names, personal data for
+a signed-in person, as in run history). Found nothing to fix; the documentation now says what doesn't count
+(exports, live events, MCP resources, the Management API) and that an agent's write request does.
 ### CORS
 
 Cross-origin access is off unless `QUERYAPIGATE_CORS_ORIGINS` is explicitly set, and CORS is a browser-only

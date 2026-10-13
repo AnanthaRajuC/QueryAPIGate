@@ -146,6 +146,20 @@ def load_examples_at_startup():
                        ', '.join(f'{name}={secret}' for name, secret in sorted(added['key_secrets'].items())))
 
 
+def warn_env_references():
+    """Once at startup: ${VAR} references in use with no QUERYAPIGATE_SECRET_ENV_VARS - so an administrator may
+    reference any other variable too, but the few secretrefs.py always refuses (ADR 0017)."""
+    from . import destinations, secretrefs
+    if config.secret_env_vars():
+        return
+    used = secretrefs.env_variables([*store.read_connections().values(), *destinations.list_all()])
+    if used:
+        log.warning('Connections and destinations reference environment variables (%s), and '
+                    'QUERYAPIGATE_SECRET_ENV_VARS is unset: an administrator could reference any other variable too, '
+                    "and have the server send it to a host of theirs as a password. Set it to the ones in use.",
+                    ', '.join(used))
+
+
 def create_app():
     from . import __version__
     config.check_settings()
@@ -153,6 +167,7 @@ def create_app():
     db.init_schema()
     store.refuse_legacy_home()
     experimental.warn_in_use(log, os.environ, store.read_connections())
+    warn_env_references()
     instances.register('serve')
     instances.warn_if_unshared(log)
     app = Flask(__name__)

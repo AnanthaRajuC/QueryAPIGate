@@ -572,7 +572,7 @@ SCHEMAS = {
             'incremental': _INCREMENTAL,
             'skip_empty': {'type': 'boolean', 'description': 'A run with no rows writes no file.'},
             'mask': {'type': 'array', 'items': _ref('MaskRule'),
-                     'description': 'Column-masking rules applied to every row the export writes (experimental).'},
+                     'description': 'Column-masking rules applied to every row the export writes.'},
             'timeout': {'type': 'number', 'description': "Seconds, within the server's own limit."},
             'watermark': {'nullable': True, 'description': 'The largest incremental value delivered so far.'},
             'running': {'type': 'boolean', 'description': 'Whether a run holds its lease now.'},
@@ -833,7 +833,7 @@ SCHEMAS = {
                      'rate_limit', 'allowed_ips', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota'],
         'properties': {
             'mask': {'type': 'array', 'nullable': True, 'items': _ref('MaskRule'),
-                     'description': 'Column-masking rules applied to everything this caller receives (experimental).'},
+                     'description': 'Column-masking rules applied to everything this caller receives.'},
             'connections': {'oneOf': [{'type': 'string', 'enum': ['*']},
                                       {'type': 'array', 'items': {'type': 'string'}}],
                             'description': '"*" for every connection, or a list of names (ad-hoc SQL and every '
@@ -865,7 +865,7 @@ SCHEMAS = {
     },
     'Quota': {
         'type': 'object', 'nullable': True, 'required': ['per'],
-        'description': 'Calls and/or rows per calendar day or month, per caller (experimental, ADR 0011).',
+        'description': 'Calls and/or rows per calendar day or month, per caller (ADR 0011).',
         'properties': {'calls': {'type': 'integer', 'minimum': 1}, 'rows': {'type': 'integer', 'minimum': 1},
                        'per': {'type': 'string', 'enum': ['day', 'month']}},
     },

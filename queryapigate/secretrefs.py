@@ -62,6 +62,34 @@ def server_setting(name):
     return name.upper().startswith(('QUERYAPIGATE_', 'OTEL_'))
 
 
+# Credentials the server itself may run with - its cloud identity (boto3's AWS_*, Azure's, Google's), a Vault client's
+# token, the Kubernetes service account's - are never a connection's to read either, whatever
+# QUERYAPIGATE_SECRET_ENV_VARS says: they reach far more than any one connection's secret (ADR 0017).
+CREDENTIAL_PREFIXES = ('AWS_', 'AZURE_', 'ARM_', 'GOOGLE_', 'GCP_', 'VAULT_', 'KUBERNETES_')
+
+
+def env_refusal(name):
+    """Why `${name}` may not be referenced, or None - checked when a reference is saved and again when it's used."""
+    if server_setting(name):
+        return "is one of this server's own settings"
+    if name.upper().startswith(CREDENTIAL_PREFIXES):
+        return 'is a cloud, Vault or Kubernetes credential the server itself may use'
+    allowed = config.secret_env_vars()
+    if allowed and not any(name == a or (a.endswith('*') and name.startswith(a[:-1])) for a in allowed):
+        return "isn't one of QUERYAPIGATE_SECRET_ENV_VARS"
+    return None
+
+
+def env_variables(objects):
+    """The environment variables the given connections' and destinations' fields reference, sorted."""
+    found = set()
+    for details in objects:
+        for value in (details.values() if isinstance(details, dict) else ()):
+            if isinstance(value, str):
+                found.update(m.group(3) for m in REF_RE.finditer(value) if m.group(3))
+    return sorted(found)
+
+
 # --------------------------------------------------------------------------------------
 # Providers
 # --------------------------------------------------------------------------------------
@@ -366,9 +394,10 @@ def check_value(value):
     for match in REF_RE.finditer(value):
         provider, what, variable = match.groups()
         if variable is not None:
-            if server_setting(variable):
-                raise ApiError(f"${{{variable}}} is one of this server's own settings and can't be referenced - "
-                               'use a variable of its own for the secret', code='invalid_body')
+            reason = env_refusal(variable)
+            if reason:
+                raise ApiError(f"${{{variable}}} {reason} and can't be referenced - use a variable of its own for the "
+                               'secret', code='invalid_body')
             continue
         if provider not in PROVIDERS:
             raise ApiError(f"${{{provider}:...}}: there is no secret provider '{provider}' - one of: "
@@ -534,9 +563,10 @@ def expand(value):
     def replace(match):
         provider, what, variable = match.groups()
         if variable is not None:
-            if server_setting(variable):
-                raise ApiError(f"${{{variable}}} is one of this server's own settings and can't be referenced by a "
-                               'connection or destination', 500, code='connection_misconfigured')
+            reason = env_refusal(variable)
+            if reason:
+                raise ApiError(f"${{{variable}}} {reason} and can't be referenced by a connection or destination", 500,
+                               code='connection_misconfigured')
             if variable not in os.environ:
                 raise ApiError(f"Environment variable '{variable}' referenced by the connection is not set", 500,
                                code='connection_misconfigured')

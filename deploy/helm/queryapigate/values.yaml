@@ -45,7 +45,7 @@ config: {}
   # QUERYAPIGATE_HSTS_MAX_AGE: "31536000"
   # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
-# Configuration as code (ADR 0014, experimental): connections, queries, roles, keys' grants and the rest as one file,
+# Configuration as code (ADR 0014): connections, queries, roles, keys' grants and the rest as one file,
 # applied by the API server as it starts - once per file. Changing it rolls the pods, and the first new one applies it;
 # one that can't be applied doesn't start, and the pods still serving keep what they have. No secret goes in the file:
 # passwords are ${VAR} references to variables in the Secret, keys are their secret_sha256.

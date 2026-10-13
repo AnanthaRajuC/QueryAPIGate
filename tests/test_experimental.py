@@ -65,9 +65,20 @@ class MarkedEverywhereTests(unittest.TestCase):
                 note = read(path)[match.start():match.start() + 900].replace('\n>', ' ')
                 self.assertIn('may still be added', ' '.join(note.split()))
 
+    def test_features_graduated_for_1_0_0_rc1_say_what_may_be_added_and_their_limits(self):
+        """ADR 0017: each section opens with the promise, what may still be added, and its limits."""
+        for heading in ('Descriptions', 'Agent usage', 'Usage quotas', 'Configuration as code'):
+            with self.subTest(heading=heading):
+                text = read('documentation/API.md')
+                match = re.search(rf'^#+ {re.escape(heading)}\n+(.+)', text, re.M)
+                self.assertTrue(match.group(1).startswith('> **Stable** since 1.0.0-rc1'), match.group(1))
+                callout = text[match.start(1):].split('\n\n', 1)[0].replace('\n>', ' ')
+                self.assertIn('may still be added', ' '.join(callout.split()))
+                self.assertIn('Limits:', callout)
+
     def test_the_changelog_definition_lists_each_one(self):
         definition = read('CHANGELOG.md').split('**Experimental** features are outside that promise', 1)[1]
-        definition = definition.split('\n\n', 1)[0].lower()
+        definition = ' '.join(definition.split('\n\n', 1)[0].lower().split())  # however the paragraph is wrapped
         for feature in experimental.FEATURES.values():
             self.assertIn(feature['name'].lower(), definition)
 

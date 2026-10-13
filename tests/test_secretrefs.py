@@ -121,6 +121,76 @@ class AllowListTests(SecretTestCase):
         self.assertIn("isn't inside a folder QUERYAPIGATE_SECRET_FILE_DIRS allows", caught.exception.message)
 
 
+class EnvironmentAllowListTests(SecretTestCase):
+    """${VAR} (ADR 0017): the server's cloud, Vault and Kubernetes credentials are never reachable, and
+    QUERYAPIGATE_SECRET_ENV_VARS limits the rest to what the deployer lists."""
+
+    def test_the_servers_own_credentials_are_never_reachable(self):
+        for name in ('AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AZURE_CLIENT_SECRET', 'ARM_CLIENT_SECRET',
+                     'GOOGLE_APPLICATION_CREDENTIALS', 'GCP_KEY', 'VAULT_TOKEN', 'KUBERNETES_SERVICE_HOST'):
+            with self.subTest(name=name):
+                self.assertIn('a cloud, Vault or Kubernetes credential', self.refused('${' + name + '}'))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'AWS_*', 'AWS_SECRET_ACCESS_KEY': 'k'}):
+            self.assertIn('a cloud, Vault or Kubernetes credential', self.refused('${AWS_SECRET_ACCESS_KEY}'))
+            with self.assertRaises(ApiError) as caught:
+                secretrefs.expand('${AWS_SECRET_ACCESS_KEY}')
+            self.assertEqual(caught.exception.code, 'connection_misconfigured')
+            self.assertNotIn("'k'", caught.exception.message)
+
+    def test_unset_any_other_variable_is_reachable(self):
+        with mock.patch.dict(os.environ, {'WAREHOUSE_PASSWORD': 'pw'}):
+            secretrefs.check_value('${WAREHOUSE_PASSWORD}')
+            self.assertEqual(secretrefs.expand('${WAREHOUSE_PASSWORD}'), 'pw')
+
+    def test_set_only_what_it_lists(self):
+        env = {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_PASSWORD, QAG_*', 'WAREHOUSE_PASSWORD': 'pw',
+               'QAG_LEGACY_PASSWORD': 'old', 'DB_ADMIN_PW': 'root'}
+        with mock.patch.dict(os.environ, env):
+            secretrefs.check_value('${WAREHOUSE_PASSWORD}')
+            self.assertEqual(secretrefs.expand('${QAG_LEGACY_PASSWORD}'), 'old')
+            self.assertIn("isn't one of QUERYAPIGATE_SECRET_ENV_VARS", self.refused('${DB_ADMIN_PW}'))
+            self.assertIn("isn't one of QUERYAPIGATE_SECRET_ENV_VARS", self.refused('${WAREHOUSE_PASSWORD_2}'))
+
+    def test_checked_again_when_used_in_case_the_list_shrank(self):
+        with mock.patch.dict(os.environ, {'DB_ADMIN_PW': 'root'}):
+            connections.create({'name': 'c', 'db': 'mysql', 'host': 'h', 'password': '${DB_ADMIN_PW}'}, 't')
+            with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*'}), \
+                    self.assertRaises(ApiError) as caught:
+                store.get_connection('c')
+        self.assertEqual(caught.exception.code, 'connection_misconfigured')
+        self.assertNotIn('root', caught.exception.message)
+
+    def test_a_configuration_file_is_held_to_it_too(self):
+        doc = {'format': 'queryapigate-config', 'format_version': 1, 'connections': [
+            {'name': 'w', 'db': 'mysql', 'host': 'h', 'password': '${AWS_SECRET_ACCESS_KEY}'}]}
+        with self.assertRaises(configcode.ConfigInvalid) as caught:
+            configcode.diff(doc)
+        self.assertIn('a cloud, Vault or Kubernetes credential', str(caught.exception.problems))
+
+    def test_a_malformed_list_fails_at_startup(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'GOOD, not-a-name'}), \
+                self.assertRaises(ValueError) as caught:
+            config.check_settings()
+        self.assertIn("'not-a-name' must be a variable's name", str(caught.exception))
+
+    def test_startup_warns_while_references_are_in_use_and_the_list_is_unset(self):
+        import logging
+
+        from queryapigate import app
+        with mock.patch.dict(os.environ, {'WAREHOUSE_PASSWORD': 'pw'}):
+            connections.create({'name': 'c', 'db': 'mysql', 'host': 'h', 'password': '${WAREHOUSE_PASSWORD}'}, 't')
+        log = logging.getLogger('queryapigate')
+        with self.assertLogs(log, level=logging.WARNING) as logs:
+            log.warning('marker')
+            app.warn_env_references()
+        self.assertIn('reference environment variables (WAREHOUSE_PASSWORD)', ' '.join(logs.output))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*'}), \
+                self.assertLogs(log, level=logging.WARNING) as logs:
+            log.warning('marker')
+            app.warn_env_references()
+        self.assertEqual(len(logs.output), 1)
+
+
 class FailingClosedTests(SecretTestCase):
     def setUp(self):
         super().setUp()

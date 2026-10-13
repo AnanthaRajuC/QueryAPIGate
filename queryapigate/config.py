@@ -357,6 +357,10 @@ def check_settings():
     for folder in os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '').split(','):
         if folder.strip() and not os.path.isabs(folder.strip()):
             raise ValueError(f"QUERYAPIGATE_SECRET_FILE_DIRS: '{folder.strip()}' must be an absolute path")
+    for name in secret_env_vars():
+        if not SECRET_ENV_VAR_RE.fullmatch(name):
+            raise ValueError(f"QUERYAPIGATE_SECRET_ENV_VARS: '{name}' must be a variable's name, or a prefix "
+                             'ending in *')
     # This project was named SQL2API before it was QueryAPIGate, and its settings were SQL2API_*. They are
     # deliberately not read any more - but silently ignoring a leftover SQL2API_API_KEY would start the server
     # with no admin key configured, which means open access. So a leftover old name is a startup error.
@@ -473,6 +477,18 @@ def secret_file_dirs():
     administrator could have the server send them any file it can read, as a connection's password."""
     raw = os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '')
     return [os.path.realpath(p.strip()) for p in raw.split(',') if p.strip()]
+
+
+SECRET_ENV_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\*?')
+
+
+def secret_env_vars():
+    """QUERYAPIGATE_SECRET_ENV_VARS: the environment variables `${VAR}` references may read (ADR 0017) - names, or
+    prefixes ending in `*` (`WAREHOUSE_*`), comma-separated. Unset, any may be read but those secretrefs.py always
+    refuses: the server's own settings, and the cloud, Vault and Kubernetes credentials it may run with. Validated by
+    check_settings()."""
+    raw = os.environ.get('QUERYAPIGATE_SECRET_ENV_VARS', '')
+    return [p.strip() for p in raw.split(',') if p.strip()]
 
 
 def secret_cache_seconds():
@@ -1243,6 +1259,10 @@ def describe_settings():
             row('Secret files', 'Folders ${file:...} references may read - a connection\'s or destination\'s '
                 'password from a file the CSI driver, Docker or Vault Agent keeps current (ADR 0015).',
                 'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused'),
+            row('Environment secrets', 'Variables ${VAR} references may read. Never the server\'s own settings, nor '
+                'the cloud, Vault and Kubernetes credentials it may run with (AWS_*, AZURE_*, ARM_*, GOOGLE_*, GCP_*, '
+                'VAULT_*, KUBERNETES_*).', 'QUERYAPIGATE_SECRET_ENV_VARS',
+                ', '.join(secret_env_vars()) or 'any - set it to the ones your connections use'),
             row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
                 'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
             row('Secret providers', 'How the ones this process has used answered, last.', '',
