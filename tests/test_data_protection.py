@@ -137,9 +137,10 @@ class ForgetTests(unittest.TestCase):
 
     def test_a_persons_runs_and_usage_go_and_no_one_elses(self):
         # the month's count was never written: counted all the same, whether a background write came first or not
-        self.assertEqual(history.forget(self.PERSON, 'owner', dry_run=True), {'runs': 2, 'usage_periods': 2})
+        self.assertEqual(history.forget(self.PERSON, 'owner', dry_run=True),
+                         {'runs': 2, 'events': 2, 'usage_periods': 2})
         self.assertEqual(self.runs(self.PERSON), 2)  # a dry run deletes nothing
-        self.assertEqual(history.forget(self.PERSON, 'owner'), {'runs': 2, 'usage_periods': 2})
+        self.assertEqual(history.forget(self.PERSON, 'owner'), {'runs': 2, 'events': 2, 'usage_periods': 2})
         self.assertEqual((self.runs(self.PERSON), self.periods(self.PERSON)), (0, 0))
         self.assertEqual((self.runs('jwt:bob@example.com'), self.runs('partner-key')), (1, 1))
         self.assertEqual(self.periods('jwt:bob@example.com'), 1)
@@ -151,7 +152,7 @@ class ForgetTests(unittest.TestCase):
         entry = self.audit()[-1]
         self.assertEqual((entry['action'], entry['actor'], entry['target']), ('forget_caller', 'owner', 'history'))
         self.assertEqual(entry['changes'], {'caller_sha256': hashlib.sha256(self.PERSON.encode()).hexdigest(),
-                                            'runs': 2, 'usage_periods': 2})
+                                            'runs': 2, 'events': 2, 'usage_periods': 2})
         self.assertNotIn('alice', json.dumps(self.audit()))
 
     def test_through_the_api_owners_only(self):
@@ -162,7 +163,7 @@ class ForgetTests(unittest.TestCase):
         refused = client.delete(f'/api/v1/history?caller={self.PERSON}', headers=ops)
         self.assertEqual((refused.status_code, refused.get_json()['code']), (403, 'role_forbidden'))
         answer = client.delete(f'/api/v1/history?caller={self.PERSON}', headers={'X-API-Key': 'owner'})
-        self.assertEqual((answer.status_code, answer.get_json()), (200, {'runs': 2, 'usage_periods': 2}))
+        self.assertEqual((answer.status_code, answer.get_json()), (200, {'runs': 2, 'events': 2, 'usage_periods': 2}))
         self.assertEqual(client.delete('/api/v1/history', headers={'X-API-Key': 'owner'}).get_json()['code'],
                          'invalid_body')
 
@@ -171,7 +172,7 @@ class ForgetTests(unittest.TestCase):
         with redirect_stdout(out), redirect_stderr(err):
             code = cli.main(['history', 'forget', self.PERSON])
         self.assertEqual(code, 0, err.getvalue())
-        self.assertIn('Deleted 2 run(s) and 2 usage period(s) of jwt:alice@example.com', out.getvalue())
+        self.assertIn('Deleted 2 run(s), 2 event(s) and 2 usage period(s) of jwt:alice@example.com', out.getvalue())
 
     @unittest.skipUnless(os.environ.get('QUERYAPIGATE_TEST_REDIS_URL'), 'set QUERYAPIGATE_TEST_REDIS_URL')
     def test_and_what_redis_counts(self):

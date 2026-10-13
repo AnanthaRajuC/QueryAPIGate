@@ -678,7 +678,7 @@ def _handler():
 
 
 def _history_forget(args):
-    """`queryapigate history forget CALLER`: delete a person's runs and usage counts (ADR 0016)."""
+    """`queryapigate history forget CALLER`: delete a person's runs, events and usage counts (ADR 0016)."""
     from . import history
     try:
         config.check_settings()
@@ -687,10 +687,11 @@ def _history_forget(args):
         print(f'queryapigate history forget: {getattr(error, "message", error)}', file=sys.stderr)
         return 1
     if args.dry_run:
-        print(f"Would delete {found['runs']} run(s) and {found['usage_periods']} usage period(s) of {args.caller}.")
+        print(f"Would delete {found['runs']} run(s), {found['events']} event(s) and {found['usage_periods']} usage "
+              f"period(s) of {args.caller}.")
     else:
-        print(f"Deleted {found['runs']} run(s) and {found['usage_periods']} usage period(s) of {args.caller}; recorded "
-              'in the audit log by its hash, not its name.')
+        print(f"Deleted {found['runs']} run(s), {found['events']} event(s) and {found['usage_periods']} usage "
+              f'period(s) of {args.caller}; recorded in the audit log by its hash, not its name.')
     return 0
 
 
@@ -929,8 +930,8 @@ def build_parser():
     history_parser.set_defaults(func=lambda a: history_parser.print_help() or 2)
     history_actions = history_parser.add_subparsers(dest='action')
     history_forget = history_actions.add_parser(
-        'forget', help="delete every run by CALLER and its usage counts - a person's data, on request; recorded in the "
-                       'audit log by its hash, not its name')
+        'forget', help="delete every run by CALLER, its events and its usage counts - a person's data, on request; "
+                       'recorded in the audit log by its hash, not its name')
     history_forget.add_argument('caller', help='a key name, or jwt:<subject> for a signed-in person')
     history_forget.add_argument('--dry-run', action='store_true', help='say how much would go; delete nothing')
     history_forget.set_defaults(func=_history_forget)

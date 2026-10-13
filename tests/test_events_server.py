@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from unittest import mock
 
 from queryapigate import config, create_app, db, events
@@ -201,18 +202,18 @@ class RequestTests(EventServerTestCase):
 
         self.assertEqual(chunk(), b'retry: 3000\n\n')
         self.run_query(self.alice)
-        self.assertRegex(chunk().decode(), r'^id: \d+\ndata: \{.*"filename": "q".*\}\n\n$')
+        self.assertRegex(chunk().decode(), r'^id: \d+\ndata: \{"type": "query.run", .*"query": "q".*\}\n\n$')
 
 
 class DeliveryTests(EventServerTestCase):
-    def test_a_recorded_run_arrives_with_its_history_id(self):
+    def test_a_recorded_run_arrives_with_its_event_log_id(self):
         stream = self.open('admin')
         self.run_query(self.alice)
         (event_id, payload), = stream.events(1)
-        stored = db.connection().execute('SELECT MAX(rowid) FROM execution_history').fetchone()[0]
+        stored = db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0]
         self.assertEqual(event_id, stored)
-        self.assertEqual((payload['type'], payload['filename'], payload['version'], payload['entry']['key_name']),
-                         ('execution', 'q', 1, 'alice'))
+        self.assertEqual((payload['type'], payload['kind'], payload['query'], payload['version'],
+                          payload['entry']['key_name']), ('query.run', 'saved', 'q', 1, 'alice'))
 
     def test_a_scoped_key_sees_only_its_own_runs_and_the_admin_sees_all(self):
         admin, alice = self.open('admin'), self.open(self.alice)
@@ -234,9 +235,9 @@ class DeliveryTests(EventServerTestCase):
         self.run_query(self.alice)
         (newest, _), = stream.events(1)
         with db.transaction() as conn:  # a straggler with an id below the newest one already delivered
-            conn.execute("INSERT INTO execution_history (rowid, query_name, version, executed_at, entry_json, status, "
-                         "key_name) VALUES (?, 'q', 1, '2026-01-01 00:00:00', ?, 'success', 'alice')",
-                         (newest - 1 if newest > 1 else newest + 5000, json.dumps({'key_name': 'alice', 'late': True})))
+            late = {'executed_at': '2026-01-01 00:00:00', 'key_name': 'alice', 'status': 'success', 'late': True}
+            conn.execute(events.INSERT_WITH_ID,
+                         (newest - 1 if newest > 1 else newest + 5000, *events.run_columns('q', 1, late)))
         (_, payload), = stream.events(1)
         self.assertTrue(payload['entry']['late'])
         self.assertTrue(stream.nothing_more())
@@ -274,6 +275,11 @@ class ResumeTests(EventServerTestCase):
         self.assertEqual([p['entry']['key_name'] for _, p in resumed.events(1)], ['alice'])
         self.assertTrue(resumed.nothing_more())
 
+    def test_an_id_from_another_store_still_gets_live_events(self):
+        stream = self.open('admin', **{'Last-Event-ID': '999999'})
+        self.run_query(self.alice)
+        self.assertEqual([p['entry']['key_name'] for _, p in stream.events(1)], ['alice'])
+
     def test_the_query_parameter_form_works_too(self):
         first = self.open('admin')
         self.run_query(self.alice)
@@ -282,6 +288,119 @@ class ResumeTests(EventServerTestCase):
         stream = Stream(self.server.port, path=f'/events?last_event_id={ids[0]}', headers=self.admin)
         self.addCleanup(stream.close)
         self.assertEqual([event_id for event_id, _ in stream.events(1)], ids[1:])
+
+
+class EventLogTests(EventServerTestCase):
+    """The event log (ADR 0020): its own table, ids and retention - not history's."""
+
+    def test_a_run_sampled_out_of_history_is_still_an_event(self):
+        stream = self.open('admin')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_SAMPLE_RATE': '0.000001'}):
+            self.run_query(self.alice)
+        (_, payload), = stream.events(1)
+        self.assertEqual(payload['query'], 'q')
+        self.assertEqual(db.connection().execute('SELECT COUNT(*) FROM execution_history').fetchone()[0], 0)
+
+    def test_an_id_is_never_handed_out_twice(self):
+        self.run_query(self.alice)
+        newest = events._newest_id()
+        with db.transaction() as conn:
+            conn.execute('DELETE FROM events WHERE id = ?', (newest,))  # swept, say, before the next run
+        stream = self.open('admin', **{'Last-Event-ID': str(newest)})
+        self.run_query(self.alice)
+        (event_id, _), = stream.events(1)
+        self.assertGreater(event_id, newest)
+
+    def test_retention_sweeps_events_older_than_the_window_and_nothing_newer(self):
+        with db.transaction() as conn:
+            for occurred_at in ('2026-01-01 00:00:00', '2026-01-02 11:00:00', '2026-01-02 13:00:00'):
+                conn.execute(events.INSERT, events.run_columns('q', 1, {'executed_at': occurred_at}))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '12'}):
+            self.assertEqual(events.sweep(now=datetime(2026, 1, 3, 0, 0)), 2)
+        self.assertEqual([row[0] for row in db.connection().execute('SELECT occurred_at FROM events')],
+                         ['2026-01-02 13:00:00'])
+
+    def test_a_long_resume_is_replayed_in_full_not_cut_at_a_page(self):
+        first = self.open('admin')
+        for _ in range(5):
+            self.run_query(self.alice)
+        ids = [event_id for event_id, _ in first.events(5)]
+        with mock.patch.object(events, '_REPLAY_PAGE', 2):
+            resumed = self.open('admin', **{'Last-Event-ID': str(ids[0] - 1)})
+            self.assertEqual([event_id for event_id, _ in resumed.events(5)], ids)
+        self.assertTrue(resumed.nothing_more())
+        self.assertEqual(self.server.replayed, 5)
+
+
+class FilterTests(EventServerTestCase):
+    def setUp(self):
+        super().setUp()
+        save_query(self.client, headers=self.admin, body={
+            'author': 'a', 'description': 'd', 'filename': 'other', 'connection_name': 'lite',
+            'sql_query': 'SELECT 2'})
+
+    def open_filtered(self, query, key='admin', **headers):
+        stream = Stream(self.server.port, path=f'/events?{query}', headers={'X-API-Key': key, **headers})
+        self.addCleanup(stream.close)
+        return stream
+
+    def test_live_events_are_narrowed_to_what_was_asked_for(self):
+        only_q, only_other = self.open_filtered('query=q'), self.open_filtered('query=other&status=success')
+        self.run_query(self.alice)
+        self.assertEqual(self.client.get('/q/other', headers=self.admin).status_code, 200)
+        self.assertEqual([p['query'] for _, p in only_q.events(1)], ['q'])
+        self.assertEqual([p['query'] for _, p in only_other.events(1)], ['other'])
+        self.assertTrue(only_q.nothing_more())
+
+    def test_filters_never_widen_what_a_key_may_see(self):
+        stream = self.open_filtered('query=q', key=self.alice)
+        self.run_query(self.bob)
+        self.run_query(self.alice)
+        self.assertEqual([p['entry']['key_name'] for _, p in stream.events(1)], ['alice'])
+        self.assertTrue(stream.nothing_more())
+
+    def test_a_replay_is_filtered_too(self):
+        first = self.open('admin')
+        self.run_query(self.alice)
+        self.assertEqual(self.client.get('/q/other', headers=self.admin).status_code, 200)
+        (start, _), _ = first.events(2)
+        resumed = self.open_filtered('query=other', **{'Last-Event-ID': str(start - 1)})
+        self.assertEqual([p['query'] for _, p in resumed.events(1)], ['other'])
+        self.assertTrue(resumed.nothing_more())
+
+    def test_kind_and_type(self):
+        adhoc, saved = self.open_filtered('kind=adhoc'), self.open_filtered('type=query.run&kind=saved')
+        self.run_query(self.alice)
+        self.assertEqual([p['kind'] for _, p in saved.events(1)], ['saved'])
+        self.assertTrue(adhoc.nothing_more())
+
+    def test_a_status_or_kind_that_can_never_match_is_refused(self):
+        for query in ('status=ok', 'kind=stored'):
+            stream = self.open_filtered(query)
+            self.assertEqual((stream.status, stream.body()['code']), (400, 'invalid_filter'), query)
+
+
+class MetricsTests(EventServerTestCase):
+    def metrics(self, **headers):
+        stream = Stream(self.server.port, path='/metrics', headers=headers)
+        self.addCleanup(stream.close)
+        return stream
+
+    def test_streams_deliveries_and_lag_are_counted(self):
+        stream = self.open('admin')
+        self.run_query(self.alice)
+        stream.events(1)
+        res = self.metrics()
+        text = res.file.read(int(res.headers['content-length'])).decode()
+        self.assertEqual(res.status, 200)
+        self.assertIn('queryapigate_events_streams 1\n', text)
+        self.assertIn('queryapigate_events_delivered_total 1\n', text)
+        self.assertIn('queryapigate_events_lag_seconds_count 1\n', text)
+
+    def test_the_metrics_token_applies(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METRICS_TOKEN': 'sesame'}):
+            self.assertEqual(self.metrics().status, 401)
+            self.assertEqual(self.metrics(Authorization='Bearer sesame').status, 200)
 
 
 class LimitTests(EventServerTestCase):
@@ -324,7 +443,7 @@ class LimitTests(EventServerTestCase):
             with mock.patch.object(events, '_QUEUE_SIZE', 3):
                 client.queue = asyncio.Queue(maxsize=3)
                 for rowid in range(1, 6):
-                    server._deliver(rowid, 'k', b'data')
+                    server._deliver(rowid, 'k', (events.RUN, 'saved', 'q', 'lite', 'success'), b'data')
             return client
         client = asyncio.run(scenario())
         self.assertTrue(client.too_slow)

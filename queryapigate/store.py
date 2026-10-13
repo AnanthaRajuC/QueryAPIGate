@@ -775,11 +775,12 @@ def delete_saved(ref, version=None):
                      (name, version, name, version))
 
 
-def record_execution(path, version, entry, sample=True):
-    """Record one run in a saved version's execution_history - queued and written in the background, sampled
-    and kept as configured: see history.py. Never raises and never blocks the request it's logging for, the
-    same trade-off record_audit() makes."""
-    history.record(path, version, entry, sample=sample)
+def record_execution(path, version, entry, live=True):
+    """Record one run in a saved version's execution_history, and as an event - queued and written in the
+    background, sampled and kept as configured: see history.py. ``live=False``: not live traffic (the examples'
+    seeded runs), so kept whatever the sample rate and not an event. Never raises and never blocks the request it's
+    logging for, the same trade-off record_audit() makes."""
+    history.record(path, version, entry, live=live)
 
 
 def refuse_legacy_home():

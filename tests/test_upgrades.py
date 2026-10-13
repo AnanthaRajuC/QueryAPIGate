@@ -20,7 +20,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import create_app, db, history
+from queryapigate import create_app, db, events, history
 from tests import TEST_DATABASE_URL
 from tests.helpers import needs_sqlite_335
 
@@ -122,6 +122,26 @@ class StoreChecks(FixtureTestCase):
 
         self.assertTrue(self.get(client, '/api/v1/audit')['items'])
 
+    def check_event_ids(self, version):
+        """ADR 0002 §3, ADR 0020 §4: the run's history row id was its event id, and stays so. A client holding the id
+        before it resumes with the run; the next event's id is above every id the old release could have sent."""
+        home, _ = self.open_home(version, self.kind)
+        if self.kind == '.postgres':
+            with open(os.path.join(home, 'store.sql')) as f:
+                restore_postgres(f.read())
+        newest = db.connection().execute('SELECT MAX(rowid) FROM execution_history').fetchone()[0]
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '1000000'}):  # however old the run
+            client = create_app().test_client()
+        [(event_id, payload_json)] = events._replay_page(newest - 1, None, {})
+        payload = json.loads(payload_json)
+        self.assertEqual((event_id, payload['type'], payload['kind'], payload['query'], payload['version']),
+                         (newest, 'query.run', 'saved', 'films_by_rating', 2))
+        res = client.patch('/api/v1/connections/films', headers=ADMIN, json={'database': os.path.join(home, 'data.db')})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(client.get('/q/films_by_rating?rating=PG', headers=ADMIN).status_code, 200)
+        history.flush()
+        self.assertEqual([row[0] for row in events._replay_page(newest, None, {})], [newest + 1])
+
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the SQLite stores and JSON homes')
 class UpgradeTests(StoreChecks):
@@ -130,6 +150,11 @@ class UpgradeTests(StoreChecks):
 
     def test_every_release_store_starts_with_its_data_intact(self):
         self.check_every_release()
+
+    def test_every_release_store_keeps_its_event_ids(self):
+        for version in fixture_versions()[fixture_versions().index('0.11.0'):]:
+            with self.subTest(version=version):
+                self.check_event_ids(version)
 
 
 @unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
@@ -141,6 +166,11 @@ class PostgresUpgradeTests(StoreChecks):
 
     def test_every_release_store_starts_with_its_data_intact(self):
         self.check_every_release()
+
+    def test_every_release_store_keeps_its_event_ids(self):
+        for version in fixture_versions(self.kind):
+            with self.subTest(version=version):
+                self.check_event_ids(version)
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the fixtures are SQLite stores')

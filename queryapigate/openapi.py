@@ -152,12 +152,26 @@ def build_spec(version, saved_queries=None, jwt=None):
                          'requestBody': _body(_EXEC_PROPS, []),
                          'responses': {'200': _ROWS, **_ERRORS}}},
             '/events': {'get': {
-                'summary': 'Live saved-query execution events (Server-Sent Events)', 'tags': ['Saved queries'],
-                'description': 'One `data: {...}` line per saved-query execution as it happens - what keeps '
-                    'the admin UI\'s Home screen live. Any authenticated key may '
-                    'connect: the admin key sees every execution; a scoped key sees only executions it '
-                    'triggered itself (its own personal activity feed, filtered by API key name).',
-                'responses': {'200': {'description': 'text/event-stream of execution events',
+                'summary': 'Live events (Server-Sent Events)', 'tags': ['Saved queries'],
+                'description': 'One `data: {...}` line per event as it happens - today a run, `query.run`, of a '
+                    'saved query or of ad-hoc SQL - what keeps the admin UI\'s Home screen live. Any authenticated '
+                    'key may connect: the admin key sees every event; a scoped key sees only the runs it made '
+                    'itself (its own personal activity feed, filtered by API key name). The filters narrow that, '
+                    'never widen it; they combine with AND.',
+                'parameters': [
+                    {'name': 'type', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                     'description': 'Only events of this type, e.g. query.run.'},
+                    {'name': 'kind', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'enum': ['saved', 'adhoc']},
+                     'description': 'Only runs of a saved query, or only ad-hoc SQL.'},
+                    {'name': 'query', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                     'description': 'Only runs of this saved query.'},
+                    {'name': 'connection', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
+                     'description': 'Only runs on this connection.'},
+                    {'name': 'status', 'in': 'query', 'required': False,
+                     'schema': {'type': 'string', 'enum': ['success', 'error']},
+                     'description': 'Only runs that succeeded, or only runs that failed.'}],
+                'responses': {'200': {'description': 'text/event-stream of events',
                                       'content': {'text/event-stream': {'schema': {'type': 'string'}}}},
                              **_ERRORS}}},
             '/connections/{name}/schema': {'get': {

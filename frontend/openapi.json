@@ -2143,6 +2143,10 @@
       },
       "Forgotten": {
         "properties": {
+          "events": {
+            "description": "Events deleted from the event log.",
+            "type": "integer"
+          },
           "runs": {
             "description": "Runs deleted (or that would be, with dry_run).",
             "type": "integer"
@@ -2154,6 +2158,7 @@
         },
         "required": [
           "runs",
+          "events",
           "usage_periods"
         ],
         "type": "object"
@@ -11576,7 +11581,62 @@
     },
     "/events": {
       "get": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. One `data: {...}` line per saved-query execution as it happens - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every execution; a scoped key sees only executions it triggered itself (its own personal activity feed, filtered by API key name).",
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. One `data: {...}` line per event as it happens - today a run, `query.run`, of a saved query or of ad-hoc SQL - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every event; a scoped key sees only the runs it made itself (its own personal activity feed, filtered by API key name). The filters narrow that, never widen it; they combine with AND.",
+        "parameters": [
+          {
+            "description": "Only events of this type, e.g. query.run.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only runs of a saved query, or only ad-hoc SQL.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "saved",
+                "adhoc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only runs of this saved query.",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only runs on this connection.",
+            "in": "query",
+            "name": "connection",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only runs that succeeded, or only runs that failed.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "success",
+                "error"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -11586,7 +11646,7 @@
                 }
               }
             },
-            "description": "text/event-stream of execution events"
+            "description": "text/event-stream of events"
           },
           "400": {
             "$ref": "#/components/responses/Error"
@@ -11610,7 +11670,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Live saved-query execution events (Server-Sent Events)",
+        "summary": "Live events (Server-Sent Events)",
         "tags": [
           "Saved queries"
         ],

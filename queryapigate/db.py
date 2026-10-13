@@ -20,6 +20,7 @@ transaction can't be invalidated by another writer before that transaction commi
 import contextlib
 import functools
 import itertools
+import json
 import os
 import re
 import sqlite3
@@ -27,13 +28,13 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 15  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 16  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
-#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied
-#                    - see _upgrade()
+#                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied;
+#                    16: events - see _upgrade()
 
 _local = threading.local()
 _savepoints = itertools.count(1)  # names for nested transactions' savepoints - see transaction()
@@ -265,6 +266,21 @@ CREATE TABLE IF NOT EXISTS config_applied (
   applied_at TEXT NOT NULL,
   actor TEXT NOT NULL
 );
+-- The event log (events.py, ADR 0020): what `queryapigate events` streams. A run is written here in the same batch as
+-- its history row (history.py) and kept for QUERYAPIGATE_EVENTS_RETENTION_HOURS. AUTOINCREMENT: an id is never handed
+-- out twice, even after the newest event is swept - a client holding it would otherwise miss the one that reused it.
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,          -- query.run
+  source TEXT,                 -- for a run, its front door: rest, mcp, export
+  occurred_at TEXT NOT NULL,
+  key_name TEXT,               -- these four are what access checks and subscription filters read
+  connection_name TEXT,
+  query_name TEXT,
+  status TEXT,
+  payload_json TEXT NOT NULL   -- the event's data: exactly as sent
+);
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
 
 
@@ -479,6 +495,18 @@ CREATE TABLE IF NOT EXISTS config_applied (
   applied_at TEXT NOT NULL,
   actor TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+  id BIGSERIAL PRIMARY KEY,
+  type TEXT COLLATE "C" NOT NULL,
+  source TEXT COLLATE "C",
+  occurred_at TEXT NOT NULL,
+  key_name TEXT COLLATE "C",
+  connection_name TEXT COLLATE "C",
+  query_name TEXT COLLATE "C",
+  status TEXT,
+  payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -703,7 +731,11 @@ def _upgrade(conn, postgres):
         entry says from when the chain holds. A 0.24 process still running writes entries without a link; the next
         upgraded write links them in (auditchain.append() chains any it finds), so nothing is lost - but upgrade
         every instance.
-    15: config_managed and config_applied (ADR 0014) - new tables, made by CREATE TABLE IF NOT EXISTS; additive."""
+    15: config_managed and config_applied (ADR 0014) - new tables, made by CREATE TABLE IF NOT EXISTS; additive.
+    16: events (ADR 0020) - a new table, made by CREATE TABLE IF NOT EXISTS. Until now a run's history row id was its
+        event id, so the runs still in history from the retention window are copied in under those same ids, and
+        the id sequence is seeded above every history row id: a client resuming with an id from before the upgrade
+        gets what it missed, nothing twice (_start_event_log()). Additive: a 0.32 process ignores the table."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -748,6 +780,48 @@ def _upgrade(conn, postgres):
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_qv '
                          'ON execution_history(query_name, version, executed_at)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at)')
+    _start_event_log(conn, postgres)
+
+
+def _events_sequence(conn, postgres):
+    """The newest id the events table has handed out, or None while it has never handed one out - which is what
+    makes _start_event_log() safe to re-run. PostgreSQL's sequence, or SQLite's sqlite_sequence row (AUTOINCREMENT's
+    own record, which survives a delete of the newest row)."""
+    if postgres:
+        name = conn.execute("SELECT pg_get_serial_sequence('events', 'id')").fetchone()[0]
+        row = conn.execute(f'SELECT last_value, is_called FROM {name}').fetchone()
+        return row[0] if row[1] else None
+    row = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()
+    return row[0] if row is not None else None
+
+
+def _set_events_sequence(conn, postgres, value):
+    """Make ``value`` the newest id the events table has handed out: the next is above it."""
+    if postgres:
+        conn.execute("SELECT setval(pg_get_serial_sequence('events', 'id'), ?, true)", (value,))
+    elif conn.execute("SELECT 1 FROM sqlite_sequence WHERE name = 'events'").fetchone():
+        conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'events'", (value,))
+    else:
+        conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('events', ?)", (value,))
+
+
+def _start_event_log(conn, postgres):
+    """Schema 16 (ADR 0020 §4): continue the event ids clients already hold, rather than start again at 1. Runs only
+    while the events table has never handed out an id."""
+    if _events_sequence(conn, postgres) is not None:
+        return
+    newest = conn.execute('SELECT MAX(rowid) FROM execution_history').fetchone()[0]
+    if not newest:
+        return  # a new store, or one with no runs: no client holds an id, so ids start at 1
+    from datetime import datetime, timedelta
+
+    from . import events
+    cutoff = (datetime.now() - timedelta(hours=config.events_retention_hours())).strftime('%Y-%m-%d %H:%M:%S')
+    for rowid, query_name, version, entry_json in conn.execute(
+            'SELECT rowid, query_name, version, entry_json FROM execution_history WHERE executed_at >= ? '
+            'ORDER BY rowid', (cutoff,)).fetchall():
+        conn.execute(events.INSERT_WITH_ID, (rowid, *events.run_columns(query_name, version, json.loads(entry_json))))
+    _set_events_sequence(conn, postgres, newest)
 
 
 def _now():
@@ -950,6 +1024,9 @@ _MIGRATED_TABLES = (
     ('usage_counters', ('caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
     ('config_managed', ('kind', 'name', 'applied_at', 'file_hash'), 'kind, name'),
     ('config_applied', ('file_hash', 'applied_at', 'actor'), 'file_hash'),
+    # With their ids: an event id is what a client resumes from (ADR 0020 §4)
+    ('events', ('id', 'type', 'source', 'occurred_at', 'key_name', 'connection_name', 'query_name', 'status',
+                'payload_json'), 'id'),
 )
 
 
@@ -991,6 +1068,11 @@ def migrate_sqlite_to_postgres(sqlite_path):
                         execute_values(cursor, f'INSERT INTO {table} ({", ".join(columns)}) VALUES %s', rows,
                                        page_size=1000)
                 copied[table] = len(rows)
+            # The sequence comes across as SQLite kept it, not as MAX(id): an id handed out and since swept away
+            # must not be handed out again.
+            seq = source.execute("SELECT seq FROM sqlite_sequence WHERE name = 'events'").fetchone()
+            if seq is not None and seq[0]:
+                _set_events_sequence(conn, True, seq[0])
         return copied
     finally:
         source.close()

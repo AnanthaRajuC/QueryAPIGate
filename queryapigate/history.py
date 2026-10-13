@@ -17,7 +17,8 @@ history write, and a busy server makes one write per batch instead of one per ru
 What is kept:
 
 - **Sampling** (config.history_sample_rate()): only that fraction of *successful* runs is recorded. A failed run
-  always is - those are the ones worth looking into.
+  always is - those are the ones worth looking into. Sampling is history's alone: every run, sampled out or not, is
+  written to the event log (events.py, ADR 0020) in the same batch.
 - **Retention**: by default each version keeps its newest config.history_limit() runs, trimmed as each batch is
   written. With config.history_retention_days() set, every run is kept for that many days instead, and a
   periodic sweep deletes older ones - meant for a PostgreSQL store (db.py), where months of runs are fine.
@@ -49,9 +50,13 @@ NOTIFY_CHANNEL = 'queryapigate_history'  # Postgres LISTEN/NOTIFY channel: "new 
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'  # executed_at's format (store.now()) - a string compare orders it correctly
 
 
-def _row(name, version, entry):
+def _row(name, version, entry, keep=True, event=True):
+    """A queued run: its history columns, whether history keeps it (``keep`` - false when sampled out), and its event
+    log columns (None: not an event)."""
+    from . import events
     return (name, version, entry.get('executed_at') or datetime.now().strftime(TIME_FORMAT),
-            json.dumps(entry, default=str), entry.get('status'), entry.get('key_name'))
+            json.dumps(entry, default=str), entry.get('status'), entry.get('key_name'), keep,
+            events.run_columns(name, version, entry) if event else None)
 
 
 class _Writer:
@@ -137,10 +142,13 @@ class _Writer:
                 self.cond.notify_all()
 
     def maybe_sweep(self):
-        if config.history_retention_days() is None or time.monotonic() - self.last_sweep < _SWEEP_INTERVAL:
+        if time.monotonic() - self.last_sweep < _SWEEP_INTERVAL:
             return
         self.last_sweep = time.monotonic()
-        sweep()
+        from . import events
+        events.sweep()  # the event log's own retention (ADR 0020), whatever history's is
+        if config.history_retention_days() is not None:
+            sweep()
 
 
 _writer_instance = None
@@ -166,16 +174,18 @@ def ensure_writer():
     _writer()._ensure_thread()
 
 
-def record(name, version, entry, sample=True):
-    """Queue one run of saved query ``name`` at ``version`` for its history. Never raises and never blocks on the
-    database (except with a flush interval of 0). ``sample=False`` records it whatever the sample rate - for
-    entries that aren't live traffic, such as the examples' seeded history."""
-    if sample and entry.get('status') != 'error':
+def record(name, version, entry, sample=True, live=True):
+    """Queue one run of saved query ``name`` at ``version`` for its history and the event log. Never raises and never
+    blocks on the database (except with a flush interval of 0). A run sampled out of history is still queued, as an
+    event only. ``live=False`` is for entries that aren't live traffic, such as the examples' seeded history: kept
+    whatever the sample rate, and not an event. ``sample=False`` keeps it whatever the sample rate."""
+    keep = True
+    if live and sample and entry.get('status') != 'error':
         rate = config.history_sample_rate()
         if rate < 1 and random.random() >= rate:
             metrics.inc_history('sampled_out')
-            return
-    row = _row(name, version, entry)
+            keep = False
+    row = _row(name, version, entry, keep=keep, event=live)
     target = db.current_target()
     if config.history_flush_interval() == 0:
         write([row], target)
@@ -201,9 +211,9 @@ def record_adhoc(entry, sql, params=None, sample=True):
 
 
 def forget(caller, actor, dry_run=False):
-    """Delete every run by `caller` - a person signed in as `jwt:alice@example.com`, or a key - and their usage counts
-    (ADR 0016). Recorded in the audit log by the caller's SHA-256, not their name, so the record of the erasure keeps
-    nothing of what was erased. Returns {'runs': n, 'usage_periods': n}."""
+    """Delete every run by `caller` - a person signed in as `jwt:alice@example.com`, or a key - their events and their
+    usage counts (ADR 0016). Recorded in the audit log by the caller's SHA-256, not their name, so the record of the
+    erasure keeps nothing of what was erased. Returns {'runs': n, 'events': n, 'usage_periods': n}."""
     import hashlib
 
     from . import quotas, store
@@ -214,12 +224,14 @@ def forget(caller, actor, dry_run=False):
     conn = db.connection()
     if dry_run:
         runs = conn.execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?', (caller,)).fetchone()[0]
+        found = conn.execute('SELECT COUNT(*) FROM events WHERE key_name = ?', (caller,)).fetchone()[0]
         periods = conn.execute('SELECT COUNT(*) FROM usage_counters WHERE caller = ?', (caller,)).fetchone()[0]
-        return {'runs': runs, 'usage_periods': periods}
+        return {'runs': runs, 'events': found, 'usage_periods': periods}
     with db.transaction() as tx:
         runs = tx.execute('DELETE FROM execution_history WHERE key_name = ?', (caller,)).rowcount
+        erased = tx.execute('DELETE FROM events WHERE key_name = ?', (caller,)).rowcount  # ADR 0020
     periods = quotas.forget(caller)
-    found = {'runs': runs, 'usage_periods': periods}
+    found = {'runs': runs, 'events': erased, 'usage_periods': periods}
     store.record_audit(actor, 'forget_caller', 'history',
                        {'caller_sha256': hashlib.sha256(caller.encode()).hexdigest(), **found})
     return found
@@ -256,12 +268,18 @@ def pending_count():
 
 
 def write(rows, target=None):
-    """Insert ``rows`` (see _row()) in one transaction, then trim each version they touch back to its limit
-    (unless a retention period applies instead). A run whose saved query or version was deleted meanwhile is
-    skipped, not an error. Never raises: a history write must never fail the work it records."""
+    """Insert ``rows`` (see _row()) in one transaction - each run's history row, if history keeps it, and its event -
+    then trim each version they touch back to its limit (unless a retention period applies instead). A run whose saved
+    query or version was deleted meanwhile has no history row, but keeps its event: it happened (ADR 0020 §2). Never
+    raises: a history write must never fail the work it records."""
+    from . import events
     try:
         with db.transaction(append_only=True, target=target) as conn:
-            for name, version, executed_at, entry_json, status, key_name in rows:
+            for name, version, executed_at, entry_json, status, key_name, keep, event in rows:
+                if event is not None:
+                    conn.execute(events.INSERT, event)
+                if not keep:
+                    continue
                 if name is None:  # an ad-hoc run: no saved query to belong to
                     conn.execute('INSERT INTO execution_history (query_name, version, executed_at, entry_json, '
                                  'status, key_name) VALUES (NULL, NULL, ?, ?, ?, ?)',
@@ -280,9 +298,9 @@ def write(rows, target=None):
         log.warning('Could not record %d history entries', len(rows), exc_info=True)
         metrics.inc_history('failed', len(rows))
         return
-    metrics.inc_history('recorded', len(rows))
+    metrics.inc_history('recorded', sum(1 for row in rows if row[6]))
     if config.history_retention_days() is None:
-        for name, version in dict.fromkeys((row[0], row[1]) for row in rows):
+        for name, version in dict.fromkeys((row[0], row[1]) for row in rows if row[6]):
             _trim(name, version, target)
 
 

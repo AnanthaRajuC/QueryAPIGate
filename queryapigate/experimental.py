@@ -28,10 +28,12 @@ GRADUATION = (
 FEATURES: dict[str, dict[str, Any]] = {
     'live_events': {
         'name': 'Live events',
-        'why': 'its event ids and payload change when the dedicated event log ships (ADR 0002)',
+        'why': 'its payload changed in 0.33, with the event log (ADR 0020); it graduates once it has gone a release '
+               'unchanged',
         'operations': (('get', '/events'),),
         'settings': ('QUERYAPIGATE_EVENTS_PORT', 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS',
-                     'QUERYAPIGATE_EVENTS_POLL_INTERVAL', 'QUERYAPIGATE_EVENTS_MAX_STREAMS'),
+                     'QUERYAPIGATE_EVENTS_POLL_INTERVAL', 'QUERYAPIGATE_EVENTS_MAX_STREAMS',
+                     'QUERYAPIGATE_EVENTS_RETENTION_HOURS'),
         'docs': ('documentation/API.md', 'Live events (Server-Sent Events)'),
     },
     'connection_types': {

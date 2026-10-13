@@ -616,6 +616,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_EVENTS_PORT` | `5002` | Port of `queryapigate events`, the separate live-events server for many clients - see [Live events](documentation/API.md#live-events-server-sent-events). |
 | `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` | `10000` | Open streams one `queryapigate events` process accepts. |
 | `QUERYAPIGATE_EVENTS_POLL_INTERVAL` | `1` | Seconds between `queryapigate events` checks for new runs (on PostgreSQL a notification usually arrives first). |
+| `QUERYAPIGATE_EVENTS_RETENTION_HOURS` | `24` | Hours the event log keeps an event: how far back a `queryapigate events` client can resume with `Last-Event-ID`. A whole number, at least 1. |
 | `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp` - see [documentation/MCP.md](documentation/MCP.md). |
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for an MCP tool call's result. Always a positive count; a malformed value stops startup. |
 | `QUERYAPIGATE_SSO_ISSUER` / `QUERYAPIGATE_SSO_CLIENT_ID` / `QUERYAPIGATE_SSO_CLIENT_SECRET` / `QUERYAPIGATE_SSO_REDIRECT_URL` | unset | Administrators sign in to the Console through your identity provider, their role from their groups (`QUERYAPIGATE_SSO_ROLES`). Experimental - see [Console sign-in through SSO](documentation/API.md#console-sign-in-through-sso). |
@@ -725,7 +726,7 @@ through the Management API, the same calls the Console makes. Clean up with `doc
 | `/q/<name>` | GET, POST | Run a saved query; query-string or body values become parameters. |
 | `/connections/<name>/schema` | GET | List a connection's tables/views and their columns. |
 | `/catalog` | GET | The saved queries this caller can reach, and the terms they're offered under. |
-| `/events` | GET | Live saved-query runs (Server-Sent Events). |
+| `/events` | GET | Live events: every run, as it happens (Server-Sent Events). |
 | `/api/v1/...` | GET, POST, PATCH, DELETE | The Management API (admin only): saved queries and their versions, drafts and publishing, connections, API keys, roles, collections, history, the audit log, settings, the response cache and the example APIs - see [Management API (v1)](documentation/API.md#management-api-v1). |
 | `/health`, `/docs`, `/openapi.json` | GET | Liveness, Swagger UI, OpenAPI spec. |
 | `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |

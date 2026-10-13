@@ -4,35 +4,38 @@ The main server's own GET /events (app.stream_events()) holds one request thread
 ever serve a handful (config.events_max_streams()). This process serves the same `/events` on its own port
 (config.events_port()) with asyncio instead: one thread, thousands of open streams, no new dependency.
 
-**Where events come from.** Not from any one process's memory: from the store itself. Every run recorded in
-execution_history (history.py) is an event, and its row id is the event's SSE `id:`. This process tails that
-table, so it sees the runs of every worker and every instance sharing the store - woken by a Postgres NOTIFY the
-moment a batch commits (history.write()), or checking every config.events_poll_interval() seconds on SQLite.
-Runs that history doesn't keep (sampled out, or dropped under back-pressure) produce no event.
+**Where events come from.** Not from any one process's memory: from the event log in the store, the `events` table
+(ADR 0020). Every run is written there in the same batch as its history row (history.write()) - whatever history's
+sample rate - and kept for config.events_retention_hours(). An event's id is its row id there. This process tails
+that table, so it sees the runs of every worker and every instance sharing the store - woken by a Postgres NOTIFY the
+moment a batch commits, or checking every config.events_poll_interval() seconds on SQLite. A run dropped under
+back-pressure, before it was written at all, produces no event.
 
 **Resuming.** A client that reconnects with `Last-Event-ID` (EventSource does this by itself) first gets every
-run after that id that it is allowed to see - up to _REPLAY_LIMIT - then the live stream, with nothing missed or
-repeated in between. A run trimmed from history before the client came back (a version keeps only its newest
-QUERYAPIGATE_HISTORY_LIMIT runs unless QUERYAPIGATE_HISTORY_RETENTION_DAYS is set) can't be replayed.
+event after that id that it is allowed to see and asked for, a page at a time, then the live stream, with nothing
+missed or repeated in between. An event older than the retention window can't be replayed: the client gets the
+stream from the oldest one still kept.
 
 **Who sees what.** Exactly as GET /events on the main server: an X-API-Key is required (unless the server runs
-with no keys at all); the admin key sees every run, any other key only its own. A stream's key is checked again
-every _RECHECK_SECONDS, so a revoked or expired key's stream is closed. A client that stops reading is
-disconnected once _QUEUE_SIZE events are waiting for it, rather than holding memory or silently losing events -
+with no keys at all); the admin key sees every event, any other key only its own. Subscription filters
+(?type=, ?kind=, ?query=, ?connection=, ?status= - parse_filters()) narrow that, never widen it. A stream's key is
+checked again every _RECHECK_SECONDS, so a revoked or expired key's stream is closed. A client that stops reading
+is disconnected once _QUEUE_SIZE events are waiting for it, rather than holding memory or silently losing events -
 it reconnects with Last-Event-ID and catches up.
 
-**Ordering on Postgres.** Row ids are handed out when a row is inserted, but transactions in different processes
-can commit out of id order, so a smaller id can become visible after a larger one was already delivered. Each
-check therefore looks back _LOOKBACK ids behind the newest one delivered and sends any it hasn't seen yet.
+**Ordering on Postgres.** Ids are handed out when a row is inserted, but transactions in different processes can
+commit out of id order, so a smaller id can become visible after a larger one was already delivered. Each check
+therefore looks back _LOOKBACK ids behind the newest one delivered and sends any it hasn't seen yet.
 """
 import asyncio
 import json
 import logging
 import time
 from collections import deque
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, history, instances, ratelimit, secheaders, tracing
+from . import config, cors, db, instances, ratelimit, secheaders, tracing
 from .errors import code_for
 
 try:
@@ -45,23 +48,80 @@ log = logging.getLogger('queryapigate')
 _HEARTBEAT_SECONDS = 15.0   # a comment line this often keeps proxies and NAT from closing an idle stream
 _RECHECK_SECONDS = 60.0     # how often an open stream's key is checked again
 _QUEUE_SIZE = 1000          # events waiting for one client before it is disconnected as too slow
-_REPLAY_LIMIT = 1000        # runs sent on a Last-Event-ID resume
+_REPLAY_PAGE = 1000         # events read per page of a Last-Event-ID resume
 _LOOKBACK = 1000            # ids behind the newest delivered that each check looks at again (see above)
 _BATCH = 1000               # rows fetched per check
 _REQUEST_TIMEOUT = 10.0     # seconds a client gets to send its request line and headers
 _MAX_HEADER_LINES = 100
 _WRITE_TIMEOUT = 30.0       # seconds a write may wait on a client's full socket buffer
 _RETRY_MS = 3000            # reconnection delay suggested to EventSource clients
+_SWEEP_LOCK_ID = 0x51A8     # next to history's: the advisory lock one instance's retention sweep holds
+_SWEEP_CHUNK = 5_000        # events deleted per sweep transaction
+_LAG_BUCKETS = (0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0)  # seconds; occurred_at has one-second precision
+
+RUN = 'query.run'  # the event type of a run, saved or ad-hoc - the only type written so far
+TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+INSERT = ('INSERT INTO events (type, source, occurred_at, key_name, connection_name, query_name, status, '
+          'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+INSERT_WITH_ID = ('INSERT INTO events (id, type, source, occurred_at, key_name, connection_name, query_name, status, '
+                  'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
 
 
-def event_payload(query_name, version, entry):
-    """The JSON an event carries - the same shape the main server's GET /events uses: an `execution` of a saved
-    query, or an `adhoc_execution` (ad-hoc SQL, which has no query or version; its entry carries the SQL as
-    QUERYAPIGATE_HISTORY_ADHOC_SQL keeps it)."""
-    if query_name is None:
-        return {'type': 'adhoc_execution', 'connection_name': entry.get('connection_name'), 'entry': entry}
-    return {'type': 'execution', 'filename': query_name, 'version': version,
+def run_payload(query_name, version, entry):
+    """The JSON a run's event carries (ADR 0020 §5), on both /events endpoints: `query.run`, for a saved query's run
+    (`kind` saved) or ad-hoc SQL (`kind` adhoc, `query` and `version` null - its entry carries the SQL as
+    QUERYAPIGATE_HISTORY_ADHOC_SQL keeps it). `kind`, `query` and `version` are GET /api/v1/history's names."""
+    return {'type': RUN, 'source': entry.get('transport'),
+            'occurred_at': entry.get('executed_at') or datetime.now().strftime(TIME_FORMAT),
+            'kind': 'saved' if query_name is not None else 'adhoc', 'query': query_name, 'version': version,
             'connection_name': entry.get('connection_name'), 'entry': entry}
+
+
+def run_columns(query_name, version, entry):
+    """A run's row in the events table, for INSERT - every column after the id."""
+    payload = run_payload(query_name, version, entry)
+    return (RUN, payload['source'], payload['occurred_at'], entry.get('key_name'), entry.get('connection_name'),
+            query_name, entry.get('status'), json.dumps(payload, default=str))
+
+
+# ---- subscription filters (ADR 0020 §6) ----
+
+FILTERS = ('type', 'kind', 'query', 'connection', 'status')
+_FILTER_COLUMNS = {'type': 'type', 'query': 'query_name', 'connection': 'connection_name', 'status': 'status'}
+
+
+def parse_filters(get):
+    """{filter: value} from a request's query string - ``get(name)`` returns a parameter's value, or None. Raises
+    ValueError, saying what's wrong, for a `status` or `kind` that can never match; any other value simply matches
+    nothing until something has that name."""
+    filters = {name: get(name) for name in FILTERS if get(name) not in (None, '')}
+    if filters.get('status') not in (None, 'success', 'error'):
+        raise ValueError("status must be 'success' or 'error'")
+    if filters.get('kind') not in (None, 'saved', 'adhoc'):
+        raise ValueError("kind must be 'saved' or 'adhoc'")
+    return filters
+
+
+def fields(payload):
+    """What filters compare, from an event's payload: (type, kind, query, connection, status)."""
+    return (payload.get('type'), payload.get('kind'), payload.get('query'), payload.get('connection_name'),
+            (payload.get('entry') or {}).get('status'))
+
+
+def matches(filters, event_fields):
+    """Whether an event with these fields() passes every filter."""
+    return all(value == event_fields[FILTERS.index(name)] for name, value in filters.items())
+
+
+def _filter_sql(filters):
+    clauses, params = [], []
+    for name, value in filters.items():
+        if name == 'kind':
+            clauses.append('query_name IS NOT NULL' if value == 'saved' else 'query_name IS NULL')
+        else:
+            clauses.append(f'{_FILTER_COLUMNS[name]} = ?')
+            params.append(value)
+    return ''.join(f' AND {c}' for c in clauses), params
 
 
 def _chunk(data):
@@ -70,21 +130,23 @@ def _chunk(data):
     return b'%x\r\n%s\r\n' % (len(data), data)
 
 
-def _format(rowid, query_name, version, entry_json):
-    entry = json.loads(entry_json)
-    return f'id: {rowid}\ndata: {json.dumps(event_payload(query_name, version, entry))}\n\n'.encode()
+def _format(event_id, payload_json):
+    return f'id: {event_id}\ndata: {payload_json}\n\n'.encode()
 
 
 # ---- store access: plain blocking calls, run in a worker thread (asyncio.to_thread) ----
 
+_COLUMNS = 'id, key_name, type, query_name, connection_name, status, occurred_at, payload_json'
+
+
 def _newest_id():
-    row = db.connection().execute('SELECT MAX(rowid) FROM execution_history').fetchone()
+    row = db.connection().execute('SELECT MAX(id) FROM events').fetchone()
     return row[0] or 0
 
 
 def _ids_after(floor):
     return [row[0] for row in db.connection().execute(
-        'SELECT rowid FROM execution_history WHERE rowid > ? ORDER BY rowid LIMIT ?', (floor, _BATCH + _LOOKBACK))]
+        'SELECT id FROM events WHERE id > ? ORDER BY id LIMIT ?', (floor, _BATCH + _LOOKBACK))]
 
 
 def _rows(ids):
@@ -92,20 +154,53 @@ def _rows(ids):
     for start in range(0, len(ids), 500):  # well under SQLite's bound-parameter limit on older builds (999)
         chunk = ids[start:start + 500]
         rows += db.connection().execute(
-            f'SELECT rowid, query_name, version, key_name, entry_json FROM execution_history '
-            f'WHERE rowid IN ({", ".join("?" * len(chunk))}) ORDER BY rowid', tuple(chunk)).fetchall()
+            f'SELECT {_COLUMNS} FROM events WHERE id IN ({", ".join("?" * len(chunk))}) ORDER BY id',
+            tuple(chunk)).fetchall()
     return rows
 
 
-def _replay(after, key_name):
-    """Runs after ``after`` that ``key_name`` may see (None: every run), oldest first."""
-    if key_name is None:
-        return db.connection().execute(
-            'SELECT rowid, query_name, version, entry_json FROM execution_history WHERE rowid > ? '
-            'ORDER BY rowid LIMIT ?', (after, _REPLAY_LIMIT)).fetchall()
+def _replay_page(after, key_name, filters):
+    """One page of the events after ``after`` that ``key_name`` may see (None: every event) and ``filters`` ask for,
+    oldest first."""
+    where, params = _filter_sql(filters)
+    if key_name is not None:
+        where, params = ' AND key_name = ?' + where, [key_name, *params]
     return db.connection().execute(
-        'SELECT rowid, query_name, version, entry_json FROM execution_history WHERE rowid > ? AND key_name = ? '
-        'ORDER BY rowid LIMIT ?', (after, key_name, _REPLAY_LIMIT)).fetchall()
+        f'SELECT id, payload_json FROM events WHERE id > ?{where} ORDER BY id LIMIT ?',
+        (after, *params, _REPLAY_PAGE)).fetchall()
+
+
+def sweep(now=None):
+    """Delete events older than config.events_retention_hours(), in chunks. Returns how many were deleted. Run by each
+    process's history writer (history.py) every few minutes; on PostgreSQL only by the instance holding the sweep
+    lock, so several don't delete the same rows in parallel."""
+    from datetime import timedelta
+    cutoff = ((now or datetime.now()) - timedelta(hours=config.events_retention_hours())).strftime(TIME_FORMAT)
+    conn = db.connection()
+    try:
+        if db.is_postgres() and not conn.execute('SELECT pg_try_advisory_lock(?)', (_SWEEP_LOCK_ID,)).fetchone()[0]:
+            return 0  # another instance is sweeping right now
+    except (OSError, *db.Error):
+        log.warning('Event log retention sweep failed; the next one retries', exc_info=True)
+        return 0
+    deleted = 0
+    try:
+        while True:
+            with db.transaction(append_only=True) as tx:
+                count = tx.execute('DELETE FROM events WHERE id IN (SELECT id FROM events WHERE occurred_at < ? '
+                                   'LIMIT ?)', (cutoff, _SWEEP_CHUNK)).rowcount
+            deleted += count
+            if count < _SWEEP_CHUNK:
+                return deleted
+    except (OSError, *db.Error):
+        log.warning('Event log retention sweep failed; the next one retries', exc_info=True)
+        return deleted
+    finally:
+        if db.is_postgres():
+            try:
+                conn.execute('SELECT pg_advisory_unlock(?)', (_SWEEP_LOCK_ID,))
+            except (OSError, *db.Error):
+                pass  # a lost connection takes its session lock with it
 
 
 def _authenticate(credentials, client_ip):
@@ -115,12 +210,21 @@ def _authenticate(credentials, client_ip):
     return authenticate(credentials[0], credentials[1], client_ip)
 
 
-class _Client:
-    __slots__ = ('queue', 'key_name', 'writer', 'too_slow')
+def _lag(occurred_at):
+    """Seconds from when an event happened (server local time, to the second) to now."""
+    try:
+        return max(0.0, time.time() - time.mktime(time.strptime(occurred_at, TIME_FORMAT)))
+    except (TypeError, ValueError):
+        return None
 
-    def __init__(self, key_name, writer):
+
+class _Client:
+    __slots__ = ('queue', 'key_name', 'filters', 'writer', 'too_slow')
+
+    def __init__(self, key_name, writer, filters=None):
         self.queue = asyncio.Queue(maxsize=_QUEUE_SIZE)
-        self.key_name = key_name  # None: sees every run
+        self.key_name = key_name  # None: sees every event
+        self.filters = filters or {}
         self.writer = writer
         self.too_slow = False
 
@@ -140,7 +244,11 @@ class EventServer:
         self.limiter = ratelimit.client_limiter(config.redis_url())  # shared with every instance's REST limit
         self.server = None
         self.tasks = []
-        self.delivered = 0
+        self.delivered = 0          # events taken off the log and queued to their clients
+        self.replayed = 0           # events sent on a Last-Event-ID resume
+        self.slow_disconnects = 0   # clients cut off for falling _QUEUE_SIZE events behind
+        self.lag = [0] * (len(_LAG_BUCKETS) + 1)  # occurred_at to delivery, per bucket (the last: +Inf)
+        self.lag_sum = 0.0
 
     # ---- lifecycle ----
 
@@ -189,13 +297,16 @@ class EventServer:
                 log.warning('Events: checking for new runs failed', exc_info=True)
 
     async def _check(self):
-        """Deliver every run recorded since the last check. True when there may be more right away."""
+        """Deliver every event written since the last check. True when there may be more right away."""
         ids = await asyncio.to_thread(_ids_after, max(0, self.cursor - _LOOKBACK))
         new = [i for i in ids if i not in self.recent]
         if not new:
             return False
-        for rowid, query_name, version, key_name, entry_json in await asyncio.to_thread(_rows, new[:_BATCH]):
-            self._deliver(rowid, key_name, _format(rowid, query_name, version, entry_json))
+        for event_id, key_name, type_, query_name, connection, status, occurred_at, payload_json in \
+                await asyncio.to_thread(_rows, new[:_BATCH]):
+            kind = 'saved' if query_name is not None else 'adhoc'
+            self._deliver(event_id, key_name, (type_, kind, query_name, connection, status),
+                          _format(event_id, payload_json), occurred_at)
         return len(new) > _BATCH or len(ids) >= _BATCH + _LOOKBACK
 
     def _remember(self, rowid):
@@ -205,25 +316,32 @@ class EventServer:
         while self.recent_order and self.recent_order[0] < self.cursor - _LOOKBACK:
             self.recent.discard(self.recent_order.popleft())
 
-    def _deliver(self, rowid, key_name, data):
+    def _deliver(self, rowid, key_name, event_fields, data, occurred_at=None):
         self._remember(rowid)
         for client in (*self.by_key.get(None, ()), *self.by_key.get(key_name, ())):
-            if client.too_slow:
+            if client.too_slow or not matches(client.filters, event_fields):
                 continue
             try:
                 client.queue.put_nowait((rowid, data))
             except asyncio.QueueFull:
                 # Too far behind: cut it off rather than hold memory or silently skip events - it reconnects with
-                # Last-Event-ID and catches up from history. The queue is emptied so the sentinel fits.
+                # Last-Event-ID and catches up from the log. The queue is emptied so the sentinel fits.
                 client.too_slow = True
+                self.slow_disconnects += 1
                 while not client.queue.empty():
                     client.queue.get_nowait()
                 client.queue.put_nowait(None)
         self.delivered += 1
+        lag = _lag(occurred_at)
+        if lag is not None:
+            self.lag[next((i for i, edge in enumerate(_LAG_BUCKETS) if lag <= edge), len(_LAG_BUCKETS))] += 1
+            self.lag_sum += lag
 
     async def _listen(self):
         """Postgres only: LISTEN on history's channel and wake _tail() the moment a batch commits."""
         import psycopg2
+
+        from . import history
         loop = asyncio.get_running_loop()
         while True:
             conn = None
@@ -276,6 +394,12 @@ class EventServer:
             if path == '/health' and method == 'GET':
                 await _respond(writer, 200, {'status': 'ok', 'connections': len(self.clients),
                                              'delivered': self.delivered}, allow_origin)
+            elif path == '/metrics' and method == 'GET':
+                from . import metrics
+                if metrics.authorized(headers.get('authorization')):
+                    await _respond_text(writer, 200, self.render_metrics())
+                else:
+                    await _respond(writer, 401, {'error': metrics.UNAUTHORIZED}, allow_origin)
             elif path != '/events':
                 await _respond(writer, 404, {'error': 'Not found'}, allow_origin)
             elif method == 'OPTIONS' and allow_origin and 'access-control-request-method' in headers:
@@ -313,9 +437,14 @@ class EventServer:
                 'queryapigate.caller': permission.name or '-', 'http.response.status_code': 200},
                 parent=tracing.extract(headers)):
             pass
+        try:
+            filters = parse_filters(lambda name: (query.get(name) or [None])[0])
+        except ValueError as error:
+            await _respond(writer, 400, {'error': str(error), 'code': 'invalid_filter'}, allow_origin)
+            return
         last_id = _last_event_id(headers, query)
         key_name = None if permission.admin else permission.name
-        client = _Client(key_name, writer)
+        client = _Client(key_name, writer, filters)
         self.clients.add(client)
         self.by_key.setdefault(key_name, set()).add(client)  # live events queue up from here on...
         try:
@@ -326,10 +455,16 @@ class EventServer:
             writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + _chunk(f'retry: {_RETRY_MS}\n\n'.encode()))
             sent = 0
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
-                for rowid, query_name, version, entry_json in await asyncio.to_thread(_replay, last_id, key_name):
-                    writer.write(_chunk(_format(rowid, query_name, version, entry_json)))
-                    sent = rowid
-                await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+                after = last_id  # only what is replayed moves `sent`: an id from another store mustn't mute live events
+                while not client.too_slow:  # every page, up to the live stream (ADR 0020 §7)
+                    page = await asyncio.to_thread(_replay_page, after, key_name, filters)
+                    for event_id, payload_json in page:
+                        writer.write(_chunk(_format(event_id, payload_json)))
+                        sent = after = event_id
+                    self.replayed += len(page)
+                    await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+                    if len(page) < _REPLAY_PAGE:
+                        break
             watcher = asyncio.create_task(self._watch(reader, client))
             try:
                 await self._pump(client, secret, client_ip, sent)
@@ -376,6 +511,29 @@ class EventServer:
                     return  # key revoked/expired/deactivated, or the bearer token expired, since the stream opened
 
 
+    def render_metrics(self):
+        """This process's own counts, as Prometheus text (ADR 0020 §8)."""
+        lines = ['# HELP queryapigate_events_streams Event streams open right now.',
+                 '# TYPE queryapigate_events_streams gauge', f'queryapigate_events_streams {len(self.clients)}']
+        for name, help_text, value in (
+                ('delivered', 'Events taken off the event log and queued to their clients.', self.delivered),
+                ('replayed', 'Events sent to clients resuming with Last-Event-ID.', self.replayed),
+                ('slow_disconnects', 'Clients disconnected for falling too far behind.', self.slow_disconnects)):
+            lines += [f'# HELP queryapigate_events_{name}_total {help_text}',
+                      f'# TYPE queryapigate_events_{name}_total counter', f'queryapigate_events_{name}_total {value}']
+        lines += ['# HELP queryapigate_events_lag_seconds From when an event happened to its delivery (to the second).',
+                  '# TYPE queryapigate_events_lag_seconds histogram']
+        cumulative = 0
+        for edge, count in zip(_LAG_BUCKETS, self.lag, strict=False):
+            cumulative += count
+            lines.append(f'queryapigate_events_lag_seconds_bucket{{le="{edge}"}} {cumulative}')
+        cumulative += self.lag[-1]
+        lines += [f'queryapigate_events_lag_seconds_bucket{{le="+Inf"}} {cumulative}',
+                  f'queryapigate_events_lag_seconds_sum {self.lag_sum}',
+                  f'queryapigate_events_lag_seconds_count {cumulative}']
+        return '\n'.join(lines) + '\n'
+
+
 # ---- small HTTP helpers ----
 
 async def _read_request(reader):
@@ -400,8 +558,8 @@ _SECURITY_HEADERS = [f'{name}: {value}' for name, value in secheaders.api_header
 
 
 async def _respond(writer, status, body, allow_origin, preflight=False, extra=None):
-    reasons = {200: 'OK', 204: 'No Content', 401: 'Unauthorized', 404: 'Not Found', 405: 'Method Not Allowed',
-               429: 'Too Many Requests', 503: 'Service Unavailable'}
+    reasons = {200: 'OK', 204: 'No Content', 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found',
+               405: 'Method Not Allowed', 429: 'Too Many Requests', 503: 'Service Unavailable'}
     if body is not None and 'error' in body:  # the same {error, code} every front door answers with (errors.py)
         body = {'error': body['error'], 'code': code_for(status, body.get('code'))}
     payload = b'' if body is None else json.dumps(body).encode()
@@ -416,6 +574,14 @@ async def _respond(writer, status, body, allow_origin, preflight=False, extra=No
                      'Access-Control-Allow-Headers: X-API-Key, Authorization, Last-Event-ID',
                      f'Access-Control-Max-Age: {cors.PREFLIGHT_MAX_AGE}']
     head += [f'{name}: {value}' for name, value in (extra or {}).items()]
+    writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + payload)
+    await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+
+
+async def _respond_text(writer, status, text):
+    payload = text.encode()
+    head = [f'HTTP/1.1 {status} OK', f'Content-Length: {len(payload)}', 'Connection: close', *_SECURITY_HEADERS,
+            'Cache-Control: no-store', 'Content-Type: text/plain; version=0.0.4; charset=utf-8']
     writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + payload)
     await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
 

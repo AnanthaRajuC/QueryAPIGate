@@ -28,6 +28,7 @@ from . import (
     deprecations,
     descriptions,
     engine,
+    events,
     examples,
     experimental,
     governance,
@@ -571,13 +572,13 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
         path, number = saved
 
         def record(finished):
-            _record_and_broadcast(path, number, connection_name, finished, broadcaster)
+            _record_and_broadcast(path, number, finished, broadcaster)
     else:
         if database:
             entry['database'] = database
 
         def record(finished):
-            _record_adhoc_and_broadcast(sql, params, connection_name, finished, broadcaster)
+            _record_adhoc_and_broadcast(sql, params, finished, broadcaster)
     opened = rows
     response = stream_response(output_format, columns,
                                _record_stream_history(rows, entry, record, g.get('permission')), filename)
@@ -602,17 +603,16 @@ def run_entry(connection_name):
             **({'trace_id': trace_id} if trace_id else {})}
 
 
-def _record_adhoc_and_broadcast(sql, params, connection_name, entry, broadcaster=None):
+def _record_adhoc_and_broadcast(sql, params, entry, broadcaster=None):
     """An ad-hoc run's _record_and_broadcast(): into run history (history.record_adhoc()) and the live feed, as an
-    `adhoc_execution` event, under the same per-key rule as a saved query's run."""
+    `query.run` event of kind `adhoc`, under the same per-key rule as a saved query's run."""
     recorded = history.record_adhoc(entry, sql, params)
     if broadcaster is None:
         broadcaster = current_app.extensions['queryapigate_broadcaster']
-    broadcaster.publish({'type': 'adhoc_execution', 'connection_name': connection_name, 'entry': recorded},
-                        entry['key_name'])
+    broadcaster.publish(events.run_payload(None, None, recorded), entry['key_name'])
 
 
-def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None):
+def _record_and_broadcast(path, number, entry, broadcaster=None):
     """store.record_execution(), plus a live event for the admin UI's Home tab and any subscribed API key's
     own personal feed (BACKLOG #43) - every call site that used to call record_execution() directly calls
     this instead. ``broadcaster`` defaults to the current request's extension (the normal case); a caller
@@ -623,8 +623,7 @@ def _record_and_broadcast(path, number, connection_name, entry, broadcaster=None
     store.record_execution(path, number, entry)
     if broadcaster is None:
         broadcaster = current_app.extensions['queryapigate_broadcaster']
-    broadcaster.publish({'type': 'execution', 'filename': path, 'version': number,
-                        'connection_name': connection_name, 'entry': entry}, entry['key_name'])
+    broadcaster.publish(events.run_payload(path, number, entry), entry['key_name'])
 
 
 def _record_stream_history(rows, entry, record, permission=None):
@@ -688,10 +687,10 @@ def execute_sql_endpoint():
                                           database=database, allowed_tables=g.permission.allowed_tables,
                                           mask=g.permission.mask)
     except ApiError as error:
-        _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
+        _record_adhoc_and_broadcast(data['sql'], params,
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
-    _record_adhoc_and_broadcast(data['sql'], params, data['connection_name'],
+    _record_adhoc_and_broadcast(data['sql'], params,
                                 {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms,
                                  **masked_entry(result.masked)})
     return render(result, output_format, page, limit)
@@ -721,10 +720,10 @@ def execute_mongo_endpoint():
                                           projection=data.get('projection'), sort=data.get('sort'),
                                           key_name=metrics_key_name(), mask=g.permission.mask)
     except ApiError as error:
-        _record_adhoc_and_broadcast(statement, params, data['connection_name'],
+        _record_adhoc_and_broadcast(statement, params,
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
-    _record_adhoc_and_broadcast(statement, params, data['connection_name'],
+    _record_adhoc_and_broadcast(statement, params,
                                 {**entry, 'status': 'success', 'rows': len(result.rows), 'duration_ms': elapsed_ms})
     return render(result, output_format, page, limit)
 
@@ -915,15 +914,15 @@ def _run_saved(ref, body, url_params):
                                           allowed_write_ops=g.permission.allowed_write_ops,
                                           allowed_tables=g.permission.allowed_tables, mask=g.permission.mask)
     except ApiError as error:
-        _record_and_broadcast(path, number, connection_name,
+        _record_and_broadcast(path, number,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     tracing.set_attributes(query_span, queryapigate__rows=len(result.rows), queryapigate__masked=bool(result.masked))
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
-    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
-                                                          'duration_ms': elapsed_ms,
-                                                          'serialization_ms': g.serialization_ms,
-                                                          **masked_entry(result.masked)})
+    _record_and_broadcast(path, number, {**entry, 'status': 'success', 'rows': len(result.rows),
+                                         'duration_ms': elapsed_ms,
+                                         'serialization_ms': g.serialization_ms,
+                                         **masked_entry(result.masked)})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl, cache_meta)
     return response
@@ -974,15 +973,15 @@ def _execute_agent_write(request, saved, path, number, connection_name, values, 
                                                       mask=g.permission.mask)
     except ApiError as error:
         agentwrites.finish(request['id'], error={'error': error.message, 'code': error.code or 'internal_error'})
-        _record_and_broadcast(path, number, connection_name,
+        _record_and_broadcast(path, number,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     limit = config.mcp_max_rows()
     rows = [dict(zip(result.columns, row, strict=False)) for row in result.rows[:limit]]
     done = agentwrites.finish(request['id'], result={'rows_affected': affected, 'rows': rows,
                                                      'truncated': len(result.rows) > limit})
-    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': affected,
-                                                          **masked_entry(result.masked)})
+    _record_and_broadcast(path, number, {**entry, 'status': 'success', 'rows': affected,
+                                         **masked_entry(result.masked)})
     return _agent_write_answer(done)
 
 
@@ -1021,13 +1020,13 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
                                           projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
                                           key_name=metrics_key_name(), mask=g.permission.mask)
     except ApiError as error:
-        _record_and_broadcast(path, number, connection_name,
+        _record_and_broadcast(path, number,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
         raise
     response = render(result, output_format, page, limit)  # sets g.serialization_ms - see render()
-    _record_and_broadcast(path, number, connection_name, {**entry, 'status': 'success', 'rows': len(result.rows),
-                                                          'duration_ms': elapsed_ms,
-                                                          'serialization_ms': g.serialization_ms})
+    _record_and_broadcast(path, number, {**entry, 'status': 'success', 'rows': len(result.rows),
+                                         'duration_ms': elapsed_ms,
+                                         'serialization_ms': g.serialization_ms})
     return response
 
 
@@ -1049,8 +1048,9 @@ _open_streams_lock = threading.Lock()
 
 @bp.route('/events', methods=['GET'])
 def stream_events():
-    """Server-Sent Events: one `data: {...}` line per live event (today: a saved-query execution, as
-    it's recorded - see _record_and_broadcast()). Originally admin-only, feeding just the admin UI's Home
+    """Server-Sent Events: one `data: {...}` line per live event (today: a run, `query.run` - events.run_payload() -
+    as it's recorded, see _record_and_broadcast()), narrowed by the same subscription filters as `queryapigate
+    events` (events.parse_filters()). Originally admin-only, feeding just the admin UI's Home
     tab; open to any authenticated key now, each getting its own personal activity feed - a scoped key sees
     only executions triggered by that same key (broadcast.Broadcaster's key_name filter), the admin key
     keeps its original unfiltered view of everything, matching the admin-sees-all/scoped-sees-its-own
@@ -1069,6 +1069,10 @@ def stream_events():
     `queryapigate events` (events.py) instead: a separate asyncio process with no such limit, every instance's
     runs, and Last-Event-ID resume."""
     global _open_streams
+    try:
+        filters = events.parse_filters(request.args.get)
+    except ValueError as error:
+        raise ApiError(str(error), code='invalid_filter') from None
     with _open_streams_lock:
         if _open_streams >= config.events_max_streams():
             raise ApiError('Too many open event streams on this server - try again shortly, or connect to '
@@ -1090,7 +1094,7 @@ def stream_events():
             _open_streams -= 1
         broadcaster.unsubscribe(subscriber)
 
-    def events():
+    def stream():
         try:
             while True:
                 try:
@@ -1098,11 +1102,13 @@ def stream_events():
                 except queue.Empty:
                     yield ': keepalive\n\n'
                     continue
+                if not events.matches(filters, events.fields(event)):
+                    continue
                 yield f'data: {json.dumps(event, default=json_default)}\n\n'
         finally:
             release()
 
-    response = Response(ClosingIterator(events(), release), mimetype='text/event-stream')
+    response = Response(ClosingIterator(stream(), release), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # disable reverse-proxy response buffering (nginx, etc.)
     return response

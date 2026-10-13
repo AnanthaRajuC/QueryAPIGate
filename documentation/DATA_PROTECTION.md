@@ -39,6 +39,7 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 | `saved_queries`, `saved_query_versions` | Saved queries and every version: SQL, parameters, descriptions, the author's name | Author | Until deleted | `queries.read` |
 | `descriptions` | Descriptions of tables and columns, and who wrote each | Administrator's name | Until changed | `connections.read`; agents |
 | `execution_history` | Each run: when, which query and version, the caller, the transport, rows, time, status, QueryAPIGate's error message; an ad-hoc run's parameter *names* and its SQL as `QUERYAPIGATE_HISTORY_ADHOC_SQL` says (`text`, `hash`, `none`) | Caller | The newest `QUERYAPIGATE_HISTORY_LIMIT` runs per version and `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` ad-hoc runs - or `QUERYAPIGATE_HISTORY_RETENTION_DAYS` days; `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps only a share | `observe` |
+| `events` | The event log (ADR 0020): each run as `/events` sends it - the same fields as its `execution_history` entry, every run whatever the sample rate | Caller | `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default) | Each key its own events, through `/events`; the admin key every one |
 | `usage_counters` | Calls and rows per caller per day and month (quotas, ADR 0011) | Caller | 400 days | `observe` |
 | `audit_log`, `audit_chain`, `audit_delivery` | Every administrative change: who, how they signed in, what changed (passwords only as "changed"); its hash chain; how far each SIEM output has got | Administrator's name | The newest `QUERYAPIGATE_AUDIT_LOG_LIMIT` entries - more while a SIEM output is behind | `observe` |
 | `api_keys`, `roles` | Keys' names, grants and the SHA-256 of their secrets; when each was last used | Key names | Until deleted | `access.read` (never a secret) |
@@ -92,12 +93,12 @@ A person who signs in to call QueryAPIGate is named `jwt:<subject>` - their emai
 and usage counts. To erase them:
 
 ```bash
-queryapigate history forget jwt:alice@example.com --dry-run   # how many runs and usage periods
+queryapigate history forget jwt:alice@example.com --dry-run   # how many runs, events and usage periods
 queryapigate history forget jwt:alice@example.com
 ```
 
-or `DELETE /api/v1/history?caller=jwt:alice@example.com` (owners only, `history.forget`). Their runs and usage counts -
-in the store and in Redis - are deleted, and the erasure is recorded in the audit log as `forget_caller` with the
+or `DELETE /api/v1/history?caller=jwt:alice@example.com` (owners only, `history.forget`). Their runs, events and usage
+counts - in the store and in Redis - are deleted, and the erasure is recorded in the audit log as `forget_caller` with the
 caller's SHA-256 and the counts, not their name. That record is pseudonymous: someone who already knows the name can
 confirm that it was erased - which is how you show a request was met - but it names no one to anyone who doesn't.
 Their quota's count for the period starts again.

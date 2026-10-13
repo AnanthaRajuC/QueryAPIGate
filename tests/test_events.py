@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import app as app_module
-from queryapigate import create_app
+from queryapigate import create_app, events
 from tests.helpers import save_query, write_connections
 
 
@@ -91,10 +91,23 @@ class EventsTests(unittest.TestCase):
         self.client.get('/q/q1', headers=self.admin_headers)
         frame = self.next_data_frame(gen)
         event = json.loads(frame[len('data: '):].strip())
-        self.assertEqual(event['type'], 'execution')
-        self.assertEqual(event['filename'], 'q1')
+        self.assertEqual((event['type'], event['kind'], event['query'], event['version'], event['source']),
+                         ('query.run', 'saved', 'q1', 1, 'rest'))
         self.assertEqual(event['entry']['status'], 'success')
         res.close()
+
+    def test_filters_narrow_the_stream(self):
+        res = self.client.get('/events?status=error', headers=self.admin_headers)
+        gen = iter(res.response)
+        self.client.get('/q/q1', headers=self.admin_headers)  # succeeds: filtered out
+        self.broadcaster().publish(events.run_payload('q1', 1, {'status': 'error', 'key_name': 'admin'}), 'admin')
+        event = json.loads(self.next_data_frame(gen)[len('data: '):].strip())
+        self.assertEqual(event['entry']['status'], 'error')
+        res.close()
+
+    def test_a_filter_that_can_never_match_is_refused(self):
+        res = self.client.get('/events?kind=stored', headers=self.admin_headers)
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_filter'))
 
     def test_a_heartbeat_is_sent_when_no_event_arrives_in_time(self):
         res = self.client.get('/events', headers=self.admin_headers)

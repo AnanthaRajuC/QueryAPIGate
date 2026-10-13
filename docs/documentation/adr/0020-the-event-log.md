@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0020-the-event-log.md"

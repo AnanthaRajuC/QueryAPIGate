@@ -456,6 +456,9 @@ serving, writing and recording runs on a store the current code has just upgrade
 1. Back up the store.
 2. Start one instance on the new version - it upgrades the store on its first start - and check its `/health`.
 3. Replace the others one by one. `GET /api/v1/instances` shows who is on which version meanwhile.
+4. Replace `queryapigate events`, if you run it, with the instances. From 0.33 it streams the event log
+   ([ADR 0020](adr/0020-the-event-log.md)), and an instance still on 0.32 writes its runs to history only - so they
+   aren't events until it's upgraded too.
 
 Two limits:
 - **An instance can't *start* on the previous release once the store is upgraded** - it refuses, naming the newer

@@ -40,7 +40,7 @@ by accident.
 | ~~#71 PostgreSQL-store backup and restore~~ (shipped) | Documented and tested; DEPLOYMENT.md §5 covers only the SQLite volume |
 | ~~#84 Admin identity, Phase 1~~ (shipped) | Named administrators, admin roles and audit by person change the management API's permission model and the audit record - cheap now, breaking after |
 
-**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, the rest of #59, #100 a Helm chart
+**Additive, can land after 1.0:** #63 column masking (new grant fields), #60 CDC, webhook delivery from #59's log, #100 a Helm chart
 (plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
 
 **More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (shipped),
@@ -102,11 +102,13 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0018](documentation/adr/0018-signed-releases.md)). (0.31.0, 2026-10-13.)
 20. **0.32: the SIEM stream against real receivers**, and stable
     ([ADR 0019](documentation/adr/0019-the-siem-stream-against-real-receivers.md)). (0.32.0, 2026-10-13.)
-21. **Then, only on demand:** #99 workspaces.
-22. **Before 1.0.0-rc1:** what still keeps it from a freeze - AWS against AWS, the dedicated event log (#59) - then
-    rc1: freeze; invite external users to upgrade real
-    stores and report back.
-20. **1.0.0.**
+21. **0.33: #59 the event log**, live events' own table, retention, filters and payload
+    ([ADR 0020](documentation/adr/0020-the-event-log.md)). (Unreleased.)
+22. **Then, only on demand:** #99 workspaces.
+23. **Before 1.0.0-rc1:** what still keeps it from a freeze - AWS against AWS, and live events graduating once their
+    0.33 payload has gone a release unchanged - then rc1: freeze; invite external users to upgrade real stores and
+    report back.
+24. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -1907,7 +1909,11 @@ Original notes:
 
 ## 59. A dedicated event log, so events stop being a view on run history
 
-**Status: open; storage decision made** ([ADR 0002](documentation/adr/0002-event-ids.md)). Event ids stay
+**Status: shipped in 0.33** ([ADR 0020](documentation/adr/0020-the-event-log.md)): the `events` table, its own
+retention (`QUERYAPIGATE_EVENTS_RETENTION_HOURS`), every run as a `query.run` event whatever history's sample rate,
+the sequence continued from history's ids on upgrade, subscription filters, the payload with `type` and `source`, and
+`/metrics` on the events server. CloudEvents and webhook push delivery are still open. What follows is the original
+item. **Storage decision made** ([ADR 0002](documentation/adr/0002-event-ids.md)). Event ids stay
 `execution_history` row ids in 0.13, documented as opaque and increasing. When this table ships, its id sequence
 **must be seeded above `MAX(execution_history.rowid)`**, so a client's `Last-Event-ID` resumes across the upgrade,
 and it uses AUTOINCREMENT/identity ids, which removes SQLite's id reuse after the newest run is deleted.

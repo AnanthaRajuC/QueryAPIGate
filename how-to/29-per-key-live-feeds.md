@@ -24,7 +24,8 @@ QUERYAPIGATE_API_KEY=demo-key queryapigate events --port 5002
 ```
 
 Run it beside `queryapigate serve`, against the same `QUERYAPIGATE_HOME` (or `QUERYAPIGATE_DATABASE_URL`). Events
-reach it from run history, within `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 second); `0.2` makes them snappier.
+reach it from the event log in the store, within `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 second); `0.2`
+makes them snappier.
 In production, route `/events` to it from your reverse proxy so the app keeps one base URL - see
 [DEPLOYMENT.md](../documentation/DEPLOYMENT.md#9-live-events-for-many-clients-optional).
 
@@ -69,18 +70,19 @@ alice, carol (JWT) and dave (JWT, no stream open). Verified result:
 
 | Stream | Events received |
 |---|---|
-| alice (`app-alice`) | 232 alice, 234 alice |
-| bob (`app-bob`) | 233 bob |
-| carol (JWT) | 235 `jwt:carol` |
-| admin | 232, 233, 234, 235, 236 - everyone, dave included |
+| alice (`app-alice`) | 1 alice, 3 alice |
+| bob (`app-bob`) | 2 bob |
+| carol (JWT) | 4 `jwt:carol` |
+| admin | 1, 2, 3, 4, 5 - everyone, dave included |
 
 Each user's app sees only its own activity. Nothing in the request chooses the filter - it comes from the credential,
 so a user can't ask for someone else's feed.
 
 ```
-id: 232
-data: {"type": "execution", "filename": "orders_by_status", "version": 1, "connection_name": "shop",
-       "entry": {"executed_at": "2026-10-04 19:06:12", "key_name": "app-alice", "transport": "rest",
+id: 1
+data: {"type": "query.run", "source": "rest", "occurred_at": "2026-10-13 18:33:37", "kind": "saved",
+       "query": "orders_by_status", "version": 1, "connection_name": "shop",
+       "entry": {"executed_at": "2026-10-13 18:33:37", "key_name": "app-alice", "transport": "rest",
                  "status": "success", "rows": 3, "duration_ms": 1, ...}}
 ```
 
@@ -88,13 +90,31 @@ data: {"type": "execution", "filename": "orders_by_status", "version": 1, "conne
 
 Phones lose connections. Send the last `id:` you received as `Last-Event-ID` when reconnecting, and the stream first
 replays what you missed - still only your own runs - then continues live. Verified: alice reconnected with
-`Last-Event-ID: 232` and received exactly `234`, nothing of bob's or carol's in between.
+`Last-Event-ID: 1` and received exactly `3`, nothing of bob's or carol's in between.
 
 ```
 GET /events
 X-API-Key: <alice's secret>
-Last-Event-ID: 232
+Last-Event-ID: 1
 ```
+
+The events server keeps each event for `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default): a phone away for longer
+gets the stream from the oldest event still kept. Raise it if your users' phones sleep for longer.
+
+## Step 5: Ask for less
+
+A stream can narrow what its credential already sees: `?type=`, `?kind=` (`saved` or `adhoc`), `?query=`,
+`?connection=` and `?status=` (`success` or `error`), combined. A filter never widens what a credential sees - alice
+asking for `?query=orders_by_status` still gets only her own runs. An operations screen that only wants failures:
+
+```
+GET /events?status=error
+X-API-Key: <the admin key>
+```
+
+Verified, in the same run: a query against a table that had been dropped failed (`500 query_failed`), and this stream
+received only that run - id 6, `old_orders`, `"status": "error"` - and none of the five that succeeded. A filter that
+can never match is refused rather than left silent: `?status=failed` answers `400`, `invalid_filter`.
 
 ## Things to know
 

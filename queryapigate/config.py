@@ -21,6 +21,7 @@ DEFAULT_EVENTS_PORT = 5002  # `queryapigate events`
 DEFAULT_EVENTS_MAX_CONNECTIONS = 10_000
 DEFAULT_EVENTS_POLL_INTERVAL = 1.0  # seconds between `queryapigate events` checks for new runs
 DEFAULT_EVENTS_MAX_STREAMS = 4  # concurrent GET /events streams the main server itself will hold open
+DEFAULT_EVENTS_RETENTION_HOURS = 24  # how long the event log keeps an event (ADR 0020)
 AUDIT_LOG_LIMIT = 500  # administrative-action entries remembered across the whole server
 DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
 DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
@@ -430,6 +431,9 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_EVENTS_POLL_INTERVAL', '').strip()
     if raw and not _number_in(raw, lambda v: 0.05 <= v <= 60):
         raise ValueError('QUERYAPIGATE_EVENTS_POLL_INTERVAL must be a number of seconds from 0.05 to 60')
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_RETENTION_HOURS', '').strip()
+    if raw and (not raw.isdigit() or int(raw) < 1):
+        raise ValueError('QUERYAPIGATE_EVENTS_RETENTION_HOURS must be a whole number of hours, at least 1')
     raw = os.environ.get('QUERYAPIGATE_HISTORY_SAMPLE_RATE', '').strip()
     if raw and not _number_in(raw, lambda v: 0 < v <= 1):
         raise ValueError('QUERYAPIGATE_HISTORY_SAMPLE_RATE must be a number above 0 and at most 1, e.g. 0.1 '
@@ -1116,6 +1120,13 @@ def events_poll_interval():
     return float(raw) if raw else DEFAULT_EVENTS_POLL_INTERVAL
 
 
+def events_retention_hours():
+    """Hours the event log keeps an event (QUERYAPIGATE_EVENTS_RETENTION_HOURS), default 24 - how far back a client of
+    `queryapigate events` can resume with Last-Event-ID (ADR 0020)."""
+    raw = os.environ.get('QUERYAPIGATE_EVENTS_RETENTION_HOURS', '').strip()
+    return int(raw) if raw else DEFAULT_EVENTS_RETENTION_HOURS
+
+
 def events_max_streams():
     """Concurrent GET /events streams the main (WSGI) server holds open (QUERYAPIGATE_EVENTS_MAX_STREAMS). Each
     one occupies a request thread for as long as it is open, so the default leaves most of the Docker image's 8
@@ -1432,7 +1443,9 @@ def describe_settings():
             row('Events server connections', 'Open streams one `queryapigate events` process accepts.',
                 'QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', str(events_max_connections())),
             row('Events poll interval', 'Seconds between checks for new runs (on PostgreSQL a notification '
-                'usually arrives first).', 'QUERYAPIGATE_EVENTS_POLL_INTERVAL', _seconds(events_poll_interval()))]},
+                'usually arrives first).', 'QUERYAPIGATE_EVENTS_POLL_INTERVAL', _seconds(events_poll_interval())),
+            row('Event retention', 'Hours the event log keeps an event: how far back a client can resume with '
+                'Last-Event-ID.', 'QUERYAPIGATE_EVENTS_RETENTION_HOURS', f'{events_retention_hours()} h')]},
         {'id': 'alerts', 'title': 'Alerts',
          'description': 'When GET /api/v1/alerts (the Console\'s Alerts screen) calls something out. A query is '
              'slow when its typical run is over the slow-query threshold (Query execution).', 'rows': [

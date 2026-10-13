@@ -50,6 +50,52 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+Live events get a log of their own ([ADR 0020](documentation/adr/0020-the-event-log.md)). Until now an event was a row
+of run history, so history's settings decided which runs became events and how far back a client could resume. Now
+every run is written to the event log in the same batch as its history row, and kept for a set time. The payload says
+what happened and where it came from, ready for event types other than a run.
+
+### Upgrading from 0.32
+- **Schema 16, applied on first start: a new `events` table.** The upgrade copies the runs still in history from the
+  last `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default) into it, each under its history row id, which was its
+  event id. New event ids continue above every one the old server could have sent. A client resuming with an id from
+  before the upgrade gets what it missed, and nothing twice.
+- **If you read live events, update your client for the new payload** (below). Live events are experimental, so this
+  needs no deprecation period.
+- **Rolling upgrades:** replace `queryapigate events` with the instances. An instance still on 0.32 writes its runs to
+  history only, so they aren't events until it's upgraded.
+
+### Added
+- **The event log** ([ADR 0020](documentation/adr/0020-the-event-log.md)): `queryapigate events` streams the new
+  `events` table, not run history. Every run is an event, including one `QUERYAPIGATE_HISTORY_SAMPLE_RATE` samples
+  out of history, and one whose saved query was deleted before its batch was written. Ids are never handed out twice:
+  on SQLite, an id could be reused when the newest run was deleted before the next was recorded.
+- **`QUERYAPIGATE_EVENTS_RETENTION_HOURS`** (default 24): how long the event log keeps an event, and so how far back a
+  client can resume. History's limit, retention and sample rate no longer decide it.
+- **Subscription filters** on both `/events` endpoints: `?type=`, `?kind=` (`saved` or `adhoc`), `?query=`,
+  `?connection=` and `?status=` (`success` or `error`), combined with AND. They narrow what a key may see, never
+  widen it, and a resume applies them too. A `kind` or `status` that can never match is refused with
+  `400 invalid_filter`.
+- **`GET /metrics` on `queryapigate events`**, behind `QUERYAPIGATE_METRICS_TOKEN` like the main server's:
+  `queryapigate_events_streams`, `_delivered_total`, `_replayed_total`, `_slow_disconnects_total` and
+  `queryapigate_events_lag_seconds`, from when an event happened to its delivery.
+
+### Changed
+- **The live event payload (experimental)** ([ADR 0020 §5](documentation/adr/0020-the-event-log.md)): every run is
+  `"type": "query.run"`, with `source` (the front door: `rest`, `mcp`, `export`), `occurred_at`, and `kind`, `query`
+  and `version` as `GET /api/v1/history` names them. `"type": "execution"`, `"type": "adhoc_execution"` and
+  `filename` are gone: check `kind` instead, and read `query` instead of `filename`. `connection_name` and `entry` are
+  unchanged. The Console's Home is updated to match.
+- **`queryapigate history forget` and `DELETE /api/v1/history?caller=` erase the caller's events too**, and report
+  how many as `events`.
+- **Live events stay experimental for this release**, as ADR 0017 asks of a payload that has just changed. They
+  graduate in the next release if the payload stays unchanged.
+
+### Fixed
+- **A resume more than 1,000 events back lost the rest.** `queryapigate events` replayed the first 1,000 events after
+  `Last-Event-ID`, then skipped to live without a word. It now replays every page up to the live stream. A client too
+  slow to take it is disconnected as too slow, and resumes from where it got to.
+
 ## [0.32.0] - 2026-10-13
 
 The audit log's stream to a SIEM, tested on every push against the software that receives it - rsyslog, syslog-ng and

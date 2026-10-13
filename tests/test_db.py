@@ -2,6 +2,7 @@
 its backends: SQLite (the default) and PostgreSQL (QUERYAPIGATE_DATABASE_URL). The Postgres-only tests run when
 QUERYAPIGATE_TEST_DATABASE_URL points at a scratch database - see tests/__init__.py."""
 import io
+import json
 import os
 import sqlite3
 import tempfile
@@ -11,7 +12,8 @@ import unittest
 from contextlib import redirect_stderr
 from unittest import mock
 
-from queryapigate import config, db, history
+from queryapigate import config, db, events, history
+from queryapigate.store import now as store_now
 from tests import TEST_DATABASE_URL
 from tests.helpers import save_query, write_connections
 
@@ -36,6 +38,28 @@ class DbTests(unittest.TestCase):
             "SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         self.assertEqual({'schema_version', 'connections', 'saved_queries', 'saved_query_versions',
                           'execution_history', 'api_keys', 'roles', 'audit_log'} - names, set())
+
+    def test_the_event_log_continues_the_ids_history_handed_out(self):
+        """Schema 16 (ADR 0020 §4) on a store with runs: those in the retention window are copied in under their
+        history ids, and the next event's id is above every history id - even one too old to copy."""
+        db.init_schema()
+        with db.transaction() as conn:
+            for executed_at in ('2020-01-01 00:00:00', store_now(), '2020-01-02 00:00:00'):
+                conn.execute("INSERT INTO execution_history (query_name, version, executed_at, entry_json) "
+                             "VALUES (NULL, NULL, ?, ?)", (executed_at, json.dumps({'executed_at': executed_at})))
+        ids = [row[0] for row in db.connection().execute('SELECT rowid FROM execution_history ORDER BY rowid')]
+        db.init_schema()
+        db.init_schema()  # and again: copied once, seeded once
+        self.assertEqual([row[0] for row in db.connection().execute('SELECT id FROM events')], [ids[1]])
+        with db.transaction() as conn:
+            conn.execute(events.INSERT, events.run_columns(None, None, {}))
+        self.assertEqual(db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0], ids[2] + 1)
+
+    def test_a_new_store_s_event_ids_start_at_one(self):
+        db.init_schema()
+        with db.transaction() as conn:
+            conn.execute(events.INSERT, events.run_columns(None, None, {}))
+        self.assertEqual(db.connection().execute('SELECT id FROM events').fetchone()[0], 1)
 
     def test_init_schema_is_idempotent(self):
         db.init_schema()
@@ -418,6 +442,20 @@ class MigrateToPostgresTests(unittest.TestCase):
         self.assertEqual(db.connection().execute(  # and the filterable copies of each run's status and caller
             "SELECT COUNT(*) FROM execution_history WHERE status = 'success' AND key_name = 'admin'").fetchone()[0], 3)
         self.assertEqual((os.path.getmtime(self.sqlite_path), os.path.getsize(self.sqlite_path)), before)
+        self.assertEqual(copied['events'], 3)
+
+    def test_event_ids_and_their_sequence_come_across(self):
+        """An id handed out and since swept is not handed out again: the sequence is SQLite's, not MAX(id)."""
+        source = sqlite3.connect(self.sqlite_path)
+        ids = [row[0] for row in source.execute('SELECT id FROM events ORDER BY id')]
+        source.execute('DELETE FROM events WHERE id = ?', (ids[-1],))
+        source.commit()
+        source.close()
+        db.migrate_sqlite_to_postgres(self.sqlite_path)
+        self.assertEqual([row[0] for row in db.connection().execute('SELECT id FROM events ORDER BY id')], ids[:-1])
+        with db.transaction() as conn:
+            conn.execute(events.INSERT, events.run_columns(None, None, {}))
+        self.assertEqual(db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0], ids[-1] + 1)
 
     def test_refuses_to_fill_a_store_that_already_has_data(self):
         db.init_schema()

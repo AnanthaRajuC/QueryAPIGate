@@ -114,13 +114,14 @@ class RecordingTests(AdhocTestCase):
         self.run_sql('SELECT 1 AS a', headers={'X-API-Key': theirs})
         self.run_sql('SELECT 2 AS b', headers={'X-API-Key': mine})
         event = subscriber.get(timeout=2)
-        self.assertEqual((event['type'], event['entry']['sql']), ('adhoc_execution', 'SELECT 2 AS b'))
+        self.assertEqual((event['type'], event['kind'], event['entry']['sql']), ('query.run', 'adhoc', 'SELECT 2 AS b'))
         self.assertTrue(subscriber.empty())
 
     def test_the_events_server_formats_an_adhoc_run(self):
-        payload = events.event_payload(None, None, {'connection_name': 'lite', 'sql': 'SELECT 1'})
-        self.assertEqual(payload, {'type': 'adhoc_execution', 'connection_name': 'lite',
-                                   'entry': {'connection_name': 'lite', 'sql': 'SELECT 1'}})
+        entry = {'executed_at': '2026-10-13 12:00:00', 'connection_name': 'lite', 'transport': 'mcp', 'sql': 'SELECT 1'}
+        self.assertEqual(events.run_payload(None, None, entry), {
+            'type': 'query.run', 'source': 'mcp', 'occurred_at': '2026-10-13 12:00:00', 'kind': 'adhoc', 'query': None,
+            'version': None, 'connection_name': 'lite', 'entry': entry})
 
 
 class SqlKeptTests(AdhocTestCase):

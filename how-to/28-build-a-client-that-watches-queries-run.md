@@ -1,8 +1,8 @@
 # How to build a client that watches your saved queries run in real time
 
 **Time:** 15 minutes. **You'll end up with:** a standalone client - Python or browser JavaScript - that
-receives a live event the moment any saved query runs, with real reconnect-on-drop handling. Both examples
-below are verified against a real running server, including a real mid-stream server drop and reconnect.
+receives a live event the moment any saved query - or ad-hoc SQL - runs, with real reconnect-on-drop handling. Both
+examples below are verified against a real running server, including a real mid-stream server drop and reconnect.
 
 > **Experimental** - live events (`GET /events`) may change in any minor release, always noted in the changelog
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
@@ -15,14 +15,16 @@ guide is the "how do I actually parse the stream" one both of those build on.
 ## The wire format, exactly
 
 ```
-data: {"type": "execution", "filename": "example_top_films", "version": 1, "connection_name": "examples", "entry": {"executed_at": "2026-09-30 21:08:17", "status": "success", "rows": 2, "duration_ms": 6, "key_name": "admin", ...}}
+data: {"type": "query.run", "source": "rest", "occurred_at": "2026-10-13 18:33:58", "kind": "saved", "query": "example_top_films", "version": 1, "connection_name": "examples", "entry": {"executed_at": "2026-10-13 18:33:58", "status": "success", "rows": 10, "duration_ms": 4, "key_name": "admin", "transport": "rest", ...}}
 
 : keepalive
 
 ```
 
 Two kinds of frame, each separated by a blank line (`\n\n`):
-- **`data: <json>`** - a real event, exactly once per query execution.
+- **`data: <json>`** - a real event, exactly once per run. `type` is `query.run` for every run; `kind` is `saved`
+  (with `query` and `version`) or `adhoc` (both `null`). Other types will be added - skip one you don't know. Every
+  field is in [Live events](../documentation/API.md#live-events-server-sent-events).
 - **`: keepalive`** - a comment line sent every 15 seconds when nothing happened, purely to keep the
   connection alive through a proxy or client library that would otherwise time out an idle connection.
   Not JSON, not meant to be parsed - just skip any frame that isn't `data: `.
@@ -77,13 +79,18 @@ def watch(on_event, max_retries=5):
 
 def print_event(event):
     entry = event["entry"]
-    print(f"[{entry['executed_at']}] {event['filename']} v{event['version']} by {entry['key_name']}: "
+    what = f"{event['query']} v{event['version']}" if event["kind"] == "saved" else "ad-hoc SQL"
+    print(f"[{event['occurred_at']}] {what} by {entry['key_name']}: "
           f"{entry['status']} ({entry.get('rows', '?')} rows, {entry.get('duration_ms', '?')} ms)")
 
 
 if __name__ == "__main__":
     watch(print_event)
 ```
+
+To receive less, ask for it in the URL: `/events?query=example_top_films` for one query's runs,
+`/events?status=error` for failures only. The filters combine, and work on both the main server and
+`queryapigate events`.
 
 Note `timeout=(5, None)` - a 5-second *connect* timeout (fine to keep short, TCP connect is fast or it
 isn't), but no read timeout at all, for exactly the reason above.
@@ -93,7 +100,7 @@ immediately. Then kill the server mid-stream:
 
 ```
 connected (status 200)
-[2026-09-30 21:08:17] example_top_films v1 by admin: success (2 rows, 6 ms)
+[2026-10-13 18:33:58] example_top_films v1 by admin: success (10 rows, 4 ms)
 stream dropped (Response ended prematurely); reconnecting in 1s (attempt 1/5)
 stream dropped (...Connection refused); reconnecting in 2s (attempt 2/5)
 stream dropped (...Connection refused); reconnecting in 4s (attempt 3/5)

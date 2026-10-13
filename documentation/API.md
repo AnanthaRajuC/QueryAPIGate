@@ -15,7 +15,7 @@ asking). See
 | [`/q/<name>`](#run-a-saved-query) | GET, POST | Run a saved query as an endpoint |
 | [`/connections/<name>/schema`](#connections) | GET | List a connection's tables/views and their columns |
 | [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
-| [`/events`](#live-events-server-sent-events) | GET | Live saved-query runs (Server-Sent Events) |
+| [`/events`](#live-events-server-sent-events) | GET | Live events: every run, as it happens (Server-Sent Events) |
 | [`/api/v1/...`](#management-api-v1) | GET, POST, PATCH, DELETE | The Management API: saved queries, connections, API keys, roles, collections, history, audit, settings and more (admin only) |
 | `/health` | GET | `{"status": "ok", "version": "...", "time_zone": "Asia/Kolkata", "utc_offset": "+05:30"}` - the zone every timestamp the server returns is in (`time_zone` is `null` when the server can't name it) |
 | [`/metrics`](#observability) | GET | Prometheus text-format metrics |
@@ -409,7 +409,7 @@ owner.
 
 | Method and path | What it does |
 |---|---|
-| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
+| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller, its events and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 | `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance`. |
@@ -1557,22 +1557,23 @@ process - `serve`, `mcp`, `events`, an export - is its own `service.instance.id`
 ## Live events (Server-Sent Events)
 
 > **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): event ids and the payload change when the dedicated event log ships
-> ([ADR 0002](adr/0002-event-ids.md)).
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)): the payload changed in 0.33, with the event log
+> ([ADR 0020](adr/0020-the-event-log.md)), and live events graduate once it has gone a release unchanged.
 
-Every recorded run - of a saved query, or of ad-hoc SQL - can be streamed to clients as it happens - a mobile app showing a user their own requests
-completing, a dashboard, the admin UI's Home tab. There are two ways to serve that stream, with the same format:
+Every run - of a saved query, or of ad-hoc SQL - can be streamed to clients as it happens: a mobile app showing a user
+their own requests completing, a dashboard, the Console's Home. There are two ways to serve that stream, with the same
+format:
 
 | | `GET /events` on the main server | `queryapigate events` |
 |---|---|---|
-| For | the admin UI, a few clients | apps and phones - many clients |
+| For | the Console, a few clients | apps and phones - many clients |
 | Open streams | `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4) - each holds a request thread | thousands per process (`QUERYAPIGATE_EVENTS_MAX_CONNECTIONS`, default 10,000) |
 | Sees runs from | this process only | every worker and instance sharing the store |
-| Event ids and resume (`Last-Event-ID`) | no | yes |
+| Event ids and resume (`Last-Event-ID`) | no | yes, for `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (default 24) |
 | Delay | immediate | up to `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 s), plus `QUERYAPIGATE_EVENTS_POLL_INTERVAL` on SQLite |
 
 **Each key gets its own view, not a shared firehose.** Either way, a real API key is required (unless the server
-runs with no keys at all). The admin key sees every run; any other key sees only the runs made with that same
+runs with no keys at all). The admin key sees every event; any other key sees only the runs made with that same
 key - its own personal activity feed:
 
 ```
@@ -1580,18 +1581,30 @@ GET /events
 X-API-Key: <a scoped key's own secret>
 
 id: 4812
-data: {"type": "execution", "filename": "monthly_revenue", "version": 3, "connection_name": "warehouse",
-       "entry": {"executed_at": "2026-09-30 12:00:00", "status": "success", "rows": 42,
-                 "duration_ms": 118.4, "key_name": "mobile-alice", "request_id": "a1b2c3d4e5f6"}}
+data: {"type": "query.run", "source": "rest", "occurred_at": "2026-10-13 12:00:00", "kind": "saved",
+       "query": "monthly_revenue", "version": 3, "connection_name": "warehouse",
+       "entry": {"executed_at": "2026-10-13 12:00:00", "status": "success", "rows": 42, "duration_ms": 118.4,
+                 "key_name": "mobile-alice", "request_id": "a1b2c3d4e5f6", "transport": "rest"}}
 ```
 
-An [ad-hoc run](#ad-hoc-runs) arrives as `"type": "adhoc_execution"`, with `connection_name` and no `filename`
-or `version`; its `entry` carries the SQL as `QUERYAPIGATE_HISTORY_ADHOC_SQL` keeps it, and `transport`.
+| Field | |
+|---|---|
+| `type` | what happened: `query.run` for every run. More types will be added - ignore one you don't know |
+| `source` | where it came from: for a run, the front door - `rest`, `mcp` or `export`; `null` for a run that names none |
+| `occurred_at` | when, in the server's time zone, to the second |
+| `kind`, `query`, `version` | `saved` with the query and version that ran, or `adhoc` with both `null` - the names [run history](#run-history) uses |
+| `connection_name` | the connection it ran on |
+| `entry` | the run's history entry. An [ad-hoc run](#ad-hoc-runs)'s carries its SQL as `QUERYAPIGATE_HISTORY_ADHOC_SQL` keeps it |
 
-**Event ids** are opaque integers that only increase: store the last one and send it back, but don't read
-anything else into it. Today an id is the run's history row id; a future dedicated event log keeps the sequence
-going rather than restarting it, so an id held across that upgrade still resumes
-([ADR 0002](adr/0002-event-ids.md)). Live events are expected to be marked experimental for 1.0 until then.
+**Filters.** Ask for less with `?type=`, `?kind=` (`saved` or `adhoc`), `?query=`, `?connection=` and `?status=`
+(`success` or `error`), on either endpoint. Each takes one value, and they combine: `/events?query=monthly_revenue&status=error`
+is that query's failures. They narrow what the key may see, never widen it, and a resume applies them too. A `kind` or
+`status` that can never match is refused with `400 invalid_filter`; a query or connection that doesn't exist yet
+simply matches nothing.
+
+**Event ids** are opaque integers that only increase, and are never handed out twice: store the last one and send it
+back, but don't read anything else into it ([ADR 0002](adr/0002-event-ids.md)). Until 0.33 an id was a run's history
+row id; the event log continued that sequence, so an id held across the upgrade still resumes.
 
 A connection with nothing to say sends a `: keepalive` comment line every 15 seconds so a proxy or client library
 doesn't time it out as idle - not an event, safe to ignore.
@@ -1605,7 +1618,7 @@ response body; every mobile platform's own HTTP client can read a streamed respo
 ### `queryapigate events`
 
 A separate process, run beside `queryapigate serve` against the same `QUERYAPIGATE_HOME` or
-`QUERYAPIGATE_DATABASE_URL`, serving `GET /events` (and `GET /health`) on its own port:
+`QUERYAPIGATE_DATABASE_URL`, serving `GET /events`, `GET /health` and `GET /metrics` on its own port:
 
 ~~~bash
 queryapigate events --host 0.0.0.0 --port 5002
@@ -1614,23 +1627,30 @@ queryapigate events --host 0.0.0.0 --port 5002
 Put it behind the same reverse proxy as the main server, routing `/events` to it - see
 [DEPLOYMENT.md](DEPLOYMENT.md#9-live-events-for-many-clients-optional) - so clients keep one base URL.
 
-- **Every instance's runs.** Events come from run history in the store, not from one process's memory: each run
-  recorded there is an event, and its history id is the event's `id:`. On PostgreSQL the server is notified the
-  moment a batch is written; on SQLite it checks every `QUERYAPIGATE_EVENTS_POLL_INTERVAL` seconds (default 1). So
-  delivery takes up to one `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` - lower that (e.g. `0.2`) for snappier events.
+- **Every instance's runs.** Events come from the event log in the store, not from one process's memory. Every run
+  is written there in the same batch as its history row, and an event's `id:` is its id there. On PostgreSQL the
+  server is notified the moment a batch is written; on SQLite it checks every `QUERYAPIGATE_EVENTS_POLL_INTERVAL`
+  seconds (default 1). So delivery takes up to one `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` - lower that (e.g. `0.2`)
+  for snappier events.
 - **Resume.** Reconnect with a `Last-Event-ID` header (or `?last_event_id=` if the client can't set headers) and
-  the stream first replays every run after that id that the key may see - up to 1,000 - then continues live,
-  with nothing missed or repeated in between. `EventSource` sends the header by itself; with `fetch()`, remember
-  the last `id:` you read and send it when you reconnect.
-- **What isn't an event.** Runs history doesn't keep: those sampled out by `QUERYAPIGATE_HISTORY_SAMPLE_RATE` or
-  dropped under back-pressure. A replay can only reach runs still in history - a version keeps its newest
-  `QUERYAPIGATE_HISTORY_LIMIT` runs unless `QUERYAPIGATE_HISTORY_RETENTION_DAYS` is set.
+  the stream first replays every event after that id that the key may see and asked for, then continues live, with
+  nothing missed or repeated in between. `EventSource` sends the header by itself; with `fetch()`, remember the last
+  `id:` you read and send it when you reconnect.
+- **How far back.** The event log keeps each event for `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (default 24), whatever
+  run history keeps: `QUERYAPIGATE_HISTORY_SAMPLE_RATE`, `QUERYAPIGATE_HISTORY_LIMIT` and retention apply to history
+  only. A client away for longer gets the stream from the oldest event still kept. One row per run: on SQLite under
+  heavy traffic, a shorter window keeps the store small. Runs dropped under back-pressure (see
+  [Run history](#run-history)) are lost to both.
 - **Limits.** A stream whose key is revoked, deactivated or expires is closed within about a minute (at most 75
   seconds: the key is checked again every 60, at the stream's next write). A client that stops
   reading is disconnected once 1,000 events are waiting for it - it reconnects with `Last-Event-ID` and catches up.
   Beyond `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` open streams, new ones get `503` with `Retry-After`;
   `QUERYAPIGATE_RATE_LIMIT` applies to connection attempts; `QUERYAPIGATE_CORS_ORIGINS` and
   `QUERYAPIGATE_TRUST_PROXY` mean the same as on the main server.
+- **Metrics.** `GET /metrics` (behind `QUERYAPIGATE_METRICS_TOKEN`, like the main server's) counts this process's
+  open streams (`queryapigate_events_streams`), events delivered, replayed on a resume, and clients cut off for
+  falling behind (`queryapigate_events_delivered_total`, `_replayed_total`, `_slow_disconnects_total`), and how long
+  an event took from happening to delivery (`queryapigate_events_lag_seconds`, to the second).
 - **Scale.** Measured on a 4-core machine shared with PostgreSQL and the load generator: 9,000 concurrent streams
   in one process (about 170 MB), every event reaching all 9,000 within 0.75 s of the request, with the main
   server's own latency unaffected.
@@ -1770,7 +1790,7 @@ How that history is written and kept is configurable:
 |----------|---------|--------|
 | `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version, unless a retention period is set. |
 | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep **every** run for this many days instead of a per-version count; a sweep every 10 minutes deletes older ones. Best with a [PostgreSQL metadata store](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
-| `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of *successful* runs recorded, e.g. `0.1` for one in ten on a very busy query. Failed runs are always recorded. |
+| `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of *successful* runs recorded, e.g. `0.1` for one in ten on a very busy query. Failed runs are always recorded. A run sampled out is still a [live event](#live-events-server-sent-events). |
 | `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes. `0` writes each run inside its own request. |
 | `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` | `1000` | Ad-hoc runs kept in all, newest first, unless a retention period is set. |
 | `QUERYAPIGATE_HISTORY_ADHOC_SQL` | `text` | What an ad-hoc run's entry keeps of its SQL: `text` (the first 4,000 characters, with `sql_truncated` when cut), `hash` (`sql_sha256` only - which statements repeat, never their text) or `none`. SQL can embed literal values; choose `hash` or `none` if those may be sensitive. |

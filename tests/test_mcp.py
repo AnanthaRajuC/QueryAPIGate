@@ -213,8 +213,8 @@ class CallToolForTests(McpTestCase):
         subscriber = broadcaster.subscribe()
         mcp_server.call_tool_for(self.app, apikeys.OPEN, 'q1', {})
         event = subscriber.get_nowait()
-        self.assertEqual(event['type'], 'execution')
-        self.assertEqual(event['filename'], 'q1')
+        self.assertEqual((event['type'], event['kind'], event['query'], event['source']),
+                         ('query.run', 'saved', 'q1', 'mcp'))
 
     def test_a_cache_ttl_carrying_query_is_actually_served_from_cache_on_the_second_call(self):
         self.save('cached', cache_ttl=60)

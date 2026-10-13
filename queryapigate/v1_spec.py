@@ -280,8 +280,9 @@ SCHEMAS = {
         },
     },
     'Forgotten': {
-        'type': 'object', 'required': ['runs', 'usage_periods'],
+        'type': 'object', 'required': ['runs', 'events', 'usage_periods'],
         'properties': {'runs': {'type': 'integer', 'description': 'Runs deleted (or that would be, with dry_run).'},
+                       'events': {'type': 'integer', 'description': 'Events deleted from the event log.'},
                        'usage_periods': {'type': 'integer', 'description': 'Days and months of usage counts deleted.'}},
     },
     'ConfigFile': {

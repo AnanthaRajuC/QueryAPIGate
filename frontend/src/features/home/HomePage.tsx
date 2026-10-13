@@ -60,7 +60,7 @@ function useLiveRuns() {
     const refresh = () => void client.invalidateQueries({ queryKey: ['home', 'runs'] });
     (async () => {
       try {
-        const response = await apiFetch('/events', { signal: controller.signal });
+        const response = await apiFetch('/events?type=query.run', { signal: controller.signal });
         if (!response.ok || !response.body) throw new Error('stream unavailable');
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -71,7 +71,7 @@ function useLiveRuns() {
           buffer += decoder.decode(chunk.value, { stream: true });
           const parts = buffer.split('\n\n');
           buffer = parts.pop() ?? '';
-          if (parts.some((part) => part.startsWith('data: ') && part.includes('"execution"'))) refresh();
+          if (parts.some((part) => part.startsWith('data: '))) refresh();
         }
       } catch {
         // falls through to the poll
