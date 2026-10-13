@@ -146,7 +146,11 @@ jobs:
         if: steps.meta.outputs.push == 'true'
         env:
           REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "$REF"
+        # Twice: the Sigstore bundle (an OCI referrer) cosign v3 and `gh` read, and the classic `.sig` tag Sigstore's
+        # policy-controller and other admission controllers still look for - without it they find no signature at all
+        run: |
+          cosign sign --yes "$REF"
+          cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"
 
       - name: Attest how it was built (GitHub)
         if: steps.meta.outputs.push == 'true'
@@ -163,7 +167,10 @@ jobs:
           IDENTITY: https://github.com/${{ github.workflow_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          cosign verify "$REF" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          for bundle in true false; do   # each form on its own: the bundle, then the classic .sig
+            cosign verify "$REF" --new-bundle-format=$bundle \
+              --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          done
           echo "signed by $IDENTITY"
           gh attestation verify "oci://$REF" --owner "$GITHUB_REPOSITORY_OWNER"
           echo "### $REF" >> "$GITHUB_STEP_SUMMARY"
@@ -226,7 +233,8 @@ jobs:
           REF: ${{ steps.push.outputs.ref }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
-          cosign sign --yes "$REF"
+          cosign sign --yes "$REF"   # both forms, as for the image
+          cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"
 
       - name: Attest how it was built (GitHub)
         if: steps.push.outputs.push == 'true'
@@ -243,7 +251,10 @@ jobs:
           IDENTITY: https://github.com/${{ github.workflow_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          cosign verify "$REF" --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          for bundle in true false; do   # each form on its own: the bundle, then the classic .sig
+            cosign verify "$REF" --new-bundle-format=$bundle \
+              --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" > /dev/null
+          done
           echo "signed by $IDENTITY"
           gh attestation verify "oci://$REF" --owner "$GITHUB_REPOSITORY_OWNER"
           echo "### $REF" >> "$GITHUB_STEP_SUMMARY"

@@ -60,7 +60,10 @@ class SignedTests(unittest.TestCase):
                 runs = '\n'.join(step.get('run', '') for step in job['steps'])
                 uses = [step.get('uses', '') for step in job['steps']]
                 self.assertIn('cosign sign --yes "$REF"', runs)
+                # and the classic .sig too: policy-controller 0.13 finds no signature in a bundle alone (ADR 0018)
+                self.assertIn('cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"', runs)
                 self.assertIn('--certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER"', runs)
+                self.assertIn('for bundle in true false', runs)
                 self.assertIn('gh attestation verify', runs)
                 self.assertTrue(any(u.startswith('actions/attest-build-provenance@') for u in uses))
                 signing = next(s for s in job['steps'] if 'cosign sign' in s.get('run', ''))
