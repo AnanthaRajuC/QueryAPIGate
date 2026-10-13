@@ -229,7 +229,7 @@ class MultiNodeTests(unittest.TestCase):
                         break
                     if line.startswith('data: '):
                         event = json.loads(line[6:])
-                        if event.get('filename') == name:
+                        if event.get('query') == name:
                             received.append(event['entry']['request_id'])
             except OSError:
                 pass
