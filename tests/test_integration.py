@@ -478,5 +478,97 @@ class DuckDBTests(IntegrationBase, unittest.TestCase):
         self.assertEqual(len(self.query('SELECT * FROM queryapigate_it', '?page_size=100').get_json()), 7)
 
 
+class MongoTests(unittest.TestCase):
+    """MongoDB against a real server (QUERYAPIGATE_IT_MONGO): find() through /execute_mongo and saved queries, the
+    time limit, allowed_tables as collections, and the refusals that keep a find() a find() - each sent to the real
+    server's parser, not a mock's. Not IntegrationBase: there is no SQL to run."""
+    db, env_var = 'mongo', 'QUERYAPIGATE_IT_MONGO'
+
+    @classmethod
+    def setUpClass(cls):
+        raw = os.environ.get(cls.env_var)
+        if not raw:
+            raise unittest.SkipTest(f'{cls.env_var} not set')
+        cls.details = {**json.loads(raw), 'db': cls.db, 'active': True}
+
+    def setUp(self):
+        import pymongo
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_API_KEY': 'admin'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        write_connections({'it': self.details})
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin'}
+        server = pymongo.MongoClient(self.details['host'], int(self.details.get('port') or 27017))
+        self.addCleanup(server.close)
+        self.mongo = server[self.details['database']]
+        for name in ('queryapigate_it', 'queryapigate_it_secret', 'queryapigate_it_slow'):
+            self.mongo.drop_collection(name)
+            self.addCleanup(self.mongo.drop_collection, name)
+        self.mongo.queryapigate_it.insert_many([{'id': i, 'name': f'Item {i}', 'price': i + 0.5} for i in range(1, 8)])
+        self.mongo.queryapigate_it_secret.insert_one({'token': 'tok_live_123'})
+
+    def find(self, headers=None, query='', **body):
+        return self.client.post(f'/execute_mongo{query}', headers=headers or self.admin,
+                                json={'connection_name': 'it', 'collection': 'queryapigate_it', **body})
+
+    def key(self, **grants):
+        res = self.client.post('/api/v1/api-keys', headers=self.admin, json={'name': 'partner', **grants})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        return {'X-API-Key': res.get_json()['secret']}
+
+    def test_a_find_filters_projects_sorts_and_pages(self):
+        res = self.find(query='?page_size=2', filter={'price': {'$gte': 3}}, projection={'_id': 0, 'id': 1},
+                        sort={'id': -1})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.get_json(), [{'id': 7}, {'id': 6}])
+        self.assertEqual(res.headers['X-Has-More'], 'true')
+
+    def test_a_saved_query_binds_a_typed_parameter(self):
+        self.assertEqual(save_query(self.client, headers=self.admin, body={
+            'filename': 'by_id', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'queryapigate_it', 'mongo_filter': {'id': ':id'},
+            'mongo_projection': {'_id': 0, 'name': 1}, 'query_parameters': {'id': 'int'},
+            'connection_name': 'it'}).status_code, 201)
+        res = self.client.get('/q/by_id?id=3', headers=self.admin)
+        self.assertEqual((res.status_code, res.get_json()), (200, [{'name': 'Item 3'}]))
+
+    def test_the_time_limit_cancels_a_find(self):
+        self.mongo.queryapigate_it_slow.insert_many([{'s': 'x' * 40 + str(i)} for i in range(100_000)])
+        res = self.find(collection='queryapigate_it_slow', filter={'s': {'$regex': 'y$'}}, timeout=0.001)
+        self.assertEqual((res.status_code, res.get_json()['code']), (504, 'query_timeout'))
+        unlimited = self.find(collection='queryapigate_it_slow', filter={'s': {'$regex': 'y$'}})
+        self.assertEqual(unlimited.status_code, 200)  # the same find, given its time, simply finds nothing
+
+    def test_allowed_tables_are_the_collections_a_key_may_read(self):
+        partner = self.key(connections=['it'], allowed_tables=['queryapigate_it'])
+        self.assertEqual(self.find(partner).status_code, 200)
+        refused = self.find(partner, collection='queryapigate_it_secret')
+        self.assertEqual((refused.status_code, refused.get_json()['code']), (403, 'table_not_allowed'))
+        self.assertNotIn('tok_live', refused.get_data(as_text=True))
+
+    def test_server_side_javascript_and_injected_operators_never_reach_the_server(self):
+        js = {'$function': {'body': 'function() { return true; }', 'args': [], 'lang': 'js'}}
+        for body in ({'filter': {'$where': 'true'}}, {'filter': {'$expr': js}}, {'projection': {'x': js}},
+                     {'sort': {'x': js}}):
+            with self.subTest(body=body):
+                res = self.find(**body)
+                self.assertEqual((res.status_code, res.get_json()['code']), (403, 'mongo_operator_forbidden'))
+        injected = self.find(filter={'name': ':u'}, params={'u': {'$ne': None}})
+        self.assertEqual((injected.status_code, injected.get_json()['code']), (400, 'param_invalid'))
+
+    def test_the_schema_lists_collections_and_the_server_its_databases(self):
+        res = self.client.get('/connections/it/schema', headers=self.admin)
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertIn('queryapigate_it', {t['name'] for t in res.get_json()['tables']})
+        listed = self.client.post('/api/v1/connections/databases', headers=self.admin, json=self.details)
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        self.assertIn(self.details['database'], json.dumps(listed.get_json()))
+        tested = self.client.post('/api/v1/connections/test', headers=self.admin, json=self.details)
+        self.assertEqual(tested.status_code, 200, tested.get_data(as_text=True))
+
+
 if __name__ == '__main__':
     unittest.main()

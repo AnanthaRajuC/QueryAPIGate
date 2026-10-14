@@ -15,8 +15,8 @@ NAMES = {'postgres': 'PostgreSQL', 'mysql': 'MySQL', 'sqlite': 'SQLite', 'duckdb
 TIER_1 = tuple(t for t in TYPES if t not in experimental.DB_TYPES)
 
 # Run against a real server (or, for SQLite, a real file) on every CI push: tests/test_integration.py's classes, and
-# the main suite for SQLite. MongoDB has no such test yet - the main reason it is experimental.
-INTEGRATION_TESTED = frozenset({'postgres', 'mysql', 'clickhouse', 'duckdb', 'h2', 'jdbc', 'sqlite'})
+# the main suite for SQLite. CI fails if one skips.
+INTEGRATION_TESTED = frozenset({'postgres', 'mysql', 'clickhouse', 'duckdb', 'h2', 'jdbc', 'sqlite', 'mongo'})
 
 # Where the database itself refuses writes in a read-only session, beside QueryAPIGate's own SQL check (sqltools):
 # MySQL and PostgreSQL read-only transactions, ClickHouse readonly=1, SQLite mode=ro. DuckDB, H2 and JDBC rest on

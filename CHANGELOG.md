@@ -49,6 +49,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **CI tests MongoDB against a real server** - MongoDB 8.0 in the integration job: `find()` with filter, projection,
+  sort and pages; a saved query's typed parameter; the time limit cancelling a find; `allowed_tables` as collections;
+  and 0.34.2's refusals - server-side JavaScript and injected operators - sent to a real server. And at `pymongo`'s
+  floor, 4.0, in the oldest-dependencies job. The support matrix now says MongoDB is tested in CI.
+
+### Changed
+- **The integration job fails if a database's tests skip** for want of their server, as the services step already
+  did: a missing `QUERYAPIGATE_IT_*` would otherwise have passed it quietly.
+
 ## [0.34.2] - 2026-10-13
 
 ### Security

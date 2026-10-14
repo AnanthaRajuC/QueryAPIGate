@@ -70,11 +70,18 @@ jobs:
         options: >-
           --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
           --health-retries 20
+      mongo:
+        image: mongo:8.0
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
+          --health-retries 20
     env:
       QUERYAPIGATE_IT_POSTGRES: '{"host": "localhost", "port": 5432, "user": "postgres", "password": "pw", "database": "postgres"}'
       QUERYAPIGATE_IT_MYSQL: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
       QUERYAPIGATE_IT_CLICKHOUSE: '{"host": "localhost", "port": 9000, "user": "default", "password": "pw", "database": "default"}'
       QUERYAPIGATE_IT_H2: '{"host": "localhost", "user": "SA", "password": "", "database": "it"}'
+      QUERYAPIGATE_IT_MONGO: '{"host": "localhost", "port": 27017, "database": "it"}'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -90,7 +97,11 @@ jobs:
         run: |
           java -cp queryapigate/lib/h2-2.2.224.jar org.h2.tools.Server -tcp -tcpPort 9092 -ifNotExists &
           sleep 5
-      - run: python -m unittest tests.test_integration -v
+      - name: Every database against its real server - none may skip
+        run: |
+          set -o pipefail  # the tests' own result, not tee's
+          python -m unittest tests.test_integration -v 2>&1 | tee /tmp/integration.log
+          ! grep -E "skipped '(QUERYAPIGATE_IT_[A-Z0-9_]+ not set|the 'duckdb' package)" /tmp/integration.log
       # Started here rather than as services: neither image can be given its command that way.
       - name: Start an S3-compatible store (SeaweedFS), for exports and files on S3
         run: |
@@ -173,6 +184,12 @@ jobs:
     name: Tests (oldest supported dependencies)
     runs-on: ubuntu-latest
     services:
+      mongo:  # pymongo's floor, against a real server
+        image: mongo:8.0
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
+          --health-retries 20
       postgres:  # psycopg2's floor, against a real store: live events' notifications among it (ADR 0021)
         image: postgres:16
         env:
@@ -196,8 +213,12 @@ jobs:
       - run: >-
           pip install -e ".[dev]" "Flask==3.0.0" "Werkzeug==3.0.0" "PyYAML==6.0.1" "openpyxl==3.1.0"
           "duckdb==1.2.0" "sqlglot==25.2.0" "mcp==1.21.1" "PyJWT[crypto]==2.14.0" "redis==5.0.0"
-          "psycopg2-binary==2.9.5"
+          "psycopg2-binary==2.9.5" "pymongo==4.0"
       - run: python -m unittest discover -s tests -t . -v
+      - name: MongoDB at pymongo's floor, against a real server
+        run: python -m unittest tests.test_integration.MongoTests -v
+        env:
+          QUERYAPIGATE_IT_MONGO: '{"host": "localhost", "port": 27017, "database": "it"}'
       - name: Again, on a PostgreSQL store
         run: python -m unittest discover -s tests -t . -v
         env:

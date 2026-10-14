@@ -11,10 +11,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Each package whose floor CI tests, and the extra that declares it - None for a core dependency. Every core
 # dependency is here, and every extra a stable feature needs (ADR 0017); the experimental features' extras (otel,
-# aws, mongo, h2) join when they graduate.
+# aws, h2) join when they graduate - mongo's already has, tested against a real server.
 FLOORS = {'Flask': None, 'Werkzeug': None, 'PyYAML': None, 'openpyxl': None,
           'duckdb': 'duckdb', 'sqlglot': 'flow', 'mcp': 'mcp', 'PyJWT': 'jwt', 'redis': 'redis',
-          'psycopg2-binary': 'postgres'}  # the PostgreSQL store, and live events' notifications (ADR 0021)
+          'psycopg2-binary': 'postgres',  # the PostgreSQL store, and live events' notifications (ADR 0021)
+          'pymongo': 'mongo'}
 
 
 def _project():

@@ -66,7 +66,7 @@ work, with the gaps below, and may change in a minor release.
 | Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
 | MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
 | Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
-| Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | no |
+| Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | yes |
 <!-- support-matrix:end -->
 
 `n/a` is a feature the database has no use for (a SQLite file has no other database to switch to; MongoDB has no SQL).
@@ -152,8 +152,8 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 These three types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
 H2 and JDBC rather than guess (fail closed), and on MongoDB is the collections a key may read (from 0.34.1 - before it,
 it wasn't checked there at all); H2 and JDBC rest their read-only default on the SQL check alone, and JDBC
-has no query time limit and no schema browser; MongoDB runs `find()` queries only, with no streaming exports, and is
-the one type not yet tested against a real server in CI. A server with one configured logs a warning at startup
+has no query time limit and no schema browser; MongoDB runs `find()` queries only, with no streaming exports. All
+three are tested against a real server in CI - MongoDB since 0.35, against MongoDB 8.0. A server with one configured logs a warning at startup
 saying so. The matrix also lists what each needs to become tier 1.
 
 ## Generic JDBC connections
