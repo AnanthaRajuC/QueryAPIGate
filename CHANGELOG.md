@@ -59,6 +59,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **The integration job fails if a database's tests skip** for want of their server, as the services step already
   did: a missing `QUERYAPIGATE_IT_*` would otherwise have passed it quietly.
 
+### Fixed
+- **Forgetting a person could leave a usage period behind** (0.29.0 to 0.34.2). If `queryapigate history forget` or
+  `DELETE /api/v1/history?caller=` ran while the background writer was storing usage counts, the counts it was
+  writing were in neither place `forget` looked: it missed them, and the writer stored them after the person was
+  forgotten - a period of their usage counts kept, and left out of the count `forget` reported. Forgetting now waits
+  for a write in flight, then deletes what it wrote. Runs and events were never affected. Found by CI, as a test
+  that failed one run in many.
+
 ## [0.34.2] - 2026-10-13
 
 ### Security

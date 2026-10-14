@@ -147,6 +147,27 @@ class ForgetTests(unittest.TestCase):
         quotas.write()  # what was still unwritten was forgotten too
         self.assertEqual(self.periods(self.PERSON), 0)
 
+    def test_a_write_in_flight_is_waited_for_not_missed(self):
+        # CI, 2026-10-14: the background writer had taken the unwritten month's count and was writing it when forget
+        # ran - forget found it in neither place, deleted the rest, and the writer then stored it after the person
+        # was forgotten. Forgetting now waits for a write in flight, and deletes what it wrote.
+        import threading
+        writing, release, original = threading.Event(), threading.Event(), quotas._write
+
+        def slow_write(target, counted, stamp):
+            writing.set()
+            release.wait(5)
+            original(target, counted, stamp)
+        with mock.patch.object(quotas, '_write', slow_write):
+            writer = threading.Thread(target=quotas.write)
+            writer.start()
+            self.assertTrue(writing.wait(5))
+            threading.Timer(0.3, release.set).start()
+            forgotten = history.forget(self.PERSON, 'owner')
+            writer.join(5)
+        self.assertEqual(forgotten['usage_periods'], 2)
+        self.assertEqual(self.periods(self.PERSON), 0)
+
     def test_the_record_of_it_keeps_nothing_of_who(self):
         history.forget(self.PERSON, 'owner')
         entry = self.audit()[-1]

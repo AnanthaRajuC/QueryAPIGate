@@ -109,6 +109,10 @@ class _Counter:
 
 
 _counter = _Counter()
+# Held from taking the unwritten counts to storing them, and by forget(): a forget that ran while a write was in flight
+# found the counts in neither place - taken from _counter, not yet in the store - and the write then stored them after
+# the person was forgotten (CI, 2026-10-14). Reentrant: forget() writes first, under it.
+_writing = threading.RLock()
 
 
 class _Shared:
@@ -209,20 +213,21 @@ def _stored(caller, key):
 def write():
     """Add what's been counted to the store(s) it was counted against - the history writer's batch calls this (and
     tests). A failed write puts the counts back, to be written next time rather than lost."""
-    taken = _counter.take()
-    if not taken:
-        return
-    by_target = {}
-    for (target, caller, key), counts in taken.items():
-        by_target.setdefault(target, {})[(caller, key)] = counts
-    stamp = datetime.now().strftime(_TIME)
-    try:
-        for target, counted in by_target.items():
-            _write(target, counted, stamp)
-    except Exception:
-        _counter.put_back(taken)
-        raise
-    _counter.forget_reads()
+    with _writing:
+        taken = _counter.take()
+        if not taken:
+            return
+        by_target = {}
+        for (target, caller, key), counts in taken.items():
+            by_target.setdefault(target, {})[(caller, key)] = counts
+        stamp = datetime.now().strftime(_TIME)
+        try:
+            for target, counted in by_target.items():
+                _write(target, counted, stamp)
+        except Exception:
+            _counter.put_back(taken)
+            raise
+        _counter.forget_reads()
 
 
 def _write(target, counted, stamp):
@@ -249,13 +254,15 @@ def _ensure_written():
 def forget(caller):
     """Delete a caller's usage counts - unwritten, stored and in Redis (ADR 0016: forgetting a person). Their quota's
     count for the period starts again. Returns how many periods there were: what this process hadn't written yet is
-    written first, so the answer doesn't depend on whether a background write happened to come first."""
-    write()
-    with _counter.lock:
-        for slot in [s for s in _counter.read if s[0] == caller]:
-            del _counter.read[slot]
-    with db.transaction() as tx:
-        stored = tx.execute('DELETE FROM usage_counters WHERE caller = ?', (caller,)).rowcount
+    written first, so the answer doesn't depend on whether a background write happened to come first - or was in
+    flight: that one is waited for (_writing)."""
+    with _writing:
+        write()
+        with _counter.lock:
+            for slot in [s for s in _counter.read if s[0] == caller]:
+                del _counter.read[slot]
+        with db.transaction() as tx:
+            stored = tx.execute('DELETE FROM usage_counters WHERE caller = ?', (caller,)).rowcount
     shared = _redis()
     if shared is not None:
         try:
