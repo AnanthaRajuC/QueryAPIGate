@@ -40,7 +40,7 @@ mongo = ["pymongo>=4.0"]
 flow = ["sqlglot>=25.2,<26"]  # the Access tab's tables and joins (sqlflow.py) and column masking's tracing (masking.py)
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
-mcp = ["mcp>=1.21.1,<2"]  # only needed for `queryapigate mcp` - see mcp_server.py. Structured tool output arrived
+mcp = ["mcp>=1.21.1,<3"]  # only needed for `queryapigate mcp` - see mcp_server.py. Structured tool output arrived
                           # in 1.10, but nothing before 1.21.1 can be imported beside the pydantic pip installs
                           # with it (a private pydantic function they used is gone).
 jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL is set - see jwtauth.py.
