@@ -371,6 +371,11 @@ class EventsServerTests(JwtTestCase):
         from queryapigate import events
         from tests.test_events_server import Stream
         self.events, self.Stream = events, Stream
+        # Before the server starts, and undone after it stops: its worker threads open store connections, and
+        # libpq reads os.environ from C - changing it meanwhile crashes the interpreter (see test_events_server).
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         loop = asyncio.new_event_loop()
         thread = threading.Thread(target=loop.run_forever, daemon=True)
         thread.start()
@@ -380,13 +385,11 @@ class EventsServerTests(JwtTestCase):
 
         def stop():
             asyncio.run_coroutine_threadsafe(server.stop(), loop).result(10)
+            asyncio.run_coroutine_threadsafe(loop.shutdown_default_executor(), loop).result(10)
             loop.call_soon_threadsafe(loop.stop)
             thread.join(5)
             loop.close()
         self.addCleanup(stop)
-        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0'})
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def open(self, value):
         stream = self.Stream(self.server.port, headers=bearer(value))

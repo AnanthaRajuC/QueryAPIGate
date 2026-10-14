@@ -119,7 +119,9 @@ class EventServerTestCase(unittest.TestCase):
             asyncio.run_coroutine_threadsafe(server.stop(), loop).result(10)
             # Wait for the loop's worker threads too (asyncio.to_thread - checking a key opens a store connection):
             # one still connecting when the test's patched environment is restored reads os.environ while it is
-            # being changed, which libpq does in C - and that crashes the interpreter, not just the test.
+            # being changed, which libpq does in C - and that crashes the interpreter, not just the test. For the
+            # same reason a test never changes os.environ while the server runs: it patches the config function that
+            # reads the setting instead (CI on a PostgreSQL store, 2026-10-14: a segfault in the metrics test).
             asyncio.run_coroutine_threadsafe(loop.shutdown_default_executor(), loop).result(10)
             loop.call_soon_threadsafe(loop.stop)
             thread.join(5)
@@ -312,7 +314,7 @@ class EventLogTests(EventServerTestCase):
 
     def test_a_run_sampled_out_of_history_is_still_an_event(self):
         stream = self.open('admin')
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_SAMPLE_RATE': '0.000001'}):
+        with mock.patch.object(config, 'history_sample_rate', return_value=0.000001):  # see start_server()
             self.run_query(self.alice)
         (_, payload), = stream.events(1)
         self.assertEqual(payload['query'], 'q')
@@ -332,7 +334,7 @@ class EventLogTests(EventServerTestCase):
         with db.transaction() as conn:
             for occurred_at in ('2026-01-01 00:00:00', '2026-01-02 11:00:00', '2026-01-02 13:00:00'):
                 conn.execute(events.INSERT, events.run_columns('q', 1, {'executed_at': occurred_at}))
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '12'}):
+        with mock.patch.object(config, 'events_retention_hours', return_value=12):
             self.assertEqual(events.sweep(now=datetime(2026, 1, 3, 0, 0)), 2)
         self.assertEqual([row[0] for row in db.connection().execute('SELECT occurred_at FROM events')],
                          ['2026-01-02 13:00:00'])
@@ -415,7 +417,7 @@ class MetricsTests(EventServerTestCase):
         self.assertIn('queryapigate_events_lag_seconds_count 1\n', text)
 
     def test_the_metrics_token_applies(self):
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METRICS_TOKEN': 'sesame'}):
+        with mock.patch.object(config, 'metrics_token', return_value='sesame'):
             self.assertEqual(self.metrics().status, 401)
             self.assertEqual(self.metrics(Authorization='Bearer sesame').status, 200)
 
@@ -447,7 +449,7 @@ class LimitTests(EventServerTestCase):
         self.assertEqual((refused.status, refused.headers['retry-after']), (503, '5'))
 
     def test_the_server_wide_rate_limit_applies_to_connection_attempts(self):
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_RATE_LIMIT': '2/minute'}):
+        with mock.patch.object(config, 'rate_limit', return_value=config.parse_rate_limit('2/minute')):
             statuses = [self.open('admin').status for _ in range(3)]
         self.assertEqual(statuses, [200, 200, 429])
 
@@ -470,7 +472,7 @@ class LimitTests(EventServerTestCase):
 
 class CorsTests(EventServerTestCase):
     def test_an_allowed_origin_gets_cors_headers_and_a_preflight(self):
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_CORS_ORIGINS': 'https://app.example.com'}):
+        with mock.patch.object(config, 'cors_origins', return_value=frozenset({'https://app.example.com'})):
             preflight = Stream(self.server.port, method='OPTIONS', headers={
                 'Origin': 'https://app.example.com', 'Access-Control-Request-Method': 'GET'})
             self.assertEqual(preflight.status, 204)
