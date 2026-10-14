@@ -49,6 +49,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-14
+
+MongoDB is tested on every push against a real server, as every other connection type already was - and every
+database's tests now fail CI if they skip. A person forgotten while usage counts were being written no longer keeps
+a period of them.
+
+### Upgrading from 0.34
+- **Nothing to change.** No schema change, no setting. MongoDB stays experimental: it graduates in 0.36, with
+  streaming exports.
+
 ### Added
 - **CI tests MongoDB against a real server** - MongoDB 8.0 in the integration job: `find()` with filter, projection,
   sort and pages; a saved query's typed parameter; the time limit cancelling a find; `allowed_tables` as collections;
@@ -2518,7 +2528,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...v0.35.0
 [0.34.2]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.33.0...v0.34.0
