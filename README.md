@@ -6,6 +6,8 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/queryapigate.svg)](https://pypi.org/project/queryapigate/)
 [![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-blue.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AnanthaRajuC/QueryAPIGate/badge)](https://scorecard.dev/viewer/?uri=github.com/AnanthaRajuC/QueryAPIGate)
+[![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md#slsa-level)
 
 ### Turn SQL queries into secure, governed REST APIs.
 

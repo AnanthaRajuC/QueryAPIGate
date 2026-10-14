@@ -49,6 +49,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **Build provenance for the sdist and wheel**: the release workflow attests what it uploads to PyPI with GitHub's
+  build provenance, signed through Sigstore - `gh attestation verify <file> --owner AnanthaRajuC`. With the images'
+  and the chart's, every release artifact meets **SLSA Build Level 2**; SECURITY.md says so, and why not Level 3.
+- **OpenSSF Scorecard**, run on every push to `main` and weekly, its results published (the README's badge) and in
+  the repository's code scanning alerts.
+
+### Changed
+- **Every workflow gives its jobs a read-only token** unless a job asks for more, as `docs.yml` already did.
+
 ## [0.35.0] - 2026-10-14
 
 MongoDB is tested on every push against a real server, as every other connection type already was - and every

@@ -27,6 +27,10 @@ env:
   # Who a signature says built it: this workflow, at the ref it ran on - refs/tags/vX.Y.Z for a release
   OIDC_ISSUER: https://token.actions.githubusercontent.com
 
+# Every job gets a read-only token unless it asks for more (OpenSSF Scorecard: Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   image:
     name: Image${{ matrix.variant }}

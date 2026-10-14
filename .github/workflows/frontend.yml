@@ -9,6 +9,10 @@ on:
   pull_request:
     paths: ["frontend/**", ".github/workflows/frontend.yml"]
 
+# Every job gets a read-only token unless it asks for more (OpenSSF Scorecard: Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   console:
     name: Console (lint, types, tests, build)

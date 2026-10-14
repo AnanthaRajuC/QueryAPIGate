@@ -6,12 +6,18 @@ on:
   push:
     tags: ["v*"]
 
+# Every job gets a read-only token unless it asks for more (OpenSSF Scorecard: Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write
+      contents: read
+      id-token: write       # trusted publishing to PyPI, and signing the provenance below - no key stored anywhere
+      attestations: write   # GitHub's build provenance for the sdist and wheel
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,4 +40,11 @@ jobs:
       - run: python -m build
       - name: The wheel contains the Console
         run: unzip -l dist/*.whl | grep -q 'queryapigate/console_dist/index.html'
+      # SLSA provenance for what PyPI gets - which workflow, at which commit, built it - signed through Sigstore and
+      # verifiable with `gh attestation verify <file> --owner AnanthaRajuC`. The publish step below adds PyPI's own
+      # PEP 740 attestations, which say who uploaded the files, not how they were built.
+      - name: Build provenance for the sdist and wheel
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
