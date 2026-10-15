@@ -49,6 +49,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.35.1] - 2026-10-15
+
+Two security fixes anyone running `allowed_tables` or ad-hoc SQL should take: a CTE named after a table read past a
+key's table allow-list, and one statement could hold a worker for over a minute. Found by a review, CodeQL and the new
+fuzzing - which arrive in this release too, with build provenance for the Python packages and a GitHub Release for
+every version.
+
+### Upgrading from 0.35.0
+- **Nothing to change.** No schema change, no setting. Two things look different: the plain-text log writes a line
+  break inside a message as `\n` (one event, one line), and a key whose stored expiry can't be read is refused - only
+  a store edited by hand could hold one.
+- **From a source checkout, fetch the H2 driver** before using an `h2` connection:
+  `python .github/scripts/fetch_h2_jar.py`. The wheel and the images bundle it as before.
+
 ### Added
 - **Build provenance for the sdist and wheel**: the release workflow attests what it uploads to PyPI with GitHub's
   build provenance, signed through Sigstore - `gh attestation verify <file> --owner AnanthaRajuC`. With the images'
@@ -2578,7 +2592,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...HEAD
+[0.35.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...v0.35.0
 [0.34.2]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...v0.34.2
 [0.34.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.0...v0.34.1
