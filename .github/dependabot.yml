@@ -4,6 +4,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Column masking and table allow-lists read sqlglot's parse tree: a new major changes it, and sqlglot 30
+      # stopped masking `SELECT * FROM customers, LATERAL (SELECT email AS e2) l`. Moving past <26 is deliberate
+      # work, tested on its own - not a bump (Dependabot #35, 2026-10-15).
+      - dependency-name: sqlglot
+        update-types: ["version-update:semver-major"]
+      # mcp 2 removed streamablehttp_client, which the MCP server's own clients and tests use (#36).
+      - dependency-name: mcp
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -12,6 +21,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The Console builds on an LTS Node, the same as frontend/.nvmrc and the release workflow - moved together,
+      # by hand; an odd major (25) is never an LTS (#38).
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker  # ClusterFuzzLite's build image, by digest
     directory: /.clusterfuzzlite
     schedule:
