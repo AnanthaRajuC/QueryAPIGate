@@ -11,8 +11,6 @@
 
 ### Turn SQL queries into secure, governed REST APIs.
 
-> **QueryAPIGate was previously named SQL2API.** Upgrading? See [Upgrading from SQL2API](documentation/INSTALLATION_AND_SETUP.md#upgrading-from-sql2api) for what changed.
-
 [**Full documentation**](https://AnanthaRajuC.github.io/QueryAPIGate/)
 
 <p align="center">
@@ -21,6 +19,24 @@
   </a>
   <br>
   <sub>Every feature, one by one: <a href="https://youtu.be/cTkv6smFtWA"><b>the full walkthrough</b></a> (6 minutes, in chapters)</sub>
+</p>
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/queryapigate-architecture.gif">
+    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/queryapigate-architecture.gif"
+         alt="One governed gate between your databases and everything that asks them for data: apps, partners, AI agents, people and pipelines come in through five front doors - REST endpoints, the MCP server, live events, exports and the CLI, the Management API - and every call passes the same governed core (identity, policy, execution) before it reaches PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse, the experimental H2, JDBC and MongoDB, files through DuckDB, or deliveries to object storage" width="820">
+  </a>
+  <br>
+  <sub>Every front door runs the same checks, so an AI agent's call is governed exactly like an app's. Write the SQL once; it's a REST endpoint, an MCP tool, a live event stream and a scheduled export.</sub>
+</p>
+
+<p align="center">
+  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/what-happens-to-every-request.gif">
+    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/what-happens-to-every-request.gif"
+         alt="What happens to every request, one partner call followed through eight stages: identify the caller, apply its limits, check the grant, validate parameters, guard the SQL, run it, mask and format, record it - a stage that fails stops the call with a typed error code" width="820">
+  </a>
+  <br>
+  <sub>One path for REST, MCP, events and exports. A stage that fails stops the call with a typed error code - except recording, which never blocks the response.</sub>
 </p>
 
 **QueryAPIGate** is a self-hosted service that runs SQL against your databases - and against Parquet, CSV and JSON files
@@ -50,458 +66,64 @@ Crimson Garden,Comedy,PG-13,631,2
   <sub>The built-in Console at <code>/console</code>: write SQL with completion and a schema browser, run it, then save it as an API - no separate tool to install.</sub>
 </p>
 
-<p align="center">
-  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png">
-    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home.png"
-         alt="Home: stat tiles for connections, the API Repository, API keys, roles, requests and error rate, System health listing the current alerts (an expiring key, a key over its rate limit, a failing query), recent audit activity, quick actions, and recent ad-hoc and saved-query requests" width="820">
-  </a>
-  <br>
-  <sub>Home: live totals, what needs attention, recent activity, and every recent request - saved APIs and ad-hoc SQL alike.</sub>
-</p>
+More of the Console - Home, connections, keys and roles, history, the audit log, metrics, alerts, the access
+map - screen by screen: [**a tour of the Console**](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/SCREENSHOTS.md).
 
-<table>
-<tr>
-<td width="25%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with All/Active/Inactive/Deleted tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with their status, each connection's live usage (queries run, failures, average latency), and Query, edit and delete actions">
-</a>
-<br><sub>Manage connections across every supported database, with live usage per connection</sub>
-</td>
-<td width="25%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png" alt="The API Repository: saved queries grouped into collapsible collections, each with its key count and Postman/Rename actions, beside the selected query's connection, collection, Run/SQL/History/Curl tabs and generated GET /q/ endpoint">
-</a>
-<br><sub>Every saved query becomes a documented REST endpoint - grouped into collections</sub>
-</td>
-<td width="25%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/api-keys.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/api-keys.png" alt="API keys screen showing keys created from roles and scoped to a collection (shown as a dashed name/ tag), an expiring partner key, per-key rate limits, and each key's last-used time and live usage">
-</a>
-<br><sub>Per-key permissions: connections, specific saved queries, expiry, rate limits - and what each key has actually done</sub>
-</td>
-<td width="25%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png" alt="Roles screen listing reusable permission templates - connections, read/write access, rate limit and IP allowlisting - with a New key from this shortcut">
-</a>
-<br><sub>Named roles: a reusable grant template, copied onto a key once at creation</sub>
-</td>
-</tr>
-</table>
 
-<table>
-<tr>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-query-history.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-query-history.png" alt="A saved query's History tab: every run with its time, calling API key, rows, duration and request ID, with a status filter and search box">
-</a>
-<br><sub>Run history per saved query: who called it, how long it took, and the request ID to find it in the logs</sub>
-</td>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/audit-log.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/audit-log.png" alt="Audit log screen listing every administrative change - saved queries, roles and API keys created or updated - with an action filter and search box">
-</a>
-<br><sub>A durable audit log of every configuration change, filterable by action, actor and target</sub>
-</td>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png" alt="Metrics screen with stat tiles for requests, error rate, active queries, pool and rate limiting, bars for requests by status and queries by connection, and a per-connection latency table">
-</a>
-<br><sub>Live metrics with no Prometheus required - or import the bundled Grafana dashboard for history</sub>
-</td>
-</tr>
-</table>
+## Contents
 
-<table>
-<tr>
-<td width="50%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/collections-move.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/collections-move.png" alt="The Move to a collection drawer: choosing a collection previews which API keys will gain access to the query and which will lose it, and which roles will include it">
-</a>
-<br><sub>Collections: grant a key a whole group of queries - and see exactly which keys gain or lose access before a query moves</sub>
-</td>
-<td width="50%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png" alt="Caching screen: response cache backend, entry count, hit rate, hits and misses, and the list of saved queries with a cache_ttl set">
-</a>
-<br><sub>Caching: live hit rate for the response cache backing every saved query's <code>cache_ttl</code></sub>
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png" alt="Alerts screen with a tab per check - key expiry, unused keys, failing connections, query errors, slow queries, rate limits, open access and run history - listing a critical failing connection and warnings for an expiring key, a key over its rate limit and a failing query, each with what to do and a link to fix it">
-</a>
-<br><sub>Alerts: failing connections, expiring keys, failing or slow queries, rate limits being hit - each with what to do, clearing by itself once fixed</sub>
-</td>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png" alt="Access map: every saved query against every API key, showing whether each key reaches it through a named query, a collection or a whole connection, with filters by connection, database and reach">
-</a>
-<br><sub>Access map: which key can call which query, and why - one grid instead of reading every grant</sub>
-</td>
-<td width="33%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png" alt="Settings: the server's effective configuration by section, and this browser's Appearance preferences - theme, font size, time zone, time format, table density and reduced motion">
-</a>
-<br><sub>Settings: the server's effective configuration, read-only, plus per-browser appearance and editor preferences</sub>
-</td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="50%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/help.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/help.png" alt="Help: the how-to guides browsed inside the Console, with an On this page list of the guide's sections">
-</a>
-<br><sub>Help: the docs and how-to guides for the version you run, inside the Console</sub>
-</td>
-<td width="50%">
-<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home-dark.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/home-dark.png" alt="Home in the dark theme, with the font size and light/dark switches in the top right corner">
-</a>
-<br><sub>Light or dark, three font sizes - switched from the top right corner</sub>
-</td>
-</tr>
-</table>
+- [Why QueryAPIGate](#why-queryapigate)
+- [Features](#features)
+- [Install](#install) · [Quick start](#quick-start) · [Saving a query as an endpoint](#saving-a-query-as-an-endpoint)
+- [Try it with Docker](#try-it-with-docker)
+- [Documentation](#documentation)
+- [Contributing](#contributing) · [Security](#security) · [License](#license) · [Contact](#contact)
 
 ---
 
-## Why QueryAPIGate?
+## Why QueryAPIGate
 
-Organizations often have valuable SQL sitting inside reports, BI dashboards, ETL pipelines, ad-hoc analysis and
-application code, with no path to a REST endpoint except writing a backend service around it.
+Valuable SQL sits in reports, dashboards, ETL jobs and application code, with no way to a REST endpoint except a
+backend service written around each query. QueryAPIGate makes the query itself the API: write the SQL once, and it is
+a versioned endpoint with typed parameters, governed by who may call it, how often and what they may see - and the same
+query is an MCP tool for AI agents, a live event stream and a scheduled export.
 
-```text
-              SQL Query
-                  |
-                  v
-          +------------------+
-          |   QueryAPIGate   |
-          |                  |
-          | Parameters       |
-          | SQL Guard        |
-          | Permissions      |
-          | Rate Limiting    |
-          | Caching          |
-          | Connection Pool  |
-          | Streaming        |
-          | Observability    |
-          +--------+---------+
-                   |
-                   v
-               REST API
-                   |
-          +--------+--------+
-          v        v        v
-        JSON      CSV      XLSX
-```
+It doesn't replace an application backend; it removes the boilerplate when the requirement is "expose this query
+safely". Use cases, how it compares to PostgREST, Hasura and others, and the thinking behind it:
+[why QueryAPIGate](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/WHY.md).
 
-If you already know SQL, you can produce a governed API without building an API application around it.
+## Features
 
-### Architecture
+- **[Saved, versioned queries as endpoints](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#save-a-query)** - `GET /q/<name>`, typed and
+  injection-safe parameters, drafts and publishing, run history.
+- **[Scoped API keys, roles and collections](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#authentication-and-permissions)** - per
+  connection, per query or per collection; expiry, IP allow-lists, rate limits, quotas, table allow-lists.
+- **[Named administrators and SSO](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#administrators-and-admin-roles)** - admin roles and
+  tokens, Console sign-in through your identity provider, signed-in users' JWTs.
+- **[Column masking](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#column-masking)** - hash, mask or drop what a caller mustn't see, traced
+  through the SQL to the source column.
+- **[An MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as tools, OAuth sign-in, write tools that
+  wait for a person's approval.
+- **[Eight database types, and files](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix)** -
+  PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse; H2, JDBC and MongoDB; Parquet, CSV and JSON on S3, GCS, R2 or disk.
+- **[Eight output formats, and streaming](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#streaming-exports)** - JSON, NDJSON, XML, YAML, CSV,
+  TSV, Excel and Parquet; whole results streamed from the database cursor.
+- **[Exports to object storage](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#exports-to-object-storage)** - scheduled, incremental, to
+  S3, GCS, R2 or a folder.
+- **[Live events](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#live-events-server-sent-events)** - every run as it happens, per key, with
+  resume.
+- **[A tamper-evident audit log](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#audit-log)** - a signed hash chain, streamed to your SIEM.
+- **[Observability](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#observability)** - Prometheus metrics, OpenTelemetry tracing, alerts that
+  clear themselves, a Grafana dashboard.
+- **[Configuration as code](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#configuration-as-code)** and
+  **[secrets from files and Vault](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#secrets-from-files-and-secrets-managers)**.
+- **[OpenAPI and Postman](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#interactive-documentation)** - every saved query a typed endpoint in
+  `/openapi.json` and `/docs`.
+- **[Docker, Helm and several instances](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md)** - one PostgreSQL store, Redis for shared
+  limits; [signed releases with SLSA provenance](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md#verify-a-release).
 
-```text
-                    ┌──────────────────────────┐
-                    │       QueryAPIGate       │
-                    │                          │
-                    │   Governed Data Layer    │
-                    └────────────┬─────────────┘
-                                 │
-             ┌───────────────────┼──────────────────┐
-             │                   │                  │
-        DATA ACCESS          GOVERNANCE        DATA DELIVERY
-             │                   │                  │
-       Saved Queries          API Keys          REST APIs
-       SQL / Mongo            Roles             JSON/CSV
-       Multi-DB               Collections       Streaming
-       DuckDB/files           Permissions       CLI exports
-       JDBC                   Rate limits       cron/K8s
-             │                IP controls
-             │                Audit
-             │
-             └───────────────────┬──────────────────┘
-                                 │
-                         OBSERVABILITY
-                                 │
-                    Metrics / Logs / History
-                    OpenAPI / Postman / UI
-```
-
----
-
-## Key features
-
-### Multi-database support
-
-**Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse: every feature, tested against a real server in CI, and
-covered by the compatibility promise. **Experimental** - H2, generic JDBC (Oracle, SQL Server, DB2, Snowflake and
-anything else with a driver jar) and MongoDB (`find()` queries): they work, with documented gaps. The same guard,
-pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TSV, Excel and Parquet - apply to every one.
-What each supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming - is in the
-[support matrix](documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
-
-**Files as a source** - through DuckDB, Parquet, CSV and JSON files on local disk, S3, GCS, R2 or the web are queried
-where they are and published like any table, limited to the paths each connection lists (see
-[publishing a bucket as an API](how-to/41-publish-files-in-s3-as-an-api.md)).
-
-### Security and access control
-
-QueryAPIGate is built to expose specific query results, not database credentials:
-
-- API key authentication, with hashed key storage (SHA-256, never the raw secret) in `queryapigate.db`.
-- Database connection passwords encrypted at rest (`QUERYAPIGATE_SECRET_KEY`), decrypted only in memory at the
-  moment a connection is opened; a literal password on disk is never returned to a client either way.
-- Scoped API keys: restrict a key to a set of connections, and/or to a specific allow-list of saved queries,
-  independent of any connection grant - individual queries in that list can also be curated for write access,
-  without granting it anywhere else reachable through the key.
-- Example APIs: `queryapigate examples load` installs four worked scenarios - a reporting API, dashboard data,
-  a streaming export and a partner integration - as collections, queries, roles and a ready-to-use API key per
-  scenario, touching nothing of yours, and removable again with one command.
-- Collections: file saved queries into named groups and grant a key a whole group - read-only, live, and every
-  move that changes who can reach a query is audited with the keys that gained or lost access. Rename a
-  collection without any key losing reach part-way; export one as a portable bundle and import it elsewhere.
-- Named permission roles: a reusable template (connections, write access, queries, collections, rate limit, allowed IPs)
-  copied onto a key once at creation, so a shared grant set for many keys lives in one place - editing or
-  deleting a role afterward never affects a key already created from it.
-- Read-only by default; write access (`INSERT`/`UPDATE`/DDL) is off unless explicitly enabled server-wide or
-  granted per key, and can be narrowed further to specific write operations a key may perform.
-- API key expiry (TTL) and revocation.
-- Per-key rate limiting, on top of the server-wide, IP-based limit.
-- IP allowlisting per key: pin a key to specific addresses or CIDR ranges.
-- A row ceiling for streaming exports (`QUERYAPIGATE_STREAM_MAX_ROWS`), unbounded by default.
-- A SQL guard that only allows single `SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN` statements through by default,
-  with bound `:name` parameters rather than string-concatenated SQL.
-
-```text
-API Consumer
-     |
-     | API Key
-     v
-  QueryAPIGate
-     |
-     +-- Authentication
-     +-- Authorization (connections + saved queries)
-     +-- SQL guard
-     +-- Rate limiting
-     +-- Execution
-     |
-     v
-  Database
-```
-
-This lets an organization hand an external client a key that can only ever reach one named query - never
-arbitrary SQL and never a whole connection - while internal callers keep broader, connection-level access.
-
-### Saved, versioned queries
-
-A saved query bundles SQL, name, description, parameters, author, version, permissions and (optionally) cache
-configuration into one addressable resource: `GET /q/<name>`. Saving again under the same name creates a new
-version rather than overwriting the old one, so a change to the SQL doesn't silently change what's already live;
-`?version=1` still runs the prior one, and each run is recorded in the query's execution history.
-
-### Bound query parameters
-
-```sql
-SELECT * FROM film WHERE film_id = :id
-```
-
-```http
-GET /q/film_by_id?id=7
-```
-
-Values are sent to the database separately from the SQL text, so they cannot be injected into it. Parameters can
-declare a type, default, required/optional, enum, numeric range, length and pattern - invalid input is rejected
-with a field-by-field `400` before it reaches the database.
-
-### Multiple response formats
-
-JSON, NDJSON, XML, YAML, CSV, TSV, XLSX and Parquet are all available per request (`?format=`), so the same saved
-query serves application clients, reporting and data pipelines - a Parquet export keeps column types and is typically
-a quarter of the CSV's size.
-
-### Pagination and streaming
-
-`?page=2&page_size=50` pages results with `X-Has-More` telling the caller whether more exist. For full exports,
-`?stream=true&format=csv` (or `tsv`/`ndjson`) streams the entire result straight from the database cursor rather
-than buffering it - verified end-to-end with 1,000,000-row results and flat server memory throughout (MySQL,
-PostgreSQL and ClickHouse); see [Streaming exports](documentation/API.md#streaming-exports) for the measured
-numbers. `queryapigate export <query> --out '/exports/{name}_{date}.csv'` wraps the same streaming path as a CLI
-command for cron/systemd/Kubernetes CronJob to call directly - no server needs to be running; see
-[Scheduled exports to a file](documentation/INSTALLATION_AND_SETUP.md#scheduled-exports-to-a-file).
-
-### Query caching
-
-Saved queries can opt into HTTP-level caching: `cache_ttl`, `Cache-Control`, `ETag`, conditional requests and
-`304 Not Modified`, plus an `X-Cache: HIT`/`MISS` header. Never applied to a query that writes.
-
-### Rate limiting
-
-A server-wide, IP-keyed limit (`QUERYAPIGATE_RATE_LIMIT`) and an independent, optional per-key limit can both be in
-effect at once - a request has to pass both. This lets different API consumers get different budgets:
-
-```text
-Internal dashboard  -> generous server-wide limit, no per-key limit
-Partner key          -> 200/hour of its own
-Trial key             -> 20/hour of its own
-```
-
-### Observability
-
-Structured JSON logs (`QUERYAPIGATE_JSON_LOGS`) tagged with a request ID, per-query execution timing, slow-query
-warnings (`QUERYAPIGATE_SLOW_QUERY_THRESHOLD`), and Prometheus metrics at `/metrics` covering request/query counts and
-latencies, connection-pool occupancy and rate-limit rejections.
-
-### OpenAPI
-
-`/openapi.json` is a complete, valid OpenAPI 3.0 document (checked in CI against the official validator) with
-every saved query listed as its own typed endpoint; `/docs` serves it through Swagger UI. A key's endpoint list is
-filtered to what that key can actually reach, so a query-scoped external key sees only its approved queries.
-
-### Administration UI
-
-A built-in UI at `/console` covers the whole workflow: connection management, a SQL editor with syntax highlighting
-and schema browsing (click a table/column to insert it), query execution and preview, EXPLAIN, saved-query and
-version management, API key management, an audit log of administrative changes, per-query execution history,
-response inspection with a collapsible JSON tree for non-tabular results, a quick bar chart of any numeric
-result, and one-click "copy as curl" / "copy as TSV" for any result.
-
-The UI has a collapsible sidebar (Data, Access, Observability; `Ctrl`+`B` toggles it) and a read-only **Settings**
-screen that shows every environment variable, its effective value and whether it was set or is the default (secrets are
-reported as configured or not, never shown), with a "Copy as .env" button. Theme, table density and the default
-result format are per-browser preferences.
-
-```text
-Connect Database
-       |
-       v
-   Write SQL
-       |
-       v
-  Test Query
-       |
-       v
-  Save Query
-       |
-       v
-Configure Access
-       |
-       v
-  Expose API
-```
-
-### Testing and quality
-
-Unit tests, integration tests against real MySQL, PostgreSQL, ClickHouse and H2 servers (run in CI against
-service containers), DuckDB integration tests that run unconditionally since it's embedded, SQL-guard fuzz
-testing with [Hypothesis](https://hypothesis.readthedocs.io/), static type checking with mypy, linting with ruff,
-and CI on every push. See [Development](#development) below.
-
----
-
-## Architecture
-
-```text
-                         +---------------------+
-                         |     API Client      |
-                         +----------+----------+
-                                    |
-                                    v
-                         +---------------------+
-                         |    QueryAPIGate     |
-                         |                     |
-                         | Authentication      |
-                         | Authorization       |
-                         | Rate Limiting       |
-                         | SQL Guard           |
-                         | Parameter Binding   |
-                         +----------+----------+
-                                    |
-                                    v
-                         +---------------------+
-                         |   Query Manager     |
-                         |                     |
-                         | Saved Queries       |
-                         | Versions            |
-                         | Cache               |
-                         | API Metadata        |
-                         +----------+----------+
-                                    |
-                                    v
-                         +---------------------+
-                         | Database Abstraction|
-                         |                     |
-                         | MySQL               |
-                         | PostgreSQL          |
-                         | ClickHouse          |
-                         | SQLite              |
-                         | H2                  |
-                         | DuckDB              |
-                         | JDBC                |
-                         +----------+----------+
-                                    |
-                                    v
-                              Database
-```
-
----
-
-## Best use cases
-
-**Internal data APIs.** Expose internal data to web apps, mobile apps, internal tools and other engineering teams
-without building a service per query:
-
-```http
-GET /q/film_by_id?id=7
-GET /q/example_top_films?top_n=5&category=Comedy
-```
-
-**Reporting APIs.** Turn an existing analytical SQL report into a reusable endpoint that dashboards or scheduled
-jobs can call directly, in JSON or as a CSV/XLSX export.
-
-**Partner and external-client integrations.** Give a partner an API key scoped to a curated list of saved
-queries, with its own rate limit and expiry, instead of database credentials:
-
-```text
-Partner --API Key--> QueryAPIGate --queries grant--> Database
-```
-
-**Data engineering to application engineering.** Data teams write and version the SQL; application teams consume
-it as a normal REST endpoint, without either side depending on the other's deploy cycle.
-
-**Data export.** Stream large results as CSV, TSV, XLSX, JSON or NDJSON without loading the whole result into
-memory first.
-
-**Rapid prototyping.** Get a working, parameterized API around an existing query for a proof of concept or
-internal tool without standing up a backend application for it.
-
----
-
-## How QueryAPIGate differs
-
-| Approach          | Primary model                        |
-|-------------------|--------------------------------------|
-| **QueryAPIGate**  | **SQL query -> governed REST API**   |
-| PostgREST         | PostgreSQL schema -> REST API        |
-| Hasura            | Database -> GraphQL/API platform     |
-| DreamFactory      | Data source -> generated APIs        |
-| SQLPad            | SQL -> interactive query environment |
-
-QueryAPIGate's primary abstraction is the SQL query as an API resource, not the schema as a whole - so it fits well
-when an API should expose one specific, curated query rather than automatically surface an entire database.
-
----
-
-## Philosophy
-
-Your database already contains the data logic. The goal isn't to replace application backends; it's to remove
-repetitive boilerplate when the actual requirement is "expose this query safely as an API" - existing SQL, plus
-governance, is the API.
-
----
+Every feature in detail: [features](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/FEATURES.md). Every setting:
+[configuration](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/CONFIGURATION.md).
 
 ## Install
 
@@ -515,7 +137,7 @@ driver jar is bundled, a JDBC connection to another vendor brings its own. DuckD
 external runtime either - it's a native Python extension, same as SQLite. `queryapigate[encryption]` adds
 [encryption at rest](documentation/API.md#encryption-at-rest-for-connection-passwords) for connection passwords -
 only needed if you set `QUERYAPIGATE_SECRET_KEY`.
-From a clone: `pip install -e ".[dev]"`. Or use Docker - see [below](#docker).
+From a clone: `pip install -e ".[dev]"`. Or use Docker - see [below](#try-it-with-docker).
 
 ## Quick start
 
@@ -573,227 +195,49 @@ Add `"cache_ttl": 60` to cache a response for that many seconds (`X-Cache: HIT`/
 opt-in, and never used for a query that writes. See
 [Response caching](documentation/API.md#response-caching).
 
-## Configuration
+## Try it with Docker
 
-Everything is configured through environment variables (all optional):
-
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
-| `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](documentation/INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
-| `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
-| `QUERYAPIGATE_API_KEY` | unset | The shared admin key, with the owner role. When set (or once a scoped key or a [named administrator](documentation/API.md#administrators-and-admin-roles) exists), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs an `X-API-Key` header. Once named owners exist it is the break-glass key: every use is logged and alerted, and it can be removed. |
-| `QUERYAPIGATE_EXPORT_DIRS` | unset | Comma-separated absolute folders a local-folder export destination may write under. Unset: only object-storage destinations (`s3://`, `gs://`, `r2://`) are allowed. Never the server's own home. |
-| `QUERYAPIGATE_MASK_KEY` | unset | The key column masking's `hash` action uses. Unset: one is made once in the store and shared by every instance. Changing it changes every hashed value. |
-| `QUERYAPIGATE_REDIS_URL` | unset | A `redis://` URL: share rate limits and the response cache across every instance and process (`serve`, `mcp`, `events`). Needs `queryapigate[redis]`. Without it, each process counts and caches on its own. |
-| `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
-| `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |
-| `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
-| `QUERYAPIGATE_RATE_LIMIT` | unset | Requests allowed per client address, e.g. `60/minute` (also `second`, `hour`, `day`). Off by default; a malformed value stops startup. |
-| `QUERYAPIGATE_TRUST_PROXY` | `0` | Number of reverse proxies in front of the app whose `X-Forwarded-*` headers are trusted. Set it (usually `1`) behind nginx, a load balancer or a platform router, or every client looks like the proxy. |
-| `QUERYAPIGATE_AUDIT_SYSLOG_URL` | *(unset)* | Stream every audit entry to a SIEM over syslog: `tls://host:6514` or `tcp://host:514`. With `QUERYAPIGATE_AUDIT_SYSLOG_CA`, and `_CERT`/`_KEY` for mutual TLS. |
-| `QUERYAPIGATE_AUDIT_OTLP` | `false` | Stream every audit entry as OTLP log records to the OTLP logs endpoint. |
-| `QUERYAPIGATE_AUDIT_KEY` | *(unset)* | HMAC key (32+ characters) the audit log's hash chain is signed with, so an edit made with only the store can't be re-signed. Several, comma-separated, while rotating it. Unset: plain SHA-256. |
-| `QUERYAPIGATE_HSTS_MAX_AGE` | *(unset)* | Seconds browsers should use only HTTPS for this host (`Strict-Transport-Security`), sent only on requests that arrived over HTTPS. Unset: not sent - set it once every client reaches the server over HTTPS. |
-| `QUERYAPIGATE_POOL_SIZE` | `5` | Idle connections kept per distinct connection setting. `0` turns pooling off. |
-| `QUERYAPIGATE_POOL_IDLE_TIMEOUT` | `300` | Seconds an idle pooled connection is kept before it is closed. |
-| `QUERYAPIGATE_QUERY_TIMEOUT` | `30` | Seconds a query may run before it is cancelled (HTTP 504). `0` disables the limit. A request can lower it with `?timeout=`, never raise it. |
-| `QUERYAPIGATE_HOST` / `QUERYAPIGATE_PORT` | `127.0.0.1` / `5000` | Bind address for `queryapigate serve`. |
-| `QUERYAPIGATE_DEBUG` | off | Flask debug mode. Never enable on a reachable host. |
-| `QUERYAPIGATE_H2_JAR` | bundled | Path to a different H2 JDBC jar. |
-| `QUERYAPIGATE_SECRET_KEY` | unset | A Fernet key encrypting connection passwords at rest. Off by default (stored as given); needs `queryapigate[encryption]`. A malformed value stops startup. |
-| `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |
-| `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` | `1` | Seconds a query may take before it is logged as a warning. `0` disables it. |
-| `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version (and shown in lists). |
-| `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /api/v1/history`. Best with `QUERYAPIGATE_DATABASE_URL`. |
-| `QUERYAPIGATE_HISTORY_SAMPLE_RATE` | `1` | Fraction of successful runs recorded; failed runs always are. |
-| `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` | `1000` | Ad-hoc SQL runs (`/execute_sql`, MCP) kept in all, unless a retention period is set. |
-| `QUERYAPIGATE_HISTORY_ADHOC_SQL` | `text` | What an ad-hoc run keeps of its SQL: `text`, `hash` (a SHA-256 only) or `none` - choose `hash` or `none` if SQL may embed sensitive literals. |
-| `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` | `1` | Seconds between batched history writes; `0` writes inside each request. See [Run history](documentation/API.md#run-history). |
-| `QUERYAPIGATE_AUDIT_LOG_LIMIT` | `500` | Administrative-change entries kept in `queryapigate.db`'s audit log; older ones roll off. Always a positive count; a malformed value stops startup. |
-| `QUERYAPIGATE_LOAD_EXAMPLES` | unset | `yes` loads the [example APIs](documentation/EXAMPLES.md) (reporting, dashboard, export, partner) at startup - idempotent; a malformed value stops startup. Never removes anything: use `queryapigate examples unload`. |
-| `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` | unset | Path to also append every audit entry to, one JSON object per line, never capped - for retention beyond the rolling window above. |
-| `QUERYAPIGATE_JWT_JWKS_URL` / `QUERYAPIGATE_JWT_SECRET` | unset | Accept signed-in users' tokens (`Authorization: Bearer`) from your identity provider or your own backend, with a role (`QUERYAPIGATE_JWT_ROLE` / `QUERYAPIGATE_JWT_ROLE_CLAIM`) for what they may do, and parameters bound to their claims (`from_claim`). See [Signed-in users](documentation/API.md#signed-in-users-jwt) for the related `QUERYAPIGATE_JWT_*` settings. |
-| `QUERYAPIGATE_EVENTS_MAX_STREAMS` | `4` | Concurrent `GET /events` streams the main server holds open (each takes a request thread); beyond it, `503`. `0` turns it off. |
-| `QUERYAPIGATE_EVENTS_PORT` | `5002` | Port of `queryapigate events`, the separate live-events server for many clients - see [Live events](documentation/API.md#live-events-server-sent-events). |
-| `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` | `10000` | Open streams one `queryapigate events` process accepts. |
-| `QUERYAPIGATE_EVENTS_POLL_INTERVAL` | `1` | Seconds between `queryapigate events` checks for new runs (on PostgreSQL a notification usually arrives first). |
-| `QUERYAPIGATE_EVENTS_RETENTION_HOURS` | `24` | Hours the event log keeps an event: how far back a `queryapigate events` client can resume with `Last-Event-ID`. A whole number, at least 1. |
-| `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp` - see [documentation/MCP.md](documentation/MCP.md). |
-| `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for an MCP tool call's result. Always a positive count; a malformed value stops startup. |
-| `QUERYAPIGATE_SSO_ISSUER` / `QUERYAPIGATE_SSO_CLIENT_ID` / `QUERYAPIGATE_SSO_CLIENT_SECRET` / `QUERYAPIGATE_SSO_REDIRECT_URL` | unset | Administrators sign in to the Console through your identity provider, their role from their groups (`QUERYAPIGATE_SSO_ROLES`). Experimental - see [Console sign-in through SSO](documentation/API.md#console-sign-in-through-sso). |
-| `QUERYAPIGATE_MCP_RESOURCE_URL` / `QUERYAPIGATE_MCP_AUTH_SERVER` | unset | Let hosted AI clients sign in through your identity provider (OAuth) - the MCP server's own URL and the provider's issuer, with `QUERYAPIGATE_MCP_ROLE` / `QUERYAPIGATE_MCP_ROLE_CLAIM` and `QUERYAPIGATE_MCP_SCOPE`. Experimental - see [Sign-in for AI clients](documentation/MCP.md#sign-in-for-ai-clients-oauth). |
-
-## Security and production considerations
-
-QueryAPIGate runs whatever SQL it is given against your databases, so it ships locked down and expects you to finish the job:
-
-- Set `QUERYAPIGATE_API_KEY` and serve over TLS (put it behind a reverse proxy). It's the shared admin key; give the
-  people who manage the server their own admin tokens and roles instead, and keep it as a break-glass key
-  ([guide 43](how-to/43-give-your-team-their-own-admin-access.md)). For anyone who only needs to run queries
-  against specific connections, create a scoped key instead
-  (`POST /api/v1/api-keys`, admin only) - see [documentation/API.md](documentation/API.md#authentication-and-permissions).
-  For an external client that should only reach a curated handful of saved queries and nothing else, scope
-  the key to those query names specifically (`queries`) instead of a whole connection - see
-  [Per-saved-query access](documentation/API.md#per-saved-query-access-external-clients).
-- Connect with a database account that only has the privileges the API needs - the read-only guard is
-  defence in depth, not a replacement for grants. (H2's driver cannot enforce read-only, so H2 relies on the guard.)
-- Use bound `:name` parameters. The older `{name}` placeholders paste text into the SQL and are therefore restricted
-  to numbers and plain text.
-- Passwords are never returned by the API.
-- Set `QUERYAPIGATE_SECRET_KEY` to encrypt connection passwords at rest instead of relying solely on the `${VAR}`
-  convention - keep the key itself outside `QUERYAPIGATE_HOME` and out of version control, the same as any
-  other credential; there is no way to recover an encrypted password without it.
-- Set query timeouts and result-size expectations deliberately (`QUERYAPIGATE_QUERY_TIMEOUT`, `QUERYAPIGATE_MAX_PAGE_SIZE`),
-  enable rate limiting, and route logs and `/metrics` into your existing monitoring.
-- Plan for backup and recovery of `queryapigate.db` (`QUERYAPIGATE_HOME`), and put QueryAPIGate behind your
-  normal reverse-proxy/TLS-termination setup rather than exposing it directly.
-
-See [documentation/THREAT_MODEL.md](documentation/THREAT_MODEL.md) for the reasoning behind these controls -
-what's actually defended against and where it stops - [documentation/DATA_PROTECTION.md](documentation/DATA_PROTECTION.md)
-for what is kept, where and for how long, and [SECURITY.md](SECURITY.md) to report a vulnerability.
-
-### Calling the API from a browser
-
-Browsers refuse cross-origin JSON calls unless the server allows them. List the sites that may call the API:
-
-~~~bash
-QUERYAPIGATE_API_KEY=change-me QUERYAPIGATE_CORS_ORIGINS=https://app.example.com queryapigate serve
-~~~
-
-Preflight checks are answered automatically, and the pagination headers (`X-Has-More` etc.) are exposed to the page's
-JavaScript. CORS only tells the *browser* which sites may call; it is not authentication, so keep the API key. Avoid
-`*` without a key: any website a visitor opens could then reach your databases through their browser (the server logs
-a warning if you start that way).
-
-### Rate limiting
-
-`QUERYAPIGATE_RATE_LIMIT=60/minute` gives each client address a bucket of 60 requests that refills steadily, so short bursts
-work but the sustained rate is capped. Over the limit, requests get `429` with a `Retry-After` header, and every
-response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`. The limit is applied before the API key check, so
-guessing keys is throttled too; `/health` and CORS preflights are never counted. With `QUERYAPIGATE_REDIS_URL` set, limits are counted in Redis - one budget per client address and per key across every instance and process (`serve`, `mcp`, `events`); if Redis fails, each process falls back to counting on its own until it's back, and an alert says so. Without Redis,
-state is per process: with several workers or instances, the effective limit is multiplied by their number.
-
-An API key can also carry its own `rate_limit` (same grammar), checked in addition to the server-wide limit, never
-instead of it - a request has to pass both. See [Per-key rate limiting](documentation/API.md#per-key-rate-limiting).
-
-## Docker
-
-Every release is published to GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+Every release is published for `linux/amd64` and `linux/arm64`, signed:
 
 ~~~bash
 docker run -p 5000:5000 -v queryapigate-data:/data -e QUERYAPIGATE_API_KEY=change-me ghcr.io/anantharajuc/queryapigate:latest
 ~~~
 
-| Tag | Contents |
-|-----|----------|
-| `X.Y.Z`, `latest` | QueryAPIGate with every optional feature: the PostgreSQL, MySQL, ClickHouse, DuckDB and MongoDB drivers (SQLite is built in), `allowed_tables`, password encryption, JWT, the Redis cache and `queryapigate mcp` |
-| `X.Y.Z-h2`, `latest-h2` | The same plus Java and the H2 driver - also the variant to use for a generic `jdbc` connection (mount your vendor's jar) |
-
-The container keeps `queryapigate.db` in `/data` (create a starter with `docker run --rm -v queryapigate-data:/data
-ghcr.io/anantharajuc/queryapigate queryapigate init`). The named volume above works
-out of the box. To use a folder on the host instead (`-v "$PWD/data:/data"`), create it yourself first (`mkdir data`) and make sure
-it is writable by uid 1000, the container's user - a folder that Docker creates for you is owned by root, which the container
-cannot write to (or run with `--user "$(id -u):$(id -g)"`). It runs as a non-root user under
-gunicorn with one worker (each process keeps its own `/metrics`; scale out with more containers - see
-[Scaling out](documentation/DEPLOYMENT.md#scaling-out) and the
-[reference deployment](deploy/scale-out/)) and a health check on `/health`. Behind a
-reverse proxy or load balancer, set `QUERYAPIGATE_TRUST_PROXY=1`. To build it yourself:
-`docker build -t queryapigate .` (add `--build-arg WITH_H2=true` for H2).
-
-For a real deployment - TLS via a reverse proxy, secrets in an env file, backups, Prometheus/Grafana - see
-[documentation/DEPLOYMENT.md](documentation/DEPLOYMENT.md).
-
-### Try it with one command
-
-[`docker-compose.yml`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/docker-compose.yml) starts QueryAPIGate in front
-of a PostgreSQL database seeded with sample films:
+Or start it in front of a PostgreSQL database seeded with sample films, with
+[`docker-compose.yml`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/docker-compose.yml):
 
 ~~~bash
 docker compose up --build
 curl -H 'X-API-Key: demo-key' 'http://127.0.0.1:5000/q/films_by_rating?rating=PG&max_length=90'
 ~~~
 
-Open <http://127.0.0.1:5000/docs>, paste `demo-key` into the box at the top, and both saved queries appear as endpoints.
-The demo listens on localhost only. Once the server is healthy, a one-shot `seed` container
-([`demo/seed.sh`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/demo/seed.sh)) creates the connection -
-its password stored as a reference to an environment variable, `${DEMO_DB_PASSWORD}` - and the two saved queries
-through the Management API, the same calls the Console makes. Clean up with `docker compose down -v`.
+Open <http://127.0.0.1:5000/docs>, paste `demo-key` into the box at the top, and both saved queries are there as
+endpoints; `docker compose down -v` cleans up.
 
-## API overview
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/execute_sql` | POST | Run ad-hoc SQL (`sql`, `connection_name`, optional `params`). |
-| `/q/<name>` | GET, POST | Run a saved query; query-string or body values become parameters. |
-| `/connections/<name>/schema` | GET | List a connection's tables/views and their columns. |
-| `/catalog` | GET | The saved queries this caller can reach, and the terms they're offered under. |
-| `/events` | GET | Live events: every run, as it happens (Server-Sent Events). |
-| `/api/v1/...` | GET, POST, PATCH, DELETE | The Management API (admin only): saved queries and their versions, drafts and publishing, connections, API keys, roles, collections, history, the audit log, settings, the response cache and the example APIs - see [Management API (v1)](documentation/API.md#management-api-v1). |
-| `/health`, `/docs`, `/openapi.json` | GET | Liveness, Swagger UI, OpenAPI spec. |
-| `/metrics` | GET | Prometheus text-format metrics: request/query counts and latencies, pool occupancy, rate-limit rejections. |
-| `/console` | GET | The admin UI (the QueryAPIGate Console). `/ui` redirects here. |
-
-Full details are in [documentation/API.md](documentation/API.md). Saved queries can also be reached as MCP
-tools for an AI agent - see [documentation/MCP.md](documentation/MCP.md).
-
-## Client SDKs
-
-`/openapi.json` is a complete, valid OpenAPI 3.0 document (checked in CI against the official validator), so a typed
-client for Java, TypeScript, Go, or [any of the ~50 languages `openapi-generator` supports](https://openapi-generator.tech/docs/generators)
-costs nothing in application code - generate it from the running server's own spec:
-
-~~~bash
-npx @openapitools/openapi-generator-cli generate \
-  -i http://127.0.0.1:5000/openapi.json -g java -o clients/java
-# or: -g typescript-fetch, -g go, -g python, ...
-~~~
-
-This is deliberately not something QueryAPIGate ships pre-generated: the spec already includes every saved query
-as its own typed `/q/<name>` endpoint (see [Quick start](#quick-start) above), so a client generated against
-*your* server reflects *your* saved queries, not a generic snapshot.
-
-## Development
-
-~~~bash
-pip install -e ".[dev]"
-ruff check .
-mypy queryapigate
-python -m unittest discover -s tests -t .
-~~~
-
-The integration tests in `tests/test_integration.py` run against real MySQL, PostgreSQL, ClickHouse and H2 servers when
-the matching `QUERYAPIGATE_IT_*` variables are set, and are skipped otherwise; CI runs them against service containers.
-DuckDB's integration tests need no such variable - being embedded, they run unconditionally whenever the `duckdb`
-package is installed.
-`tests/test_sql_guard_fuzz.py` fuzzes the SQL guard and parameter binder with [Hypothesis](https://hypothesis.readthedocs.io/).
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request process, [CHANGELOG.md](CHANGELOG.md) for what changed, and
-[BACKLOG.md](BACKLOG.md) for what's planned, in priority order.
+The image tags, volumes and a real deployment - TLS, secrets, backups, Prometheus and Grafana, several instances,
+Kubernetes: [deployment](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md).
 
 ## Documentation
 
-Full documentation covers installation, configuration, database connections (including JDBC and DuckDB),
-saved queries and parameters, authentication and authorization, API keys, rate limiting, caching, streaming,
-OpenAPI, metrics, the admin UI, security and deployment. Start at the
-[documentation site](https://AnanthaRajuC.github.io/QueryAPIGate/) or the `documentation/` directory in this repo.
+The [documentation site](https://AnanthaRajuC.github.io/QueryAPIGate/) has all of it; on GitHub:
 
-## Roadmap
-
-See [BACKLOG.md](BACKLOG.md) for the full, prioritized list with rationale. Next is **1.0**: a release candidate
-that freezes the REST and management APIs, the CLI, settings, error codes and the store, followed by 1.0.0. After
-that, all additive:
-
-- **Admin identity, phase 2** (#84): sign in to the Console through your identity provider (OIDC), groups mapped to
-  admin roles.
-- **AI agents** (#85-#88): OAuth 2.1 for the MCP server, descriptions for agents, a per-agent usage view, and write
-  tools with a confirmation step.
-- **More sources** (#76-#80): Trino, cloud warehouses, MongoDB aggregation pipelines, and more.
-- **Exports to object storage**, incremental (#89), and column masking for partners (#63).
+| | |
+|---|---|
+| **Start** | [Installation and setup](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/INSTALLATION_AND_SETUP.md) · [Configuration](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/CONFIGURATION.md) · [Example APIs](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/EXAMPLES.md) · [How-to guides](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/how-to.md) |
+| **Reference** | [API](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md) · [MCP server](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md) · [Database connections](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DATABASE_CONNECTION_CONFIGURATION.md) · [Query metadata](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/QUERY_METADATA_MANAGEMENT.md) · [Features](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/FEATURES.md) |
+| **Run it** | [Deployment](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DEPLOYMENT.md) · [Technology stack](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/TECHNOLOGY_STACK.MD) · [A tour of the Console](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/SCREENSHOTS.md) |
+| **Security** | [Security policy](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md) · [Threat model](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/THREAT_MODEL.md) · [Where data goes](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DATA_PROTECTION.md) |
+| **Project** | [Why QueryAPIGate](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/WHY.md) · [Changelog](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CHANGELOG.md) · [Roadmap](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/BACKLOG.md) · [Architecture decisions](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/adr/README.md) |
 
 ## Contributing
 
-Contributions are welcome - database drivers, security, performance, UI, documentation, testing and
-observability are all useful areas. Please review [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.
+Contributions are welcome - database drivers, security, performance, the Console, documentation, tests. Please read
+[CONTRIBUTING.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/CONTRIBUTING.md) first: the development setup, the tests, and how a change gets in.
+
+## Security
+
+Report a vulnerability privately - see [SECURITY.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md), which also has the hardening checklist for a
+deployment and how to verify a release.
 
 ## Third-party components
 

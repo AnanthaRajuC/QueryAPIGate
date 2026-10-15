@@ -83,3 +83,5 @@ documented way to Level 3; it isn't done yet.
   expensive request cannot monopolise the service; setting the timeout to `0` removes that protection.
 - Prefer bound `:name` parameters over `{name}` text placeholders.
 - Note that `GET /api/v1/connections` reveals hosts, ports, users and database names (passwords are masked).
+- Plan for backing up and restoring the store - `queryapigate.db` in `QUERYAPIGATE_HOME`, or the PostgreSQL database
+  `QUERYAPIGATE_DATABASE_URL` names ([backups and restores](documentation/DEPLOYMENT.md#5-persistent-data-backups-and-restores)).

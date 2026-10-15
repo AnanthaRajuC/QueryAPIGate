@@ -16,9 +16,13 @@ docs_dir: docs
 
 nav:
   - Home: index.md
+  - Why QueryAPIGate: documentation/WHY.md
+  - Features: documentation/FEATURES.md
   - Installation: documentation/INSTALLATION_AND_SETUP.md
+  - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Example APIs: documentation/EXAMPLES.md
+  - A tour of the Console: documentation/SCREENSHOTS.md
   - API reference: documentation/API.md
   - MCP server: documentation/MCP.md
   - Database connections: documentation/DATABASE_CONNECTION_CONFIGURATION.md

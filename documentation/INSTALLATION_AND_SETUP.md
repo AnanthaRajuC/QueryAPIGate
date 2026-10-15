@@ -54,8 +54,8 @@ To try it without any database of your own, use the bundled examples instead:
 
 ## Configuration
 
-Behaviour is controlled by environment variables - see the table in the
-[README](https://github.com/AnanthaRajuC/QueryAPIGate#configuration)
+Behaviour is controlled by environment variables - see the table in
+[CONFIGURATION.md](CONFIGURATION.md)
 (`QUERYAPIGATE_HOME`, `QUERYAPIGATE_ALLOW_WRITES`, `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_MAX_PAGE_SIZE`, `QUERYAPIGATE_QUERY_TIMEOUT`,
 `QUERYAPIGATE_POOL_SIZE`, `QUERYAPIGATE_POOL_IDLE_TIMEOUT`, `QUERYAPIGATE_CORS_ORIGINS`, `QUERYAPIGATE_RATE_LIMIT`,
 `QUERYAPIGATE_TRUST_PROXY`, `QUERYAPIGATE_HOST`, `QUERYAPIGATE_PORT`, `QUERYAPIGATE_DEBUG`, `QUERYAPIGATE_H2_JAR`,
@@ -200,44 +200,6 @@ integration, whatever the operator already has) works unmodified:
 curl http://127.0.0.1:5000/health
 curl http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: <your admin key>'
 ~~~
-
-## Upgrading from SQL2API
-
-QueryAPIGate is the new name of SQL2API - the same project, renamed because `sql2api` was shared by a dozen
-unrelated projects. It is a clean break with no compatibility aliases, so an existing deployment needs these
-changes before it upgrades:
-
-| What | Before (SQL2API) | After (QueryAPIGate) |
-|------|------------------|----------------------|
-| PyPI package | `pip install sql2api` | `pip install queryapigate` |
-| Command | `sql2api serve` / `init` / `export` | `queryapigate serve` / `init` / `export` |
-| Python import | `import sql2api` | `import queryapigate` |
-| gunicorn target | `"sql2api.app:create_app()"` | `"queryapigate.app:create_app()"` |
-| Environment variables | `SQL2API_*` (all of them) | `QUERYAPIGATE_*` |
-| Prometheus metrics | `sql2api_*` | `queryapigate_*` |
-| Docker image | `ghcr.io/anantharajuc/sql2api` | `ghcr.io/anantharajuc/queryapigate` |
-| JSON log `logger` field | `sql2api` | `queryapigate` |
-
-Your data folder needs one step if it still holds `db_connections.json`, `saved_sql/`, `api_keys.json`,
-`roles.json` or `audit_log.json` (a home last run by 0.10 or older, before everything moved into `queryapigate.db`):
-start **QueryAPIGate 0.14** on it once, which imports them, then upgrade. 0.15 and later no longer read them, and
-refuse to start on such a home rather than start without its data.
-
-**Rename every environment variable, especially `SQL2API_API_KEY`.** The old names are not read at all, and
-an unset API key means an open server - so a server that still finds any `SQL2API_*` variable in its
-environment refuses to start and lists what to rename, rather than silently running unprotected:
-
-~~~
-queryapigate: these settings use the old SQL2API_ prefix, which is no longer read:
-SQL2API_API_KEY -> QUERYAPIGATE_API_KEY. Rename each one; ignoring them silently could leave the server
-without an API key
-~~~
-
-To find them: `env | grep '^SQL2API_'`, and check any `.env` files, systemd units, Compose files, Kubernetes
-manifests and CI settings, not just your shell. Prometheus queries, alert rules and Grafana panels that name
-a `sql2api_*` metric need the same one-word change (the bundled dashboard already uses the new names). The
-admin UI stores your API key under a new browser-storage name, so it asks for the key once more after the
-upgrade.
 
 ## Running the tests
 

@@ -2107,8 +2107,8 @@ relied on doing so needs that connection added to its key.
 
 ### Changed
 - **Breaking: renamed from SQL2API to QueryAPIGate.** A clean break with no compatibility aliases, so an
-  existing deployment must change these before upgrading (full table and rationale in
-  [Upgrading from SQL2API](documentation/INSTALLATION_AND_SETUP.md#upgrading-from-sql2api)):
+  existing deployment must change these before upgrading (full table and rationale in that release's
+  documentation/INSTALLATION_AND_SETUP.md):
   the PyPI package is `queryapigate` (was `sql2api`), the command is `queryapigate` (was `sql2api`), the Python
   package is `queryapigate`, environment variables are `QUERYAPIGATE_*` (were `SQL2API_*`), Prometheus metrics
   are `queryapigate_*` (were `sql2api_*`), the Docker image is `ghcr.io/anantharajuc/queryapigate`, and the
