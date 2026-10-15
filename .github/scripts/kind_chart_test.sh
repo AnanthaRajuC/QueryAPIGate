@@ -19,6 +19,17 @@ repo() { echo "${1%:*}"; }
 tag() { echo "${1##*:}"; }
 say() { printf '\n== %s\n' "$*"; }
 
+# `rollout status` can return while the old ReplicaSet's pods are still in their preStop pause (10 s, the chart's
+# deployment.yaml) - still alive, and running the old release's settings. A check of a setting that just changed waits
+# for them to go first (CI, 2026-10-15: a DELETE the new lock refuses was answered by a pod without it).
+only_new_pods() {
+  for _ in $(seq 60); do
+    [ "$(kubectl -n "$1" get pods -l app.kubernetes.io/component=server --no-headers | wc -l)" = "$2" ] && return 0
+    sleep 2
+  done
+  echo "old server pods still there after 2 minutes:"; kubectl -n "$1" get pods -o wide; return 1
+}
+
 cleanup() {
   if [ -z "$KEEP_CLUSTER" ]; then kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true; fi
 }
@@ -144,6 +155,7 @@ CURRENT=(--set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAG
 helm upgrade qag "$CHART" "${COMMON[@]}" "${CURRENT[@]}" --set configAsCode.enabled=true \
   --set-file configAsCode.file="$CONFIG_DIR/good.yaml" --set configAsCode.locked=true --wait --timeout 6m
 kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
+only_new_pods pg 3
 [ "$(kubectl -n pg get secret qag-queryapigate-metrics -o jsonpath='{.data.token}' | base64 -d)" = "$METRICS_TOKEN" ] \
   || { echo 'helm upgrade changed the metrics token - lookup should have kept it'; exit 1; }
 echo 'the metrics token is the one from before this upgrade'
@@ -166,7 +178,14 @@ except urllib.error.HTTPError as error:
     body = json.load(error)
     assert (error.code, body['code']) == (409, 'config_managed'), (error.code, body)
     print('deleting it through the API:', error.code, body['code'])
-"
+" || {
+  echo 'which pod answered the DELETE, and did each have the lock:'
+  kubectl -n pg logs -l app.kubernetes.io/component=server --tail=-1 --prefix | grep 'DELETE /api/v1/queries/from_the_file' || true
+  for pod in $(kubectl -n pg get pods -l app.kubernetes.io/component=server -o name); do
+    echo "$pod: $(kubectl -n pg exec "$pod" -- printenv QUERYAPIGATE_CONFIG_LOCKED || echo 'no lock')"
+  done
+  exit 1
+}
 
 say "a file that can't be applied stops the rollout at its first pod; the others keep serving"
 cat > "$CONFIG_DIR/bad.yaml" <<'YAML'
