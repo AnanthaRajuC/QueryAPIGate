@@ -37,14 +37,51 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund && npm run build
       - run: pip install build
+      - name: The H2 driver the wheel bundles - from Maven Central, its SHA-256 checked
+        run: python .github/scripts/fetch_h2_jar.py
       - run: python -m build
-      - name: The wheel contains the Console
-        run: unzip -l dist/*.whl | grep -q 'queryapigate/console_dist/index.html'
+      - name: The wheel contains the Console, and the H2 driver
+        run: |
+          unzip -l dist/*.whl | grep -q 'queryapigate/console_dist/index.html'
+          unzip -l dist/*.whl | grep -q 'queryapigate/lib/h2-2.2.224.jar'
       # SLSA provenance for what PyPI gets - which workflow, at which commit, built it - signed through Sigstore and
       # verifiable with `gh attestation verify <file> --owner AnanthaRajuC`. The publish step below adds PyPI's own
       # PEP 740 attestations, which say who uploaded the files, not how they were built.
       - name: Build provenance for the sdist and wheel
+        id: provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
+      - name: Keep the files and their provenance for the GitHub Release
+        run: |
+          mkdir release
+          cp dist/*.whl dist/*.tar.gz release/
+          cp "${{ steps.provenance.outputs.bundle-path }}" "release/queryapigate-${GITHUB_REF_NAME#v}.intoto.jsonl"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: release/
+          retention-days: 5
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  # The same files on a GitHub Release, beside their provenance - once PyPI has them, so a Release never names files
+  # PyPI refused. Its own job: only this one may write to the repository.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release/
+      - name: Create the release, its notes the changelog's section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/check_release.py --notes "$GITHUB_REF_NAME" > notes.md
+          gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

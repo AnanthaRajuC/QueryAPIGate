@@ -64,6 +64,18 @@ class ReleaseCheckTests(unittest.TestCase):
         (self.root / 'CHANGELOG.md').unlink()
         self.assertEqual(len(check_release.problems('v0.2.0', self.root)), 2)
 
+    def test_the_release_notes_are_the_versions_changelog_section(self):
+        (self.root / 'CHANGELOG.md').write_text(
+            '## [Unreleased]\n\n## [0.3.0] - 2026-10-14\n\nNewer.\n\n## [0.2.0] - 2026-09-21\n\nThe summary.\n\n'
+            '### Fixed\n- a thing\n\n[Unreleased]: https://example.com/compare\n')
+        self.assertEqual(check_release.notes('v0.2.0', self.root), 'The summary.\n\n### Fixed\n- a thing\n')
+        self.assertEqual(check_release.notes('v0.3.0', self.root), 'Newer.\n')
+        with self.assertRaises(SystemExit):
+            check_release.notes('v9.9.9', self.root)
+        out = subprocess.run(['python3', str(SCRIPT), '--notes', 'v0.3.0'], cwd=self.root, capture_output=True,
+                             text=True)
+        self.assertEqual((out.returncode, out.stdout), (0, 'Newer.\n'))
+
     def test_command_line_exit_codes(self):
         run = lambda tag: subprocess.run(['python3', str(SCRIPT), tag], cwd=self.root,  # noqa: E731
                                          capture_output=True, text=True)

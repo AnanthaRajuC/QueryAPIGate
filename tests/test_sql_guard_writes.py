@@ -62,6 +62,21 @@ class RuleTests(unittest.TestCase):
             with self.subTest(sql=sql):
                 self.assertEqual(sqltools.write_operations(sql, dialect), set())
 
+    def test_explain_inside_explain_is_refused_not_recursed_into(self):
+        # Found by fuzzing (fuzz/fuzz_sql_guard.py): each EXPLAIN was one more level of recursion, re-scanning the
+        # whole text - a few thousand in one statement raised RecursionError (a 500) after quadratic work. No database
+        # runs EXPLAIN EXPLAIN, so it's refused as a write, failing closed, and nothing deeper is looked at.
+        import time
+        started = time.monotonic()
+        for sql in ('EXPLAIN EXPLAIN SELECT 1', 'explain ' * 5000 + 'SELECT 1', 'EXPLAIN ANALYZE EXPLAIN SELECT 1'):
+            with self.subTest(sql=sql[:40]):
+                self.assertEqual(sqltools.write_operations(sql, 'postgres'), {'explain'})
+                with self.assertRaises(Exception) as caught:
+                    sqltools.validate_sql(sql, 'postgres', allow_writes=False)
+                self.assertEqual(caught.exception.code, 'read_only')
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(sqltools.write_operations('EXPLAIN SELECT 1', 'postgres'), set())  # one level still reads
+
     def test_allowed_write_ops_cover_hidden_writes_too(self):
         sql = 'WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d'
         with self.assertRaises(Exception) as caught:

@@ -102,3 +102,44 @@ class SignedTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class H2DriverTests(unittest.TestCase):
+    """The H2 driver the package bundles isn't committed (OpenSSF Scorecard: Binary-Artifacts): the fetch script and
+    the Dockerfile each download it from Maven Central, checked against a pinned SHA-256 - the same one."""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'fetch_h2_jar', os.path.join(ROOT, '.github', 'scripts', 'fetch_h2_jar.py'))
+        self.fetch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.fetch)
+
+    def test_the_dockerfile_fetches_the_same_file_with_the_same_hash(self):
+        with open(os.path.join(ROOT, 'Dockerfile')) as f:
+            dockerfile = f.read()
+        added = re.search(r'ADD --chmod=644 --checksum=sha256:([0-9a-f]{64}) \\\n\s+(\S+) (\S+)', dockerfile)
+        self.assertIsNotNone(added, 'the Dockerfile fetches the H2 driver with ADD --checksum')
+        self.assertEqual(added.groups(), (self.fetch.SHA256, self.fetch.URL,
+                                          f'./queryapigate/lib/h2-{self.fetch.VERSION}.jar'))
+
+    def test_the_server_looks_for_the_version_fetched(self):
+        from queryapigate import config
+        self.assertEqual(config.BUNDLED_H2_JAR.resolve(), self.fetch.TARGET)
+
+    def test_a_download_with_another_hash_is_never_written(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stderr
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'h2.jar'
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = b'not the driver'
+            with mock.patch.object(self.fetch, 'TARGET', target), \
+                    mock.patch.object(self.fetch.urllib.request, 'urlopen', return_value=response), \
+                    redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(self.fetch.main(), 1)
+            self.assertFalse(target.exists())
+            self.assertIn('not written', err.getvalue())

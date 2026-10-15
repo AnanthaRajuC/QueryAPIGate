@@ -96,6 +96,10 @@ def write_operations(sql, dialect=None):
     if keyword == 'explain':
         inner = _EXPLAIN_RE.sub('', masked, count=1)
         inner_keyword = first_keyword(inner, dialect)
+        if inner_keyword == 'explain':
+            # No database runs EXPLAIN EXPLAIN: refused as a write (fails closed) rather than looked into again - each
+            # level was a recursion re-scanning the whole text, so thousands of them raised RecursionError (fuzzing).
+            return {'explain'}
         if inner_keyword in READ_ONLY_STATEMENTS:
             return write_operations(inner, dialect)
         return {inner_keyword} if inner_keyword in _WRITE_KEYWORDS else set()

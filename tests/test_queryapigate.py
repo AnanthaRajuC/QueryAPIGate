@@ -794,6 +794,7 @@ class DriverWiringTests(unittest.TestCase):
 
     def test_h2_sets_query_timeout_and_maps_cancellation(self):
         import jaydebeapi
+        self.enterContext(mock.patch.object(config, 'h2_jar', return_value=__file__))  # any file: the JVM is mocked
         cursor = mock.MagicMock()
         cursor.description = [('C',)]
         cursor.execute.side_effect = [None, jaydebeapi.DatabaseError('Statement was canceled or the session timed out')]
@@ -1038,7 +1039,16 @@ class PooledDriverTests(unittest.TestCase):
         with mock.patch('jpype.isJVMStarted', return_value=False):  # nothing to attach to before the JVM starts
             runners._attach_thread_as_daemon()
 
+    def test_h2_without_its_driver_says_how_to_get_it(self):
+        with mock.patch.object(config, 'h2_jar', return_value='/nowhere/h2.jar'), \
+                mock.patch('jaydebeapi.connect') as connect, self.assertRaises(ApiError) as caught:
+            runners._H2().connect({'host': 'h', 'database': 'd'}, True)
+        self.assertEqual((caught.exception.status, caught.exception.code), (500, 'driver_missing'))
+        self.assertIn('fetch_h2_jar.py', caught.exception.message)
+        self.assertFalse(connect.called)
+
     def test_h2_dead_connection_is_replaced(self):
+        self.enterContext(mock.patch.object(config, 'h2_jar', return_value=__file__))  # any file: the JVM is mocked
         first, second = mock.MagicMock(), mock.MagicMock()
         for conn in (first, second):
             conn.cursor.return_value.description = [('C',)]

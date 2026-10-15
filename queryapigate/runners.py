@@ -546,6 +546,10 @@ class _H2(_Driver):
 
     def connect(self, details, read_only):
         import jaydebeapi
+        if not os.path.isfile(config.h2_jar()):  # a source checkout: the driver is fetched, not committed
+            raise ApiError(f"H2's driver isn't installed ({config.h2_jar()}): in a source checkout run "
+                           'python .github/scripts/fetch_h2_jar.py, or set QUERYAPIGATE_H2_JAR', 500,
+                           code='driver_missing')
         _attach_thread_as_daemon()
         host = details.get('host') or 'localhost'
         if details.get('port') and ':' not in host:

@@ -175,3 +175,6 @@ cython_debug/
 # lands in the package (queryapigate/console_dist/) only for release builds - never committed.
 !frontend/src/lib/
 queryapigate/console_dist/
+
+# The bundled H2 driver: fetched, not committed - python .github/scripts/fetch_h2_jar.py
+queryapigate/lib/*.jar

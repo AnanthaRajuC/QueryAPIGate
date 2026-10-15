@@ -5,6 +5,10 @@ Run by the Release workflow before anything is built or uploaded:
 
     python .github/scripts/check_release.py v0.2.0
 
+and, once PyPI has the release, for the GitHub Release's notes - the version's CHANGELOG.md section:
+
+    python .github/scripts/check_release.py --notes v0.2.0
+
 It fails when
   * the tag is not `v<queryapigate.__version__>` - i.e. the tag was pushed on a commit without the version bump,
   * the tagged commit is not part of origin/main - i.e. the tag was pushed before its pull request was merged,
@@ -45,9 +49,22 @@ def problems(tag, root, main_ref='origin/main'):
     return found
 
 
+def notes(tag, root):
+    """The version's section of CHANGELOG.md, without its heading - the GitHub Release's notes."""
+    version = tag.removeprefix('v')
+    text = (root / 'CHANGELOG.md').read_text()
+    match = re.search(rf'^## \[{re.escape(version)}\] - [^\n]*\n(.*?)(?=^## \[|^\[Unreleased\]:|\Z)', text, re.M | re.S)
+    if not match:
+        raise SystemExit(f'CHANGELOG.md has no section for {version}')
+    return match.group(1).strip() + '\n'
+
+
 def main(argv):
+    if len(argv) == 3 and argv[1] == '--notes':
+        sys.stdout.write(notes(argv[2], Path.cwd()))
+        return 0
     if len(argv) != 2:
-        raise SystemExit(f'usage: {argv[0]} <tag>')
+        raise SystemExit(f'usage: {argv[0]} [--notes] <tag>')
     reasons = problems(argv[1], Path.cwd())
     for reason in reasons:
         print(f'::error::{reason}')

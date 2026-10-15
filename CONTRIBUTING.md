@@ -104,13 +104,14 @@ available at [http://contributor-covenant.org/version/1/4][version]
 git clone https://github.com/AnanthaRajuC/QueryAPIGate.git && cd QueryAPIGate
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+python .github/scripts/fetch_h2_jar.py  # the H2 driver, from Maven Central - only for h2 connections, or a build
 
 ruff check .
 mypy queryapigate
 python -m unittest discover -s tests -t .
 ~~~
 
-`tests/test_integration.py` runs against real MySQL, PostgreSQL, ClickHouse and H2 servers when the matching
+`tests/test_integration.py` runs against real MySQL, PostgreSQL, ClickHouse, H2 and MongoDB servers when the matching
 `QUERYAPIGATE_IT_*` environment variables are set (see the file header); otherwise those tests are skipped. CI runs them
 against service containers. `tests/test_sql_guard_fuzz.py` property-tests the SQL guard and parameter binder with
 [Hypothesis](https://hypothesis.readthedocs.io/); a failure there prints a minimal reproducing example.

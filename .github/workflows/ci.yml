@@ -97,6 +97,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - run: pip install -e ".[all,mcp,aws]"
+      - run: python .github/scripts/fetch_h2_jar.py  # not committed: from Maven Central, its SHA-256 checked
       - name: Start H2 server
         run: |
           java -cp queryapigate/lib/h2-2.2.224.jar org.h2.tools.Server -tcp -tcpPort 9092 -ifNotExists &
@@ -320,6 +321,7 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund && npm run build
       - run: pip install build twine
+      - run: python .github/scripts/fetch_h2_jar.py
       - run: python -m build
       - run: twine check dist/*
       - name: Wheel contains the bundled H2 driver

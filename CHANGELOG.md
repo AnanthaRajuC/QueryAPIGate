@@ -55,9 +55,25 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   and the chart's, every release artifact meets **SLSA Build Level 2**; SECURITY.md says so, and why not Level 3.
 - **OpenSSF Scorecard**, run on every push to `main` and weekly, its results published (the README's badge) and in
   the repository's code scanning alerts.
+- **A GitHub Release for every version**, its notes the changelog's section, carrying the sdist, the wheel and their
+  build provenance (`queryapigate-<version>.intoto.jsonl`) - made once PyPI has accepted them.
+- **CodeQL** on the server's Python, the Console's TypeScript and the workflows, on every push and pull request.
+- **Fuzzing with ClusterFuzzLite**: Atheris targets for the SQL guard, table checks, MongoDB documents and parameter
+  rules (`fuzz/`), each checking a property - no server-side JavaScript survives into what MongoDB is sent, a
+  declared parameter is never bound to a document - not only that nothing crashes. Five minutes on every pull
+  request, longer on `main` and weekly.
 
 ### Changed
 - **Every workflow gives its jobs a read-only token** unless a job asks for more, as `docs.yml` already did.
+- **The H2 driver isn't committed any more.** The wheel and the image still bundle it: each build fetches
+  `h2-2.2.224.jar` from Maven Central and refuses it unless its SHA-256 is the pinned one. In a source checkout, run
+  `python .github/scripts/fetch_h2_jar.py` before using an `h2` connection - without it, one says so
+  (`driver_missing`) rather than failing inside Java.
+
+### Fixed
+- **`EXPLAIN EXPLAIN ...` was looked into once per `EXPLAIN`** - found by the new fuzzing. Each level re-scanned the
+  whole statement, so a few thousand of them in one request cost quadratic time and ended in a `RecursionError` (a
+  500). No database runs a nested `EXPLAIN`: it's refused as a write now (`read_only`), and nothing deeper is read.
 
 ## [0.35.0] - 2026-10-14
 

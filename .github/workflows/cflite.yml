@@ -1,0 +1,35 @@
+name: Fuzzing (ClusterFuzzLite)
+
+# Atheris fuzz targets for the code that guards access - the SQL guard, table checks, MongoDB documents, parameter
+# rules (fuzz/README.md) - built and run by ClusterFuzzLite (OpenSSF Scorecard: Fuzzing). A pull request fuzzes for
+# five minutes and fails on a crash or a broken property; main and a weekly run fuzz longer, from what earlier runs
+# found.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          sanitizer: address
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: ${{ github.event_name == 'pull_request' && 300 || 900 }}
+          mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
+          sanitizer: address
+          output-sarif: false

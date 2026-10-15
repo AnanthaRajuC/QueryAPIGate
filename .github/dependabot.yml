@@ -12,3 +12,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: docker  # ClusterFuzzLite's build image, by digest
+    directory: /.clusterfuzzlite
+    schedule:
+      interval: weekly
