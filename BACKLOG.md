@@ -108,7 +108,8 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0021](documentation/adr/0021-live-events-and-secrets-graduate.md)). AWS's stay experimental.
     (0.34.0, 2026-10-13.) 0.34.1 and 0.34.2 fixed three MongoDB holes the review of what's left found.
 23. **0.35: MongoDB against a real server in CI**, and at `pymongo`'s floor; forgetting a person waits for a usage
-    write in flight. (0.35.0, 2026-10-14.)
+    write in flight. (0.35.0, 2026-10-14.) 0.35.1 closed an `allowed_tables` bypass through a CTE and a one-request
+    ReDoS, found by review, CodeQL and fuzzing, and brought Scorecard to 7.8. (0.35.1, 2026-10-15.)
 24. **0.36: MongoDB graduates**, with streaming exports - the one essential tier-1 feature it lacks.
 25. **Then, only on demand:** #99 workspaces.
 26. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates

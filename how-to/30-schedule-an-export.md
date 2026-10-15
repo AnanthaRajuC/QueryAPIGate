@@ -125,7 +125,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: export
-              image: ghcr.io/anantharajuc/queryapigate:0.35.0
+              image: ghcr.io/anantharajuc/queryapigate:0.35.1
               command: ["queryapigate", "export", "example_rentals_since", "--out", "/exports/{name}_{date}.csv"]
               envFrom:
                 - secretRef:

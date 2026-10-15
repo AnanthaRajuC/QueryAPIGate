@@ -41,12 +41,12 @@ tag - that the build platform signs (GitHub artifact attestations, through Sigst
 that workflow. That holds for:
 
 - **the images and the Helm chart**, from 0.31 (`docker.yml`);
-- **the sdist and wheel on PyPI**, from 0.36 (`release.yml`). Earlier ones carry only PyPI's own attestations
+- **the sdist and wheel on PyPI**, from 0.35.1 (`release.yml`). Earlier ones carry only PyPI's own attestations
   (PEP 740), which say who uploaded them, not how they were built. To check one:
 
   ```bash
-  pip download queryapigate==0.36.0 --no-deps -d .
-  gh attestation verify queryapigate-0.36.0-py3-none-any.whl --owner AnanthaRajuC
+  pip download queryapigate==0.35.1 --no-deps -d .
+  gh attestation verify queryapigate-0.35.1-py3-none-any.whl --owner AnanthaRajuC
   ```
 
 **Not Level 3.** Level 3 asks that the steps doing the build can't influence the provenance. Here the attestation is
