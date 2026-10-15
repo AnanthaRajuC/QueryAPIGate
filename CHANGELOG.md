@@ -70,6 +70,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `python .github/scripts/fetch_h2_jar.py` before using an `h2` connection - without it, one says so
   (`driver_missing`) rather than failing inside Java.
 
+### Security
+- **One request could hold a worker for over a minute** (found by CodeQL). Before checking a statement, the SQL guard
+  stripped trailing whitespace and semicolons with a regular expression that took quadratic time on a long run of
+  whitespace anywhere in it: 200,000 spaces in ad-hoc SQL - any key allowed to send some - took 81 seconds of CPU.
+  It's a linear scan now: 9 ms for the same statement.
+- **A line break in a caller's SQL, or `%0A` in a request path, could forge a line of the plain-text log** (CodeQL).
+  A message's line breaks are written as `\n` now, and its backslashes as `\\`, so one event is one line; JSON logs
+  (`QUERYAPIGATE_JSON_LOGS`) were never affected. Multi-line SQL reads as one line in the plain-text log.
+- **`/console/` told anyone whether a file existed on the server** (CodeQL). Its check before serving a file looked
+  outside the build: `/console/%2e%2e/...` naming a file that existed answered 404, one that didn't the Console's page.
+  Nothing outside was ever served. Only paths inside the build are looked at now.
+- **The SIEM stream's TLS says its minimum, 1.2**, rather than leaving it to the default.
+
 ### Fixed
 - **`EXPLAIN EXPLAIN ...` was looked into once per `EXPLAIN`** - found by the new fuzzing. Each level re-scanned the
   whole statement, so a few thousand of them in one request cost quadratic time and ended in a `RecursionError` (a

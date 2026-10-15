@@ -39,6 +39,20 @@ class _RequestContextFilter(logging.Filter):
         return True
 
 
+class _PlainFormatter(logging.Formatter):
+    """One event, one line: a line break in the message - a caller's SQL, a request path with %0A in it - is written
+    as \\n, so it can't start what reads as a log line of its own (CodeQL py/log-injection). A traceback keeps its
+    lines: it comes after the message, from the server, not a caller."""
+
+    def formatMessage(self, record):
+        message = record.message
+        record.message = message.replace('\\', '\\\\').replace('\r', '\\r').replace('\n', '\\n')
+        try:
+            return super().formatMessage(record)
+        finally:
+            record.message = message
+
+
 class _JsonFormatter(logging.Formatter):
     def format(self, record):
         payload = {
@@ -72,7 +86,7 @@ def configure(logger):
     handler = logging.StreamHandler()
     handler._queryapigate_managed = True
     handler.addFilter(_RequestContextFilter())
-    handler.setFormatter(_JsonFormatter() if config.json_logs() else logging.Formatter(_PLAIN_FORMAT))
+    handler.setFormatter(_JsonFormatter() if config.json_logs() else _PlainFormatter(_PLAIN_FORMAT))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False

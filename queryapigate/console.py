@@ -8,9 +8,11 @@ built it gets a short "not built" page instead of an error - backend work never 
 The page itself is public and holds no data: everything it shows comes from the JSON API, called with the API key the
 user enters (kept in sessionStorage under the same name /docs uses).
 """
+import os
 from pathlib import Path
 
 from flask import Response, send_from_directory
+from werkzeug.security import safe_join
 
 DIST = Path(__file__).parent / 'console_dist'
 
@@ -59,7 +61,10 @@ def serve(path=''):
     asset reference fails visibly instead of loading HTML as a script."""
     if not built():
         return _secure(Response(NOT_BUILT_HTML, mimetype='text/html'))
-    if path and (DIST / path).is_file():
+    # Only what's inside the build is looked at: checking the raw path told a caller whether a file existed anywhere
+    # on the server - 404 for one that did, the index for one that didn't (CodeQL py/path-injection).
+    inside = safe_join(str(DIST), path) if path else None
+    if inside is not None and os.path.isfile(inside):
         response = send_from_directory(DIST, path, max_age=0)
         if path.startswith('assets/'):  # content-hashed file names: safe to cache forever
             response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'

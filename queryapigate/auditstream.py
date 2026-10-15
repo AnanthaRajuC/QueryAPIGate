@@ -191,6 +191,7 @@ class _Syslog:
         if parts.scheme != 'tls':
             return raw
         context = ssl.create_default_context(cafile=os.environ.get('QUERYAPIGATE_AUDIT_SYSLOG_CA', '').strip() or None)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2  # the default; said, so nothing lowers it
         cert = os.environ.get('QUERYAPIGATE_AUDIT_SYSLOG_CERT', '').strip()
         if cert:
             context.load_cert_chain(cert, os.environ.get('QUERYAPIGATE_AUDIT_SYSLOG_KEY', '').strip())

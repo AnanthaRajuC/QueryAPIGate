@@ -385,3 +385,22 @@ class PaginateFuzzTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LinearTimeTests(unittest.TestCase):
+    """CodeQL (py/polynomial-redos, 2026-10-15): validate_sql stripped trailing whitespace and semicolons with
+    `[\\s;]+$`, which a regex engine retries from every position of a long run that isn't at the end - 40,000 spaces
+    took three seconds, a few hundred thousand a minute, in any caller's ad-hoc SQL."""
+
+    def test_a_long_run_of_spaces_is_linear(self):
+        import time
+        started = time.monotonic()
+        sqltools.validate_sql('SELECT 1' + ' ' * 200_000 + 'AS x', 'postgres', allow_writes=False)
+        self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_trailing_whitespace_and_semicolons_still_go(self):
+        for sql, expected in (('SELECT 1;', 'SELECT 1'), ('SELECT 1 ; ;\n\t ', 'SELECT 1'),
+                              ('SELECT 1 ;', 'SELECT 1'), ('  SELECT 1', 'SELECT 1'),
+                              ("SELECT ';'", "SELECT ';'")):
+            with self.subTest(sql=sql):
+                self.assertEqual(sqltools.validate_sql(sql, 'postgres', allow_writes=False), expected)

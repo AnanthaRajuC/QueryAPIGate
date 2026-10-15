@@ -84,6 +84,13 @@ class BuiltTests(ConsoleTestCase):
             res = self.get(path)
             self.assertNotIn('do not serve', res.get_data(as_text=True), path)
 
+    def test_whether_a_file_outside_exists_isnt_told_either(self):
+        # CodeQL py/path-injection: the check before send_from_directory() looked outside the build, so a file that
+        # existed there answered 404 and one that didn't the Console's index - which file is on the server, told.
+        (Path(self.tmp.name) / 'LICENSE').write_text('outside')
+        there, missing = self.get('/console/%2e%2e/LICENSE'), self.get('/console/%2e%2e/NO_SUCH_FILE')
+        self.assertEqual((there.status_code, there.get_data()), (missing.status_code, missing.get_data()))
+
     def test_every_response_carries_a_strict_content_security_policy(self):
         for path in ('/console/', '/console/queries', '/console/assets/index-abc123.js',
                      '/console/assets/missing-999.js'):
