@@ -8,6 +8,7 @@ filesystem path.
 """
 import contextlib
 import json
+import logging
 import os
 import re
 import threading
@@ -119,7 +120,9 @@ def record_audit(actor, action, target, changes=None, via=None):
             # several instances still make one chain
             link = auditchain.append(conn, entry, config.audit_log_limit())
     except (OSError, *db.Error):
-        pass
+        # The action stands, but it has no entry: said loudly, never silently (review, 2026-10-15)
+        logging.getLogger('queryapigate').error('Audit log: %s on %s by %s happened, but its entry could not be '
+                                                'written', action, target, actor, exc_info=True)
 
     def deliver():
         from . import auditstream

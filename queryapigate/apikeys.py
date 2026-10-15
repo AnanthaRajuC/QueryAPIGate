@@ -450,8 +450,10 @@ def is_expired(entry):
         return False
     try:
         deadline = datetime.strptime(expires_at, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
-    except ValueError:
-        return False  # a malformed stored value should not itself lock the key out
+    except (TypeError, ValueError):
+        # Every way in validates the date (_validate_expiry()), so this is a store edited by hand or damaged: an expiry
+        # nobody can read is treated as passed - fail closed - not as none (review, 2026-10-15)
+        return True
     return datetime.now() > deadline
 
 

@@ -26,6 +26,36 @@ class ExtractTablesTests(unittest.TestCase):
               'WHERE r.id IN (SELECT order_id FROM refunds)')
         self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'orders', 'customers', 'refunds'})
 
+    def test_a_cte_named_after_the_table_it_reads_still_counts_that_table(self):
+        # Found by review, 2026-10-15: every table sharing a name with a CTE was dropped, the one the CTE itself reads
+        # included - so `WITH secret AS (SELECT * FROM secret) SELECT * FROM secret` named no table at all, and a key
+        # allowed only `orders` read `secret`. Inside its own definition a (non-recursive) CTE's name is the table.
+        for sql, tables in (
+                ('WITH secret AS (SELECT * FROM secret) SELECT * FROM secret', {'secret'}),
+                ('WITH Secret AS (SELECT * FROM secret) SELECT * FROM SECRET', {'secret'}),
+                ('WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS n) SELECT * FROM a, b', {'b'}),  # b: not yet
+                ('WITH b AS (SELECT * FROM orders), a AS (SELECT * FROM b) SELECT * FROM a', {'orders'}),
+                ('WITH secret AS (SELECT 1 AS n) SELECT * FROM public.secret', {'secret'}),  # qualified: the table
+                ('SELECT * FROM (WITH secret AS (SELECT * FROM secret) SELECT * FROM secret) x', {'secret'}),
+                ('WITH x AS (SELECT 1 AS n) SELECT * FROM (WITH y AS (SELECT * FROM x) SELECT * FROM y) z', set()),
+                ('WITH RECURSIVE n AS (SELECT 1 AS i UNION ALL SELECT i + 1 FROM n WHERE i < 3) SELECT * FROM n',
+                 set())):  # a recursive CTE reads itself, not a table
+            with self.subTest(sql=sql):
+                self.assertEqual(tableguard.extract_tables(sql, 'postgres'), tables)
+        with self.assertRaises(ApiError) as caught:
+            sqltools.validate_sql('WITH secret AS (SELECT * FROM secret) SELECT * FROM secret', 'postgres',
+                                  allow_writes=False, allowed_tables={'orders'})
+        self.assertEqual(caught.exception.code, 'table_not_allowed')
+
+    def test_a_statement_nested_too_deep_to_walk_is_refused_not_let_through(self):
+        for depth in (50, 400, 3000):
+            sql = 'SELECT * FROM ' + '(SELECT * FROM ' * depth + 'secret' + ') x' * depth
+            with self.subTest(depth=depth):
+                try:
+                    self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'secret'})
+                except ApiError as error:
+                    self.assertEqual(error.code, 'table_check_failed')
+
     def test_a_derived_table_subquery_resolves_to_its_real_table(self):
         sql = 'SELECT * FROM (SELECT * FROM secret_table) x'
         self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'secret_table'})

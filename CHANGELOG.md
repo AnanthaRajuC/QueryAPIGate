@@ -81,7 +81,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **`/console/` told anyone whether a file existed on the server** (CodeQL). Its check before serving a file looked
   outside the build: `/console/%2e%2e/...` naming a file that existed answered 404, one that didn't the Console's page.
   Nothing outside was ever served. Only paths inside the build are looked at now.
+- **`allowed_tables` could be read past with a CTE named after the table** (found by review). Every table sharing a
+  name with a CTE was dropped from the check, the one the CTE itself reads included: `WITH secret AS (SELECT * FROM
+  secret) SELECT * FROM secret` named no table, so a key allowed only `orders` read `secret` - and so did a CTE read
+  before it was defined, a schema-qualified `public.secret`, and the same inside a subquery. A name is a CTE's only
+  where SQL makes it one now: after its `WITH`, in the CTEs after it, and in its own body under `WITH RECURSIVE`.
+  Affects every release with `allowed_tables` (0.11.0 on). To check whether it happened: ad-hoc runs by keys with
+  `allowed_tables`, in run history, whose SQL has a `WITH`.
+- **An API key or admin token whose stored expiry couldn't be read never expired.** Every way in validates it, so
+  only a store edited by hand or damaged had one; such an expiry now counts as passed.
 - **The SIEM stream's TLS says its minimum, 1.2**, rather than leaving it to the default.
+- **An audit entry that couldn't be written is logged as an error.** The action it recorded still stands, as before -
+  but with the reason, rather than nothing.
 
 ### Fixed
 - **`EXPLAIN EXPLAIN ...` was looked into once per `EXPLAIN`** - found by the new fuzzing. Each level re-scanned the
