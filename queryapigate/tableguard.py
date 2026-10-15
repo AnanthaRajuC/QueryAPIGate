@@ -3,12 +3,13 @@ dialects sqlglot can parse (see ``_DIALECT_MAP``). Unlike sqlflow.py's best-effo
 extraction for the Access tab's visualization, this one is a security check: a query whose tables can't be
 verified - an unsupported dialect, a parse failure - must be rejected, not silently let through.
 
-Extraction is ``parsed.find_all(exp.Table)`` minus any CTE names defined in the same query, not
-``sqlglot.optimizer.scope.build_scope()`` - the latter correctly excludes CTE names for SELECT/WITH but
-returns None entirely for DELETE/UPDATE/INSERT (verified directly against a real sqlglot install), which
-would silently miss a write statement's own target table. The simpler find_all()-minus-CTE-names approach
-was verified to give correct results uniformly across CTEs, subqueries, UNION, self-joins, and bare or
-CTE'd DELETE/UPDATE/INSERT - one code path for every statement type this guard needs to check, not two.
+Extraction walks the parsed statement keeping track of which CTEs are visible where (``_real_tables``), not
+``sqlglot.optimizer.scope.build_scope()`` - that returns None entirely for DELETE/UPDATE/INSERT (verified against a
+real sqlglot install), which would silently miss a write statement's own target table. A bare name refers to a CTE
+only where SQL says it does: in the statement after its WITH, in the CTEs defined after it - and in its own body
+only under WITH RECURSIVE. Anywhere else, and always when qualified (``public.secret``), it's the table: dropping
+every table that merely shared a CTE's name let `WITH secret AS (SELECT * FROM secret) SELECT * FROM secret` past a
+key allowed only `orders` (fixed 2026-10-15).
 
 Known, accepted limitations: a table name is extracted bare (``information_schema.tables`` -> ``'tables'``),
 not schema-qualified - matches allowed_write_ops's own bare-keyword-list style, but can't disambiguate two
@@ -48,8 +49,43 @@ def extract_tables(sql, dialect):
             name = function.sql_name().lower() if not isinstance(function, exp.Anonymous) else function.name.lower()
             raise ApiError(f'This API key may only query its allowed tables - a table function such as {name}() '
                            "reads data the allow-list can't see, so it isn't allowed", 403, code='table_not_allowed')
-    cte_names = {cte.alias_or_name for cte in parsed.find_all(exp.CTE)}
-    return {t.name.lower() for t in parsed.find_all(exp.Table) if t.name and t.name not in cte_names}
+    try:
+        return _real_tables(parsed, frozenset())
+    except RecursionError:  # nested deeper than can be walked: refused, never let through
+        raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
+                       code='table_check_failed') from None
+
+
+def _real_tables(node, visible):
+    """The tables under ``node`` that aren't references to a CTE in ``visible`` (lower-case names) - see the
+    module docstring for the scoping rule."""
+    from sqlglot import exp
+    if isinstance(node, exp.Table):
+        name = node.name.lower()
+        if not name or (name in visible and not node.args.get('db') and not node.args.get('catalog')):
+            return set()
+        return {name} | _children(node, visible)
+    found = set()
+    with_ = node.args.get('with') if isinstance(node, exp.Expression) else None
+    if isinstance(with_, exp.With):
+        ctes = [(cte.alias_or_name.lower(), cte.this) for cte in with_.expressions]
+        if with_.args.get('recursive'):
+            visible = visible | {name for name, _ in ctes}
+            for _, body in ctes:
+                found |= _real_tables(body, visible)
+        else:
+            for name, body in ctes:  # each body sees the CTEs before it, not itself or those after
+                found |= _real_tables(body, visible)
+                visible = visible | {name}
+    return found | _children(node, visible, skip=with_)
+
+
+def _children(node, visible, skip=None):
+    found = set()
+    for child in node.iter_expressions():
+        if child is not skip:
+            found |= _real_tables(child, visible)
+    return found
 
 
 # Table functions that only generate values - no data to restrict - and so stay usable with allowed_tables.

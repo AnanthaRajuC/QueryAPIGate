@@ -949,6 +949,11 @@ class ApiKeysModuleTests(unittest.TestCase):
                                    rate_limit=None, allowed_write_ops=None)
         self.assertTrue(apikeys.can_write_query(admin, 'anything'))
 
+    def test_an_expiry_nobody_can_read_counts_as_passed(self):
+        for bad in ('not-a-date', '2026-13-40', 20261015):
+            with self.subTest(bad=bad):
+                self.assertTrue(apikeys.is_expired({'expires_at': bad}))
+
     def test_is_expired(self):
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -1042,4 +1047,4 @@ class CatalogTests(AppTestCase):
     def test_requires_authentication_like_any_other_functional_endpoint(self):
         self.assertEqual(self.client.get('/catalog').status_code, 401)
         self.assertEqual(self.client.get('/catalog', headers={'X-API-Key': 'wrong'}).status_code, 401)
-        self.assertFalse(apikeys.is_expired({'expires_at': 'garbage'}))  # malformed shouldn't lock the key out
+        self.assertTrue(apikeys.is_expired({'expires_at': 'garbage'}))  # unreadable: fails closed (2026-10-15)
