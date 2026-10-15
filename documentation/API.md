@@ -2082,6 +2082,22 @@ checked in addition to it, never instead of it. Unlike `/openapi.json`, `/catalo
 requires authentication like any other functional endpoint, since the whole point is answering "what can *I*
 use," which needs a resolved caller to mean anything.
 
+## Client SDKs
+
+`/openapi.json` is a complete, valid OpenAPI 3.0 document (checked in CI against the official validator), so a typed
+client for Java, TypeScript, Go, or [any of the ~50 languages `openapi-generator` supports](https://openapi-generator.tech/docs/generators)
+costs nothing in application code - generate it from the running server's own spec:
+
+~~~bash
+npx @openapitools/openapi-generator-cli generate \
+  -i http://127.0.0.1:5000/openapi.json -g java -o clients/java
+# or: -g typescript-fetch, -g go, -g python, ...
+~~~
+
+This is deliberately not something QueryAPIGate ships pre-generated: the spec already includes every saved query
+as its own typed `/q/<name>` endpoint (see [Run a saved query](#run-a-saved-query)), so a client generated against
+*your* server reflects *your* saved queries, not a generic snapshot.
+
 ## Errors
 
 Every error - from `/api/v1`, the runtime routes (`/q/<name>`, `/execute_sql`, `/catalog`, ...), `queryapigate

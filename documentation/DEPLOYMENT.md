@@ -30,6 +30,12 @@ The image already does the things a production container should: runs as a non-r
 ships a `HEALTHCHECK` against `/health`, and starts gunicorn with `--worker-class gthread` and one worker
 (see [Scaling out](#scaling-out) below) - none of that needs reconfiguring.
 
+The store lives in `/data`. A named volume (`-v queryapigate-data:/data`) works as it is; a folder on the host
+(`-v "$PWD/data:/data"`) has to be created first (`mkdir data`) and be writable by uid 1000 - one Docker creates for
+you is root's, which the container can't write to (or run with `--user "$(id -u):$(id -g)"`). A starter store:
+`docker run --rm -v queryapigate-data:/data ghcr.io/anantharajuc/queryapigate queryapigate init`. To build the image
+yourself: `docker build -t queryapigate .`, with `--build-arg WITH_H2=true` for the H2 variant.
+
 ## 2. Compose file
 
 ~~~yaml
@@ -465,6 +471,4 @@ Two limits:
   release. If one restarts mid-upgrade, bring it back on the new version.
 - **Upgrade one minor version at a time** (0.15 -> 0.16, not 0.15 -> 0.17) when rolling: the guarantee is about the
   release just before. A release that can't keep it says so under **Breaking** in its changelog entry, and then all
-  instances must be stopped before the first one starts on it. If you're upgrading from the project's old name (SQL2API), see
-[Upgrading from SQL2API](INSTALLATION_AND_SETUP.md#upgrading-from-sql2api) first; environment variables
-renamed and the server refuses to start until they're renamed too.
+  instances must be stopped before the first one starts on it.
