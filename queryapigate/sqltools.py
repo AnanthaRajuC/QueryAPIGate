@@ -148,7 +148,11 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     """
     if not isinstance(sql, str) or not sql.strip():
         raise ApiError('SQL query is missing', code='sql_required')
-    sql = re.sub(r'[\s;]+$', '', sql.strip())
+    sql = sql.strip()
+    end = len(sql)  # trailing whitespace and semicolons, from the end: `[\s;]+$` was quadratic in a long inner run
+    while end and (sql[end - 1] == ';' or sql[end - 1].isspace()):
+        end -= 1
+    sql = sql[:end]
     if ';' in _literals_re(dialect).sub(' ', sql):
         raise ApiError('Only a single SQL statement can be executed at a time', code='multiple_statements')
     # Every write the statement performs - including one hidden behind a read-only first keyword (a writable CTE,

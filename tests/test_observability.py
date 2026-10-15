@@ -153,6 +153,22 @@ class LoggingFormatTests(unittest.TestCase):
         _, handler = self._handler_for('queryapigate_test_plain', json_logs=False)
         self.assertNotIsInstance(handler.formatter, logging_setup._JsonFormatter)
 
+    def test_a_line_break_in_a_message_cant_forge_a_line_of_its_own(self):
+        # CodeQL py/log-injection: a caller's SQL (or a request path with %0A) is in the message; in plain text a line
+        # break there could start what reads as another event. A traceback keeps its own lines.
+        logger, handler = self._handler_for('queryapigate_test_inject', json_logs=False)
+        buf = io.StringIO()
+        handler.stream = buf
+        logger.warning('Executing: %s', "SELECT 1\n2026-10-15 07:00:00 INFO queryapigate [- key=admin]: forged\\n")
+        try:
+            raise ValueError('boom')
+        except ValueError:
+            logger.exception('failed')
+        lines = buf.getvalue().splitlines()
+        self.assertTrue(lines[0].endswith(r"SELECT 1\n2026-10-15 07:00:00 INFO queryapigate [- key=admin]: forged\\n"))
+        self.assertFalse(any(line.startswith('2026-10-15 07:00:00 INFO') for line in lines))
+        self.assertIn('Traceback (most recent call last):', lines)  # the server's own lines, as they were
+
     def test_json_when_enabled(self):
         logger, handler = self._handler_for('queryapigate_test_json', json_logs=True)
         self.assertIsInstance(handler.formatter, logging_setup._JsonFormatter)
