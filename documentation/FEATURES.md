@@ -1,6 +1,6 @@
 # Features
 
-What QueryAPIGate does, feature by feature, with links to the reference for each. The [README](../README.md) has the short version; [the API reference](API.md) has every detail.
+What QueryAPIGate does, feature by feature, with links to the reference for each. The [README](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/README.md) has the short version; [the API reference](API.md) has every detail.
 
 ## Multi-database support
 
@@ -13,7 +13,7 @@ What each supports - read-only enforcement, time limits, `allowed_tables`, schem
 
 **Files as a source** - through DuckDB, Parquet, CSV and JSON files on local disk, S3, GCS, R2 or the web are queried
 where they are and published like any table, limited to the paths each connection lists (see
-[publishing a bucket as an API](../how-to/41-publish-files-in-s3-as-an-api.md)).
+[publishing a bucket as an API](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/41-publish-files-in-s3-as-an-api.md)).
 
 ## Security and access control
 
@@ -165,7 +165,7 @@ Configure Access
 Unit tests, integration tests against real PostgreSQL, MySQL, ClickHouse, H2 and MongoDB servers (run in CI
 against service containers; the job fails if one skips), DuckDB integration tests that run unconditionally since it's
 embedded, property tests of the SQL guard with [Hypothesis](https://hypothesis.readthedocs.io/) and fuzzing of the
-guards with Atheris and ClusterFuzzLite ([fuzz/](../fuzz/README.md)), CodeQL, static type checking with mypy, linting
+guards with Atheris and ClusterFuzzLite ([fuzz/](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/fuzz/README.md)), CodeQL, static type checking with mypy, linting
 with ruff, and CI on every push - on Python 3.11 to 3.14, at the oldest dependency versions allowed, on a PostgreSQL
 store and under FIPS. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
