@@ -49,6 +49,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Fixed
+- **Building the image could fail on Maven Central.** The H2 driver was fetched from repo1.maven.org alone, which twice
+  answered GitHub's runners with something other than the jar - the pinned hash refused it, and the build stopped.
+  The image now fetches it with the same script the release uses, trying Maven Central, Apache's mirror and Google's,
+  a few times each; the hash still decides, so a mirror can't change what's installed. A wrong answer is reported -
+  its status, type, size and first bytes - rather than only its hash.
+
 ## [0.35.1] - 2026-10-15
 
 Two security fixes anyone running `allowed_tables` or ad-hoc SQL should take: a CTE named after a table read past a
