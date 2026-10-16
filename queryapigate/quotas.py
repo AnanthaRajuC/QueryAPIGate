@@ -272,7 +272,11 @@ def forget(caller):
     shared = _redis()
     if shared is not None:
         try:
-            names = list(shared._client.scan_iter(match=f'qag:quota:*~{_glob_escape(caller)}:*', count=500))
+            escaped = _glob_escape(caller)
+            # in every workspace (`<workspace>~<caller>`), and as counted before workspaces - `qag:quota:<caller>:...`,
+            # what a 0.37 server left in Redis, kept up to 40 days: erasing a person erases those too
+            names = [*shared._client.scan_iter(match=f'qag:quota:*~{escaped}:*', count=500),
+                     *shared._client.scan_iter(match=f'qag:quota:{escaped}:*', count=500)]
             if names:
                 shared._client.delete(*names)
         except shared._error as error:

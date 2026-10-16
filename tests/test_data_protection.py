@@ -200,13 +200,18 @@ class ForgetTests(unittest.TestCase):
         import redis
         url = os.environ['QUERYAPIGATE_TEST_REDIS_URL']
         client = redis.Redis.from_url(url)
-        for name in (f'qag:quota:{self.PERSON}:day:2026-10-12', 'qag:quota:jwt:bob@example.com:day:2026-10-12'):
+        theirs = (f'qag:quota:{self.PERSON}:day:2026-10-12',  # as a server before workspaces counted it (0.37)
+                  f'qag:quota:default~{self.PERSON}:day:2026-10-12',  # in a workspace (ADR 0023)
+                  f'qag:quota:team-b~{self.PERSON}:month:2026-10')
+        others = ('qag:quota:jwt:bob@example.com:day:2026-10-12',
+                  'qag:quota:default~jwt:bob@example.com:day:2026-10-12')
+        for name in (*theirs, *others):
             client.hset(name, 'calls', 1)
-        self.addCleanup(lambda: client.delete('qag:quota:jwt:bob@example.com:day:2026-10-12'))
+        self.addCleanup(lambda: client.delete(*others))
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_REDIS_URL': url}):
             history.forget(self.PERSON, 'owner')
-        self.assertFalse(client.exists(f'qag:quota:{self.PERSON}:day:2026-10-12'))
-        self.assertTrue(client.exists('qag:quota:jwt:bob@example.com:day:2026-10-12'))
+        self.assertEqual([bool(client.exists(name)) for name in theirs], [False, False, False])
+        self.assertEqual([bool(client.exists(name)) for name in others], [True, True])
 
 
 if __name__ == '__main__':
