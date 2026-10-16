@@ -156,11 +156,20 @@ def delete_key(name, actor):
 # Roles
 # --------------------------------------------------------------------------------------
 
+# A role's own fields beyond a grant: not copied onto a key created from it - a key has no sign-in token to bind.
+ROLE_ONLY_FIELDS = ('require_claim_binding',)
+
+
+def role_fields(entry):
+    """A role as compared and exported: its grants, and what only a role has."""
+    return {**_grants(entry), 'require_claim_binding': entry.get('require_claim_binding') is True}
+
+
 def to_role(name, entry, keys=None):
     keys = apikeys.list_keys() if keys is None else keys
     return {
         'name': name,
-        **_grants(entry),
+        **role_fields(entry),
         'created_at': entry.get('created_at'),
         'example': entry.get('example') is True,
         'keys_created': sum(1 for k in keys.values() if k.get('created_from_role') == name),
@@ -180,7 +189,7 @@ def list_roles():
 
 
 def create_role(data, actor):
-    _refuse_unknown(data, ('name', *GRANT_FIELDS))
+    _refuse_unknown(data, ('name', *GRANT_FIELDS, *ROLE_ONLY_FIELDS))
     name = data.get('name')
     _check_name(name, 'A role')
     if name in apikeys.list_roles():
@@ -190,15 +199,16 @@ def create_role(data, actor):
                         allowed_ips=data.get('allowed_ips'), allowed_write_ops=data.get('allowed_write_ops'),
                         collections=data.get('collections'), allowed_tables=data.get('allowed_tables'),
                         mask=data.get('mask'), quota=data.get('quota'),
+                        require_claim_binding=data.get('require_claim_binding'),
                         **{field: data.get(field) for field in LIMIT_FIELDS})
     store.record_audit(actor, 'create_role', name, apikeys.list_roles().get(name))
     return name
 
 
 def update_role(name, data, actor):
-    _refuse_unknown(data, GRANT_FIELDS)
+    _refuse_unknown(data, (*GRANT_FIELDS, *ROLE_ONLY_FIELDS))
     before = load_role(name)
-    clearable = {k: data[k] for k in _CLEARABLE if k in data and k != 'expires_at'}
+    clearable = {k: data[k] for k in (*_CLEARABLE, *ROLE_ONLY_FIELDS) if k in data and k != 'expires_at'}
     apikeys.update_role(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
                         queries=data.get('queries'), collections=data.get('collections'), **clearable)
     changes = _diff(before, apikeys.list_roles().get(name))

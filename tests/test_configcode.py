@@ -601,6 +601,31 @@ class ApplyTests(ConfigTestCase):
         self.assertNotIn('second', apikeys.list_keys())
 
 
+
+class ClaimBoundRoleTests(ConfigTestCase):
+    """require_claim_binding is a role's alone (API.md, Signed-in users): a file carries it, and a key from the role
+    doesn't take it."""
+
+    def test_it_round_trips_and_stays_off_the_key(self):
+        apikeys.create_role('customers', require_claim_binding=True, queries=['my_orders'])
+        apikeys.create_key('from-it', role='customers')
+        doc, _, _ = configcode.export()
+        role = next(r for r in doc['roles'] if r['name'] == 'customers')
+        self.assertEqual((role['require_claim_binding'], role['connections']), (True, []))
+        self.assertEqual(next(k for k in doc['api_keys'] if k['name'] == 'from-it').get('role'), 'customers')
+        self.assertEqual(configcode.diff(doc), {'changes': [], 'not_in_file': []})
+        self.assertNotIn('require_claim_binding', apikeys.list_keys()['from-it'])
+
+    def test_a_file_role_without_connections_reaches_none_and_with_them_is_refused(self):
+        configcode.apply(self.file(roles=[{'name': 'customers', 'require_claim_binding': True}]))
+        self.assertEqual(apikeys.list_roles()['customers']['connections'], [])
+        problems = self.problems(self.file(roles=[{'name': 'shoppers', 'require_claim_binding': True,
+                                                   'connections': '*'}]))
+        self.assertIn('by name or collection only', json.dumps(problems))
+        problems = self.problems(self.file(roles=[{'name': 'shoppers', 'require_claim_binding': 'yes'}]))
+        self.assertIn('true or false', json.dumps(problems))
+
+
 class PruneTests(ConfigTestCase):
     def setUp(self):
         super().setUp()

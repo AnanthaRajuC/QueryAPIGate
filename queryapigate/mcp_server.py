@@ -121,7 +121,7 @@ def list_tools_for(permission):
         if name in RESERVED_TOOL_NAMES or not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
-        if not apikeys.can_run_saved(permission, name, collection, connection_name):
+        if not apikeys.can_run_saved(permission, name, collection, connection_name, data.get('query_parameters')):
             continue
         if is_read_only(data):
             tools.append({

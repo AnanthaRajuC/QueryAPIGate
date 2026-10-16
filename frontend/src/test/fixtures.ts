@@ -166,5 +166,13 @@ export function apiKey(name: string, extra: Record<string, unknown> = {}) {
 
 /** A role as /api/v1/roles returns it. */
 export function role(name: string, extra: Record<string, unknown> = {}) {
-  return { name, ...GRANTS, created_at: '2026-10-01 10:00:00', example: false, keys_created: 0, ...extra };
+  return {
+    name,
+    ...GRANTS,
+    created_at: '2026-10-01 10:00:00',
+    example: false,
+    keys_created: 0,
+    require_claim_binding: false,
+    ...extra,
+  };
 }

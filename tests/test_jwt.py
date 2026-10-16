@@ -80,6 +80,73 @@ class JwtTestCase(unittest.TestCase):
         return [row['item'] for row in res.get_json()]
 
 
+
+class ClaimBindingTests(JwtTestCase):
+    """A role with require_claim_binding: its signed-in users run only saved queries that take a parameter from their
+    token - so a query granted to a customer-facing role by mistake, with no `from_claim`, can't show every customer
+    every row. Everywhere a caller sees or reaches queries: running one, /catalog, /openapi.json, MCP, ad-hoc SQL."""
+
+    def setUp(self):
+        super().setUp()
+        res = self.client.patch('/api/v1/roles/mobile', headers=self.admin,
+                                json={'require_claim_binding': True, 'queries': ['my_orders', 'all_orders']})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+
+    def test_only_a_query_that_binds_the_user_runs(self):
+        alice = bearer(token())
+        self.assertEqual(self.items(self.client.get('/q/my_orders', headers=alice)), ['apples', 'avocados'])
+        refused = self.client.get('/q/all_orders', headers=alice)
+        self.assertEqual((refused.status_code, refused.get_json()['code']), (403, 'claim_binding_required'))
+
+    def test_what_they_cant_run_isnt_listed_either(self):
+        alice = bearer(token())
+        catalog = {q['name'] for q in self.client.get('/catalog', headers=alice).get_json()['queries']}
+        self.assertEqual(catalog, {'my_orders'})
+        paths = self.client.get('/openapi.json', headers=alice).get_json()['paths']
+        self.assertIn('/q/my_orders', paths)
+        self.assertNotIn('/q/all_orders', paths)
+
+    def test_no_connection_and_no_ad_hoc_sql(self):
+        alice = bearer(token())
+        res = self.client.post('/execute_sql', headers=alice, json={'connection_name': 'lite', 'sql': 'SELECT 1'})
+        self.assertEqual((res.status_code, res.get_json()['code']), (403, 'connection_forbidden'))
+        self.assertEqual(self.client.get('/connections/lite/schema', headers=alice).status_code, 403)
+
+    def test_a_claim_bound_role_has_no_connection_grant(self):
+        res = self.client.post('/api/v1/roles', headers=self.admin,
+                               json={'name': 'customers', 'require_claim_binding': True, 'connections': ['lite']})
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_body'))
+        made = self.client.post('/api/v1/roles', headers=self.admin,
+                                json={'name': 'customers', 'require_claim_binding': True, 'queries': ['my_orders']})
+        self.assertEqual(made.status_code, 201, made.get_data(as_text=True))
+        role = self.client.get('/api/v1/roles/customers', headers=self.admin).get_json()
+        self.assertEqual((role['connections'], role['require_claim_binding']), ([], True))  # none, not every one
+        for bad in ('yes', 1):
+            res = self.client.patch('/api/v1/roles/customers', headers=self.admin, json={'require_claim_binding': bad})
+            self.assertEqual(res.status_code, 400, bad)
+
+    def test_a_key_made_from_the_role_doesnt_take_it(self):
+        res = self.client.post('/api/v1/api-keys', headers=self.admin, json={'name': 'from-role', 'role': 'mobile'})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        key = {'X-API-Key': res.get_json()['secret']}
+        self.assertEqual(self.items(self.client.get('/q/all_orders', headers=key)),
+                         ['apples', 'avocados', 'bananas', 'numbered'])  # a key's own grant, as before
+
+    def test_an_ai_client_signed_in_as_the_user_sees_only_the_bound_tool(self):
+        with self.app.app_context():
+            permission = jwtauth.authenticate(f'Bearer {token()}')
+        self.assertTrue(permission.claim_binding)
+        tools = {t['name'] for t in mcp_server.list_tools_for(permission)}
+        self.assertIn('my_orders', tools)
+        self.assertNotIn('all_orders', tools)
+        refused = mcp_server.call_tool_for(self.app, permission, 'all_orders', {})
+        self.assertTrue(refused.get('isError'), refused)
+
+    def test_without_it_a_role_is_as_before(self):
+        self.client.patch('/api/v1/roles/mobile', headers=self.admin, json={'require_claim_binding': False})
+        self.assertEqual(len(self.items(self.client.get('/q/all_orders', headers=bearer(token())))), 4)
+
+
 class VerificationTests(JwtTestCase):
     def test_a_valid_token_runs_the_query_as_that_user(self):
         self.assertEqual(self.items(self.client.get('/q/my_orders', headers=bearer(token()))), ['apples', 'avocados'])

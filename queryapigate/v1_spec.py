@@ -953,9 +953,15 @@ SCHEMAS = {
     },
     'Role': {
         'allOf': [_ref('Grants'), {
-            'type': 'object', 'required': ['name', 'created_at', 'example', 'keys_created'],
+            'type': 'object', 'required': ['name', 'created_at', 'example', 'keys_created', 'require_claim_binding'],
             'properties': {'name': {'type': 'string'}, 'created_at': _NULLABLE_STRING, 'example': {'type': 'boolean'},
-                           'keys_created': {'type': 'integer', 'description': 'Keys created from this role.'}},
+                           'keys_created': {'type': 'integer', 'description': 'Keys created from this role.'},
+                           'require_claim_binding': {
+                               'type': 'boolean',
+                               'description': 'Signed-in users with this role run only saved queries that take a '
+                                              'parameter from their sign-in token (from_claim), reached by name or '
+                                              'collection - no connection, no ad-hoc SQL. Roles only: not copied '
+                                              'onto a key created from the role.'}},
         }],
     },
     'RoleInput': {
@@ -973,6 +979,8 @@ SCHEMAS = {
             'query_timeout': {'type': 'number', 'nullable': True, 'minimum': 0.1, 'maximum': 86400},
             'max_rows': {'type': 'integer', 'nullable': True, 'minimum': 1, 'maximum': 10000000},
             'quota': _ref('Quota'),
+            'require_claim_binding': {'type': 'boolean',
+                                      'description': 'See Role.require_claim_binding. Default false.'},
         },
     },
     'RoleList': {

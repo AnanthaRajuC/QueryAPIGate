@@ -73,6 +73,14 @@ export function RolesPage() {
                       <span className="name">{name}</span>
                       <ManagedTag kind="roles" name={name} />
                       {r.example && <ExampleBadge />}
+                      {r.require_claim_binding ? (
+                        <span
+                          className="tag"
+                          title="Its signed-in users run only saved queries that take a parameter from their token"
+                        >
+                          bound to user
+                        </span>
+                      ) : null}
                       {r.mask?.length ? (
                         <span
                           className="tag"
