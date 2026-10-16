@@ -143,7 +143,8 @@ def _write(conn, name, fields, created_at, timestamp):
     details = {k: v for k, v in fields.items() if k in FIELDS}
     conn.execute("""
         INSERT INTO destinations (name, created_at, updated_at, details_json) VALUES (?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET updated_at = excluded.updated_at, details_json = excluded.details_json
+        ON CONFLICT(workspace, name) DO UPDATE SET updated_at = excluded.updated_at,
+          details_json = excluded.details_json
     """, (name, created_at, timestamp, json.dumps(details)))
 
 

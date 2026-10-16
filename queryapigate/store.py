@@ -400,7 +400,7 @@ def update_connections(connections):
             conn.execute("""
                 INSERT INTO connections (name, db, active, created_at, updated_at, details_json)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
+                ON CONFLICT(workspace, name) DO UPDATE SET
                     db = excluded.db, active = excluded.active,
                     created_at = excluded.created_at, updated_at = excluded.updated_at,
                     details_json = excluded.details_json

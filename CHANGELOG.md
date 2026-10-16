@@ -49,6 +49,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Upgrading from 0.37
+- **Stop every instance before starting 0.38** - this upgrade isn't a rolling one. The store moves to schema 17
+  (workspaces, [ADR 0023](documentation/adr/0023-workspaces.md)): everything it holds goes into the workspace
+  `default`, and each name becomes unique per workspace, which changes the tables' primary keys. A 0.37 instance can't
+  write to a store that has been upgraded, so don't run the two side by side. Back up the store, stop every instance
+  (in Kubernetes, scale the Deployment to 0), and start one 0.38 instance - it upgrades the store - then the rest.
+  Nothing changes for a server with one workspace, which is every server until a second is created.
+
 ### Added
 - **A sign-in page for the Console.** On a server that needs credentials, a tab without them sees only the sign-in
   page - **Sign in with SSO** when it's set up, and a field for an admin token or API key - instead of the whole

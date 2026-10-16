@@ -123,6 +123,10 @@ boundary like this needs.
   column, and each name becomes unique per workspace: a primary key of (workspace, name), with the foreign keys that
   name it. On SQLite that is a table rebuild per table; both stores migrate in one schema version, with upgrade
   fixtures proving every earlier release's store comes up as `default`.
+- **The upgrade to 0.38 isn't a rolling one.** Changing primary keys isn't additive: a 0.37 instance still running
+  can't write to a store 0.38 has upgraded (its upserts name the old keys). So every instance is stopped before the
+  first 0.38 one starts - the one exception before 1.x's rule that store changes are additive, and the reason to make
+  the change before rc1 rather than after it. Decided in review, with no deployments yet to keep running through it.
 - **Every check that names something gets a workspace.** The authorization path (`apikeys.Permission` gains its
   workspace), every store lookup, the cache key, history and audit writes, metrics. A lookup that forgets it is a
   cross-workspace leak, so tests assert isolation per route, not just per feature.

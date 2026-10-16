@@ -7,7 +7,11 @@ What it can't do is start: a release refuses a store a newer one has upgraded (d
 restarts mid-upgrade must come back on the new version.
 
 This runs the real previous release, installed from PyPI - QUERYAPIGATE_TEST_OLD_BIN is its `queryapigate` - beside
-the current code, on one store. Runs when that and QUERYAPIGATE_TEST_DATABASE_URL are set (CI's PostgreSQL job)."""
+the current code, on one store. Runs when that and QUERYAPIGATE_TEST_DATABASE_URL are set (CI's PostgreSQL job).
+
+The one exception: 0.38's store change (schema 17, workspaces - ADR 0023) isn't additive, so a 0.37 instance can't
+write to a store 0.38 has upgraded, and that upgrade stops every instance first (CHANGELOG). Against a previous release
+older than NOT_ADDITIVE_UNTIL this is skipped; it runs again from the release after."""
 import os
 import socket
 import subprocess
@@ -20,6 +24,13 @@ from tests.test_multinode import ADMIN, call, eventually
 
 DATABASE_URL = os.environ.get('QUERYAPIGATE_TEST_DATABASE_URL')
 OLD_BIN = os.environ.get('QUERYAPIGATE_TEST_OLD_BIN')
+NOT_ADDITIVE_UNTIL = (0, 38, 0)  # the release whose store change wasn't additive: one before it can't serve beside it
+
+
+def old_version():
+    """The previous release's version, as its own `queryapigate --version` says (`queryapigate 0.37.0`)."""
+    out = subprocess.run([OLD_BIN, '--version'], capture_output=True, text=True, timeout=60).stdout
+    return tuple(int(part) for part in out.split()[-1].split('.')[:3])
 
 
 def free_port():
@@ -30,6 +41,12 @@ def free_port():
 
 @unittest.skipUnless(DATABASE_URL and OLD_BIN, 'set QUERYAPIGATE_TEST_DATABASE_URL and QUERYAPIGATE_TEST_OLD_BIN')
 class RollingUpgradeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if old_version() < NOT_ADDITIVE_UNTIL:
+            raise unittest.SkipTest(f'the previous release, {".".join(map(str, old_version()))}, predates schema 17 - '
+                                    'not additive, so its upgrade stops every instance first (ADR 0023)')
+
     def setUp(self):
         import psycopg2
         self.schema = 'qag_rolling_' + uuid.uuid4().hex[:12]

@@ -217,7 +217,7 @@ def _upsert(conn, name, entry):
                if k not in ('hash', 'active', 'expires_at', 'created_at', 'previous_expires_at')}
     conn.execute("""
         INSERT INTO api_keys (name, hash, active, expires_at, created_at, details_json) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET
+        ON CONFLICT(workspace, name) DO UPDATE SET
             hash = excluded.hash, active = excluded.active, expires_at = excluded.expires_at,
             created_at = excluded.created_at, details_json = excluded.details_json
     """, (name, entry['hash'], int(bool(entry.get('active', True))), entry.get('expires_at'),
@@ -730,7 +730,8 @@ def _upsert_role(conn, name, entry):
     details = {k: v for k, v in entry.items() if k != 'created_at'}
     conn.execute("""
         INSERT INTO roles (name, created_at, details_json) VALUES (?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET created_at = excluded.created_at, details_json = excluded.details_json
+        ON CONFLICT(workspace, name) DO UPDATE SET created_at = excluded.created_at,
+          details_json = excluded.details_json
     """, (name, entry.get('created_at') or store.now(), json.dumps(details)))
 
 

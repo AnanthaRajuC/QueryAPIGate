@@ -698,7 +698,7 @@ def apply(doc, prune=False, actor='cli', once=False):
         for kind in wanted:
             for name in wanted[kind]:
                 conn.execute('INSERT INTO config_managed (kind, name, applied_at, file_hash) VALUES (?, ?, ?, ?) '
-                             'ON CONFLICT(kind, name) DO UPDATE SET applied_at = excluded.applied_at, '
+                             'ON CONFLICT(workspace, kind, name) DO UPDATE SET applied_at = excluded.applied_at, '
                              'file_hash = excluded.file_hash', (kind, name, timestamp, digest))
         counts = {action: sum(1 for c in result['changes'] if c['action'] == action)
                   for action in ('create', 'update', 'delete')}

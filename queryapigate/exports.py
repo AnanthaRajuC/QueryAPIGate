@@ -225,7 +225,8 @@ def _check_name(name):
 def _write(conn, name, fields, created_at):
     conn.execute(f"""
         INSERT INTO exports ({_COLUMNS}) VALUES (?, ?, ?, NULL, NULL, ?)
-        ON CONFLICT(name) DO UPDATE SET updated_at = excluded.updated_at, details_json = excluded.details_json
+        ON CONFLICT(workspace, name) DO UPDATE SET updated_at = excluded.updated_at,
+          details_json = excluded.details_json
     """, (name, created_at, store.now(), json.dumps({k: fields[k] for k in FIELDS if k in fields}, default=str)))
 
 

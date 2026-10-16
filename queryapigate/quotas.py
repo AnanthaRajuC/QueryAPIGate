@@ -234,8 +234,9 @@ def _write(target, counted, stamp):
     with db.transaction(target=target) as tx:
         for (caller, key), (calls, rows) in counted.items():
             tx.execute('INSERT INTO usage_counters (caller, period, calls, rows, updated_at) VALUES (?, ?, ?, ?, ?) '
-                           'ON CONFLICT (caller, period) DO UPDATE SET calls = usage_counters.calls + excluded.calls, '
-                           'rows = usage_counters.rows + excluded.rows, updated_at = excluded.updated_at',
+                           'ON CONFLICT (workspace, caller, period) DO UPDATE SET '
+                           'calls = usage_counters.calls + excluded.calls, rows = usage_counters.rows + excluded.rows, '
+                           'updated_at = excluded.updated_at',
                        (caller, key, calls, rows, stamp))
         cutoff = (datetime.now() - timedelta(days=KEEP_DAYS)).strftime(_TIME)
         tx.execute('DELETE FROM usage_counters WHERE updated_at < ?', (cutoff,))
