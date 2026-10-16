@@ -76,8 +76,8 @@ Experimental: Console sign-in through SSO (QUERYAPIGATE_SSO_CLIENT_ID, QUERYAPIG
 
 ## Step 3: Sign in
 
-The Console now offers **Sign in with SSO** at the bottom of the sidebar, above the token box. alice clicks it, signs
-in at Keycloak, and lands back on the page she was on, *Signed in as alice · Admin via SSO*. Her administrator was
+The Console's sign-in page now offers **Sign in with SSO**, above the token field. alice clicks it, signs in at
+Keycloak, and lands back on the page she was on, *Signed in as alice · Admin via SSO*. Her administrator was
 created at that sign-in; her session, as the Console sees it:
 
 ```json

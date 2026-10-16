@@ -389,3 +389,68 @@ h1 .tag.experimental {
   margin-left: 4px;
   font-weight: 400;
 }
+
+/* The sign-in page (SignIn.tsx), shown instead of the shell while signed out: one card, centred, across the whole
+   body grid. */
+.signin {
+  grid-column: 1 / -1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+.signin-card {
+  width: min(380px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.signin-card .signin-mark {
+  display: block; /* classic.css hides .wordmark on narrow screens, with the sidebar */
+  font-size: 15px;
+}
+.signin-card h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.signin-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.signin-card label {
+  font-weight: 500;
+  font-size: 12.5px;
+}
+.signin-card input {
+  height: 34px;
+  font-family: var(--mono);
+  padding: 0 10px;
+}
+.signin-card .btn {
+  height: 34px;
+}
+.signin-or {
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+}
+.signin-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.signin-card .hint {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}

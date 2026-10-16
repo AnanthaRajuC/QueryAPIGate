@@ -15,6 +15,23 @@ SQL editor, the demo video and the architecture.
 
 <table>
 <tr>
+<td width="50%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in.png" alt="The Console's sign-in page: a centred card with the QueryAPIGate wordmark, the heading Sign in to the Console, a field for an admin token or API key, a Sign in button, and a note on where tokens come from">
+</a>
+<br><sub>Signed out, a tab sees only the sign-in page - Sign in with SSO when it's set up, or an admin token</sub>
+</td>
+<td width="50%">
+<a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in-dark.png">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in-dark.png" alt="The same sign-in page in the dark theme">
+</a>
+<br><sub>The same page in the dark theme, following the operating system's</sub>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png">
 <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with All/Active/Inactive/Deleted tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with their status, each connection's live usage (queries run, failures, average latency), and Query, edit and delete actions">

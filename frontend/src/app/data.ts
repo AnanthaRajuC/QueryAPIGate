@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
-import { api, unwrap, type Schemas } from '@/api/client';
+import { api, ApiError, unwrap, type Schemas } from '@/api/client';
 
 // Data the shell and several screens share. /api/v1 where it exists; the legacy routes (typed loosely here) for
 // what hasn't got a v1 resource yet - collections.
@@ -115,6 +115,13 @@ const ME_QUERY = {
 
 export function useMe() {
   return useQuery(ME_QUERY);
+}
+
+/** Whether this tab has to sign in first: the server answered /api/v1/me with 401 - no key, a wrong or expired one,
+ * no session. A server open to all answers it, and a key that isn't an administrator's gets 403: neither is asked to
+ * sign in here (the pages say what that key may not do, as before). */
+export function mustSignIn(me: ReturnType<typeof useMe>): boolean {
+  return me.isError && me.error instanceof ApiError && me.error.status === 401;
 }
 
 /** Whether the caller's role holds `capability`, asked when a request is about to be made - so a request fired right

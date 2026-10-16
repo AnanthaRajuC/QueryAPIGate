@@ -28,8 +28,9 @@ Use it as the X-API-Key header, or paste it into the Console's key box.
 In Docker: `docker compose exec queryapigate queryapigate admins create alice --role owner`. Tokens expire after 90
 days unless you pass `--expires YYYY-MM-DD` (or `never`, for automation that rotates its own).
 
-Alice signs in by pasting the token into the Console's key box (bottom of the sidebar) - it then says **Signed in as
-alice · Owner** - or by sending it as `X-API-Key`:
+Alice signs in by pasting the token into the Console's sign-in page, the first thing a tab without one sees - the
+sidebar then says **Signed in as alice · Owner**, and **Sign out** beside it ends that - or by sending it as
+`X-API-Key`:
 
 ```bash
 curl http://127.0.0.1:5000/api/v1/me -H 'X-API-Key: qagadm_9-2f...'

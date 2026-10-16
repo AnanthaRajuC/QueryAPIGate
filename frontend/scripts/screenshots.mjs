@@ -221,6 +221,26 @@ await context.addInitScript(() => {
 await go('/', '#home-health .home-activity-row');
 await shot('home-dark', 900);
 
+// Signed out: the sign-in page, in a tab with no key - the operating system's light and dark.
+for (const [name, colorScheme] of [
+  ['sign-in', 'light'],
+  ['sign-in-dark', 'dark'],
+]) {
+  const signedOut = await browser.newContext({
+    viewport: { width: 1000, height: 640 },
+    deviceScaleFactor: 2,
+    colorScheme,
+  });
+  const tab = await signedOut.newPage();
+  tab.on('pageerror', (e) => errors.push(e.message));
+  await tab.goto(BASE + '/console/');
+  await tab.getByRole('heading', { name: 'Sign in to the Console' }).waitFor({ timeout: 15_000 });
+  await tab.waitForTimeout(400);
+  await tab.screenshot({ path: OUT + name + '.png' });
+  console.log('wrote', name + '.png');
+  await signedOut.close();
+}
+
 await browser.close();
 console.log(errors.length ? 'page errors: ' + JSON.stringify(errors) : 'no page errors');
 stop();
