@@ -105,8 +105,8 @@ if __name__ == '__main__':
 
 
 class H2DriverTests(unittest.TestCase):
-    """The H2 driver the package bundles isn't committed (OpenSSF Scorecard: Binary-Artifacts): the fetch script and
-    the Dockerfile each download it from Maven Central, checked against a pinned SHA-256 - the same one."""
+    """The H2 driver the package bundles isn't committed (OpenSSF Scorecard: Binary-Artifacts): one script fetches it,
+    for builds and for the Dockerfile alike, from Maven Central or a mirror of it, checked against a pinned SHA-256."""
 
     def setUp(self):
         import importlib.util
@@ -115,31 +115,72 @@ class H2DriverTests(unittest.TestCase):
         self.fetch = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.fetch)
 
-    def test_the_dockerfile_fetches_the_same_file_with_the_same_hash(self):
+    def test_the_dockerfile_fetches_it_with_the_script(self):
         with open(os.path.join(ROOT, 'Dockerfile')) as f:
             dockerfile = f.read()
-        added = re.search(r'ADD --chmod=644 --checksum=sha256:([0-9a-f]{64}) \\\n\s+(\S+) (\S+)', dockerfile)
-        self.assertIsNotNone(added, 'the Dockerfile fetches the H2 driver with ADD --checksum')
-        self.assertEqual(added.groups(), (self.fetch.SHA256, self.fetch.URL,
-                                          f'./queryapigate/lib/h2-{self.fetch.VERSION}.jar'))
+        self.assertIn('COPY .github/scripts/fetch_h2_jar.py /tmp/fetch_h2_jar.py', dockerfile)
+        self.assertIn('RUN python /tmp/fetch_h2_jar.py --dest ./queryapigate/lib', dockerfile)
+        self.assertNotIn('repo1.maven.org', dockerfile)  # one place knows where it comes from, and its hash
 
     def test_the_server_looks_for_the_version_fetched(self):
         from queryapigate import config
         self.assertEqual(config.BUNDLED_H2_JAR.resolve(), self.fetch.TARGET)
 
-    def test_a_download_with_another_hash_is_never_written(self):
+    def _serve(self, *bodies):
+        """urlopen answering each call with the next body (bytes), or raising it (an exception)."""
+        from unittest import mock
+        calls, answers = [], iter(bodies)
+
+        def urlopen(request, timeout=None):
+            calls.append(request.full_url)
+            body = next(answers)
+            if isinstance(body, Exception):
+                raise body
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = body
+            response.__enter__.return_value.status = 200
+            return response
+        return calls, urlopen
+
+    def test_a_download_with_another_hash_is_never_written_from_any_mirror(self):
+        # CI, 2026-10-15: repo1.maven.org twice answered GitHub's runners with something else, the same something both
+        # times - the hash refused it, and now the other mirrors are asked before the build gives up
         import io
         import tempfile
         from contextlib import redirect_stderr
         from pathlib import Path
         from unittest import mock
+        tries = len(self.fetch.MIRRORS) * self.fetch.ATTEMPTS
+        calls, urlopen = self._serve(*[b'<html>not the driver</html>'] * tries)
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / 'h2.jar'
-            response = mock.MagicMock()
-            response.__enter__.return_value.read.return_value = b'not the driver'
-            with mock.patch.object(self.fetch, 'TARGET', target), \
-                    mock.patch.object(self.fetch.urllib.request, 'urlopen', return_value=response), \
-                    redirect_stderr(io.StringIO()) as err:
-                self.assertEqual(self.fetch.main(), 1)
+            with mock.patch.object(self.fetch.urllib.request, 'urlopen', urlopen), \
+                    mock.patch.object(self.fetch.time, 'sleep'), redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(self.fetch.fetch(target), 1)
             self.assertFalse(target.exists())
-            self.assertIn('not written', err.getvalue())
+        self.assertEqual(len(calls), tries)
+        hosts = {url.split('/maven2/')[0] for url in calls}
+        self.assertEqual(hosts, {m.split('/maven2/')[0] for m in self.fetch.MIRRORS})
+        self.assertIn("starts b'<html>not the driver</html>'", err.getvalue())  # what came instead, for the log
+
+    def test_a_mirror_that_answers_wrongly_or_not_at_all_is_passed_over(self):
+        import hashlib
+        import io
+        import tempfile
+        import urllib.error
+        from contextlib import redirect_stderr, redirect_stdout
+        from pathlib import Path
+        from unittest import mock
+        good = b'the driver'
+        bad_then_down = [b'error page'] + [urllib.error.URLError('blocked')] * (self.fetch.ATTEMPTS - 1)
+        calls, urlopen = self._serve(*bad_then_down, good)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'lib' / 'h2.jar'
+            with mock.patch.object(self.fetch, 'SHA256', hashlib.sha256(good).hexdigest()), \
+                    mock.patch.object(self.fetch.urllib.request, 'urlopen', urlopen), \
+                    mock.patch.object(self.fetch.time, 'sleep'), redirect_stderr(io.StringIO()), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(self.fetch.fetch(target), 0)
+            self.assertEqual(target.read_bytes(), good)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)  # readable by an image's own user
+        self.assertTrue(calls[-1].startswith(self.fetch.MIRRORS[1]))
