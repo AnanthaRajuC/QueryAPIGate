@@ -31,6 +31,7 @@ one it supersedes.
 | [0020](0020-the-event-log.md) | The event log: events stop being a view on run history | Accepted |
 | [0021](0021-live-events-and-secrets-graduate.md) | Live events, and secrets from files and Vault, graduate | Accepted |
 | [0022](0022-mongodb-streaming-and-graduation.md) | MongoDB streaming exports, and MongoDB graduates | Accepted |
+| [0023](0023-workspaces.md) | Workspaces: delegated administration for teams | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
