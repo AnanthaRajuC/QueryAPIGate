@@ -49,6 +49,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-16
+
+MongoDB graduates to tier 1, under the compatibility promise: a find() now streams its whole result - over HTTP, from
+`queryapigate export` and in saved exports - in NDJSON, CSV, TSV and Parquet, the one essential feature it lacked.
+
 ### Upgrading from 0.36
 - **Nothing to change.** No schema change, no setting. A server with a MongoDB connection no longer logs that it's
   experimental; H2 and JDBC connections still do.
@@ -2650,7 +2655,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...v0.35.0
