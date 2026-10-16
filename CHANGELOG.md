@@ -49,6 +49,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-10-16
+
+Workspaces (experimental): several teams on one server, each running its own connections, saved queries, keys,
+roles and exports - administering nothing of another's - while the platform team sees all of it. And a sign-in page
+for the Console.
+
+### Breaking
+- **Not a rolling upgrade.** The store's primary keys change (schema 17, every name unique per workspace), so a 0.37
+  instance can't write to a store 0.38 has upgraded. Stop every instance before the first 0.38 one starts - the one
+  exception before 1.x's rule that store changes are additive ([Rolling
+  upgrades](documentation/DEPLOYMENT.md#rolling-upgrades-several-instances-on-one-store)). A single instance upgrades
+  as always.
+
 ### Upgrading from 0.37
 - **Stop every instance before starting 0.38** - this upgrade isn't a rolling one. The store moves to schema 17
   (workspaces, [ADR 0023](documentation/adr/0023-workspaces.md)): everything it holds goes into the workspace
@@ -2696,7 +2709,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...v0.35.1
