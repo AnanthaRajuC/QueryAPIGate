@@ -17,6 +17,7 @@ from .runners import (
     mongo_list_collections,
     mongo_list_databases,
     mongo_ping,
+    mongo_stream,
 )
 from .sqltools import first_keyword, validate_sql
 
@@ -430,6 +431,56 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     return columns, masked_rows
 
 
+def stream_mongo(collection, filter_doc, connection_name, params=None, timeout=None, projection=None, sort=None,
+                 key_name='-', allowed_tables=None, mask=None):
+    """stream_sql() for a find() (ADR 0022): the same checks as execute_mongo(), the same bookkeeping as a SQL
+    stream - the caller's slot held, the stream row limit, the active-query count, the rows counted as they leave.
+    Returns the documents, lazily, as a _Rows: each a dict, as the server sent it after the projection. Turning them
+    into columns is the format's business (mongodocs.py), since documents don't share a schema."""
+    if allowed_tables is not None and str(collection).lower() not in allowed_tables:
+        raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed_tables))}. "
+                       f'Forbidden: {collection}.', 403, code='table_not_allowed')
+    masking.prepare(mask, '', connection_name, 'mongo')  # refused for a caller with rules, as execute_mongo()
+    details = store.get_connection(connection_name)
+    if details['db'] != 'mongo':
+        raise ApiError(f"'{connection_name}' is not a mongo connection", code='wrong_connection_type')
+    filter_doc = mongotools.validate_filter(filter_doc or {})
+    mongotools.validate_options(projection, sort)
+    if params:
+        filter_doc = mongotools.fill_placeholders(filter_doc, params)
+    timeout = limits.timeout(timeout)
+    row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
+    slot = limits.acquire(timeout)  # held until the last document is read - _drain() or _Rows.close() releases it
+    log.info('Streaming a find from %s (mongo), collection=%s', connection_name, collection,
+             extra={'connection': connection_name, 'dialect': 'mongo', 'timeout': timeout})
+    status = 'error'
+    metrics.inc_active_query()
+    try:
+        with tracing.span(f'find {connection_name}', 'client',
+                          tracing.db_attributes(details, 'find', connection_name)) as span:
+            tracing.set_attributes(span, db__collection__name=collection)
+            stream = mongo_stream(details, collection, filter_doc, projection, sort, timeout, get_pool())
+            next(stream)  # the first batch: a failure here is an error response, not a stream cut short
+        status = 'success'
+    except ApiError:
+        raise
+    except ImportError as error:
+        log.exception('Missing database driver')
+        raise ApiError("The driver for 'mongo' is not installed", 500, detail=str(error),
+                       code='driver_missing') from error
+    except Exception as error:
+        log.exception('Streaming find on %s failed', connection_name)
+        raise _failure(error, 'An error occurred while executing the find query', details) from error
+    finally:
+        if status == 'error':  # on success, as in stream_sql(), _drain() does this once the stream ends
+            metrics.observe_stream(connection_name, 'mongo', status, key_name)
+            metrics.dec_active_query()
+            slot.release()
+    rows = _Rows(stream, connection_name, 'mongo', key_name, slot, row_limit)
+    rows.masked = []
+    return rows
+
+
 class _Rows:
     """The rows stream_sql() returns: an iterator over _drain(), whose close() ends the query even before the first
     row is read. Closing a generator that hasn't started runs none of its code, so a caller that gave up first - an
@@ -457,6 +508,9 @@ class _Rows:
         self._closed = True
         if self._started:
             self._drain.close()  # _drain's own GeneratorExit handling does the bookkeeping
+            # _drain reads the stream with a for loop, and closing it doesn't close what it was reading: the
+            # connection (a MongoDB cursor, on the server) would otherwise wait for garbage collection
+            self._stream.close()
             return
         self._stream.close()  # releases the connection (runners._make_stream_runner)
         self._slot.release()

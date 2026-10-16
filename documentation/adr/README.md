@@ -30,6 +30,7 @@ one it supersedes.
 | [0019](0019-the-siem-stream-against-real-receivers.md) | The SIEM stream, against real receivers | Accepted |
 | [0020](0020-the-event-log.md) | The event log: events stop being a view on run history | Accepted |
 | [0021](0021-live-events-and-secrets-graduate.md) | Live events, and secrets from files and Vault, graduate | Accepted |
+| [0022](0022-mongodb-streaming-and-graduation.md) | MongoDB streaming exports, and MongoDB graduates | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

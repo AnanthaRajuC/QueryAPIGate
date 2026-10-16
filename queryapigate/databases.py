@@ -38,7 +38,8 @@ def matrix():
     rows = [
         ('Saved queries and ad-hoc runs',
          {t: YES if _sql(t) else 'find() only' for t in TYPES}),
-        ('Read-only by default (SQL check)', {t: YES if _sql(t) else NA for t in TYPES}),
+        ('Read-only by default (SQL check)', {t: YES if _sql(t) else 'always (find() only)'  # no write path at all
+                                              for t in TYPES}),
         ('Read-only enforced by the database too', {t: YES if t in DRIVER_READ_ONLY else (NA if not _sql(t) else NO)
                                                     for t in TYPES}),
         ('Writes, when allowed', {t: YES if _sql(t) else NO for t in TYPES}),
@@ -58,7 +59,8 @@ def matrix():
         ('Descriptions from database comments', {t: YES if t in descriptions.IMPORTABLE else
                                                  (NA if t in ('sqlite', 'mongo') else NO)  # no comments to read
                                                  for t in TYPES}),
-        ('Streaming exports', {t: YES if t in STREAM_RUNNERS else NO for t in TYPES}),
+        ('Streaming exports', {t: YES if t in STREAM_RUNNERS or t == 'mongo' else NO  # runners.mongo_stream()
+                               for t in TYPES}),
         ('Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP', {t: YES if t == 'duckdb'
                                                                     else NO for t in TYPES}),  # duckfiles.py
         ('Response caching (`cache_ttl`)', {t: YES if _sql(t) else NO for t in TYPES}),  # app.run_saved_mongo
@@ -71,7 +73,8 @@ def matrix():
 
 
 GRADUATION = (
-    'it runs against a real server in the CI integration job (tests/test_integration.py), reads and writes;',
+    'it runs against a real server in the CI integration job (tests/test_integration.py) - reads, and writes where '
+    'it takes them;',
     'the read-only default, the query time limit and `allowed_tables` all work on it - each a test, not a claim;',
     'its gaps in this table are closed, or stated as limits of the database itself;',
     'its entry leaves `queryapigate/experimental.py`, and this table and the changelog say so.',

@@ -37,21 +37,21 @@ object; `GET /api/v1/connections/{name}` returns them under `options`.
 | `h2` | `JayDeBeApi` + bundled JDBC jar | Connects to a running H2 TCP server: `jdbc:h2:tcp://<host>[:port]/~/<database>` |
 | `jdbc` | `JayDeBeApi` + your own JDBC jar | Any other JDBC-compliant database (Oracle, SQL Server, DB2, Snowflake, ...) - see [Generic JDBC connections](#generic-jdbc-connections) |
 | `duckdb` | `duckdb` | An embedded analytical database that can also query CSV/JSON/Parquet files directly - see [DuckDB connections](#duckdb-connections) |
-| `mongo` | `pymongo` | `find()` queries only, never writes - see [Connect to MongoDB](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/04-connect-to-mongodb.md) |
+| `mongo` | `pymongo` | `find()` queries only, never writes - see [MongoDB connections](#mongodb-connections) |
 
-`h2`, `jdbc` and `mongo` are [experimental](#experimental-h2-jdbc-and-mongo).
+`h2` and `jdbc` are [experimental](#experimental-h2-and-jdbc).
 
 ## Support matrix
 
-**Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse - is covered by the compatibility promise and runs
-against a real server in CI on every push. Types marked `*` are [experimental](#experimental-h2-jdbc-and-mongo): they
-work, with the gaps below, and may change in a minor release.
+**Tier 1** - PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and, from 0.37, MongoDB - is covered by the compatibility
+promise and runs against a real server in CI on every push. Types marked `*` are
+[experimental](#experimental-h2-and-jdbc): they work, with the gaps below, and may change in a minor release.
 
 <!-- support-matrix:start - generated from queryapigate/databases.py; tests/test_databases.py checks it -->
-| | PostgreSQL | MySQL | SQLite | DuckDB | ClickHouse | H2 * | JDBC * | MongoDB * |
+| | PostgreSQL | MySQL | SQLite | DuckDB | ClickHouse | H2 * | JDBC * | MongoDB |
 |---|---|---|---|---|---|---|---|---|
 | Saved queries and ad-hoc runs | yes | yes | yes | yes | yes | yes | yes | find() only |
-| Read-only by default (SQL check) | yes | yes | yes | yes | yes | yes | yes | n/a |
+| Read-only by default (SQL check) | yes | yes | yes | yes | yes | yes | yes | always (find() only) |
 | Read-only enforced by the database too | yes | yes | yes | no | yes | no | no | n/a |
 | Writes, when allowed | yes | yes | yes | yes | yes | yes | yes | no |
 | Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes |
@@ -61,7 +61,7 @@ work, with the gaps below, and may change in a minor release.
 | Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
 | Table DDL | no | yes | yes | no | yes | no | no | n/a |
 | Descriptions from database comments | yes | yes | n/a | yes | yes | no | no | n/a |
-| Streaming exports | yes | yes | yes | yes | yes | yes | yes | no |
+| Streaming exports | yes | yes | yes | yes | yes | yes | yes | yes |
 | Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes | no | no | no | no |
 | Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
 | MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
@@ -70,12 +70,14 @@ work, with the gaps below, and may change in a minor release.
 <!-- support-matrix:end -->
 
 `n/a` is a feature the database has no use for (a SQLite file has no other database to switch to; MongoDB has no SQL).
+MongoDB's read-only default is `always`: it runs `find()` and nothing else, so there is no write to refuse.
 Where `allowed_tables` says `no`, a key restricted to tables is refused on that connection rather than trusted, and
 `Read-only enforced by the database too: no` means the read-only default rests on QueryAPIGate's own SQL check.
 
 An experimental type becomes tier 1 when:
 
-1. It runs against a real server in the CI integration job (tests/test_integration.py), reads and writes;
+1. It runs against a real server in the CI integration job (tests/test_integration.py) - reads, and writes where it
+   takes them;
 2. The read-only default, the query time limit and `allowed_tables` all work on it - each a test, not a claim;
 3. Its gaps in this table are closed, or stated as limits of the database itself;
 4. Its entry leaves `queryapigate/experimental.py`, and this table and the changelog say so.
@@ -144,17 +146,47 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 | `user`, `password` | usually | Credentials |
 | `jar`, `driver_class`, `jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
 
-## Experimental: h2, jdbc and mongo
+## Experimental: h2 and jdbc
 
 > **Experimental** - may change in any minor release, always noted in the changelog
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
-These three types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
-H2 and JDBC rather than guess (fail closed), and on MongoDB is the collections a key may read (from 0.34.1 - before it,
-it wasn't checked there at all); H2 and JDBC rest their read-only default on the SQL check alone, and JDBC
-has no query time limit and no schema browser; MongoDB runs `find()` queries only, with no streaming exports. All
-three are tested against a real server in CI - MongoDB since 0.35, against MongoDB 8.0. A server with one configured logs a warning at startup
-saying so. The matrix also lists what each needs to become tier 1.
+These two types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
+them rather than guess (fail closed); both rest their read-only default on the SQL check alone; and JDBC has no query
+time limit and no schema browser. Both are tested against a real server in CI. A server with one configured logs a
+warning at startup saying so. The matrix also lists what each needs to become tier 1. (MongoDB was experimental too,
+until 0.37 - [below](#mongodb-connections).)
+
+## MongoDB connections
+
+> **Stable** since 0.37, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
+> the `mongo` saved-query fields (`mongo_collection`, `mongo_filter`, `mongo_projection`, `mongo_sort`),
+> `/execute_mongo`, and what each streamed format writes. Aggregation pipelines, writes, response caching, column
+> masking and incremental exports may still be added. Limits: `find()` only - no writes, no response caching, no MCP
+> `execute_sql`, no column masking (a caller with mask rules is refused); a streamed CSV or TSV takes its columns from
+> the projection or the first 1,000 documents; and `allowed_tables` matches collection names case-insensitively, so a
+> grant of `orders` also reads a collection named `Orders`.
+
+`find()` queries - filter, projection, sort, bound `:name` parameters - ad hoc through `POST /execute_mongo`, or saved
+and called at `/q/<name>` like any SQL query ([Connect to MongoDB](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/04-connect-to-mongodb.md)).
+Read-only by construction: nothing but `find()` is ever sent. `$where`, `$function` and `$accumulator` - server-side
+JavaScript - are refused in the filter, the projection and the sort, and a parameter's value is a value, never a
+document of operators. `allowed_tables` is the collections a key may read, checked before the server is asked
+anything; the query time limit is the cursor's `maxTimeMS`.
+
+**Streaming** (`?stream=true` on `/q/<name>` and `/execute_mongo`, `queryapigate export`, saved exports - [ADR
+0022](adr/0022-mongodb-streaming-and-graduation.md)). Documents don't share a schema, so each format decides:
+
+| Format | What it writes |
+|---|---|
+| NDJSON | Each document whole: nested documents and arrays stay nested, no field is dropped |
+| Parquet | Every field of every document as a column, in first-seen order; a field holding a number in one document and text in another is a text column; nested values are JSON text |
+| CSV, TSV (streamed) | The columns are decided before the first row: an inclusion projection's fields in its order (`_id` first unless `"_id": 0`), or else the fields of the first 1,000 documents. A field first seen later is left out, and the run's history counts them (`fields_dropped`); nested values are JSON text |
+| Any format, to a destination | Staged before it's written, so every field of every document is a column, as for Parquet - nested values JSON text, NDJSON included |
+
+For a CSV whose columns don't depend on the data, name them in the projection. For an export that keeps every
+field and its nesting, use NDJSON. Incremental exports (`incremental`) of a `mongo` query are refused, for now; a full
+export works.
 
 ## Generic JDBC connections
 

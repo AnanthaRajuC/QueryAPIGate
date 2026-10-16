@@ -268,6 +268,33 @@ but the project's own account of it calls it "a real failure of an explicitly do
 "directly undermined auditability" - which is why the guard is now dialect-aware and exercised by a fuzz
 test on every change, not just trusted to keep working.
 
+### MongoDB: a find() and nothing else
+
+A `mongo` connection has no SQL guard to rely on; what keeps it read-only and inside its grants is that only one
+operation exists. Reviewed for its graduation to tier 1 in 0.37 ([ADR
+0022](adr/0022-mongodb-streaming-and-graduation.md)):
+
+- **Only `find()` is ever sent** - no aggregation pipeline, no write, no command a caller can name. There is no
+  `allow_writes` to get wrong.
+- **No server-side JavaScript.** `$where`, `$function` and `$accumulator` are refused in the filter, the projection
+  and the sort (`mongotools.py`), on every request and when a saved query is saved. Until 0.34.2 only the filter was
+  checked, and MongoDB 4.4+ evaluates `$function` in a projection: any key with a MongoDB connection could run
+  JavaScript on the database server.
+- **A parameter is a value, never operators.** A `:name` placeholder takes a string, number, boolean, null or a list
+  of those - `{"$ne": null}` is refused (`param_invalid`), not run as a filter matching the whole collection. Until
+  0.34.2 an untyped placeholder took any JSON.
+- **`allowed_tables` is the collections a key may read**, checked before the server is asked anything - in paged
+  runs, streams and exports. Until 0.34.1 it wasn't checked on MongoDB at all. Collection names are compared
+  case-insensitively, as table names are, so `orders` in a grant also reads a collection named `Orders`: a limit,
+  documented with the type.
+- **The time limit is the cursor's `maxTimeMS`**, over the whole cursor - a stream included - and the caller's
+  concurrency slot is held until the last document is read or the client leaves, when the cursor is closed on the
+  server.
+- **Column masking is refused** on MongoDB (`mask_unresolvable`) rather than applied to fields it can't trace.
+- **The refusals are properties under fuzzing**: `fuzz/fuzz_mongo.py` (ClusterFuzzLite, from 0.35.1) checks that no
+  server-side JavaScript survives into what MongoDB is sent and no parameter becomes an operator; the CI integration
+  job sends them to a real MongoDB 8.0.
+
 ### Secrets at rest
 
 Connection passwords in the store can be a literal string, an

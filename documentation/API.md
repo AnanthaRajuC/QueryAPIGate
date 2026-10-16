@@ -105,6 +105,11 @@ format_unavailable`. Column types come from the values: integers `BIGINT` (`DECI
   `queryapigate_stream_exports_total` counts a capped export under `status="truncated"`, distinct from `"success"`; a
   saved query's `execution_history` still records it as `"success"` with the truncated row count - it did succeed,
   just not to completion.
+- **MongoDB** streams too, from 0.37: `?stream=true` on a saved `mongo` query and on `POST /execute_mongo`, with the
+  same limits, grants and history. Documents don't share a schema, so NDJSON writes each one whole, Parquet makes
+  every field a column, and CSV and TSV take their columns from the projection or the first 1,000 documents - a
+  field first seen later is left out and counted in the run's history as `fields_dropped`
+  ([MongoDB connections](DATABASE_CONNECTION_CONFIGURATION.md#mongodb-connections)).
 
 ## Exports to object storage
 
@@ -2168,7 +2173,6 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `param_invalid` | 400 | A parameter's value breaks its rules; `errors` says how |
 | `param_from_claim` | 400 | The call sent a parameter the query takes from the caller's sign-in token |
 | `reason_required` | 400 | Deleting a connection without a `reason` |
-| `stream_unsupported` | 400 | Streaming a Mongo query |
 | `unsupported_database` | 400 | A database type QueryAPIGate doesn't support |
 | `unsupported_operation` | 400 | The operation isn't available for this database type (listing databases, schema, DDL) |
 | `wrong_connection_type` | 400 | A Mongo call on a SQL connection |

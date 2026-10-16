@@ -20,8 +20,8 @@ is a minor release, called out under **Breaking** - never a patch.
 **Experimental** features are outside that promise: they may change or be removed in any minor release (a patch
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
-its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and
-MongoDB connections, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
+its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2 and JDBC
+connections, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
 (`${aws-sm:...}`, `aws-rds-iam`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -48,6 +48,37 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Upgrading from 0.36
+- **Nothing to change.** No schema change, no setting. A server with a MongoDB connection no longer logs that it's
+  experimental; H2 and JDBC connections still do.
+
+### Added
+- **MongoDB streams** ([ADR 0022](documentation/adr/0022-mongodb-streaming-and-graduation.md)): `?stream=true` on a
+  saved `mongo` query and on `POST /execute_mongo`, `queryapigate export`, and saved exports to a bucket or a folder -
+  in NDJSON, CSV, TSV and Parquet, with the same time limit, row limits, concurrency slot, history and grants as a SQL
+  stream. Documents don't share a schema, so each format decides what that means: NDJSON writes each document whole;
+  Parquet, and anything written to a destination, makes every field of every document a column; a streamed CSV or
+  TSV takes its columns from the projection, in its order, or else from the first 1,000 documents - a field first
+  seen later is left out, and the run's history counts them (`fields_dropped`). Exporting a `mongo` query
+  incrementally is refused, for now; full exports work.
+
+### Changed
+- **MongoDB graduates to tier 1** - under the compatibility promise, its entry gone from `experimental.py`
+  ([MongoDB connections](documentation/DATABASE_CONNECTION_CONFIGURATION.md#mongodb-connections)). It meets
+  `databases.GRADUATION`: tested against MongoDB 8.0 in CI and at `pymongo` 4.0, its 0.34 security review's findings
+  fixed and held by fuzzing, the time limit and `allowed_tables` working, and now streaming exports. The support
+  matrix says *always (find() only)* for its read-only default. Its documentation says what may still be added
+  (aggregation pipelines, writes, response caching, masking, incremental exports) and its limits. H2 and JDBC stay
+  experimental.
+
+### Fixed
+- **A client that leaves a stream closes the database cursor at once**, not when the response is garbage-collected:
+  the rows' close() closed the wrapper reading them but not the database's own generator - so a MongoDB cursor stayed
+  open on the server, and a pooled connection checked out, a little longer than the request.
+
+### Removed
+- **The `stream_unsupported` error code**, which only a streamed MongoDB query answered with.
 
 ## [0.36.0] - 2026-10-16
 

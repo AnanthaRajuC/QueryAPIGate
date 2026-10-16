@@ -75,6 +75,8 @@ class MarkedEverywhereTests(unittest.TestCase):
                                      (api, 'Streaming the audit log to a SIEM', '0.32'),
                                      (api, 'Live events (Server-Sent Events)', '0.34'),
                                      (api, 'Secrets from files and secrets managers', '0.34'),
+                                     ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'MongoDB connections',
+                                      '0.37'),
                                      ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)', '0.30'),
                                      ('documentation/MCP.md', 'Write tools: agents that write, approved by a person',
                                       '0.30'),
@@ -125,9 +127,11 @@ class StartupWarningTests(unittest.TestCase):
                                        QUERYAPIGATE_SECRET_FILE_DIRS=self.tmp.name), [])  # graduated in 0.34
 
     def test_a_connection_of_an_experimental_type_names_it(self):
-        write_connections({'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})
-        [line] = self.warnings()
-        self.assertIn('Experimental: H2, JDBC and MongoDB connections (connection docs)', line)
+        write_connections({'legacy': {'db': 'jdbc', 'host': 'j', 'database': 'd', 'active': True},
+                           'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})
+        [line] = self.warnings()  # MongoDB graduated in 0.37 (ADR 0022)
+        self.assertIn('Experimental: H2 and JDBC connections (connection legacy)', line)
+        self.assertNotIn('docs', line)
 
     def test_an_inactive_connection_isnt_in_use(self):
         # `queryapigate init` seeds an inactive H2 template; a fresh server shouldn't warn about it.

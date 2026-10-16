@@ -204,7 +204,12 @@ def stream_response(output_format, columns, rows, filename):
     they arrive rather than built up front - the point being that a result far larger than fits in memory
     can still be exported, at the cost of the usual conveniences a fully-buffered response gets for free
     (a reliable Content-Length, the ability to retry a failed write, an ETag for caching)."""
-    body = iter_stream_chunks(output_format, columns, rows)
+    return chunked_response(output_format, iter_stream_chunks(output_format, columns, rows), filename)
+
+
+def chunked_response(output_format, body, filename):
+    """The Response for chunks of `output_format` already made - stream_response()'s, and a MongoDB stream's
+    (mongodocs.chunks())."""
     response = Response(body, mimetype=STREAM_MIMETYPES[output_format])
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}.{output_format}"'
     return response

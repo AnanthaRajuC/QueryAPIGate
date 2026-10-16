@@ -24,7 +24,7 @@
 <p align="center">
   <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/queryapigate-architecture.gif">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/queryapigate-architecture.gif"
-         alt="One governed gate between your databases and everything that asks them for data: apps, partners, AI agents, people and pipelines come in through five front doors - REST endpoints, the MCP server, live events, exports and the CLI, the Management API - and every call passes the same governed core (identity, policy, execution) before it reaches PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse, the experimental H2, JDBC and MongoDB, files through DuckDB, or deliveries to object storage" width="820">
+         alt="One governed gate between your databases and everything that asks them for data: apps, partners, AI agents, people and pipelines come in through five front doors - REST endpoints, the MCP server, live events, exports and the CLI, the Management API - and every call passes the same governed core (identity, policy, execution) before it reaches PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse, MongoDB, the experimental H2 and JDBC, files through DuckDB, or deliveries to object storage" width="820">
   </a>
   <br>
   <sub>Every front door runs the same checks, so an AI agent's call is governed exactly like an app's. Write the SQL once; it's a REST endpoint, an MCP tool, a live event stream and a scheduled export.</sub>
@@ -105,7 +105,7 @@ safely". Use cases, how it compares to PostgREST, Hasura and others, and the thi
 - **[An MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as tools, OAuth sign-in, write tools that
   wait for a person's approval.
 - **[Eight database types, and files](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix)** -
-  PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse; H2, JDBC and MongoDB; Parquet, CSV and JSON on S3, GCS, R2 or disk.
+  PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and MongoDB; H2 and JDBC; Parquet, CSV and JSON on S3, GCS, R2 or disk.
 - **[Eight output formats, and streaming](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#streaming-exports)** - JSON, NDJSON, XML, YAML, CSV,
   TSV, Excel and Parquet; whole results streamed from the database cursor.
 - **[Exports to object storage](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#exports-to-object-storage)** - scheduled, incremental, to

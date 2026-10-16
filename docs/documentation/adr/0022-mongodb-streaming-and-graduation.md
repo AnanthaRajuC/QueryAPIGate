@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0022-mongodb-streaming-and-graduation.md"

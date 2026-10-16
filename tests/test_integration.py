@@ -15,7 +15,7 @@ import time
 import unittest
 from unittest import mock
 
-from queryapigate import config, create_app, pool, runners
+from queryapigate import config, create_app, history, pool, runners
 from tests.helpers import save_query, write_connections
 
 CREATE = {
@@ -481,7 +481,8 @@ class DuckDBTests(IntegrationBase, unittest.TestCase):
 class MongoTests(unittest.TestCase):
     """MongoDB against a real server (QUERYAPIGATE_IT_MONGO): find() through /execute_mongo and saved queries, the
     time limit, allowed_tables as collections, and the refusals that keep a find() a find() - each sent to the real
-    server's parser, not a mock's. Not IntegrationBase: there is no SQL to run."""
+    server's parser, not a mock's - and streams (ADR 0022) through real cursors. Not IntegrationBase: there is no SQL
+    to run."""
     db, env_var = 'mongo', 'QUERYAPIGATE_IT_MONGO'
 
     @classmethod
@@ -498,13 +499,14 @@ class MongoTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_API_KEY': 'admin'})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(history.flush)  # runs first: batched runs land in this home, not while the next opens its own
         write_connections({'it': self.details})
         self.client = create_app().test_client()
         self.admin = {'X-API-Key': 'admin'}
         server = pymongo.MongoClient(self.details['host'], int(self.details.get('port') or 27017))
         self.addCleanup(server.close)
         self.mongo = server[self.details['database']]
-        for name in ('queryapigate_it', 'queryapigate_it_secret', 'queryapigate_it_slow'):
+        for name in ('queryapigate_it', 'queryapigate_it_secret', 'queryapigate_it_slow', 'queryapigate_it_many'):
             self.mongo.drop_collection(name)
             self.addCleanup(self.mongo.drop_collection, name)
         self.mongo.queryapigate_it.insert_many([{'id': i, 'name': f'Item {i}', 'price': i + 0.5} for i in range(1, 8)])
@@ -558,6 +560,59 @@ class MongoTests(unittest.TestCase):
                 self.assertEqual((res.status_code, res.get_json()['code']), (403, 'mongo_operator_forbidden'))
         injected = self.find(filter={'name': ':u'}, params={'u': {'$ne': None}})
         self.assertEqual((injected.status_code, injected.get_json()['code']), (400, 'param_invalid'))
+
+    def many(self, count=2500):
+        """More documents than a cursor batch (runners.MONGO_STREAM_BATCH) and the CSV lookahead - the last one with
+        a field none before it has."""
+        docs = [{'n': i, 'name': f'Doc {i}', 'tags': [i, i + 1]} for i in range(count)]
+        docs[-1]['late'] = 'only here'
+        self.mongo.queryapigate_it_many.insert_many(docs)
+        self.assertEqual(save_query(self.client, headers=self.admin, body={
+            'filename': 'many', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
+            'mongo_collection': 'queryapigate_it_many', 'mongo_filter': {}, 'mongo_projection': {'_id': 0},
+            'mongo_sort': {'n': 1}, 'connection_name': 'it'}).status_code, 201)
+
+    def test_a_find_streams_in_every_format_across_cursor_batches(self):
+        import csv
+        import io
+
+        import duckdb
+        self.many()
+        res = self.client.get('/q/many?stream=true&format=ndjson', headers=self.admin)
+        lines = res.get_data(as_text=True).splitlines()
+        self.assertEqual((res.status_code, len(lines)), (200, 2500))
+        self.assertEqual(json.loads(lines[-1]), {'n': 2499, 'name': 'Doc 2499', 'tags': [2499, 2500],
+                                                 'late': 'only here'})
+        res = self.client.get('/q/many?stream=true&format=csv', headers=self.admin)
+        rows = list(csv.reader(io.StringIO(res.get_data(as_text=True))))
+        self.assertEqual((rows[0], rows[1], len(rows)), (['n', 'name', 'tags'], ['0', 'Doc 0', '[0, 1]'], 2501))
+        history.flush()
+        self.assertEqual(history.search(query='many')[0][0]['fields_dropped'], 1)  # `late`, after the first 1,000
+        res = self.client.get('/q/many?stream=true&format=parquet', headers=self.admin)
+        path = os.path.join(self.tmp.name, 'many.parquet')
+        with open(path, 'wb') as f:
+            f.write(res.get_data())
+        self.assertEqual(duckdb.sql(f"SELECT count(*), count(late), max(n) FROM '{path}'").fetchone(), (2500, 1, 2499))
+
+    def test_a_streamed_find_keeps_to_the_time_limit(self):
+        self.mongo.queryapigate_it_slow.insert_many([{'s': 'x' * 40 + str(i)} for i in range(100_000)])
+        res = self.find(query='?stream=true&format=ndjson', collection='queryapigate_it_slow',
+                        filter={'s': {'$regex': 'y$'}}, timeout=0.001)
+        self.assertEqual((res.status_code, res.get_json()['code']), (504, 'query_timeout'))
+
+    def test_a_client_that_leaves_early_closes_the_cursor_on_the_server(self):
+        self.many()
+
+        def open_cursors():
+            return self.mongo.command('serverStatus')['metrics']['cursor']['open']['total']
+
+        before = open_cursors()
+        res = self.client.get('/q/many?stream=true&format=ndjson', headers=self.admin, buffered=False)
+        first = next(iter(res.response))
+        self.assertIn(b'Doc 0', first)
+        self.assertEqual(open_cursors(), before + 1)  # 2,500 documents: more batches to come
+        res.close()
+        self.assertEqual(open_cursors(), before)
 
     def test_the_schema_lists_collections_and_the_server_its_databases(self):
         res = self.client.get('/connections/it/schema', headers=self.admin)
