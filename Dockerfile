@@ -32,11 +32,11 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY queryapigate ./queryapigate
 COPY --from=console /queryapigate/console_dist ./queryapigate/console_dist
-# The H2 driver the package bundles, from Maven Central - not committed. The build fails unless it has exactly this
-# SHA-256 (.github/scripts/fetch_h2_jar.py pins the same one; tests/test_supply_chain.py checks they agree). Readable by
-# all: the image runs as a user of its own, and a file ADD fetches is otherwise root's alone.
-ADD --chmod=644 --checksum=sha256:b9d8f19358ada82a4f6eb5b174c6cfe320a375b5a9cb5a4fe456d623e6e55497 \
-    https://repo1.maven.org/maven2/com/h2database/h2/2.2.224/h2-2.2.224.jar ./queryapigate/lib/h2-2.2.224.jar
+# The H2 driver the package bundles - not committed. One already in the build context with the pinned SHA-256 is
+# used as it is; otherwise it's fetched from Maven Central or a mirror of it, and the build fails unless the hash
+# matches (.github/scripts/fetch_h2_jar.py: the hash, the mirrors, the retries).
+COPY .github/scripts/fetch_h2_jar.py /tmp/fetch_h2_jar.py
+RUN python /tmp/fetch_h2_jar.py --dest ./queryapigate/lib && rm /tmp/fetch_h2_jar.py
 # Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
 # tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment
 # turns on with an environment variable or a second command - none of them should need a custom image.
