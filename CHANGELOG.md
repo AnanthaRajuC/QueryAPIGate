@@ -49,6 +49,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **A sign-in page for the Console.** On a server that needs credentials, a tab without them sees only the sign-in
+  page - **Sign in with SSO** when it's set up, and a field for an admin token or API key - instead of the whole
+  Console with every screen failing. A refused token, or an SSO sign-in the server refused, is said there. **Sign out**
+  in the sidebar ends a token's sign-in and comes back to it. A server open to all (no `QUERYAPIGATE_API_KEY`), and a
+  key that isn't an administrator's, see the Console as before. The server decides as it always did; this changes only
+  what a signed-out tab is shown.
+
 ## [0.37.0] - 2026-10-16
 
 MongoDB graduates to tier 1, under the compatibility promise: a find() now streams its whole result - over HTTP, from

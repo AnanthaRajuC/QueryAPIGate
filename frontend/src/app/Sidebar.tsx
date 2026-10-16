@@ -162,6 +162,14 @@ function KeyPanel() {
   const sso = session.data?.sso ?? false;
   const viaSso = !key && Boolean(session.data?.signed_in);
 
+  /** Forget this tab's key: a server that needs one shows its sign-in page (AppShell), an open one carries on. */
+  function forget() {
+    setApiKey('');
+    setKey('');
+    setEditing(false);
+    void queryClient.resetQueries();
+  }
+
   async function leave() {
     const providerSignOut = await signOut();
     // Out of the provider too, where it has a sign-out page; otherwise just back to a signed-out Console.
@@ -203,6 +211,9 @@ function KeyPanel() {
         </span>
         <button type="button" id="key-change" onClick={() => setEditing(true)}>
           Change
+        </button>
+        <button type="button" id="key-sign-out" onClick={forget}>
+          Sign out
         </button>
       </div>
       <form id="key-bar" autoComplete="off" hidden={showView || viaSso} onSubmit={submit}>
