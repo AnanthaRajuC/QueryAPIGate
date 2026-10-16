@@ -124,12 +124,14 @@
             "type": "string"
           },
           "role": {
+            "description": "Server-wide; null: only the roles their workspace memberships give them.",
             "enum": [
               "owner",
               "admin",
               "developer",
               "auditor"
             ],
+            "nullable": true,
             "type": "string"
           },
           "sso": {
@@ -156,6 +158,19 @@
           "tokens": {
             "description": "Tokens they hold, expired ones included.",
             "type": "integer"
+          },
+          "workspaces": {
+            "additionalProperties": {
+              "enum": [
+                "owner",
+                "admin",
+                "developer",
+                "auditor"
+              ],
+              "type": "string"
+            },
+            "description": "Their roles in workspaces, by workspace (ADR 0023).",
+            "type": "object"
           }
         },
         "required": [
@@ -166,7 +181,8 @@
           "created_at",
           "created_by",
           "last_seen_at",
-          "tokens"
+          "tokens",
+          "workspaces"
         ],
         "type": "object"
       },
@@ -185,12 +201,14 @@
             "type": "string"
           },
           "role": {
+            "description": "Server-wide - required on create; null: roles only in workspaces.",
             "enum": [
               "owner",
               "admin",
               "developer",
               "auditor"
             ],
+            "nullable": true,
             "type": "string"
           },
           "sso": {
@@ -2627,13 +2645,19 @@
             "type": "string"
           },
           "role": {
+            "description": "Their role in `workspace`: server-wide, or from a membership there; null for an administrator with roles only in other workspaces.",
             "enum": [
               "owner",
               "admin",
               "developer",
               "auditor"
             ],
+            "nullable": true,
             "type": "string"
+          },
+          "server_wide": {
+            "description": "Whether `role` is server-wide; false when it comes from a membership, which administers that one workspace.",
+            "type": "boolean"
           },
           "via": {
             "enum": [
@@ -2643,6 +2667,23 @@
               "open"
             ],
             "type": "string"
+          },
+          "workspace": {
+            "description": "The workspace this call acts in (ADR 0023).",
+            "type": "string"
+          },
+          "workspaces": {
+            "additionalProperties": {
+              "enum": [
+                "owner",
+                "admin",
+                "developer",
+                "auditor"
+              ],
+              "type": "string"
+            },
+            "description": "Their roles in workspaces, by workspace.",
+            "type": "object"
           }
         },
         "required": [
@@ -2650,7 +2691,10 @@
           "role",
           "via",
           "capabilities",
-          "data_access"
+          "data_access",
+          "workspace",
+          "server_wide",
+          "workspaces"
         ],
         "type": "object"
       },
@@ -3611,6 +3655,124 @@
           "errors",
           "placeholders",
           "tables"
+        ],
+        "type": "object"
+      },
+      "Workspace": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "members": {
+            "description": "Administrators with a role in it.",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "created_at",
+          "created_by",
+          "members"
+        ],
+        "type": "object"
+      },
+      "WorkspaceInput": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "Create only: 1-100 letters, digits, '.', '_' or '-'.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Workspace"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "WorkspaceMember": {
+        "properties": {
+          "added_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "admin": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "developer",
+              "auditor"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin",
+          "role",
+          "created_at",
+          "added_by"
+        ],
+        "type": "object"
+      },
+      "WorkspaceMemberInput": {
+        "properties": {
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "developer",
+              "auditor"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
+      "WorkspaceMemberList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMember"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -10831,6 +10993,632 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/workspaces": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "List workspaces - every one for a server-wide owner, admin or auditor; your own otherwise",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Create a workspace (owners)",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/workspaces/{name}": {
+      "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Remove an empty workspace and its memberships (owners); never 'default'",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Get a workspace (404 for one you may not see, as for one that does not exist)",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "patch": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Change its description (owners)",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/workspaces/{name}/members": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "List who has a role in it",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/workspaces/{name}/members/{admin}": {
+      "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "An administrator's name.",
+            "in": "path",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Take an administrator out of it",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "put": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "An administrator's name.",
+            "in": "path",
+            "name": "admin",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMember"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Give an administrator a role in it, or change it - a server owner's, or the workspace's owner's",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/write-requests": {

@@ -38,6 +38,7 @@ from .services import access, administrators, audit, collections, connections, m
 from .services import descriptions as description_service
 from .services import destinations as destination_service
 from .services import exports as export_service
+from .services import workspaces as workspace_service
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -79,8 +80,10 @@ def me():
     """Who the caller is: name, role, what that role may do, and how they authenticated."""
     permission = g.permission
     return jsonify({'name': permission.name, 'role': permission.role, 'via': permission.via,
-                    'capabilities': adminroles.capabilities(permission.role),
-                    'data_access': permission.role in adminroles.DATA_ROLES}), 200
+                    'capabilities': adminroles.capabilities(permission.role, permission.server_wide),
+                    'data_access': permission.role in adminroles.DATA_ROLES,
+                    'workspace': permission.workspace, 'server_wide': permission.server_wide,
+                    'workspaces': permission.memberships or {}}), 200
 
 
 # --------------------------------------------------------------------------------------
@@ -632,6 +635,62 @@ def delete_administrator(name):
     """Remove them and every token they hold. Their name stays in the audit log."""
     _check_admin_if_match(name)
     administrators.delete(name, caller_key_name())
+    return '', 204
+
+
+# --------------------------------------------------------------------------------------
+# Workspaces and their members (ADR 0023)
+# --------------------------------------------------------------------------------------
+
+def _workspace_response(workspace, status=200):
+    response = jsonify(workspace)
+    response.headers['ETag'] = access.etag({k: workspace[k] for k in ('name', 'description')})
+    return response, status
+
+
+@bp.route('/workspaces', methods=['GET'])
+def list_workspaces():
+    """Every workspace for a server-wide owner, admin or auditor; the ones they belong to for anyone else."""
+    return jsonify({'items': workspace_service.list_visible(g.permission)}), 200
+
+
+@bp.route('/workspaces', methods=['POST'])
+def create_workspace():
+    return _workspace_response(workspace_service.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/workspaces/<name>', methods=['GET'])
+def get_workspace(name):
+    return _workspace_response(workspace_service.load(g.permission, name))
+
+
+@bp.route('/workspaces/<name>', methods=['PATCH'])
+def update_workspace(name):
+    return _workspace_response(workspace_service.update(name, get_json_body(), caller_key_name()))
+
+
+@bp.route('/workspaces/<name>', methods=['DELETE'])
+def delete_workspace(name):
+    """Only an empty one - what it owns is never deleted with it - and never `default`."""
+    workspace_service.delete(name, caller_key_name())
+    return '', 204
+
+
+@bp.route('/workspaces/<name>/members', methods=['GET'])
+def list_workspace_members(name):
+    return jsonify({'items': workspace_service.list_members(g.permission, name)}), 200
+
+
+@bp.route('/workspaces/<name>/members/<admin_name>', methods=['PUT'])
+def set_workspace_member(name, admin_name):
+    """Give an administrator a role in the workspace, or change it."""
+    return jsonify(workspace_service.set_member(g.permission, name, admin_name, get_json_body(),
+                                                caller_key_name())), 200
+
+
+@bp.route('/workspaces/<name>/members/<admin_name>', methods=['DELETE'])
+def remove_workspace_member(name, admin_name):
+    workspace_service.remove_member(g.permission, name, admin_name, caller_key_name())
     return '', 204
 
 

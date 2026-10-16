@@ -168,7 +168,7 @@ def create_app():
     logging_setup.configure(log)  # before anything below logs - the legacy import's deprecation warning, for one
     db.init_schema()
     store.refuse_legacy_home()
-    experimental.warn_in_use(log, os.environ, store.read_connections())
+    experimental.warn_in_use(log, os.environ, store.read_connections(), store.workspace_names())
     warn_env_references()
     instances.register('serve')
     instances.warn_if_unshared(log)
@@ -1218,8 +1218,9 @@ def metrics_endpoint():
     since its ingress would otherwise publish the counts and the key, query and connection names in them (ADR 0017's
     review)."""
     from . import adminroles
-    role = getattr(g.get('permission'), 'role', None)
-    observer = role in adminroles.ROLES and 'observe' in adminroles.ROLES[role]
+    permission = g.get('permission')
+    # every workspace's counts: a server-wide role's to read (ADR 0023)
+    observer = adminroles.allows(permission, 'observe') and getattr(permission, 'server_wide', True)
     if not (observer or metrics.authorized(request.headers.get('Authorization'))):
         response = jsonify(error_body(metrics.UNAUTHORIZED, 401))
         response.status_code = 401

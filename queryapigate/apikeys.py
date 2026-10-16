@@ -112,8 +112,9 @@ DEFAULT_GRACE_MINUTES = 60
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
                                        'allowed_write_ops', 'collections', 'allowed_tables', 'claims', 'role',
                                        'via', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota',
-                                       'claim_binding'],
-                        defaults=(frozenset(), None, None, None, None, None, None, None, None, None, False))
+                                       'claim_binding', 'workspace', 'memberships', 'server_wide'],
+                        defaults=(frozenset(), None, None, None, None, None, None, None, None, None, False,
+                                  'default', None, True))
 # `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
 # `role`: the administrator role (adminroles.py) - 'owner' for the shared key and an open server, an administrator's
 # own role for an admin token, None for a scoped key or a signed-in app user (they can't manage anything).
@@ -124,6 +125,10 @@ Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_wr
 # server's, never widens it; None for none. `quota`: calls and rows per day or month (quotas.py) - None for none.
 # `via`: how an administrator authenticated - 'break-glass' (QUERYAPIGATE_API_KEY), 'token' or 'open'; it goes into
 # the audit log next to the actor's name.
+# `workspace`: the workspace this caller acts in (ADR 0023) - a key's or role's own; for an administrator, the one a
+# request names (`default` until it names another). `memberships`: an administrator's {workspace: role}, None for
+# anyone else. `server_wide`: whether `role` is a server-wide one - False when it comes from a membership, which
+# administers that one workspace (adminroles.SERVER_ONLY).
 
 # The unrestricted caller used when the server has no key configured at all (QUERYAPIGATE_API_KEY unset and no
 # scoped keys stored) - today's "open by design" behaviour, unchanged by this module. Its name is None (there

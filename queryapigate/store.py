@@ -170,6 +170,15 @@ def _connection_row_to_dict(row):
     return details
 
 
+def workspace_names():
+    """Every workspace's name (ADR 0023) - `default` always among them, also on a store not yet upgraded to have
+    them (read before db.init_schema() by `queryapigate events`)."""
+    try:
+        return [row[0] for row in db.connection().execute('SELECT name FROM workspaces ORDER BY name').fetchall()]
+    except db.Error:
+        return [db.DEFAULT_WORKSPACE]
+
+
 def read_connections():
     rows = db.connection().execute(
         'SELECT name, db, active, created_at, updated_at, details_json FROM connections').fetchall()

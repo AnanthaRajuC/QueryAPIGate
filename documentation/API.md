@@ -410,6 +410,21 @@ secret.
 Tokens: every administrator may list, issue and revoke **their own**, whatever their role; anyone else's take an
 owner.
 
+An administrator's `role` is their **server-wide** one, and may be `null` - required on create, so it is a choice:
+they then have only the roles their workspace memberships give them, listed under `workspaces`
+([Workspaces](#workspaces)). `GET /api/v1/me` adds the `workspace` a call acts in, whether `role` is `server_wide`,
+and those `workspaces`.
+
+### Workspaces and their members
+
+| Method and path | What it does |
+|---|---|
+| `GET /api/v1/workspaces` | Every workspace - `name`, `description`, `created_at`, `created_by`, `members` (how many) - for a server-wide owner, admin or auditor; the ones you belong to otherwise. |
+| `POST /api/v1/workspaces` | Create one: `{"name": "team-a", "description": "Payments"}`. 409 `workspace_exists`. Owners only. |
+| `GET`, `PATCH`, `DELETE /api/v1/workspaces/{name}` | One workspace (404 for one you may not see, as for one that doesn't exist); change its `description`; remove it - only when it owns nothing (409 `workspace_not_empty`, with what it still has in `contents`), and never `default` (409 `workspace_protected`). Changing and removing: owners only. |
+| `GET /api/v1/workspaces/{name}/members` | Who has a role in it: `admin`, `role`, `created_at`, `added_by`. |
+| `PUT`, `DELETE /api/v1/workspaces/{name}/members/{admin}` | Give an administrator a role in it - `{"role": "developer"}` - or change it; take them out (404 `member_not_found`). A server owner's, or the workspace's own owner's. |
+
 ### History and audit
 
 | Method and path | What it does |
@@ -1038,6 +1053,32 @@ policies apply, and their role comes from their groups:
   (expired, used, or started in another browser), `sso_id_token` (the provider's answer didn't verify),
   `sso_inactive`, `sso_denied` (the provider ended it), `sso_unreachable`, `sso_ambiguous`.
 - Every sign-in, refusal and sign-out is in the audit log, and every action in a session says `via: sso`.
+
+## Workspaces
+
+> **Experimental** - may change in any minor release, always noted in the changelog
+> ([what that means](../CHANGELOG.md#versioning-and-compatibility)). A server with only `default` behaves exactly as
+> before, and that part is under the promise.
+
+A workspace is **delegated administration inside one server** ([ADR 0023](adr/0023-workspaces.md)): one gateway for
+many teams, each managing its own connections, saved queries, API keys, roles, destinations and exports - each name
+unique within it - without reaching another's. It is not tenant isolation for a hosted service: every workspace runs
+in the same process, on the same store, with passwords under the same encryption key, and server-wide administrators
+see everything. It protects teams from each other's mistakes and reach, not from the people who run the server.
+
+- **`default`** holds everything a server had before workspaces, and what is made without naming one. It can't be
+  removed. A server that never creates a second workspace sees no difference.
+- **Server-wide roles and memberships.** An administrator's own `role` applies everywhere, as before. A
+  **membership** gives them one of the same four roles in one workspace and nothing outside it - without what only a
+  server-wide role gives: managing administrators, the server's settings, re-encrypting secrets, applying
+  configuration files, deleting a person's runs, and creating or removing workspaces. A workspace's owner manages its
+  members. An administrator whose only roles are in other workspaces gets `403 workspace_required`, naming them.
+- **Removing** a workspace takes it being empty: what it owns is deleted, or moved, first - never with it.
+  Removing an administrator ends their memberships.
+- Every change - a workspace created, described or removed, a member added, changed or removed - is in the audit log.
+
+What a call reaches in a workspace other than `default` (the `/w/<workspace>/...` routes) comes in the following
+steps of ADR 0023's delivery, and this section with them.
 
 ## Authentication and permissions
 
@@ -2181,6 +2222,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `insufficient_scope` | 403 | On the MCP server: a valid access token that doesn't carry `QUERYAPIGATE_MCP_SCOPE` |
 | `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
 | `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role. For a move or merge that would widen access, `gaining` lists the keys and roles |
+| `workspace_required` | 403 | An administrator with no role in the workspace the call is for - only in others, which `workspaces` lists ([Workspaces](#workspaces)) |
 | `connection_forbidden` | 403 | This key may not use this connection |
 | `store_not_allowed` | 403 | A connection was pointed at the server's own metadata store (`queryapigate.db`) |
 | `connection_inactive` | 403 | The connection is switched off |
@@ -2207,6 +2249,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `key_secret_taken` | 409 | A configuration file gives a key the `secret_sha256` another key already has - each key needs its own secret |
 | `previous_secret_not_found` | 404 | The key has no old secret that still works - nothing to end |
 | `admin_not_found`, `token_not_found` | 404 | No such administrator, or no such token of theirs |
+| `workspace_not_found`, `member_not_found` | 404 | No such workspace - or none the caller may see - or that administrator isn't a member of it |
 | `destination_not_found`, `export_not_found` | 404 | No such destination or export |
 | `collection_not_found` | 404 | No such collection (or it is empty) |
 | `cache_entry_not_found` | 404 | No such cached response |
@@ -2214,6 +2257,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `database_file_not_found` | 404 | A SQLite/DuckDB connection's file doesn't exist |
 | `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
 | `admin_exists` | 409 | An administrator by that name exists |
+| `workspace_exists` | 409 | A workspace by that name exists |
+| `workspace_not_empty`, `workspace_protected` | 409 | Removing a workspace that still owns something (`contents` counts it), or `default` |
 | `destination_exists`, `export_exists` | 409 | A destination or export by that name exists |
 | `export_running` | 409 | Another run of the export holds its lease; retry after `retry_after` seconds |
 | `destination_in_use` | 409 | An export still writes to the destination |

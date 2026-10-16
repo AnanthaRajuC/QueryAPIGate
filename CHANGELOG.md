@@ -21,7 +21,7 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2 and JDBC
-connections, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
+connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
 (`${aws-sm:...}`, `aws-rds-iam`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against

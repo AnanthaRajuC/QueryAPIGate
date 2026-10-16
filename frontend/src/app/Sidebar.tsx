@@ -132,8 +132,10 @@ const ROLE_LABEL: Record<string, string> = {
 /** Who the key in this tab signs in as: an administrator by name, the shared break-glass key, or an open server. */
 function identity(me: ReturnType<typeof useMe>['data'], key: string) {
   if (!me) return key ? 'API key applied' : 'No API key';
-  if (me.via === 'token') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role}`;
-  if (me.via === 'sso') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role} via SSO`;
+  // no role here: only in workspaces (ADR 0023)
+  const role = me.role === null ? 'Workspaces only' : (ROLE_LABEL[me.role] ?? me.role);
+  if (me.via === 'token') return `Signed in as ${me.name} · ${role}`;
+  if (me.via === 'sso') return `Signed in as ${me.name} · ${role} via SSO`;
   if (me.via === 'break-glass') return 'Shared admin key (owner)';
   return 'No API key needed';
 }

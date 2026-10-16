@@ -108,7 +108,8 @@ def _events(args):
         print(f'queryapigate: {error}', file=sys.stderr)
         return 2
     logging_setup.configure(logging.getLogger('queryapigate'))
-    experimental.warn_in_use(logging.getLogger('queryapigate'), os.environ, store.read_connections())
+    experimental.warn_in_use(logging.getLogger('queryapigate'), os.environ, store.read_connections(),
+                             store.workspace_names())
     db.init_schema()
     instances.register('events')
     args.port = args.port or config.events_port()

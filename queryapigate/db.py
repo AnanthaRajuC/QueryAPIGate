@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS instances (
 -- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
 CREATE TABLE IF NOT EXISTS administrators (
   name TEXT PRIMARY KEY,
-  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  role TEXT,                   -- owner, admin, developer or auditor (adminroles.py), server-wide; NULL: none - only
+                               -- the roles workspace_members gives them (schema 17)
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   details_json TEXT NOT NULL   -- email, created_by, last_seen_at
@@ -449,7 +450,7 @@ CREATE TABLE IF NOT EXISTS instances (
 -- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
 CREATE TABLE IF NOT EXISTS administrators (
   name TEXT COLLATE "C" PRIMARY KEY,
-  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  role TEXT,                   -- owner, admin, developer or auditor (adminroles.py), server-wide; NULL: none
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   details_json TEXT NOT NULL   -- email, created_by, last_seen_at
@@ -911,6 +912,11 @@ def _add_workspaces(conn, postgres):
             for table in rekey:
                 _sqlite_rebuild(conn, table)
             conn.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_previous_hash ON api_keys(previous_hash)')
+    if _role_required(conn, postgres):  # an administrator may have no server-wide role, only workspace ones
+        if postgres:
+            conn.execute('ALTER TABLE administrators ALTER COLUMN role DROP NOT NULL')
+        else:
+            _sqlite_rebuild(conn, 'administrators')
     collation = ' COLLATE "C"' if postgres else ''
     for table in _WORKSPACE_TAGGED:
         if 'workspace' not in _columns(conn, table, postgres):
@@ -923,6 +929,15 @@ def _add_workspaces(conn, postgres):
                                                                         'and what is made without naming one'})))
 
 
+def _role_required(conn, postgres):
+    """Whether administrators.role is still NOT NULL, as before schema 17."""
+    if postgres:
+        row = conn.execute("SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() "
+                           "AND table_name = 'administrators' AND column_name = 'role'").fetchone()
+        return row is not None and row[0] == 'NO'
+    return any(row[1] == 'role' and row[3] for row in conn.execute('PRAGMA table_info(administrators)').fetchall())
+
+
 def _table_ddl(table, schema=None):
     """One table's CREATE TABLE statement, as this version's schema defines it."""
     schema = _SCHEMA if schema is None else schema
@@ -931,15 +946,16 @@ def _table_ddl(table, schema=None):
 
 
 def _sqlite_rebuild(conn, table):
-    """Rebuild `table` as this version's schema has it, every row in `default` with its rowid - SQLite can't change
-    a primary key in place. Foreign keys are off meanwhile (init_schema()), so dropping the old table cascades nothing;
-    its indexes go with it and are made again."""
+    """Rebuild `table` as this version's schema has it, every row with its rowid - SQLite can't change a primary key
+    or a NOT NULL in place. A column the old table hasn't takes its default: `workspace` is `default` for every row.
+    Foreign keys are off meanwhile (init_schema()), so dropping the old table cascades nothing; its indexes go with
+    it and are made again."""
     new = f'{table}_v17'
     conn.execute(_table_ddl(table).replace(f'CREATE TABLE IF NOT EXISTS {table} (', f'CREATE TABLE {new} (', 1))
     wanted = {row[1] for row in conn.execute(f'PRAGMA table_info({new})').fetchall()}
     columns = [row[1] for row in conn.execute(f'PRAGMA table_info({table})').fetchall() if row[1] in wanted]
     listed = ', '.join(columns)
-    conn.execute(f"INSERT INTO {new} (rowid, workspace, {listed}) SELECT rowid, 'default', {listed} FROM {table}")
+    conn.execute(f'INSERT INTO {new} (rowid, {listed}) SELECT rowid, {listed} FROM {table}')
     conn.execute(f'DROP TABLE {table}')
     conn.execute(f'ALTER TABLE {new} RENAME TO {table}')
     for statement in re.findall(rf'CREATE (?:UNIQUE )?INDEX IF NOT EXISTS \w+ ON {table}\([^)]*\);', _SCHEMA):

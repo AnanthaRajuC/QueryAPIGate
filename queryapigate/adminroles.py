@@ -35,15 +35,23 @@ CAPABILITIES = {
     'destinations.write': 'create, change, test and delete destinations',
     'config.apply': 'see what a configuration file would change, and apply it - any of the above (ADR 0014)',
     'history.forget': "delete a person's runs and usage counts, on request (ADR 0016)",
+    'workspaces.read': 'list every workspace and its members (ADR 0023)',
+    'workspaces.write': 'create and remove workspaces, and give administrators roles in any of them',
 }
+
+# What only a server-wide role gives (ADR 0023 §3): the server itself, and the people who run it. A role from a
+# workspace membership is that role without these - whatever it is called, it administers one workspace.
+SERVER_ONLY = frozenset({'admins.read', 'admins.write', 'settings.read', 'secrets.rotate', 'config.apply',
+                         'history.forget', 'workspaces.read', 'workspaces.write'})
 
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
     'owner': set(CAPABILITIES),
     'admin': set(CAPABILITIES) - {'admins.read', 'admins.write', 'secrets.rotate', 'config.apply', 'history.forget'},
     'developer': _EVERYONE | {'queries.write', 'exports.read', 'exports.run'},
-    'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read'},
+    'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read', 'workspaces.read'},
 }
+ROLES['admin'] -= {'workspaces.write'}  # like administrators: who belongs where is an owner's to decide
 
 # Which roles may run SQL - ad-hoc or saved - on every connection, as the shared key can. An auditor reads what
 # happened and needs no rows.
@@ -94,6 +102,12 @@ OPERATIONS = {
     'v1.run_export': 'exports.run',
     'v1.config_diff': 'config.apply', 'v1.config_apply': 'config.apply', 'v1.config_managed': 'observe',
     'v1.forget_history': 'history.forget',
+    # every administrator sees the workspaces they belong to (all of them with workspaces.read) - the route narrows
+    'v1.list_workspaces': 'self', 'v1.get_workspace': 'self', 'v1.list_workspace_members': 'self',
+    # a workspace's own owner may also manage its members - checked in the route
+    'v1.set_workspace_member': 'self', 'v1.remove_workspace_member': 'self',
+    'v1.create_workspace': 'workspaces.write', 'v1.update_workspace': 'workspaces.write',
+    'v1.delete_workspace': 'workspaces.write',
 }
 
 
@@ -104,7 +118,7 @@ def require_to_widen_access(permission, gained, what):
     if not (gained.get('keys') or gained.get('roles')):
         return
     role = getattr(permission, 'role', None)
-    if role is not None and 'access.write' in ROLES[role]:
+    if allows(permission, 'access.write'):
         return
     who = ', '.join([*(f"key '{k}'" for k in gained.get('keys', [])),
                      *(f"role '{r}'" for r in gained.get('roles', []))])
@@ -112,18 +126,43 @@ def require_to_widen_access(permission, gained, what):
                    code='role_forbidden', capability='access.write', role=role, gaining=gained)
 
 
-def capabilities(role):
-    return sorted(ROLES.get(role, ()))
+def capabilities(role, server_wide=True):
+    """What `role` may do - without SERVER_ONLY when it comes from a workspace membership."""
+    granted = ROLES.get(role, set())
+    return sorted(granted if server_wide else granted - SERVER_ONLY)
+
+
+def allows(permission, capability):
+    """Whether `permission`'s role holds `capability` - in the workspace it acts in, for a membership's role."""
+    role = getattr(permission, 'role', None)
+    if role not in ROLES or capability not in ROLES[role]:
+        return False
+    return getattr(permission, 'server_wide', True) or capability not in SERVER_ONLY
+
+
+def is_administrator(permission):
+    """An administrator of something: a role here, or a membership in some workspace."""
+    return getattr(permission, 'role', None) is not None or bool(getattr(permission, 'memberships', None))
 
 
 def authorize(permission, endpoint):
     """Raise unless `permission` may call the /api/v1 operation `endpoint`: 403 `admin_only` for a caller that
-    isn't an administrator at all (a scoped key, a signed-in app user), 403 `role_forbidden` for one whose role
-    lacks the capability."""
+    isn't an administrator at all (a scoped key, a signed-in app user), 403 `workspace_required` for an administrator
+    with no role in the workspace the call is for - only in others - and 403 `role_forbidden` for one whose role
+    lacks the capability. `self` operations are any administrator's, role or not."""
+    needed = OPERATIONS.get(endpoint, 'admins.write')  # unmapped: owners only, and the test says so
+    if not is_administrator(permission):
+        raise ApiError('This API key is not authorized to manage the server configuration', 403, code='admin_only')
+    if needed == 'self':
+        return
     role = getattr(permission, 'role', None)
     if role is None:
-        raise ApiError('This API key is not authorized to manage the server configuration', 403, code='admin_only')
-    needed = OPERATIONS.get(endpoint, 'admins.write')  # unmapped: owners only, and the test says so
-    if needed not in ROLES[role]:
-        raise ApiError(f"The {role} role may not {CAPABILITIES[needed]}", 403, code='role_forbidden',
+        workspace = getattr(permission, 'workspace', None)
+        names = ', '.join(sorted(permission.memberships))
+        raise ApiError(f"You have no role in the workspace '{workspace}' - only in {names}: name the workspace you "
+                       'mean', 403, code='workspace_required', workspace=workspace,
+                       workspaces=sorted(permission.memberships))
+    if not allows(permission, needed):
+        where = '' if getattr(permission, 'server_wide', True) else ' in a workspace (it is server-wide)'
+        raise ApiError(f"The {role} role may not {CAPABILITIES[needed]}{where}", 403, code='role_forbidden',
                        capability=needed, role=role)

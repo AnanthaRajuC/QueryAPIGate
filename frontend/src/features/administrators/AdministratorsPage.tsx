@@ -22,7 +22,9 @@ const ROLES = [
   { value: 'auditor', label: 'Auditor', text: 'read only - audit log, history, configuration; no SQL' },
 ] as const;
 
-const roleLabel = (role: string) => ROLES.find((r) => r.value === role)?.label ?? role;
+// null: no server-wide role - only the roles their workspace memberships give them (ADR 0023)
+const roleLabel = (role: string | null) =>
+  role === null ? 'Workspaces only' : (ROLES.find((r) => r.value === role)?.label ?? role);
 const TOKEN_DAYS = 90;
 const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const TOKEN_HINT =
@@ -244,7 +246,7 @@ function AdministratorTable({ items, self }: { items: Administrator[]; self: str
 }
 
 /** A non-owner's view: who they are, and their own tokens. */
-function OwnAccount({ name, role }: { name: string; role: string }) {
+function OwnAccount({ name, role }: { name: string; role: string | null }) {
   return (
     <div className="form" style={{ padding: 16 }}>
       <div>
