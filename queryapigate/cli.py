@@ -25,7 +25,9 @@ from . import (
     instances,
     logging_setup,
     postman,
+    scope,
     store,
+    workspaces,
 )
 from .app import create_app
 from .errors import ApiError
@@ -423,7 +425,9 @@ def _remote(args, operation, **flags):
         raise ApiError('--server needs the API key in the QAG_API_KEY environment variable')
     doc = _read_config_file(args.file)
     query = '&'.join(f'{k}=true' for k, v in flags.items() if v)
-    url = args.server.rstrip('/') + f'/api/v1/config/{operation}' + (f'?{query}' if query else '')
+    workspace = configcode.workspace_of(doc)  # the server applies a file only to the workspace it describes
+    prefix = '' if workspace == db.DEFAULT_WORKSPACE else f'/w/{workspace}'
+    url = args.server.rstrip('/') + f'{prefix}/api/v1/config/{operation}' + (f'?{query}' if query else '')
     request = urllib.request.Request(url, data=json.dumps(doc).encode(), method='POST',
                                      headers={'X-API-Key': key, 'Content-Type': 'application/json'})
     try:
@@ -977,6 +981,12 @@ def build_parser():
                 audit_verify):
         sub.add_argument('--home', help='folder holding queryapigate.db '
                                         '(default: $QUERYAPIGATE_HOME or the current directory)')
+    # What a workspace owns (ADR 0023): these act in one. `config diff` and `config apply` take theirs from the file.
+    for sub in (export, collection_export, collection_import, config_export, examples_load, examples_unload,
+                examples_status, exports_run, exports_list):
+        sub.add_argument('--workspace', metavar='NAME',
+                         help='the workspace whose queries, connections, keys and exports this acts on '
+                              '(default: default)')
     return parser
 
 
@@ -999,4 +1009,10 @@ def main(argv=None):
     except db.Error as error:  # e.g. QUERYAPIGATE_DATABASE_URL names a server that isn't reachable
         print(f'queryapigate: cannot open the metadata database {db.describe()}: {error}'.rstrip(), file=sys.stderr)
         return 2
-    return args.func(args)
+    workspace = getattr(args, 'workspace', None)
+    if workspace is not None and not workspaces.exists(workspace):
+        print(f"queryapigate: no workspace named '{workspace}' - create it first "
+              '(POST /api/v1/workspaces, or the Console)', file=sys.stderr)
+        return 2
+    with scope.using(workspace):
+        return args.func(args)

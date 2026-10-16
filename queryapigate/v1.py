@@ -860,12 +860,24 @@ def _config_document():
     """The configuration file a request carries: as JSON, or as YAML with a YAML Content-Type (ADR 0014)."""
     from . import configcode
     if request.mimetype in ('application/yaml', 'application/x-yaml', 'text/yaml'):
-        return configcode.load(request.get_data(as_text=True))
+        return _of_this_workspace(configcode.load(request.get_data(as_text=True)))
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         raise ApiError('The body is a configuration file: a JSON object, or YAML sent as application/yaml',
                        code='invalid_config')
-    return configcode.load(json.dumps(data))
+    return _of_this_workspace(configcode.load(json.dumps(data)))
+
+
+def _of_this_workspace(doc):
+    """A file is applied to the workspace it describes, and this call acts in one: they must be the same, so a file is
+    never applied anywhere it doesn't say (ADR 0023 §6) - and a member applies only their own workspace's."""
+    from . import configcode
+    described = configcode.workspace_of(doc)
+    if described != scope.current():
+        prefix = '' if described == DEFAULT_WORKSPACE else f'/w/{described}'
+        raise ApiError(f"This file describes the workspace '{described}', and this call is for "
+                       f"'{scope.current()}' - send it to {prefix}{request.path}", code='invalid_config')
+    return doc
 
 
 def _flag(name):

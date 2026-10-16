@@ -629,9 +629,16 @@ queryapigate config apply queryapigate.yaml               # all or nothing; --dr
 queryapigate config new-key                               # a secret and its secret_sha256, for a new key
 ~~~
 
+**A file describes one workspace** ([Workspaces](#workspaces), experimental): an optional top-level `workspace:
+team-a` says which; without it, `default` - as every file before workspaces. It is applied there and only there, and
+it must exist (a file fills a workspace, it doesn't make one). `config export --workspace team-a` writes one, with
+its `workspace:`; `config diff` and `config apply` go by the file's. Over the API, a file is applied only to the
+workspace the call is for - `/w/team-a/api/v1/config/apply` - and refused anywhere else. Pruning and what a file
+manages are per workspace too.
+
 Against a running server, for CI: `POST /api/v1/config/diff` and `POST /api/v1/config/apply` (`?prune=true`,
 `?dry_run=true`), with the file as JSON or as YAML (`Content-Type: application/yaml`). Owners only - the
-`config.apply` capability, since a file can change anything. Or the CLI, with `--server`: it posts the file and shows
+`config.apply` capability, since a file can change anything; a workspace's own owner applies its file. Or the CLI, with `--server`: it posts the file and shows
 the answer as it would locally, the key from `QAG_API_KEY` (never an argument, so never in a log), and opens no
 store of its own:
 
@@ -1090,6 +1097,9 @@ see everything. It protects teams from each other's mistakes and reach, not from
 - **Kept apart** in each workspace: its run history, usage quotas (two workspaces' keys of one name are two
   callers), cached responses and the cache's management, write requests, descriptions and configuration-file records.
   A local-folder destination is only in `default`: the folders exports may write under are the server's.
+- **Configuration files and the CLI**: a file's `workspace:` says where it applies
+  ([Configuration as code](#configuration-as-code)); `queryapigate export`, `exports run|list`, `collection
+  export|import`, `config export` and `examples` take `--workspace NAME`.
 
 **Seeing what happened, per workspace.**
 

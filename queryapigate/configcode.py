@@ -103,10 +103,27 @@ def load(text):
     if doc.get('format_version') != FORMAT_VERSION:
         raise ConfigInvalid([f"Unsupported format_version {doc.get('format_version')!r} - this version reads "
                              f'{FORMAT_VERSION}'])
-    unknown = sorted(set(doc) - {'format', 'format_version', *KINDS})
+    unknown = sorted(set(doc) - {'format', 'format_version', 'workspace', *KINDS})
     if unknown:
         raise ConfigInvalid([f"Unknown section(s): {', '.join(map(str, unknown))} (known: {', '.join(KINDS)})"])
+    if 'workspace' in doc and (not isinstance(doc['workspace'], str) or not scope.PREFIX_RE.match(
+            f"/w/{doc['workspace']}")):
+        raise ConfigInvalid(["workspace is a workspace's name: 1-100 letters, digits, '.', '_' or '-'"])
     return doc
+
+
+def workspace_of(doc):
+    """The workspace a file describes (ADR 0023 §6): its `workspace`, or `default` - as every file before them."""
+    return doc.get('workspace') or db.DEFAULT_WORKSPACE
+
+
+def _in_its_workspace(doc):
+    """Act in the workspace `doc` describes - which must exist: a file fills a workspace, it doesn't make one."""
+    from . import workspaces
+    name = workspace_of(doc)
+    if not workspaces.exists(name):
+        raise ConfigInvalid([f"workspace: no workspace named '{name}' - create it first (POST /api/v1/workspaces)"])
+    return scope.using(name)
 
 
 class _Problems:
@@ -491,8 +508,10 @@ def diff(doc, prune=False):
     'notes'}. A saved query's update is a new version (published) when its definition changes, and a move when only
     its collection does. With `prune`, what a file manages (it created, changed or named it) and this one doesn't
     have is deleted - and a managed connection's descriptions this one doesn't list. `not_in_file` names the rest of
-    what the server holds, of the kinds the file has, that the file doesn't: applying leaves it alone."""
-    return _plan(desired(doc), prune)['result']
+    what the server holds, of the kinds the file has, that the file doesn't: applying leaves it alone. All of it in
+    the file's workspace (workspace_of())."""
+    with _in_its_workspace(doc):
+        return _plan(desired(doc), prune)['result']
 
 
 def _plan(wanted, prune):
@@ -667,7 +686,12 @@ def apply(doc, prune=False, actor='cli', once=False):
 
     With `once` - QUERYAPIGATE_CONFIG_FILE at startup - a file already applied, by this instance or another, is left
     alone (`already_applied`): several instances starting together apply it once, and a change made since in the
-    Console isn't undone at every restart."""
+    Console isn't undone at every restart. All of it in the file's workspace (workspace_of())."""
+    with _in_its_workspace(doc):
+        return _apply(doc, prune, actor, once)
+
+
+def _apply(doc, prune, actor, once):
     digest = file_hash(doc)
     with db.transaction() as conn:
         seen = conn.execute('SELECT 1 FROM config_applied WHERE file_hash = ?', (digest,)).fetchone() is not None
@@ -959,6 +983,8 @@ def export(kinds=KINDS, examples=False):
     if unknown:
         raise ApiError(f"Unknown kind(s): {', '.join(unknown)} (known: {', '.join(KINDS)})", code='invalid_config')
     doc = {'format': FORMAT, 'format_version': FORMAT_VERSION}
+    if scope.current() != db.DEFAULT_WORKSPACE:  # the workspace it was exported from, and is applied to
+        doc['workspace'] = scope.current()
     variables, skipped = [], []
     if 'connections' in kinds:
         doc['connections'] = []

@@ -41,8 +41,8 @@ CAPABILITIES = {
 
 # What only a server-wide role gives (ADR 0023 §3): the server itself, and the people who run it. A role from a
 # workspace membership is that role without these - whatever it is called, it administers one workspace.
-SERVER_ONLY = frozenset({'admins.read', 'admins.write', 'settings.read', 'secrets.rotate', 'config.apply',
-                         'history.forget', 'workspaces.read', 'workspaces.write'})
+SERVER_ONLY = frozenset({'admins.read', 'admins.write', 'settings.read', 'secrets.rotate', 'history.forget',
+                         'workspaces.read', 'workspaces.write'})  # config.apply: a workspace's owner applies its file
 
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
