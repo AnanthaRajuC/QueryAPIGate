@@ -19,17 +19,18 @@ From the changelog's [versioning policy](../CHANGELOG.md#versioning-and-compatib
 ## Before: read, then back up
 
 1. **Read the changelog** for every version between yours and the target: anything under **Breaking**,
-   **Deprecated** and **Upgrading**. Note any Python version change - 0.14 requires Python 3.11 or newer.
+   **Deprecated** and **Upgrading**. Note any Python version change - 0.14 requires Python 3.11 or newer. And
+   whether it's a rolling upgrade: from 0.37 to 0.38 it isn't - stop every instance first.
 2. **Back up the store** - [Back up and restore](33-back-up-and-restore.md). This is your way back: going to an older
    version in place is not supported.
 3. **Pin the target version** - never upgrade by accident:
 
    ```bash
-   pip install "queryapigate[server,postgres]==0.37.0"      # not just "queryapigate"
+   pip install "queryapigate[server,postgres]==0.38.0"      # not just "queryapigate"
    ```
 
    ```yaml
-   image: ghcr.io/anantharajuc/queryapigate:0.37.0           # not :latest
+   image: ghcr.io/anantharajuc/queryapigate:0.38.0           # not :latest
    ```
 
 ## During: just start it
