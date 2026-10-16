@@ -9,6 +9,7 @@ import { usePendingWrites } from './approvals';
 import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 import { useAlertFeed } from './alerts';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 // ui.py <aside class="side">, element for element.
 
@@ -82,6 +83,7 @@ export function Sidebar() {
           <span id="version">{health.data ? `v${health.data.version}` : '…'}</span>
         </span>
       </div>
+      <WorkspaceSwitcher />
       <nav id="tabs" role="tablist" aria-label="Sections">
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(shown);

@@ -8,7 +8,7 @@ export interface Call {
   body: unknown;
 }
 
-type Handler = (call: Call) => unknown | Response;
+type Handler = (call: Call) => unknown | Response | Promise<unknown | Response>;
 
 /** Stub fetch with a route table: { 'GET /api/v1/queries': () => ({...}) }. A handler returns a JSON body (200) or
  * a full Response. An exact route wins; otherwise `*` matches any one path segment
@@ -29,7 +29,10 @@ export function fakeBackend(routes: Record<string, Handler>) {
     };
     calls.push(call);
     const handler = routes[`${call.method} ${call.path}`] ?? wildcard(routes, `${call.method} ${call.path}`);
-    const result = handler ? handler(call) : jsonResponse({ error: 'Not found', code: 'not_found' }, 404);
+    // a handler may answer later (a Promise), as a slow server does
+    const result = handler
+      ? await handler(call)
+      : jsonResponse({ error: 'Not found', code: 'not_found' }, 404);
     return result instanceof Response ? result : jsonResponse(result);
   });
   vi.stubGlobal('fetch', fetchMock);

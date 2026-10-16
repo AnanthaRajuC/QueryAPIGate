@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DrawerHost, ErrorBanner, FeedbackProvider, Toasts, useFeedback } from './feedback';
@@ -7,6 +7,7 @@ import { usePrefs } from './prefs';
 import { mustSignIn, useMe } from './data';
 import { activeItem, Sidebar } from './Sidebar';
 import { SignIn } from './SignIn';
+import { useSettleWorkspace } from './workspaceHooks';
 import { ssoRefusal } from '@/auth/ssoRefusal';
 
 /** The classic page frame (ui.py <body>): sidebar, then content (header, error banner, main), then the drawer,
@@ -18,7 +19,21 @@ export function AppShell() {
   const section = activeItem(useLocation().pathname);
   // A server that needs a sign-in shows only that, once it has said so (401 from /api/v1/me).
   const me = useMe();
-  if (mustSignIn(me)) return <SignIn me={me} />;
+  useSettleWorkspace();
+  const signedOut = mustSignIn(me);
+  // Once this tab has been shown the sign-in page, it stays there until /me says who the tab is - not the shell for
+  // the moment a sign-in attempt's /me is in flight, which unmounted the page and lost what it had to say. Whether a
+  // token was tried lives here, in the frame that stays, for the same reason.
+  const [gated, setGated] = useState(false);
+  const [tried, setTried] = useState(false);
+  // adjusted while rendering, React's way for state that follows other state - each settles in one pass
+  if (signedOut && !gated) setGated(true);
+  if (me.isSuccess && (gated || tried)) {
+    setGated(false);
+    setTried(false);
+  }
+  if (signedOut || (gated && !me.isSuccess))
+    return <SignIn me={me} tried={tried} onTry={() => setTried(true)} />;
   return (
     <FeedbackProvider>
       {/* Not before /me has answered: signed out, the sign-in page says why SSO refused, not the banner. */}

@@ -185,6 +185,20 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ),
       },
       {
+        tab: 'workspaces',
+        path: '/workspaces',
+        group: 'Access',
+        label: 'Workspaces',
+        needs: 'self',
+        icon: svg(
+          <>
+            <rect x="3" y="4" width="8" height="7" rx="1.5" />
+            <rect x="13" y="4" width="8" height="7" rx="1.5" />
+            <rect x="8" y="13" width="8" height="7" rx="1.5" />
+          </>,
+        ),
+      },
+      {
         tab: 'administrators',
         path: '/administrators',
         group: 'Access',

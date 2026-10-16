@@ -1097,6 +1097,10 @@ see everything. It protects teams from each other's mistakes and reach, not from
 - **Kept apart** in each workspace: its run history, usage quotas (two workspaces' keys of one name are two
   callers), cached responses and the cache's management, write requests, descriptions and configuration-file records.
   A local-folder destination is only in `default`: the folders exports may write under are the server's.
+- **The Console**: once there is a second workspace, a switcher under the wordmark picks the one the tab works in -
+  every screen then reads and changes that workspace's things - and the **Workspaces** screen lists them, creates and
+  removes them (owners), and manages each one's members. An administrator whose roles are all in workspaces starts
+  in their first.
 - **Configuration files and the CLI**: a file's `workspace:` says where it applies
   ([Configuration as code](#configuration-as-code)); `queryapigate export`, `exports run|list`, `collection
   export|import`, `config export` and `examples` take `--workspace NAME`.

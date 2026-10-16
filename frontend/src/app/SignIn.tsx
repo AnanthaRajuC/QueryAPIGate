@@ -10,13 +10,21 @@ import type { useMe } from './data';
 
 /** The Console's front door, in place of the whole shell while signed out: SSO first when the server has it, and a
  * token - an administrator's own, or the shared admin key - always. */
-export function SignIn({ me }: { me: ReturnType<typeof useMe> }) {
+export function SignIn({
+  me,
+  tried,
+  onTry,
+}: {
+  me: ReturnType<typeof useMe>;
+  /** A token was tried and /me refused it - kept by the shell, which stays mounted (AppShell). */
+  tried: boolean;
+  onTry: () => void;
+}) {
   const queryClient = useQueryClient();
   const session = useSession();
   const location = useLocation();
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
-  const [tried, setTried] = useState(false);
   const refused = new URLSearchParams(location.search).get('sso_error');
   const sso = session.data?.sso ?? false;
 
@@ -26,7 +34,7 @@ export function SignIn({ me }: { me: ReturnType<typeof useMe> }) {
     if (!value) return;
     setApiKey(value);
     setDraft('');
-    setTried(true);
+    onTry();
     if (refused) navigate({ pathname: location.pathname }, { replace: true }); // that refusal is answered now
     // Asked afresh. Invalidated rather than reset, so this page stays up - with its answer - until /me says who
     // the token is; the shell's queries start once it does.
@@ -44,7 +52,7 @@ export function SignIn({ me }: { me: ReturnType<typeof useMe> }) {
           <p className="signin-error" role="alert">
             {ssoRefusal(refused)}
           </p>
-        ) : tried && !me.isFetching ? (
+        ) : tried && me.isError && !me.isFetching ? (
           <p className="signin-error" role="alert">
             That token wasn’t accepted - it may be mistyped, expired or revoked.
           </p>
