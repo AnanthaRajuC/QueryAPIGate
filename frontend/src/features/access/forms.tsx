@@ -390,10 +390,16 @@ function RoleFormFields({ name, existing, etag }: { name?: string; existing?: Ro
   const { connectionNames, queryNames } = useGrantChoices();
   const [roleName, setRoleName] = useState(name ?? '');
   const [grants, setGrants] = useState<GrantState>(() => initialGrants(existing));
+  const [claimBound, setClaimBound] = useState(Boolean(existing?.require_claim_binding));
 
   const save = useMutation({
     mutationFn: async () => {
-      const body = grantsPayload(grants, connectionNames, queryNames);
+      const body = {
+        ...grantsPayload(grants, connectionNames, queryNames),
+        require_claim_binding: claimBound,
+        // a claim-bound role reaches queries one by one, never a connection (the server refuses any other value)
+        ...(claimBound ? { connections: [] } : {}),
+      };
       if (isEdit) {
         return unwrap(
           await api.PATCH('/api/v1/roles/{name}', {
@@ -439,6 +445,26 @@ function RoleFormFields({ name, existing, etag }: { name?: string; existing?: Ro
         />
       </Field>
       <GrantFields prefix="r" state={grants} onChange={setGrants} />
+      <label className="switch">
+        <input
+          id="r-claim-bound"
+          type="checkbox"
+          checked={claimBound}
+          onChange={(e) => setClaimBound(e.target.checked)}
+        />
+        Only queries that bind the signed-in user
+        <span className="hint">
+          — for a role your customers sign in with: its users run only saved queries that take a parameter
+          from their token (<code>from_claim</code>), so each sees only their own rows
+        </span>
+      </label>
+      {claimBound && (
+        <div className="hint" id="r-claim-bound-note">
+          Its users reach the queries and collections chosen above, one by one — never a connection, so no
+          ad-hoc SQL. The connections above aren’t used, and are saved as none. API keys created from this
+          role don’t take this setting.
+        </div>
+      )}
       <div className="hint">
         A role is a template: it’s copied onto a key once, when the key is created &quot;from&quot; it.
         Editing or deleting this role afterward never changes a key already created from it.

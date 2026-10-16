@@ -1426,6 +1426,23 @@ can only ever see the caller's data - there is nothing in the request to change:
   MCP client using one - gets `403`: it has no token to take the value from.
 - It is left out of `/openapi.json`, `/catalog`, Postman exports and MCP tool schemas: callers never send it.
 
+**Every query, not just this one: `require_claim_binding`.** The guarantee above holds for a query that binds the
+user; a query granted to the same role without a `from_claim` parameter shows every user every row it returns. For a
+role whose users are your customers, say so on the role, and the server holds every query to it:
+
+~~~bash
+curl -X PATCH http://127.0.0.1:5000/api/v1/roles/customers -H "X-API-Key: $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"require_claim_binding": true}'
+~~~
+
+- Its users run only saved queries with at least one `from_claim` parameter; another is `403
+  claim_binding_required`, and is left out of their `/catalog`, `/openapi.json` and MCP tools.
+- They reach queries by name or collection only - never a connection, so no ad-hoc SQL, `find()` or schema browsing.
+  Such a role has `connections: []` (left out, that's what it means here; another value is refused).
+- It's a role's alone: a key created from the role doesn't take it - a key has no token to bind. In a
+  [configuration file](#configuration-as-code), `require_claim_binding: true` on the role.
+- Default off: a role without it works as it always has, for staff tools that do read every row.
+
 A JWT can't be revoked before it expires, so keep token lifetimes short (minutes, refreshed by your app) - as
 identity providers do by default. Disabling a user's access at once means taking the query or the role away.
 
@@ -2175,6 +2192,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `mongo_operator_forbidden` | 403 | A Mongo operator that runs server-side JavaScript |
 | `sign_in_required` | 403 | The query takes values from a sign-in token; call it with one |
 | `claim_missing` | 403 | The sign-in token lacks a claim the query needs |
+| `claim_binding_required` | 403 | The caller's role has `require_claim_binding`, and the query takes no parameter from the sign-in token |
 | `forbidden` | 403 | Any other refusal |
 | `query_not_found` | 404 | No such saved query |
 | `version_not_found` | 404 | No such version - or a draft, to a key that can't see drafts |

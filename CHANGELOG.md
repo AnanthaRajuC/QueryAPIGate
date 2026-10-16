@@ -49,6 +49,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **`require_claim_binding` on a role, for customer-facing APIs** ([Signed-in users](documentation/API.md#signed-in-users-jwt)).
+  A `from_claim` parameter limits a query to the signed-in user's own rows - but only that query: another granted to
+  the same role without one showed every user every row it returned, and nothing said so. With `"require_claim_binding":
+  true`, a role's users run only saved queries that take a parameter from their token (anything else is `403
+  claim_binding_required`, and left out of their `/catalog`, `/openapi.json` and MCP tools), reach queries by name or
+  collection only - no connection, so no ad-hoc SQL or schema browsing - and the role refuses a connection grant. A
+  role's alone: a key created from it doesn't take it. Off by default; through the API and configuration files.
+
 ### Fixed
 - **Building the image could fail on Maven Central.** The H2 driver was fetched from repo1.maven.org alone, which twice
   answered GitHub's runners with something other than the jar - the pinned hash refused it, and the build stopped.

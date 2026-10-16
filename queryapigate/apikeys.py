@@ -111,12 +111,15 @@ DEFAULT_GRACE_MINUTES = 60
 
 Permission = namedtuple('Permission', ['name', 'admin', 'connections', 'allow_writes', 'queries', 'rate_limit',
                                        'allowed_write_ops', 'collections', 'allowed_tables', 'claims', 'role',
-                                       'via', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota'],
-                        defaults=(frozenset(), None, None, None, None, None, None, None, None, None))
+                                       'via', 'mask', 'max_concurrent', 'query_timeout', 'max_rows', 'quota',
+                                       'claim_binding'],
+                        defaults=(frozenset(), None, None, None, None, None, None, None, None, None, False))
 # `claims`: a signed-in user's verified token claims (jwtauth.py) - None for every API key, admin included.
 # `role`: the administrator role (adminroles.py) - 'owner' for the shared key and an open server, an administrator's
 # own role for an admin token, None for a scoped key or a signed-in app user (they can't manage anything).
 # `mask`: column-masking rules (masking.py, ADR 0005) applied to everything this caller receives - None for none.
+# `claim_binding`: a signed-in user whose role has require_claim_binding - they reach only saved queries that take a
+# parameter from their token (`from_claim`), and no connection at all (can_use(), can_run_saved()). False for any key.
 # `max_concurrent`, `query_timeout`, `max_rows`: this caller's own limits (limits.py, ADR 0011) - each narrows the
 # server's, never widens it; None for none. `quota`: calls and rows per day or month (quotas.py) - None for none.
 # `via`: how an administrator authenticated - 'break-glass' (QUERYAPIGATE_API_KEY), 'token' or 'open'; it goes into
@@ -131,7 +134,21 @@ OPEN = Permission(name=None, admin=True, connections=ALL_CONNECTIONS, allow_writ
 
 
 def can_use(permission, connection_name):
+    """Whether ``permission`` may use a connection directly - ad-hoc SQL, a find(), its schema, any saved query on it.
+    Never for a claim-bound caller (Permission.claim_binding): what they reach is decided query by query."""
+    if permission.claim_binding:
+        return False
     return permission.admin or permission.connections == ALL_CONNECTIONS or connection_name in permission.connections
+
+
+def binds_claim(query_parameters):
+    """Whether a saved query takes at least one parameter from the caller's sign-in token (params.py's `from_claim`)
+    - the only kind a claim-bound caller may run: its rows are the caller's own, whatever else it reads."""
+    from . import params
+    try:
+        return any(spec['from_claim'] for spec in params.read_definitions(query_parameters).values())
+    except ApiError:
+        return False
 
 
 def can_use_query(permission, query_name):
@@ -148,10 +165,13 @@ def can_use_collection(permission, collection):
     return permission.admin or (collection is not None and collection in permission.collections)
 
 
-def can_run_saved(permission, query_name, collection, connection_name):
+def can_run_saved(permission, query_name, collection, connection_name, query_parameters=None):
     """The single rule for "may this caller run this saved query": named in its ``queries`` grant, or in a
     collection it was granted, or on a connection it may use. The run path, ``/openapi.json`` and
-    ``/catalog`` all call this, so a new kind of grant cannot be honoured by one and missed by another."""
+    ``/catalog`` all call this, so a new kind of grant cannot be honoured by one and missed by another.
+    A claim-bound caller also needs the query to bind a claim (``query_parameters``: its declared parameters)."""
+    if permission.claim_binding and not binds_claim(query_parameters):
+        return False
     return (can_use_query(permission, query_name)
             or can_use_collection(permission, collection)
             or bool(connection_name and can_use(permission, connection_name)))
@@ -728,9 +748,12 @@ def list_roles():
 
 def create_role(name, connections=None, allow_writes=False, queries=None, rate_limit=None, allowed_ips=None,
                 allowed_write_ops=None, collections=None, example=False, allowed_tables=None, mask=None,
-                max_concurrent=None, query_timeout=None, max_rows=None, quota=None):
+                max_concurrent=None, query_timeout=None, max_rows=None, quota=None, require_claim_binding=False):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("Role name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
+    require_claim_binding = _validate_claim_binding(require_claim_binding)
+    if require_claim_binding and connections is None:
+        connections = []  # a claim-bound role reaches queries one by one, never a whole connection
     collections = _normalize_collections(collections)
     _require_existing_collections(collections)
     with db.transaction() as conn:
@@ -742,13 +765,16 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
                                quota),
             'created_at': store.now(),
             **({'example': True} if example else {}),  # installed by `examples load` - see examples.py
+            **({'require_claim_binding': True} if require_claim_binding else {}),
         }
+        _check_claim_bound_role(entry)
         _upsert_role(conn, name, entry)
 
 
 def update_role(name, connections=None, allow_writes=None, queries=None, rate_limit=_UNSET, allowed_ips=_UNSET,
                 allowed_write_ops=_UNSET, collections=None, allowed_tables=_UNSET, mask=_UNSET,
-                max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET, quota=_UNSET):
+                max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET, quota=_UNSET,
+                require_claim_binding=_UNSET):
     with db.transaction() as conn:
         row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
         if row is None:
@@ -780,7 +806,28 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
                 entry[field] = _validate_limit(field, value)
         if quota is not _UNSET:
             entry['quota'] = quotas.validate(quota)
+        if require_claim_binding is not _UNSET:
+            entry.pop('require_claim_binding', None)
+            if _validate_claim_binding(require_claim_binding):
+                entry['require_claim_binding'] = True
+        _check_claim_bound_role(entry)
         _upsert_role(conn, name, entry)
+
+
+def _validate_claim_binding(value):
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ApiError('require_claim_binding must be true or false', code='invalid_body')
+    return value
+
+
+def _check_claim_bound_role(entry):
+    """A claim-bound role reaches saved queries by name or collection only - a connection grant would give its users
+    ad-hoc SQL on it, and every query there whether it binds them or not."""
+    if entry.get('require_claim_binding') and entry.get('connections'):
+        raise ApiError('A role with require_claim_binding reaches saved queries by name or collection only - give it '
+                       'connections: [] (its users run only queries that bind their token)', code='invalid_body')
 
 
 def delete_role(name):
@@ -897,7 +944,8 @@ def permission_from_grants(name, entry, claims=None):
                       if entry.get('allowed_tables') is not None else None,
                       claims=claims, mask=entry.get('mask') or None, max_concurrent=entry.get('max_concurrent'),
                       query_timeout=entry.get('query_timeout'), max_rows=entry.get('max_rows'),
-                      quota=entry.get('quota'))
+                      quota=entry.get('quota'),
+                      claim_binding=claims is not None and entry.get('require_claim_binding') is True)
 
 
 def ip_allowed(entry, client_ip):

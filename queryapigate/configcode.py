@@ -51,7 +51,7 @@ _QUERY_FIELDS = frozenset({'name', 'description', 'author', 'tags', 'query_type'
 _QUERY_COMPARED = ('description', 'tags', 'query_type', 'sql', 'mongo', 'connection_name', 'parameters', 'cache_ttl',
                    'columns', 'agent_writes', 'max_affected_rows')
 _KEY_FIELDS = frozenset({'name', 'role', 'active', 'expires_at', 'secret_sha256', *access.GRANT_FIELDS})
-_ROLE_FIELDS = frozenset({'name', *access.GRANT_FIELDS})
+_ROLE_FIELDS = frozenset({'name', *access.GRANT_FIELDS, *access.ROLE_ONLY_FIELDS})
 
 
 class ConfigInvalid(ApiError):
@@ -223,7 +223,18 @@ def _role_from_file(where, entry, problems):
     if not apikeys._NAME_RE.match(entry['name']):
         problems.add(where, "a role name is 1-100 letters, digits, spaces, '.', '_' or '-'")
         return None
-    return _grants_from_file(where, entry, problems)
+    bound = problems.check(where, apikeys._validate_claim_binding, entry.get('require_claim_binding'))
+    if bound is _FAILED:
+        return None
+    if bound and 'connections' not in entry:
+        entry = {**entry, 'connections': []}  # as through the API: a claim-bound role reaches no connection
+    grants = _grants_from_file(where, entry, problems)
+    if grants is None:
+        return None
+    role = {**grants, 'require_claim_binding': bound}
+    if problems.check(where, apikeys._check_claim_bound_role, role) is _FAILED:
+        return None
+    return role
 
 
 def _key_from_file(where, entry, problems):
@@ -416,8 +427,8 @@ def _resolve_roles(wanted):
         role = wanted.get('roles', {}).get(entry['role'])
         if role is None:
             stored = apikeys.list_roles() if stored is None else stored
-            role = access._grants(stored[entry['role']])
-        entry['grants'] = role
+            role = access.role_fields(stored[entry['role']])
+        entry['grants'] = {k: v for k, v in role.items() if k not in access.ROLE_ONLY_FIELDS}  # a key's grants only
 
 
 def current(kinds=KINDS, examples=False):
@@ -431,7 +442,7 @@ def current(kinds=KINDS, examples=False):
     if 'destinations' in kinds:
         out['destinations'] = {d['name']: _destination_from_store(d) for d in destinations.list_all()}
     if 'roles' in kinds:
-        out['roles'] = {name: access._grants(entry) for name, entry in sorted(apikeys.list_roles().items())
+        out['roles'] = {name: access.role_fields(entry) for name, entry in sorted(apikeys.list_roles().items())
                         if examples or entry.get('example') is not True}
     if 'queries' in kinds:
         out['queries'] = {}
@@ -970,7 +981,7 @@ def export(kinds=KINDS, examples=False):
             doc['destinations'].append(entry)
     roles = apikeys.list_roles()
     if 'roles' in kinds:
-        doc['roles'] = [{'name': name, **_without_defaults(access._grants(entry))}
+        doc['roles'] = [{'name': name, **_without_defaults(access.role_fields(entry))}
                         for name, entry in sorted(roles.items()) if examples or entry.get('example') is not True]
     if 'queries' in kinds:
         doc['queries'] = []

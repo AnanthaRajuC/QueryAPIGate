@@ -72,7 +72,10 @@ Every request carries (or omits) an `X-API-Key` header, checked once per request
   can't mix HMAC with public-key families (algorithm confusion), and `none` is never accepted. Grants come from
   a role, read live. A saved-query parameter declared `from_claim` is bound from the verified token, never from
   the request, which closes the "change `user_id` in the URL" class of bug (insecure direct object reference)
-  for queries written that way. Residual risk: a JWT can't be revoked before it expires.
+  for queries written that way. "Written that way" is the gap: a query granted to the same role without such a
+  parameter returns every user's rows. A role with `require_claim_binding` closes it - its users run only queries
+  that bind their token, by name or collection, never a connection or ad-hoc SQL - and is the setting for a role
+  whose users are customers. Residual risk: a JWT can't be revoked before it expires.
 
 #### Open-access mode: a deliberate default worth understanding
 

@@ -783,6 +783,9 @@ def bind_claims(saved, raw):
       choose one would defeat the point."""
     declared = param_rules.read_definitions(saved.get('query_parameters'))
     bound = {name: spec['from_claim'] for name, spec in declared.items() if spec['from_claim']}
+    if g.permission.claim_binding and not bound:
+        raise ApiError("Your role runs only saved queries that take a parameter from your sign-in token, and this one "
+                       "doesn't (require_claim_binding)", 403, code='claim_binding_required')
     if not bound:
         return raw
     claims = g.permission.claims
@@ -1204,7 +1207,7 @@ def describe_saved_queries(permission):
         if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
-        if not apikeys.can_run_saved(permission, name, collection, connection_name):
+        if not apikeys.can_run_saved(permission, name, collection, connection_name, data.get('query_parameters')):
             continue
         parameters = definitions.effective_parameters(data)  # what the SQL needs, in order
         described.append({'name': name, 'version': number, 'description': data.get('description'),
@@ -1235,7 +1238,7 @@ def describe_catalog(permission):
         if not _is_runnable(data):
             continue
         connection_name = data.get('connection_name')
-        if not apikeys.can_run_saved(permission, name, collection, connection_name):
+        if not apikeys.can_run_saved(permission, name, collection, connection_name, data.get('query_parameters')):
             continue
         parameters = definitions.effective_parameters(data)
         entry = {'name': name, 'version': number, 'description': data.get('description'),

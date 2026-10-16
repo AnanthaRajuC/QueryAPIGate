@@ -336,6 +336,63 @@ describe('Roles', () => {
     expect(await screen.findByText('Created role writer')).toBeInTheDocument();
   });
 
+  it('makes a role claim-bound: its users run only queries that bind them, and it reaches no connection', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'POST /api/v1/roles': () => jsonResponse(role('customers', { require_claim_binding: true }), 201),
+    });
+    renderAt('/roles');
+    await userEvent.click(await screen.findByRole('button', { name: 'New role' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.type(within(drawer).getByLabelText('Name'), 'customers');
+    const bound = within(drawer).getByLabelText(/^Only queries that bind the signed-in user/);
+    expect(bound).not.toBeChecked(); // off unless asked for
+    expect(document.getElementById('r-claim-bound-note')).toBeNull();
+    await userEvent.click(bound);
+    expect(document.getElementById('r-claim-bound-note')).toHaveTextContent('never a connection');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Create role' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    // "all connections" is the form's default; a claim-bound role is saved with none, which the server requires
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
+      name: 'customers',
+      require_claim_binding: true,
+      connections: [],
+    });
+  });
+
+  it('shows which roles are claim-bound, and keeps the setting when one is edited', async () => {
+    const { calls } = fakeBackend({
+      ...routes(),
+      'GET /api/v1/roles': () => ({
+        items: [role('customers', { connections: [], queries: ['films'], require_claim_binding: true })],
+      }),
+      'GET /api/v1/roles/customers': () =>
+        jsonResponse(
+          role('customers', { connections: [], queries: ['films'], require_claim_binding: true }),
+          200,
+          {
+            ETag: '"r1"',
+          },
+        ),
+      'PATCH /api/v1/roles/customers': () => jsonResponse(role('customers', { require_claim_binding: true })),
+    });
+    renderAt('/roles');
+    await waitFor(() => expect(rolesTable().querySelector('tr[data-name="customers"]')).not.toBeNull());
+    const customers = rolesTable().querySelector('tr[data-name="customers"]') as HTMLElement;
+    expect(customers).toHaveTextContent('bound to user');
+    await userEvent.click(within(customers).getByRole('button', { name: 'Edit' }));
+    const drawer = document.getElementById('drawer')!;
+    await waitFor(() =>
+      expect(within(drawer).getByLabelText(/^Only queries that bind the signed-in user/)).toBeChecked(),
+    );
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({
+      require_claim_binding: true,
+      connections: [],
+    });
+  });
+
   it('deletes a role after confirming', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { calls } = fakeBackend({
