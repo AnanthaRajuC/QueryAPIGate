@@ -96,7 +96,7 @@ import time
 from collections import namedtuple
 from datetime import datetime, timedelta
 
-from . import admins, config, db, masking, quotas, store
+from . import admins, config, db, masking, quotas, scope, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -211,22 +211,24 @@ def _row_to_entry(row):
 
 
 def _read():
+    """Every key of the workspace this code acts in (scope.py), by name."""
     rows = db.connection().execute(
-        'SELECT name, hash, active, expires_at, created_at, details_json, previous_expires_at FROM api_keys'
-    ).fetchall()
+        'SELECT name, hash, active, expires_at, created_at, details_json, previous_expires_at FROM api_keys '
+        'WHERE workspace = ?', (scope.current(),)).fetchall()
     return {row['name']: {**_row_to_entry(row), 'previous_expires_at': row['previous_expires_at']} for row in rows}
 
 
-def _upsert(conn, name, entry):
+def _upsert(conn, name, entry, workspace=None):
     details = {k: v for k, v in entry.items()
                if k not in ('hash', 'active', 'expires_at', 'created_at', 'previous_expires_at')}
     conn.execute("""
-        INSERT INTO api_keys (name, hash, active, expires_at, created_at, details_json) VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO api_keys (workspace, name, hash, active, expires_at, created_at, details_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(workspace, name) DO UPDATE SET
             hash = excluded.hash, active = excluded.active, expires_at = excluded.expires_at,
             created_at = excluded.created_at, details_json = excluded.details_json
-    """, (name, entry['hash'], int(bool(entry.get('active', True))), entry.get('expires_at'),
-          entry.get('created_at') or store.now(), json.dumps(details)))
+    """, (workspace or scope.current(), name, entry['hash'], int(bool(entry.get('active', True))),
+          entry.get('expires_at'), entry.get('created_at') or store.now(), json.dumps(details)))
 
 
 def _normalize_connections(connections):
@@ -482,7 +484,7 @@ def is_expired(entry):
     return datetime.now() > deadline
 
 
-def _record_use(name, previous=False):
+def _record_use(name, previous, workspace):
     """Persist last_used_at for the key named ``name``, throttled to once per _USE_RECORD_INTERVAL - see
     the module docstring. Re-reads under the lock immediately before writing, rather than reusing the
     entry authenticate() already had in hand, so this never clobbers a concurrent admin change (a
@@ -493,18 +495,18 @@ def _record_use(name, previous=False):
     # "Never recorded" must be None, not 0.0: time.monotonic() has an undefined starting point (on Linux, boot), so
     # on a host up for under _USE_RECORD_INTERVAL seconds `now - 0.0` is already inside the window and a key's
     # first use would be silently throttled away - which is exactly what happened on freshly booted CI runners.
-    last = _last_recorded_use.get((name, previous))
+    last = _last_recorded_use.get((workspace, name, previous))
     if last is not None and now - last < _USE_RECORD_INTERVAL:
         return
-    _last_recorded_use[(name, previous)] = now
+    _last_recorded_use[(workspace, name, previous)] = now
     with db.transaction() as conn:
         row = conn.execute(
-            'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
-            (name,)).fetchone()
+            'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE workspace = ? AND name = ?',
+            (workspace, name)).fetchone()
         if row is not None:
             entry = _row_to_entry(row)
             entry['previous_last_used_at' if previous else 'last_used_at'] = store.now()
-            _upsert(conn, name, entry)
+            _upsert(conn, name, entry, workspace)
 
 
 def any_configured():
@@ -570,7 +572,8 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
         quota = role_entry.get('quota')
     secret = 'sk_' + secrets.token_urlsafe(32)
     with db.transaction() as conn:
-        if conn.execute('SELECT 1 FROM api_keys WHERE name = ?', (name,)).fetchone() is not None:
+        if conn.execute('SELECT 1 FROM api_keys WHERE workspace = ? AND name = ?',
+                        (scope.current(), name)).fetchone() is not None:
             raise ApiError(f"An API key named '{name}' already exists", 409, code='key_exists')
         entry = {
             'hash': _hash(secret),
@@ -593,8 +596,8 @@ def update_key(name, connections=None, allow_writes=None, active=None, queries=N
                quota=_UNSET):
     with db.transaction() as conn:
         row = conn.execute(
-            'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE name = ?',
-            (name,)).fetchone()
+            'SELECT hash, active, expires_at, created_at, details_json FROM api_keys WHERE workspace = ? AND name = ?',
+            (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
         entry = _row_to_entry(row)
@@ -649,7 +652,8 @@ def rotate_key(name, grace_minutes=None):
     grace = _validate_grace(grace_minutes)
     with db.transaction() as conn:
         row = conn.execute('SELECT hash, active, expires_at, created_at, details_json, previous_hash, '
-                           'previous_expires_at FROM api_keys WHERE name = ?', (name,)).fetchone()
+                           'previous_expires_at FROM api_keys WHERE workspace = ? AND name = ?',
+                           (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
         if row['previous_hash'] and row['previous_expires_at'] and row['previous_expires_at'] > store.now():
@@ -667,7 +671,8 @@ def _replace_hash(conn, name, row, new_hash, grace):
     details = json.loads(row['details_json'])
     details.pop('previous_last_used_at', None)
     conn.execute('UPDATE api_keys SET hash = ?, previous_hash = ?, previous_expires_at = ?, details_json = ? '
-                 'WHERE name = ?', (new_hash, row['hash'] if until else None, until, json.dumps(details), name))
+                 'WHERE workspace = ? AND name = ?',
+                 (new_hash, row['hash'] if until else None, until, json.dumps(details), scope.current(), name))
     return until
 
 
@@ -678,12 +683,14 @@ def set_secret_hash(name, secret_hash, grace_minutes=None):
     secret stops working."""
     grace = _validate_grace(grace_minutes)
     with db.transaction() as conn:
-        row = conn.execute('SELECT hash, details_json, previous_hash, previous_expires_at FROM api_keys WHERE name = ?',
-                           (name,)).fetchone()
+        row = conn.execute('SELECT hash, details_json, previous_hash, previous_expires_at FROM api_keys '
+                           'WHERE workspace = ? AND name = ?', (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
-        taken = conn.execute('SELECT name FROM api_keys WHERE (hash = ? OR previous_hash = ?) AND name <> ?',
-                             (secret_hash, secret_hash, name)).fetchone()
+        # any other key, in any workspace: a secret names one key on the whole server
+        taken = conn.execute('SELECT name FROM api_keys WHERE (hash = ? OR previous_hash = ?) '
+                             'AND NOT (workspace = ? AND name = ?)',
+                             (secret_hash, secret_hash, scope.current(), name)).fetchone()
         if taken is not None:
             raise ApiError("Another key already has this secret_sha256 - each key needs its own secret",
                            409, code='key_secret_taken')
@@ -699,19 +706,21 @@ def set_secret_hash(name, secret_hash, grace_minutes=None):
 def end_previous(name):
     """Stop the old secret now, before its grace period ends. Returns when it would have stopped."""
     with db.transaction() as conn:
-        row = conn.execute('SELECT previous_hash, previous_expires_at FROM api_keys WHERE name = ?',
-                           (name,)).fetchone()
+        row = conn.execute('SELECT previous_hash, previous_expires_at FROM api_keys WHERE workspace = ? AND name = ?',
+                           (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
         if not (row['previous_hash'] and row['previous_expires_at'] and row['previous_expires_at'] > store.now()):
             raise ApiError(f"API key '{name}' has no old secret still working", 404, code='previous_secret_not_found')
-        conn.execute('UPDATE api_keys SET previous_hash = NULL, previous_expires_at = NULL WHERE name = ?', (name,))
+        conn.execute('UPDATE api_keys SET previous_hash = NULL, previous_expires_at = NULL '
+                     'WHERE workspace = ? AND name = ?', (scope.current(), name))
     return row['previous_expires_at']
 
 
 def delete_key(name):
     with db.transaction() as conn:
-        if not conn.execute('DELETE FROM api_keys WHERE name = ?', (name,)).rowcount:
+        if not conn.execute('DELETE FROM api_keys WHERE workspace = ? AND name = ?',
+                            (scope.current(), name)).rowcount:
             raise ApiError(f"API key '{name}' not found", 404, code='key_not_found')
 
 
@@ -727,22 +736,23 @@ def _row_to_role(row):
 
 
 def _read_roles():
-    rows = db.connection().execute('SELECT name, created_at, details_json FROM roles').fetchall()
+    rows = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE workspace = ?',
+                                   (scope.current(),)).fetchall()
     return {row['name']: _row_to_role(row) for row in rows}
 
 
 def _upsert_role(conn, name, entry):
     details = {k: v for k, v in entry.items() if k != 'created_at'}
     conn.execute("""
-        INSERT INTO roles (name, created_at, details_json) VALUES (?, ?, ?)
+        INSERT INTO roles (workspace, name, created_at, details_json) VALUES (?, ?, ?, ?)
         ON CONFLICT(workspace, name) DO UPDATE SET created_at = excluded.created_at,
           details_json = excluded.details_json
-    """, (name, entry.get('created_at') or store.now(), json.dumps(details)))
+    """, (scope.current(), name, entry.get('created_at') or store.now(), json.dumps(details)))
 
 
 def _get_role_or_404(name):
-    row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE name = ?',
-                                  (name,)).fetchone()
+    row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE workspace = ? AND name = ?',
+                                  (scope.current(), name)).fetchone()
     if row is None:
         raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
     return _row_to_role(row)
@@ -763,7 +773,8 @@ def create_role(name, connections=None, allow_writes=False, queries=None, rate_l
     collections = _normalize_collections(collections)
     _require_existing_collections(collections)
     with db.transaction() as conn:
-        if conn.execute('SELECT 1 FROM roles WHERE name = ?', (name,)).fetchone() is not None:
+        if conn.execute('SELECT 1 FROM roles WHERE workspace = ? AND name = ?',
+                        (scope.current(), name)).fetchone() is not None:
             raise ApiError(f"A role named '{name}' already exists", 409, code='role_exists')
         entry = {
             **normalize_grants(connections, allow_writes, queries, collections, rate_limit, allowed_ips,
@@ -782,7 +793,8 @@ def update_role(name, connections=None, allow_writes=None, queries=None, rate_li
                 max_concurrent=_UNSET, query_timeout=_UNSET, max_rows=_UNSET, quota=_UNSET,
                 require_claim_binding=_UNSET):
     with db.transaction() as conn:
-        row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE name = ?', (name,)).fetchone()
+        row = conn.execute('SELECT name, created_at, details_json FROM roles WHERE workspace = ? AND name = ?',
+                           (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
         entry = _row_to_role(row)
@@ -838,7 +850,7 @@ def _check_claim_bound_role(entry):
 
 def delete_role(name):
     with db.transaction() as conn:
-        if not conn.execute('DELETE FROM roles WHERE name = ?', (name,)).rowcount:
+        if not conn.execute('DELETE FROM roles WHERE workspace = ? AND name = ?', (scope.current(), name)).rowcount:
             raise ApiError(f"Role '{name}' not found", 404, code='role_not_found')
 
 
@@ -918,9 +930,10 @@ def authenticate(supplied, client_ip=None):
     # An old secret still in its grace period after a rotation (ADR 0009) matches by previous_hash - indexed too -
     # and only until previous_expires_at; everything else (active, expiry, allowed_ips) applies to it the same.
     rows = db.connection().execute(
-        'SELECT name, hash, active, expires_at, created_at, details_json, previous_hash, previous_expires_at '
-        'FROM api_keys WHERE hash = ? OR previous_hash = ?', (supplied_hash, supplied_hash)).fetchall()
-    for row in rows:
+        'SELECT workspace, name, hash, active, expires_at, created_at, details_json, previous_hash, '
+        'previous_expires_at FROM api_keys WHERE hash = ? OR previous_hash = ?',
+        (supplied_hash, supplied_hash)).fetchall()
+    for row in rows:  # across every workspace: a key's secret is unique on the server, and says which it is in
         name, entry = row['name'], _row_to_entry(row)
         previous = row['hash'] != supplied_hash
         if previous and not (row['previous_hash'] and row['previous_expires_at']
@@ -929,14 +942,15 @@ def authenticate(supplied, client_ip=None):
             continue
         if entry.get('active', True) and not is_expired(entry) and _ip_allowed(entry, client_ip) \
                 and (previous or hmac.compare_digest(supplied_hash, entry['hash'])):
-            _record_use(name, previous)
-            return permission_from_grants(name, entry)
+            _record_use(name, previous, row['workspace'])
+            return permission_from_grants(name, entry, workspace=row['workspace'])
     return None
 
 
-def permission_from_grants(name, entry, claims=None):
+def permission_from_grants(name, entry, claims=None, workspace=None):
     """A non-admin Permission from stored grants - an API key's own entry, or (jwtauth.py) the role a signed-in
-    user's token maps to, together with that token's verified ``claims``."""
+    user's token maps to, together with that token's verified ``claims`` - in `workspace`, the key's or the role's
+    (the workspace this code acts in unless given)."""
     connections = entry.get('connections', [])
     queries = entry.get('queries', [])  # absent on a key stored before this field existed
     return Permission(name=name, admin=False,
@@ -951,7 +965,8 @@ def permission_from_grants(name, entry, claims=None):
                       claims=claims, mask=entry.get('mask') or None, max_concurrent=entry.get('max_concurrent'),
                       query_timeout=entry.get('query_timeout'), max_rows=entry.get('max_rows'),
                       quota=entry.get('quota'),
-                      claim_binding=claims is not None and entry.get('require_claim_binding') is True)
+                      claim_binding=claims is not None and entry.get('require_claim_binding') is True,
+                      workspace=workspace or scope.current())
 
 
 def ip_allowed(entry, client_ip):
@@ -961,6 +976,6 @@ def ip_allowed(entry, client_ip):
 
 def get_role(name):
     """One role's stored grants, or None."""
-    row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE name = ?',
-                                  (name,)).fetchone()
+    row = db.connection().execute('SELECT name, created_at, details_json FROM roles WHERE workspace = ? AND name = ?',
+                                  (scope.current(), name)).fetchone()
     return _row_to_role(row) if row is not None else None

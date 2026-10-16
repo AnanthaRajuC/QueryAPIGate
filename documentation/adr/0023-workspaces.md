@@ -74,6 +74,9 @@ workspaces inside it.
 - **Callers that belong to a workspace use the routes they use today.** An API key, and a signed-in user's role,
   belong to exactly one workspace; `/q/<name>`, `/catalog`, `/openapi.json`, `/execute_sql`, `/execute_mongo`,
   `/events` and the MCP server resolve every name in it. A key from Team B asking for `/q/orders` gets Team B's.
+  (A key's secret says which workspace it is in. A token's role is found by name - and role names repeat across
+  workspaces - so a signed-in user's role is looked up in the workspace the path names, `default` without one: a
+  Team B user calls `/w/team-b/...`.)
 - **An explicit prefix always works:** `/w/<workspace>/q/<name>`, `/w/<workspace>/catalog`, and so on. A
   server-wide caller (the shared key, a server-wide admin) uses the prefix to reach a workspace; without it, they reach
   `default`. A caller naming a workspace that isn't theirs gets `404`, the same answer as for a workspace that doesn't

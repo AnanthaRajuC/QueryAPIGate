@@ -277,7 +277,8 @@ def authenticate(session_id, csrf):
     if admin is None or not admin['active']:
         return None
     _note_seen(row['id_hash'], admin)
-    return admins.permission_for(admin, 'sso')
+    from . import scope
+    return admins.permission_for(admin, 'sso', scope.current())  # the workspace the request names (app.gate())
 
 
 def _note_seen(id_hash, admin):

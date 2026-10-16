@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-from . import config, db, duckfiles, store
+from . import config, db, duckfiles, scope, store
 from .errors import ApiError
 
 FIELDS = ('url', 'storage', 'region', 'endpoint', 'url_style', 'use_ssl', 'account_id', 'user', 'password')
@@ -85,7 +85,12 @@ def validate(fields, partial=False):
 def check_local_folder(folder):
     """A local folder may be a destination only inside one the operator allowed (QUERYAPIGATE_EXPORT_DIRS), and never
     the server's own home - where the store lives. Checked when a destination is saved and again before every write,
-    with symbolic links resolved."""
+    with symbolic links resolved. Only in `default` (ADR 0023): QUERYAPIGATE_EXPORT_DIRS is the server's, so two
+    workspaces could otherwise write into one folder - an object-storage prefix is bounded by its own credentials."""
+    if scope.current() != db.DEFAULT_WORKSPACE:
+        raise ApiError("A local folder can be a destination only in the default workspace - the folders exports may "
+                       "write under are the server's, not one workspace's. Use an s3://, gs:// or r2:// destination",
+                       code='invalid_body')
     allowed = config.export_dirs()
     real = os.path.realpath(folder)
     home = os.path.realpath(config.home())
@@ -116,8 +121,8 @@ def _row(row):
 
 
 def _load(conn, name):
-    row = conn.execute('SELECT name, created_at, updated_at, details_json FROM destinations WHERE name = ?',
-                       (name,)).fetchone()
+    row = conn.execute('SELECT name, created_at, updated_at, details_json FROM destinations '
+                       'WHERE workspace = ? AND name = ?', (scope.current(), name)).fetchone()
     return _row(row) if row is not None else None
 
 
@@ -128,7 +133,8 @@ def masked(destination):
 
 def list_all():
     rows = db.connection().execute(
-        'SELECT name, created_at, updated_at, details_json FROM destinations ORDER BY name').fetchall()
+        'SELECT name, created_at, updated_at, details_json FROM destinations WHERE workspace = ? ORDER BY name',
+        (scope.current(),)).fetchall()
     return [_row(row) for row in rows]
 
 
@@ -142,10 +148,10 @@ def get(name):
 def _write(conn, name, fields, created_at, timestamp):
     details = {k: v for k, v in fields.items() if k in FIELDS}
     conn.execute("""
-        INSERT INTO destinations (name, created_at, updated_at, details_json) VALUES (?, ?, ?, ?)
+        INSERT INTO destinations (workspace, name, created_at, updated_at, details_json) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(workspace, name) DO UPDATE SET updated_at = excluded.updated_at,
           details_json = excluded.details_json
-    """, (name, created_at, timestamp, json.dumps(details)))
+    """, (scope.current(), name, created_at, timestamp, json.dumps(details)))
 
 
 def create(name, fields):
@@ -192,7 +198,7 @@ def delete(name, used_by=()):
     with db.transaction() as conn:
         if _load(conn, name) is None:
             raise ApiError(f"Destination '{name}' not found", 404, code='destination_not_found')
-        conn.execute('DELETE FROM destinations WHERE name = ?', (name,))
+        conn.execute('DELETE FROM destinations WHERE workspace = ? AND name = ?', (scope.current(), name))
 
 
 # --------------------------------------------------------------------------------------

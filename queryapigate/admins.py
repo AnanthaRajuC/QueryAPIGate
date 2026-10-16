@@ -256,7 +256,8 @@ def authenticate(supplied):
     if admin is None or not admin['active'] or (config.sso_only() and linked(admin)):
         return None
     _record_use(row['id'], admin['name'])
-    return permission_for(admin, 'token')
+    from . import scope
+    return permission_for(admin, 'token', scope.current())  # the workspace the request names (app.gate())
 
 
 def _record_use(token_id, admin_name):

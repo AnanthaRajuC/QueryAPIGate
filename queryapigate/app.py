@@ -45,6 +45,7 @@ from . import (
     quotas,
     ratelimit,
     schema,
+    scope,
     secheaders,
     sqltools,
     sso,
@@ -173,6 +174,7 @@ def create_app():
     instances.register('serve')
     instances.warn_if_unshared(log)
     app = Flask(__name__)
+    app.wsgi_app = scope.WorkspacePrefix(app.wsgi_app)  # /w/<workspace>/... - every route, in that workspace (ADR 0023)
     hops = config.proxy_hops()
     if hops:  # behind reverse proxies: take the client address and scheme from their X-Forwarded-* headers
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
@@ -293,9 +295,15 @@ def create_app():
         limited = check_rate_limit()
         if limited is not None:
             return limited
+        # The workspace the path names, if it names one, before the caller is known: a signed-in user's role is found
+        # by name in it. Settled once the caller is (settle_workspace()).
+        named = request.environ.get(scope.ENVIRON_KEY)
+        g.workspace = named or db.DEFAULT_WORKSPACE
         g.permission = resolve_permission()
         if request.endpoint not in PUBLIC_ENDPOINTS and g.permission is None:
             return jsonify(error_body('Unauthorized', 401)), 401
+        if g.permission is not None:
+            g.permission = settle_workspace(g.permission, named)
         limited = check_key_rate_limit()
         if limited is not None:
             return limited
@@ -423,6 +431,32 @@ def check_key_rate_limit():
         return None
     g.key_rate_limit = (verdict.limit, verdict.remaining)
     return None if verdict.allowed else _too_many(verdict, 'Rate limit exceeded for this API key')
+
+
+def settle_workspace(permission, named):
+    """The workspace this request acts in (ADR 0023 §4), and the caller's Permission in it:
+
+    - an API key, or a signed-in user's role, is in one workspace - its own. Naming another is 404, as for one that
+      doesn't exist, so a key can't learn which workspaces there are;
+    - an administrator acts in the one the path names, or `default`: it must exist, and - for one whose roles are all
+      memberships - be one of theirs, else 404 too. Their Permission was built for it (admins.permission_for()).
+    """
+    from . import workspaces
+
+    def missing():
+        return ApiError(f"No workspace named '{named}'", 404, code='workspace_not_found')
+
+    if permission.via is None:  # a key or a signed-in user: theirs alone
+        if named is not None and named != permission.workspace:
+            raise missing()
+        g.workspace = permission.workspace
+        return permission
+    if named is not None and (not workspaces.exists(named)
+                              or (not permission.server_wide and named not in (permission.memberships or {}))):
+        raise missing()
+    if permission.workspace != g.workspace:  # the shared key and an open server: an owner, wherever it is named
+        permission = permission._replace(workspace=g.workspace)
+    return permission
 
 
 def resolve_permission():
@@ -659,6 +693,18 @@ def _record_and_broadcast(path, number, entry, broadcaster=None):
 
 
 def _record_stream_history(rows, entry, record, permission=None):
+    """_stream_history(), in the request's workspace: its body runs as the response streams out, after the request -
+    and with it scope.current()'s answer - has gone (scope.py)."""
+    workspace = scope.current()
+
+    def recorded():
+        with scope.using(workspace):
+            yield from _stream_history(rows, entry, record, permission)
+
+    return recorded()
+
+
+def _stream_history(rows, entry, record, permission=None):
     """Records a streamed run, through ``record``, once fully drained or failed partway through (not on a client
     disconnect, GeneratorExit) - counting rows as they pass through, since the total is not known up front, the
     same trade-off engine._drain() makes for the streaming metric. However it ends, the rows that left count against
@@ -940,9 +986,10 @@ def _run_saved(ref, body, url_params):
             # Callers with different masking rules get different responses, so they never share one.
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
                                                 values=values, format=output_format, page=page, page_size=limit,
-                                                mask=masking.fingerprint(g.permission.mask))
+                                                mask=masking.fingerprint(g.permission.mask),
+                                                workspace=scope.current())
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
-                         'format': output_format, 'page': page}
+                         'format': output_format, 'page': page, 'workspace': scope.current()}
             cached = cache_lookup(cache_key, ttl)
             tracing.set_attributes(query_span, queryapigate__cache='hit' if cached is not None else 'miss')
             if cached is not None:

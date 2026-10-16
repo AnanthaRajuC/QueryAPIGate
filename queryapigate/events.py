@@ -62,9 +62,9 @@ _LAG_BUCKETS = (0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0)  # seconds; occurre
 RUN = 'query.run'  # the event type of a run, saved or ad-hoc - the only type written so far
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 INSERT = ('INSERT INTO events (type, source, occurred_at, key_name, connection_name, query_name, status, '
-          'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          'payload_json, workspace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
 INSERT_WITH_ID = ('INSERT INTO events (id, type, source, occurred_at, key_name, connection_name, query_name, status, '
-                  'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                  'payload_json, workspace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
 
 
 def run_payload(query_name, version, entry):
@@ -77,11 +77,13 @@ def run_payload(query_name, version, entry):
             'connection_name': entry.get('connection_name'), 'entry': entry}
 
 
-def run_columns(query_name, version, entry):
-    """A run's row in the events table, for INSERT - every column after the id."""
+def run_columns(query_name, version, entry, workspace=None):
+    """A run's row in the events table, for INSERT - every column after the id; `workspace` the run's (ADR 0023),
+    the workspace this code acts in unless given."""
+    from . import scope
     payload = run_payload(query_name, version, entry)
     return (RUN, payload['source'], payload['occurred_at'], entry.get('key_name'), entry.get('connection_name'),
-            query_name, entry.get('status'), json.dumps(payload, default=str))
+            query_name, entry.get('status'), json.dumps(payload, default=str), workspace or scope.current())
 
 
 # ---- subscription filters (ADR 0020 §6) ----

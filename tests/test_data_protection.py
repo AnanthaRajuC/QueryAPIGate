@@ -120,10 +120,10 @@ class ForgetTests(unittest.TestCase):
         for caller in (self.PERSON, self.PERSON, 'jwt:bob@example.com', 'partner-key'):
             history.record('q', 1, {'executed_at': store.now(), 'key_name': caller, 'status': 'success', 'rows': 1})
         history.flush()
-        quotas._counter.add(self.PERSON, 'day:2026-10-12', 3, 30)
-        quotas._counter.add('jwt:bob@example.com', 'day:2026-10-12', 1, 10)
+        quotas._counter.add('default', self.PERSON, 'day:2026-10-12', 3, 30)
+        quotas._counter.add('default', 'jwt:bob@example.com', 'day:2026-10-12', 1, 10)
         quotas.write()
-        quotas._counter.add(self.PERSON, 'month:2026-10', 1, 1)  # still unwritten
+        quotas._counter.add('default', self.PERSON, 'month:2026-10', 1, 1)  # still unwritten
 
     def runs(self, caller):
         return db.connection().execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?',

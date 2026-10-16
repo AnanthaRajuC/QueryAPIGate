@@ -22,7 +22,7 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
-from . import config, db, destinations, exporting, masking, mongodocs, mongotools, store
+from . import config, db, destinations, exporting, masking, mongodocs, mongotools, scope, store
 from .errors import ApiError
 
 FIELDS = ('description', 'query', 'params', 'format', 'destination', 'path', 'incremental', 'skip_empty', 'timeout',
@@ -121,12 +121,14 @@ def _row(row):
 
 
 def _load(conn, name):
-    row = conn.execute(f'SELECT {_COLUMNS} FROM exports WHERE name = ?', (name,)).fetchone()
+    row = conn.execute(f'SELECT {_COLUMNS} FROM exports WHERE workspace = ? AND name = ?',
+                       (scope.current(), name)).fetchone()
     return _row(row) if row is not None else None
 
 
 def list_all():
-    return [_row(row) for row in db.connection().execute(f'SELECT {_COLUMNS} FROM exports ORDER BY name').fetchall()]
+    return [_row(row) for row in db.connection().execute(f'SELECT {_COLUMNS} FROM exports WHERE workspace = ? '
+                                                         'ORDER BY name', (scope.current(),)).fetchall()]
 
 
 def get(name):
@@ -224,10 +226,11 @@ def _check_name(name):
 
 def _write(conn, name, fields, created_at):
     conn.execute(f"""
-        INSERT INTO exports ({_COLUMNS}) VALUES (?, ?, ?, NULL, NULL, ?)
+        INSERT INTO exports (workspace, {_COLUMNS}) VALUES (?, ?, ?, ?, NULL, NULL, ?)
         ON CONFLICT(workspace, name) DO UPDATE SET updated_at = excluded.updated_at,
           details_json = excluded.details_json
-    """, (name, created_at, store.now(), json.dumps({k: fields[k] for k in FIELDS if k in fields}, default=str)))
+    """, (scope.current(), name, created_at, store.now(),
+          json.dumps({k: fields[k] for k in FIELDS if k in fields}, default=str)))
 
 
 def create(name, fields):
@@ -257,8 +260,8 @@ def update(name, changes):
     with db.transaction() as conn:
         _write(conn, name, fields, current['created_at'])
         if 'watermark' in changes:
-            conn.execute('UPDATE exports SET watermark = ? WHERE name = ?',
-                         (_encode_watermark(changes['watermark']), name))
+            conn.execute('UPDATE exports SET watermark = ? WHERE workspace = ? AND name = ?',
+                         (_encode_watermark(changes['watermark']), scope.current(), name))
     return get(name)
 
 
@@ -266,7 +269,7 @@ def delete(name):
     with db.transaction() as conn:
         if _load(conn, name) is None:
             raise ApiError(f"Export '{name}' not found", 404, code='export_not_found')
-        conn.execute('DELETE FROM exports WHERE name = ?', (name,))
+        conn.execute('DELETE FROM exports WHERE workspace = ? AND name = ?', (scope.current(), name))
 
 
 # --------------------------------------------------------------------------------------
@@ -275,22 +278,26 @@ def delete(name):
 
 def _take_lease(name, seconds):
     with db.transaction() as conn:
-        row = conn.execute('SELECT lease_until FROM exports WHERE name = ?', (name,)).fetchone()
+        row = conn.execute('SELECT lease_until FROM exports WHERE workspace = ? AND name = ?',
+                           (scope.current(), name)).fetchone()
         if row is None:
             raise ApiError(f"Export '{name}' not found", 404, code='export_not_found')
         now = time.time()
         if row['lease_until'] and row['lease_until'] > now:
             raise ApiError(f"Export '{name}' is already running - try again once that run has finished", 409,
                            code='export_running', retry_after=max(1, int(row['lease_until'] - now)))
-        conn.execute('UPDATE exports SET lease_until = ? WHERE name = ?', (now + seconds, name))
+        conn.execute('UPDATE exports SET lease_until = ? WHERE workspace = ? AND name = ?',
+                     (now + seconds, scope.current(), name))
 
 
 def _release(name, watermark=None, advance=False):
     with db.transaction() as conn:
         if advance:
-            conn.execute('UPDATE exports SET lease_until = NULL, watermark = ? WHERE name = ?', (watermark, name))
+            conn.execute('UPDATE exports SET lease_until = NULL, watermark = ? WHERE workspace = ? AND name = ?',
+                         (watermark, scope.current(), name))
         else:
-            conn.execute('UPDATE exports SET lease_until = NULL WHERE name = ?', (name,))
+            conn.execute('UPDATE exports SET lease_until = NULL WHERE workspace = ? AND name = ?',
+                         (scope.current(), name))
 
 
 def _check_watermark(export, value):

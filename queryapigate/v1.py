@@ -28,11 +28,13 @@ from . import (
     history,
     instances,
     schema,
+    scope,
     sqlflow,
     store,
     usage,
 )
 from .app import caller_key_name, get_int, get_json_body
+from .db import DEFAULT_WORKSPACE
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
 from .services import descriptions as description_service
@@ -909,25 +911,42 @@ def _cache():
     return current_app.extensions['queryapigate_cache']
 
 
+def _workspace_entries():
+    """The cache's entries of the workspace this call acts in (ADR 0023) - one cache serves every workspace, and an
+    entry's body is a workspace's data. An entry from before workspaces, with none in its meta, is `default`'s."""
+    workspace = scope.current()
+    return [e for e in _cache().list_entries()
+            if ((e.get('meta') or {}).get('workspace') or DEFAULT_WORKSPACE) == workspace]
+
+
+def _require_entry(key):
+    if key not in {e['key'] for e in _workspace_entries()}:
+        raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404,
+                       code='cache_entry_not_found')
+
+
 @bp.route('/cache/entries', methods=['GET'])
 def list_cache_entries():
     """What is cached right now (in-process or Redis), soonest to expire first - each entry's query, version,
     connection, format, content type, size and time left; never the body."""
-    entries = _cache().list_entries()
+    entries = _workspace_entries()
     entries.sort(key=lambda e: e['ttl_remaining_s'])
     return jsonify({'items': entries}), 200
 
 
 @bp.route('/cache/entries', methods=['DELETE'])
 def clear_cache():
-    """Evict everything: the next call to each query runs it for real. Not audited - housekeeping, not a change."""
-    _cache().clear()
+    """Evict everything this workspace has cached: the next call to each query runs it for real. Not audited -
+    housekeeping, not a change."""
+    for entry in _workspace_entries():
+        _cache().delete(entry['key'])
     return '', 204
 
 
 @bp.route('/cache/entries/<key>', methods=['GET'])
 def get_cache_entry(key):
     """The cached body itself, with its real content type - what a caller receives on a hit."""
+    _require_entry(key)
     hit = _cache().get_body(key)
     if hit is None:
         raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404,
@@ -938,8 +957,9 @@ def get_cache_entry(key):
 
 @bp.route('/cache/entries/<key>', methods=['DELETE'])
 def delete_cache_entry(key):
-    """Evict one entry early."""
-    _cache().delete(key)
+    """Evict one entry early - a no-op for one that's gone, or another workspace's."""
+    if key in {e['key'] for e in _workspace_entries()}:
+        _cache().delete(key)
     return '', 204
 
 

@@ -21,7 +21,7 @@ import secrets
 import time
 from datetime import datetime
 
-from . import config, db, store
+from . import config, db, scope, store
 from .errors import ApiError
 
 KEEP_DAYS = 30
@@ -60,8 +60,9 @@ def public(request):
 
 
 def get(request_id):
-    row = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE id = ?', (request_id,)).fetchone() \
-        if isinstance(request_id, str) else None
+    # in its own workspace only: another workspace's approvers don't see it (ADR 0023)
+    row = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ? AND id = ?',
+                                  (scope.current(), request_id)).fetchone() if isinstance(request_id, str) else None
     if row is None:
         raise ApiError(f"No write request '{request_id}'", 404, code='write_request_not_found')
     return _row(row)
@@ -70,8 +71,9 @@ def get(request_id):
 def list_requests(status=None, limit=200):
     if status not in (None, '') and status not in STATUSES:
         raise ApiError(f"status must be one of: {', '.join(STATUSES)}", code='invalid_filter')
-    rows = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests ORDER BY created_at DESC, id DESC LIMIT ?',
-                                   (max(1, min(int(limit), 1000)),)).fetchall()
+    rows = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ? '
+                                   'ORDER BY created_at DESC, id DESC LIMIT ?',
+                                   (scope.current(), max(1, min(int(limit), 1000)))).fetchall()
     found = [_row(r) for r in rows]
     return [r for r in found if not status or r['status'] == status]
 
@@ -96,8 +98,9 @@ def _write_details(conn, request_id, **changes):
 def create(caller, name, version, saved, connection_name, values, status='pending', idempotency=None):
     """A new write request; pending ones expire after QUERYAPIGATE_WRITE_APPROVAL_MINUTES."""
     if status == 'pending':
-        waiting = db.connection().execute("SELECT COUNT(*) FROM write_requests WHERE caller = ? AND status = 'pending' "
-                                          'AND expires_at >= ?', (caller, time.time())).fetchone()[0]
+        waiting = db.connection().execute("SELECT COUNT(*) FROM write_requests WHERE workspace = ? AND caller = ? "
+                                          "AND status = 'pending' AND expires_at >= ?",
+                                          (scope.current(), caller, time.time())).fetchone()[0]
         if waiting >= MAX_PENDING_PER_CALLER:
             raise ApiError(f'{waiting} writes asked for by this caller are already waiting for approval - wait for '
                            'them to be decided or to expire', 429, code='too_many_pending_writes')
@@ -107,8 +110,8 @@ def create(caller, name, version, saved, connection_name, values, status='pendin
                'max_affected_rows': saved.get('max_affected_rows') or 1}
     with db.transaction() as conn:
         _sweep(conn)
-        conn.execute(f'INSERT INTO write_requests ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                     (request_id, name, version, caller, status, store.now(),
+        conn.execute(f'INSERT INTO write_requests (workspace, {_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                     (scope.current(), request_id, name, version, caller, status, store.now(),
                       time.time() + config.write_approval_minutes() * 60, idempotency,
                       json.dumps(details, default=str)))
     return get(request_id)
@@ -183,8 +186,9 @@ def idempotent(caller, name, key):
         raise ApiError('idempotency_key is text of 1 to 200 characters', code='param_invalid')
     hashed = _hash(json.dumps([caller, name, key]))
     since = datetime.fromtimestamp(time.time() - IDEMPOTENCY_SECONDS).strftime('%Y-%m-%d %H:%M:%S')
-    row = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE idempotency_hash = ? AND '
-                                  'created_at >= ? ORDER BY created_at DESC LIMIT 1', (hashed, since)).fetchone()
+    row = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ? AND idempotency_hash = ? '
+                                  'AND created_at >= ? ORDER BY created_at DESC LIMIT 1',
+                                  (scope.current(), hashed, since)).fetchone()
     return hashed, (_row(row) if row is not None else None)
 
 

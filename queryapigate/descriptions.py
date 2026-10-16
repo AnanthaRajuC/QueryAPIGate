@@ -15,7 +15,7 @@ reaches no further than the schema it's attached to: callers only see those of t
 (schema._only_allowed() runs first), and annotate() marks a column the caller gets masked, so an agent doesn't plan
 around a value it will never see.
 """
-from . import db, engine, masking, store
+from . import db, engine, masking, scope, store
 from .errors import ApiError
 
 MAX_DESCRIPTION = 2000       # a table's or a column's
@@ -118,14 +118,16 @@ def list_for(connection_name):
     """Every description on a connection: the connection's notes first, then by table and column."""
     rows = db.connection().execute(
         'SELECT table_name, column_name, description, source, updated_at, updated_by FROM descriptions '
-        'WHERE connection_name = ? ORDER BY table_name, column_name', (connection_name,)).fetchall()
+        'WHERE workspace = ? AND connection_name = ? ORDER BY table_name, column_name',
+        (scope.current(), connection_name)).fetchall()
     return [_row(tuple(r)) for r in rows]
 
 
 def _lookup(connection_name):
     """{(table, column): description} for one connection."""
     rows = db.connection().execute('SELECT table_name, column_name, description FROM descriptions '
-                                   'WHERE connection_name = ?', (connection_name,)).fetchall()
+                                   'WHERE workspace = ? AND connection_name = ?',
+                                   (scope.current(), connection_name)).fetchall()
     return {(r[0], r[1]): r[2] for r in rows}
 
 
@@ -140,28 +142,30 @@ def write(connection_name, items, actor, source='written', overwrite=True):
     now = store.now()
     with db.transaction() as conn:
         existing = {(r[0], r[1]): (r[2], r[3]) for r in conn.execute(
-            'SELECT table_name, column_name, description, source FROM descriptions WHERE connection_name = ?',
-            (connection_name,)).fetchall()}
+            'SELECT table_name, column_name, description, source FROM descriptions '
+            'WHERE workspace = ? AND connection_name = ?',
+            (scope.current(), connection_name)).fetchall()}
         for table, column, text in items:
             before = existing.get((table, column))
             if before is not None and not overwrite and before[1] == 'written':
                 continue
             if text is None:
                 if before is not None:
-                    conn.execute('DELETE FROM descriptions WHERE connection_name = ? AND table_name = ? '
-                                 'AND column_name = ?', (connection_name, table, column))
+                    conn.execute('DELETE FROM descriptions WHERE workspace = ? AND connection_name = ? '
+                                 'AND table_name = ? AND column_name = ?',
+                                 (scope.current(), connection_name, table, column))
                     changed[(table, column)] = (before[0], None)
                 continue
             if before is not None and before[0] == text and before[1] == source:
                 continue
             if before is None:
-                conn.execute('INSERT INTO descriptions (connection_name, table_name, column_name, description, source, '
-                             'updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                             (connection_name, table, column, text, source, now, actor))
+                conn.execute('INSERT INTO descriptions (workspace, connection_name, table_name, column_name, '
+                             'description, source, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                             (scope.current(), connection_name, table, column, text, source, now, actor))
             else:
                 conn.execute('UPDATE descriptions SET description = ?, source = ?, updated_at = ?, updated_by = ? '
-                             'WHERE connection_name = ? AND table_name = ? AND column_name = ?',
-                             (text, source, now, actor, connection_name, table, column))
+                             'WHERE workspace = ? AND connection_name = ? AND table_name = ? AND column_name = ?',
+                             (text, source, now, actor, scope.current(), connection_name, table, column))
             changed[(table, column)] = (before[0] if before else None, text)
     return changed
 

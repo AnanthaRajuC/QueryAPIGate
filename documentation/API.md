@@ -1077,8 +1077,19 @@ see everything. It protects teams from each other's mistakes and reach, not from
   Removing an administrator ends their memberships.
 - Every change - a workspace created, described or removed, a member added, changed or removed - is in the audit log.
 
-What a call reaches in a workspace other than `default` (the `/w/<workspace>/...` routes) comes in the following
-steps of ADR 0023's delivery, and this section with them.
+**Reaching a workspace.** Every route - `/q/<name>`, `/execute_sql`, `/catalog`, `/openapi.json`, the Management API
+- also answers under `/w/<workspace>/...`, in that workspace: `/w/team-a/q/orders`, `/w/team-a/api/v1/queries`.
+
+- **An API key** belongs to the workspace it was created in, and every call it makes is there - with or without the
+  prefix. A signed-in user's role is found by name in the workspace the path names (`default` without one), so the
+  users of another workspace call `/w/<workspace>/...`. MCP: a key's tools are its workspace's queries.
+- **An administrator** acts in the workspace the path names, or `default`. One whose roles are all memberships names
+  their workspace; unprefixed, they get `403 workspace_required`.
+- **Naming a workspace you aren't in** - or one that doesn't exist - is `404 workspace_not_found`, either way, so a
+  caller can't learn which workspaces there are.
+- **Kept apart** in each workspace: its run history, usage quotas (two workspaces' keys of one name are two
+  callers), cached responses and the cache's management, write requests, descriptions and configuration-file records.
+  A local-folder destination is only in `default`: the folders exports may write under are the server's.
 
 ## Authentication and permissions
 

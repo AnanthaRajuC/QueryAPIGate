@@ -17,14 +17,42 @@ truth - holds regardless of which process each server runs in.
 Every ``mcp`` package import is deferred into run()/build_server(), so this module (and its pure helpers,
 unit-tested without the optional ``queryapigate[mcp]`` extra installed) can be imported even when that
 package isn't."""
+import functools
 import json
 import logging
 import re
 import time
 import urllib.parse
 
-from . import apikeys, config, definitions, descriptions, engine, history, metrics, params, schema, sqltools, store
+from . import (
+    apikeys,
+    config,
+    definitions,
+    descriptions,
+    engine,
+    history,
+    metrics,
+    params,
+    schema,
+    scope,
+    sqltools,
+    store,
+)
 from .errors import ApiError, code_for
+
+
+def _in_callers_workspace(position):
+    """Run the function in the workspace of the Permission it is given (argument `position`): the MCP server answers
+    outside Flask's request hooks, so nothing else has settled it (scope.py). A key's tools, resources and calls are
+    its own workspace's (ADR 0023)."""
+    def wrap(function):
+        @functools.wraps(function)
+        def inner(*args, **kwargs):
+            permission = args[position] if len(args) > position else kwargs.get('permission')
+            with scope.using(getattr(permission, 'workspace', None)):
+                return function(*args, **kwargs)
+        return inner
+    return wrap
 
 # A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
 # hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
@@ -110,6 +138,7 @@ def output_schema(data):
             'properties': {**ROWS_OUTPUT_SCHEMA['properties'], 'rows': {'type': 'array', 'items': row}}}
 
 
+@_in_callers_workspace(0)
 def list_tools_for(permission):
     """Every read-only saved query ``permission`` may run, as plain dicts shaped like an MCP Tool - the same
     apikeys.can_run_saved() scoping GET /catalog already enforces (its own docstring: "the single rule...
@@ -185,6 +214,7 @@ def write_tool(name, data):
     }
 
 
+@_in_callers_workspace(0)
 def fixed_tools_for(permission):
     """The two ad-hoc tools, not tied to any saved query - schema discovery and read-only SQL, each gated by
     the same ``connections`` grant REST's own /connections/<name>/schema and /execute_sql already check.
@@ -333,6 +363,7 @@ def list_tables_tool(permission, arguments):
 DICTIONARY_URI = 'queryapigate://connections/{}/dictionary'
 
 
+@_in_callers_workspace(0)
 def list_resources_for(permission):
     """One data dictionary per active connection the caller may use: its notes, tables, columns and what they mean,
     as one Markdown document (BACKLOG #86). Callers with saved queries only have none."""
@@ -349,6 +380,7 @@ def list_resources_for(permission):
     return found
 
 
+@_in_callers_workspace(0)
 def read_resource_for(permission, uri):
     """A data dictionary's text, for a caller who may use that connection - its reachable tables only, with what it
     gets masked. Raises ApiError otherwise, never saying whether the connection exists."""
@@ -438,6 +470,7 @@ def handle_call(flask_app, api_key, authorization, client_ip, name, arguments):
 _TOOL_NAME_RE = re.compile(r'[\w .\-]{1,100}')
 
 
+@_in_callers_workspace(1)
 def call_as(flask_app, permission, name, arguments, started=None, headers=None):
     """One tools/call by an authenticated caller: its own rate limit, the tool, and a request in /metrics (method
     MCP, endpoint mcp.<tool kind>) - in a span (tracing.py) continuing the trace a `traceparent` in `headers` names."""

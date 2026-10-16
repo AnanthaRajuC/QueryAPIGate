@@ -26,7 +26,7 @@ import re
 
 import yaml
 
-from . import apikeys, db, definitions, descriptions, destinations, exports, store
+from . import apikeys, db, definitions, descriptions, destinations, exports, scope, store
 from .errors import ApiError
 from .services import access
 from .services import queries as query_service
@@ -480,7 +480,8 @@ def _key_fields(key):
 
 def _managed():
     """{(kind, name)} for every object a configuration file manages (ADR 0014)."""
-    return {(row[0], row[1]) for row in db.connection().execute('SELECT kind, name FROM config_managed').fetchall()}
+    return {(row[0], row[1]) for row in db.connection().execute(
+        'SELECT kind, name FROM config_managed WHERE workspace = ?', (scope.current(),)).fetchall()}
 
 
 def diff(doc, prune=False):
@@ -694,12 +695,14 @@ def apply(doc, prune=False, actor='cli', once=False):
         timestamp = store.now()
         for change in result['changes']:
             if change['action'] == 'delete':
-                conn.execute('DELETE FROM config_managed WHERE kind = ? AND name = ?', (change['kind'], change['name']))
+                conn.execute('DELETE FROM config_managed WHERE workspace = ? AND kind = ? AND name = ?',
+                             (scope.current(), change['kind'], change['name']))
         for kind in wanted:
             for name in wanted[kind]:
-                conn.execute('INSERT INTO config_managed (kind, name, applied_at, file_hash) VALUES (?, ?, ?, ?) '
+                conn.execute('INSERT INTO config_managed (workspace, kind, name, applied_at, file_hash) '
+                             'VALUES (?, ?, ?, ?, ?) '
                              'ON CONFLICT(workspace, kind, name) DO UPDATE SET applied_at = excluded.applied_at, '
-                             'file_hash = excluded.file_hash', (kind, name, timestamp, digest))
+                             'file_hash = excluded.file_hash', (scope.current(), kind, name, timestamp, digest))
         counts = {action: sum(1 for c in result['changes'] if c['action'] == action)
                   for action in ('create', 'update', 'delete')}
         store.record_audit(actor, 'config_applied', digest[:12], {
@@ -838,7 +841,8 @@ def managed_listing():
     """What GET /api/v1/config/managed answers: whether the lock is on, and every managed object."""
     from . import config
     rows = db.connection().execute(
-        'SELECT kind, name, applied_at, file_hash FROM config_managed ORDER BY kind, name').fetchall()
+        'SELECT kind, name, applied_at, file_hash FROM config_managed WHERE workspace = ? ORDER BY kind, name',
+        (scope.current(),)).fetchall()
     return {'locked': config.config_locked(),
             'items': [{'kind': r[0], 'name': r[1], 'applied_at': r[2], 'file_sha256': r[3]} for r in rows]}
 
@@ -882,7 +886,8 @@ def forget_deleted(endpoint, view_args):
     kind, name = _DELETES.get(endpoint), (view_args or {}).get('name')
     if kind is None or name is None or (kind == 'queries' and store.saved_query_exists(name)):
         return  # a version deleted, and the query still there
-    db.connection().execute('DELETE FROM config_managed WHERE kind = ? AND name = ?', (kind, name))
+    db.connection().execute('DELETE FROM config_managed WHERE workspace = ? AND kind = ? AND name = ?',
+                            (scope.current(), kind, name))
 
 
 _APPLY = {'connections': _apply_connection, 'destinations': _apply_destination, 'queries': _apply_query,
