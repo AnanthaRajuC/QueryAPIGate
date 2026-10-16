@@ -110,11 +110,13 @@ documentation. #99 workspaces only if asked for.
 23. **0.35: MongoDB against a real server in CI**, and at `pymongo`'s floor; forgetting a person waits for a usage
     write in flight. (0.35.0, 2026-10-14.) 0.35.1 closed an `allowed_tables` bypass through a CTE and a one-request
     ReDoS, found by review, CodeQL and fuzzing, and brought Scorecard to 7.8. (0.35.1, 2026-10-15.)
-24. **0.36: MongoDB graduates**, with streaming exports - the one essential tier-1 feature it lacks.
-25. **Then, only on demand:** #99 workspaces.
-26. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+24. **0.36: `require_claim_binding`**, a role for customer-facing APIs - its signed-in users run only queries that
+    bind their token, never a connection; the H2 driver from Maven Central or a mirror. (0.36.0, 2026-10-16.)
+25. **0.37: MongoDB graduates**, with streaming exports - the one essential tier-1 feature it lacks.
+26. **Then, only on demand:** #99 workspaces.
+27. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-27. **1.0.0.**
+28. **1.0.0.**
 
 ## 1. Per-key API permissions
 
