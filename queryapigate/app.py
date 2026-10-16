@@ -39,6 +39,7 @@ from . import (
     logging_setup,
     masking,
     metrics,
+    mongodocs,
     mongotools,
     openapi,
     quotas,
@@ -52,7 +53,7 @@ from . import (
 )
 from . import params as param_rules
 from .errors import ApiError, code_for
-from .formats import FORMATTERS, STREAM_FORMATTERS, json_default, stream_response
+from .formats import FORMATTERS, STREAM_FORMATTERS, chunked_response, json_default, stream_response
 
 log = logging.getLogger('queryapigate')
 bp = Blueprint('api', __name__)
@@ -589,6 +590,37 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
     return response
 
 
+def stream_mongo_response(collection, filter_doc, connection_name, params, timeout, output_format, filename,
+                          projection=None, sort=None, saved=None, statement=None, entry=None):
+    """stream_sql_response() for a find() (ADR 0022): the same constraints and history, the documents shaped by
+    their format (mongodocs.chunks()). A CSV or TSV run that left fields out says how many in its history entry -
+    the response can't, its headers went out with the first row."""
+    if output_format not in STREAM_FORMATTERS:
+        raise ApiError(f"stream=true only supports these formats: {', '.join(sorted(STREAM_FORMATTERS))}",
+                       code='invalid_stream')
+    if request.args.get('page') or request.args.get('page_size'):
+        raise ApiError('stream=true exports the whole result and does not accept page/page_size', code='invalid_stream')
+    docs = engine.stream_mongo(collection, filter_doc, connection_name, params, timeout, projection=projection,
+                               sort=sort, key_name=metrics_key_name(), allowed_tables=g.permission.allowed_tables,
+                               mask=g.permission.mask)
+    broadcaster = current_app.extensions['queryapigate_broadcaster']  # captured now: see stream_sql_response()
+    entry = {**run_entry(connection_name), **(entry or {})}
+    shaped = None
+
+    def record(finished):
+        finished = {**finished, **(shaped.report() if shaped is not None else {})}
+        if saved is not None:
+            _record_and_broadcast(*saved, finished, broadcaster)
+        else:
+            _record_adhoc_and_broadcast(statement, params, finished, broadcaster)
+
+    body, shaped = mongodocs.chunks(output_format, _record_stream_history(docs, entry, record, g.get('permission')),
+                                    projection)
+    response = chunked_response(output_format, body, filename)
+    response.call_on_close(docs.close)  # as in stream_sql_response(): a client gone before the first chunk
+    return response
+
+
 def masked_entry(fired):
     """A run's history field for what masking did (ADR 0005): which result columns, which action, from which source
     - so "was national_id ever returned to this key?" is answered by history. Nothing when nothing was masked."""
@@ -711,9 +743,14 @@ def execute_mongo_endpoint():
     params = get_object(data.get('params'), 'params')
     output_format = get_output_format(data)
     timeout = get_timeout(data)
+    statement = json.dumps({'collection': data['collection'], 'filter': filter_doc}, default=str)
+    if get_stream_flag():
+        return stream_mongo_response(data['collection'], filter_doc, data['connection_name'], params, timeout,
+                                     output_format, filename=data['collection'], projection=data.get('projection'),
+                                     sort=data.get('sort'), statement=statement,
+                                     entry={'query_type': 'mongo', 'mongo_collection': data['collection']})
     limit, offset, page = get_pagination()
     entry = {**run_entry(data['connection_name']), 'query_type': 'mongo', 'mongo_collection': data['collection']}
-    statement = json.dumps({'collection': data['collection'], 'filter': filter_doc}, default=str)
     try:
         result, elapsed_ms = engine.timed(engine.execute_mongo, data['collection'], filter_doc,
                                           data['connection_name'], limit, offset, params, timeout,
@@ -1009,13 +1046,16 @@ def _agent_write_answer(request, **extra):
 
 def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_format, timeout):
     """The mongo query_type branch of run_saved(): a find() query instead of SQL. No caching (cache_ttl is
-    not yet supported for a mongo saved query) and no streaming (?stream=true) in this version - see
-    BACKLOG #36. Always read-only, same as the ad-hoc /execute_mongo."""
-    if get_stream_flag():
-        raise ApiError('Streaming is not supported for Mongo queries yet', 400, code='stream_unsupported')
+    not yet supported for a mongo saved query). ?stream=true streams the whole result (ADR 0022). Always
+    read-only, same as the ad-hoc /execute_mongo."""
     used = set(mongotools.placeholder_names(saved.get('mongo_filter') or {}))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     filter_doc = mongotools.fill_placeholders(saved.get('mongo_filter') or {}, values)
+    if get_stream_flag():
+        return stream_mongo_response(saved['mongo_collection'], filter_doc, connection_name, None, timeout,
+                                     output_format, filename=ref,
+                                     projection=saved.get('mongo_projection'), sort=saved.get('mongo_sort'),
+                                     saved=(path, number))
     limit, offset, page = get_pagination()
     entry = run_entry(connection_name)
     try:

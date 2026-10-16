@@ -11,7 +11,8 @@ added - when it meets every one of GRADUATION. Alerts, remote files through Duck
 0.20; descriptions, agent usage, usage quotas, configuration as code, OAuth for the MCP server, write tools and
 Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart; the audit log streamed to a SIEM in 0.32, once
 tested against real receivers (ADR 0019); live events, and secrets from files and Vault, in 0.34 (ADR 0021) - AWS's
-stay, until tested against AWS. The connection types have their own terms (databases.GRADUATION).
+stay, until tested against AWS. The connection types have their own terms (databases.GRADUATION): MongoDB met them
+in 0.37, with streaming exports (ADR 0022).
 """
 from typing import Any
 
@@ -28,11 +29,11 @@ GRADUATION = (
 
 FEATURES: dict[str, dict[str, Any]] = {
     'connection_types': {
-        'name': 'H2, JDBC and MongoDB connections',
-        'why': 'they are tested less than the other types, and not every feature works on them (allowed_tables, '
-               'schema browsing, streaming)',
-        'db_types': ('h2', 'jdbc', 'mongo'),
-        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and mongo'),
+        'name': 'H2 and JDBC connections',
+        'why': 'not every feature works on them - allowed_tables on either, schema browsing and the query time limit '
+               'on JDBC (the support matrix in DATABASE_CONNECTION_CONFIGURATION.md)',
+        'db_types': ('h2', 'jdbc'),
+        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2 and jdbc'),
     },
     'tracing': {
         'name': 'Tracing with OpenTelemetry',

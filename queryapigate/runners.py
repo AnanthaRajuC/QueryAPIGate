@@ -885,6 +885,51 @@ def mongo_find(details, collection_name, filter_doc, projection, sort, limit, of
     return _with_mongo_session(details, pool, True, body)
 
 
+# Documents a streamed find() asks the server for at a time - its cursor's batchSize. A batch is held in memory while
+# it's written out, as a SQL stream's fetchmany() batch is.
+MONGO_STREAM_BATCH = 1000
+
+
+def mongo_stream(details, collection_name, filter_doc, projection, sort, timeout=None, pool=None):
+    """The whole result of one find(), a document at a time - the MongoDB _make_stream_runner() (ADR 0022). Yields
+    True once the first batch is in, so a bad filter or an unreachable server is an error before anything is sent
+    (engine.stream_mongo() reads it, as stream_sql() reads a SQL stream's columns), then each document. `timeout` is
+    the cursor's maxTimeMS: the whole stream's time on the server, not one batch's. The connection is held until
+    the generator is exhausted, fails or is closed."""
+    from pymongo.errors import ExecutionTimeout
+
+    def documents(session):
+        coll = _mongo_database(details, session.conn)[collection_name]
+        cursor = coll.find(filter_doc, projection, batch_size=MONGO_STREAM_BATCH)
+        if sort:
+            cursor = cursor.sort(list(sort.items()))
+        if timeout:
+            cursor = cursor.max_time_ms(_millis(timeout))
+        try:
+            docs = iter(cursor)
+            try:
+                first = next(docs, None)
+                yield True
+                if first is None:
+                    return
+                yield first
+                yield from docs
+            except ExecutionTimeout:
+                raise _timed_out(timeout) from None
+        finally:
+            cursor.close()
+
+    if pool is None:
+        session = Session(_mongo_driver.connect(details, True), _mongo_driver)
+        try:
+            yield from documents(session)
+        finally:
+            session.close()
+    else:
+        with pool.checkout(_mongo_driver, details, True) as session:
+            yield from documents(session)
+
+
 def mongo_ping(details, pool=None):
     """A connectivity probe - POST /api/v1/connections/test's mongo case (see engine.test_connection)."""
     _with_mongo_session(details, pool, True, lambda session: session.conn.admin.command('ping'))

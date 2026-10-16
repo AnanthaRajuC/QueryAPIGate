@@ -3,12 +3,11 @@
 **Time:** 10 minutes. **You'll end up with:** a `find()`-based saved query - with bound parameters,
 projection and sort - callable as a versioned, validated REST endpoint, exactly like a SQL one.
 
-> **Experimental** - may change in any minor release, always noted in the changelog
-> ([what that means](../CHANGELOG.md#versioning-and-compatibility)). MongoDB isn't yet tested against a real server in CI; see the
-> [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
+> **Stable** since 0.37, under the compatibility promise - what that covers, what may still be added and its limits:
+> [MongoDB connections](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#mongodb-connections).
 
 MongoDB support in QueryAPIGate is **`find()`-only, read-only, full stop** - no aggregation pipelines, no
-writes, no streaming, no response caching (yet). Everything below is what's actually built; nothing here
+writes, no response caching (yet). Everything below is what's actually built; nothing here
 is a partial feature with hidden gaps.
 
 ## Step 1: Add the connection
@@ -122,14 +121,38 @@ collection with inconsistent document shapes still produces one flat table (ever
 JSON, CSV, XLSX, XML, YAML - keeps working unmodified), but a document missing a field just shows that
 field as absent/null in its row, not an error.
 
+## Step 4: Export the whole result
+
+A page is at most `QUERYAPIGATE_MAX_PAGE_SIZE` documents. `?stream=true` sends all of them, read from the cursor as
+they come, in NDJSON, CSV, TSV or Parquet:
+
+```bash
+curl 'http://127.0.0.1:5000/q/orders_by_status?status=paid&stream=true&format=ndjson' -H 'X-API-Key: demo-key' -o paid.ndjson
+queryapigate export orders_by_status --param status=paid --format parquet --out 'paid-{date}.parquet'
+```
+
+Each format handles documents that don't share fields in its own way:
+
+- **NDJSON** writes each document whole - nested documents and arrays stay nested. Nothing is ever left out.
+- **Parquet** makes every field of every document a column.
+- **CSV and TSV** send their header line first, so the columns are decided before any document is written: the
+  projection's fields, in its order - `{"customer": 1, "total": 1, "_id": 0}` above gives `customer,total` - or,
+  without an inclusion projection, the fields of the first 1,000 documents. A field that first appears after those
+  has no column and is left out; the run's history says how many (`fields_dropped`). Name your columns in the
+  projection and that can't happen.
+
+The same works ad hoc (`POST /execute_mongo?stream=true&format=csv`) and in [saved
+exports](30-schedule-an-export.md) to a bucket or a folder - there, every field becomes a column whatever the format.
+Exports of a MongoDB query are full exports: `incremental` isn't supported for one yet.
+
 ## What's not there yet
 
 Worth knowing up front so you don't go looking for it:
 
 - **No writes.** `insert`/`update`/`delete` aren't reachable through QueryAPIGate at all for Mongo - only
   `find()`. There's no `allow_writes` equivalent to turn on.
-- **No `?stream=true`.** A Mongo saved query answers with `"Streaming is not supported for Mongo queries
-  yet"` if you try - for a very large result, page through it with `?page`/`?page_size` instead.
+- **No incremental exports.** A saved export of a Mongo query delivers the whole result each run.
+- **No column masking.** A caller with mask rules is refused on a Mongo connection.
 - **No `cache_ttl`.** Response caching (see [Cache a saved query's response](08-cache-a-saved-query.md))
   isn't available for a Mongo saved query yet, only SQL ones.
 - **No aggregation pipeline.** `find()` and its filter/projection/sort only - no `$group`, `$lookup`, or

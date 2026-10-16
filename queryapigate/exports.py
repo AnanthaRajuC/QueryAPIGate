@@ -22,7 +22,7 @@ import time
 from datetime import date, datetime
 from decimal import Decimal
 
-from . import config, db, destinations, exporting, masking, store
+from . import config, db, destinations, exporting, masking, mongodocs, mongotools, store
 from .errors import ApiError
 
 FIELDS = ('description', 'query', 'params', 'format', 'destination', 'path', 'incremental', 'skip_empty', 'timeout',
@@ -42,22 +42,41 @@ def _invalid(message):
 
 def prepare(query, raw_params, connection=None):
     """(path, version, connection_name, sql, values) for running a saved query's published version with
-    `raw_params` - every value checked against its declared parameter, as /q/<name> does."""
+    `raw_params` - every value checked against its declared parameter, as /q/<name> does. For a `mongo` query,
+    `sql` is a mongodocs.Find, its parameters already in its filter - open_stream() runs either."""
     from .params import resolve as resolve_params
     from .sqltools import fill_placeholders, placeholder_names
     path = store.resolve_saved_file(query)
     version, saved = store.select_version(store.load_versions(path), None)
-    if saved.get('query_type') == 'mongo':
-        raise ApiError("A MongoDB query can't be exported yet - only SQL queries", code='invalid_body')
     connection_name = connection or saved.get('connection_name')
     if not connection_name:
         raise ApiError('Connection name is missing - set one on the saved query')
+    if saved.get('query_type') == 'mongo':
+        filter_doc = saved.get('mongo_filter') or {}
+        used = set(mongotools.placeholder_names(filter_doc))
+        values = resolve_params(saved.get('query_parameters'), raw_params, used=used)
+        find = mongodocs.Find(saved['mongo_collection'], mongotools.fill_placeholders(filter_doc, values),
+                              saved.get('mongo_projection'), saved.get('mongo_sort'))
+        return path, version, connection_name, find, values
     sql = saved.get('sql_query')
     if not isinstance(sql, str):
         raise ApiError('Saved query has no SQL', 500)
     used = set(placeholder_names(sql))
     values = resolve_params(saved.get('query_parameters'), raw_params, used=used)
     return path, version, connection_name, fill_placeholders(sql, values), values
+
+
+def open_stream(statement, connection_name, values, timeout, mask=None):
+    """(columns, rows) for prepare()'s statement, to be staged - exporting.deliver(). A find()'s documents have
+    every field as a column (ADR 0022): staging reads all of them before anything is written, so no field is left
+    out, and `columns` grows as they're read. Close `rows` when done, however it ends."""
+    from .engine import stream_mongo, stream_sql
+    if isinstance(statement, mongodocs.Find):
+        docs = stream_mongo(statement.collection, statement.filter, connection_name, None, timeout,
+                            projection=statement.projection, sort=statement.sort, mask=mask)
+        shaped = mongodocs.Documents(docs, grow=True)
+        return shaped.columns, shaped
+    return stream_sql(statement, connection_name, values, timeout, mask=mask)
 
 
 # --------------------------------------------------------------------------------------
@@ -175,6 +194,9 @@ def validate(fields):
     if incremental is not None:
         from .sqltools import placeholder_names
         _, published = store.select_version(store.load_versions(store.resolve_saved_file(out['query'])), None)
+        if published.get('query_type') == 'mongo':
+            raise _invalid("A MongoDB query can't be exported incrementally yet - export it whole, without "
+                           "'incremental' (ADR 0022)")
         if incremental['parameter'] not in placeholder_names(published.get('sql_query') or ''):
             raise _invalid(f"The query doesn't use :{incremental['parameter']} - an incremental export binds the "
                            f"last value it delivered to it, e.g. WHERE {incremental['column']} > "
@@ -301,7 +323,6 @@ def run(name, actor):
 
 def _run(name, actor):
     """Run export `name` once. Returns the run: id, object, rows, bytes, watermark before and after."""
-    from .engine import stream_sql
     export = get(name)
     destinations.require_duckdb()  # before the lease and the query: there'd be no way to write what it returns
     timeout = config.effective_timeout(export.get('timeout'))
@@ -323,10 +344,13 @@ def _run(name, actor):
             if position is not None:
                 raw[incremental['parameter']] = position
         path, version, connection_name, sql, values = prepare(export['query'], raw)
+        if incremental is not None and isinstance(sql, mongodocs.Find):  # the query became a find() since it was saved
+            raise _invalid("A MongoDB query can't be exported incrementally yet - remove 'incremental' from this "
+                           'export to export it whole (ADR 0022)')
         entry['connection_name'] = connection_name
         relative = exporting.render_path(export['path'], export['query'], values, run_id)
         destination = destinations.get(export['destination'])
-        columns, rows = stream_sql(sql, connection_name, values, timeout, mask=export.get('mask'))
+        columns, rows = open_stream(sql, connection_name, values, timeout, mask=export.get('mask'))
         if getattr(rows, 'masked', None):
             entry['masked'] = rows.masked
         with contextlib.closing(rows):  # a failed write must still end the query and give its connection back

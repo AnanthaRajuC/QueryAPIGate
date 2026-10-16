@@ -185,7 +185,8 @@ def _export_run(args):
         print(f'queryapigate export: {error}', file=sys.stderr)
         return 2
 
-    from .engine import stream_sql
+    from . import mongodocs
+    from .engine import stream_mongo, stream_sql
     from .errors import ApiError
     from .formats import STREAM_FORMATTERS, iter_stream_chunks
 
@@ -212,13 +213,20 @@ def _export_run(args):
         started = time.monotonic()
         entry = {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': None,
                  'key_name': 'cli'}
+        find = sql if isinstance(sql, mongodocs.Find) else None
+        timeout = config.effective_timeout(args.timeout)
         try:
-            columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
+            if find is not None:
+                columns, rows = None, stream_mongo(find.collection, find.filter, connection_name, None, timeout,
+                                                   projection=find.projection, sort=find.sort)
+            else:
+                columns, rows = stream_sql(sql, connection_name, values, timeout)
         except ApiError as error:
             store.record_execution(path, version,
                                    {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
             raise
         row_count = 0
+        shaped = None
 
         def counted(row_iter):
             nonlocal row_count
@@ -226,18 +234,30 @@ def _export_run(args):
                 row_count += 1
                 yield row
 
-        if args.format == 'parquet':
-            from . import parquet
-            parquet.write(columns, counted(rows), tmp_path)
-        else:
-            with open(tmp_path, 'w', newline='') as f:
-                for chunk in iter_stream_chunks(args.format, columns, counted(rows)):
-                    f.write(chunk)
+        with contextlib.closing(rows):  # a failed write must still end the query and give its connection back
+            if find is not None:  # documents, shaped by the format (ADR 0022)
+                body, shaped = mongodocs.chunks(args.format, counted(rows), find.projection)
+                with open(tmp_path, 'wb' if args.format == 'parquet' else 'w',
+                          **({} if args.format == 'parquet' else {'newline': ''})) as f:
+                    for chunk in body:
+                        f.write(chunk)
+            elif args.format == 'parquet':
+                from . import parquet
+                parquet.write(columns, counted(rows), tmp_path)
+            else:
+                with open(tmp_path, 'w', newline='') as f:
+                    for chunk in iter_stream_chunks(args.format, columns, counted(rows)):
+                        f.write(chunk)
         os.replace(tmp_path, out_path)
         # The CLI runs outside the API's grants (a local operator is already trusted), but what it exports is
         # still on the record: run history, with `cli` as the caller.
-        store.record_execution(path, version, {**entry, 'status': 'success', 'rows': row_count,
+        report = shaped.report() if shaped is not None else {}
+        store.record_execution(path, version, {**entry, 'status': 'success', 'rows': row_count, **report,
                                                'duration_ms': round((time.monotonic() - started) * 1000, 1)})
+        if report:
+            print(f"queryapigate export: {report['fields_dropped']} field(s) had no column and were left out - a "
+                  f'CSV takes its columns from the projection, or else the first {mongodocs.LOOKAHEAD} documents. '
+                  'Name the fields in the projection, or export NDJSON or Parquet, to keep them', file=sys.stderr)
     except ApiError as error:
         print(f'queryapigate export: {error.message}', file=sys.stderr)
         return 1
@@ -255,8 +275,7 @@ def _export_run(args):
 def _export_to_destination(args, path, name, version, connection_name, sql, values):
     """`queryapigate export QUERY --to DESTINATION --out PATH`: the same run, written by DuckDB under a destination's
     prefix (ADR 0004) - a bucket or a folder - instead of a local file. Raises ApiError; the caller reports it."""
-    from . import destinations, exporting
-    from .engine import stream_sql
+    from . import destinations, exporting, exports
     if args.format not in exporting.FORMATS:
         raise ApiError(f"--format must be one of {', '.join(exporting.FORMATS)} with --to")
     destination = destinations.get(args.to)
@@ -266,7 +285,7 @@ def _export_to_destination(args, path, name, version, connection_name, sql, valu
     entry = {'executed_at': store.now(), 'connection_name': connection_name, 'request_id': None, 'key_name': 'cli',
              'transport': 'export', 'destination': args.to, 'run_id': run_id}
     try:
-        columns, rows = stream_sql(sql, connection_name, values, config.effective_timeout(args.timeout))
+        columns, rows = exports.open_stream(sql, connection_name, values, config.effective_timeout(args.timeout))
         with contextlib.closing(rows):  # a failed write must still end the query and give its connection back
             result = exporting.deliver(destination, relative, columns, rows, args.format)
     except ApiError as error:

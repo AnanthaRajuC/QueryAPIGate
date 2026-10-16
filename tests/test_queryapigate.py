@@ -1864,13 +1864,6 @@ class MongoQueryTests(ApiTestCase):
         res = self.client.get('/q/orders', headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 403)
 
-    def test_streaming_is_not_supported_yet(self):
-        save_query(self.client, {
-            'filename': 'orders2', 'author': 'a', 'description': 'd', 'query_type': 'mongo',
-            'mongo_collection': 'orders', 'mongo_filter': {}, 'connection_name': 'mg'})
-        res = self.client.get('/q/orders2?stream=true')
-        self.assertEqual(res.status_code, 400)
-
     def test_openapi_and_catalog_list_a_saved_mongo_query(self):
         save_query(self.client, {
             'filename': 'orders3', 'author': 'a', 'description': 'd', 'query_type': 'mongo',

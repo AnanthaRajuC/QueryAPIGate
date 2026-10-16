@@ -12,8 +12,8 @@ guide covers one scenario end to end, and every command and response in it was r
    screen or the API, one worked example per database.
 3. [**Connect to anything else via generic JDBC**](03-connect-via-generic-jdbc.md) (experimental) - Oracle, SQL
    Server, DB2, Snowflake, or any database with a JDBC driver, and what doesn't work on it.
-4. [**Connect to MongoDB**](04-connect-to-mongodb.md) (experimental) - `find()`-only saved queries, filters,
-   projections, sort.
+4. [**Connect to MongoDB**](04-connect-to-mongodb.md) - `find()`-only saved queries, filters, projections, sort,
+   and whole results streamed as NDJSON, CSV or Parquet.
 5. [**Try it without any setup, using the built-in example APIs**](05-try-the-built-in-example-apis.md) -
    `queryapigate examples load`, what it installs, and how to explore it in the Console.
 

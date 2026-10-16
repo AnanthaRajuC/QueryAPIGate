@@ -103,7 +103,10 @@ def _quote(text):
 def stage(columns, rows, track=None):
     """Write `rows` once to a temporary newline-delimited JSON file, working out each column's type on the way.
     Returns a Staged; the caller removes `staged.path` (os.unlink) when done. `track`, a column name, also finds the
-    largest non-null value in that column (an export's incremental watermark)."""
+    largest non-null value in that column (an export's incremental watermark).
+
+    `columns` may grow while `rows` are read - MongoDB documents, a field first seen half-way (mongodocs.py, ADR
+    0022): a row is staged as the array it is, a column added later is read back as null from the rows before it."""
     kinds = [set() for _ in columns]
     scales = [0] * len(columns)
     count = 0
@@ -116,6 +119,9 @@ def stage(columns, rows, track=None):
     try:
         with os.fdopen(fd, 'w') as out:
             for row in rows:
+                while len(kinds) < len(row):  # a column added since the last row (see above)
+                    kinds.append(set())
+                    scales.append(0)
                 record = []
                 for i, value in enumerate(row):
                     if value is not None:
@@ -138,6 +144,9 @@ def stage(columns, rows, track=None):
     except BaseException:
         os.unlink(staging)
         raise
+    while len(kinds) < len(columns):  # columns no row had a value for - or added after the last one
+        kinds.append(set())
+        scales.append(0)
     types = [_column_type(k, s) for k, s in zip(kinds, scales, strict=False)]
     return Staged(staging, columns, types, count, largest)
 
