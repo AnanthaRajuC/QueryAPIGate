@@ -201,7 +201,7 @@ def finish(request_id, result=None, error=None):
 
 
 def pending_count():
-    rows = db.connection().execute("SELECT created_at, expires_at FROM write_requests WHERE status = 'pending'"
-                                   ).fetchall()
+    rows = db.connection().execute("SELECT created_at, expires_at FROM write_requests WHERE workspace = ? "
+                                   "AND status = 'pending'", (scope.current(),)).fetchall()
     live = [r for r in rows if r['expires_at'] >= time.time()]
     return len(live), min((r['created_at'] for r in live), default=None)

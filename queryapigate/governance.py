@@ -81,7 +81,7 @@ def check_key_limit(flask_app, permission):
         permission.name, count, period)
     if not allowed:
         metrics.inc_rate_limit_rejection()
-        alerts.note_rate_limited('key', permission.name)
+        alerts.note_rate_limited('key', (getattr(permission, 'workspace', 'default'), permission.name))
     return Verdict(allowed, count, remaining, retry_after)
 
 

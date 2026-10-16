@@ -1091,6 +1091,21 @@ see everything. It protects teams from each other's mistakes and reach, not from
   callers), cached responses and the cache's management, write requests, descriptions and configuration-file records.
   A local-folder destination is only in `default`: the folders exports may write under are the server's.
 
+**Seeing what happened, per workspace.**
+
+- **The audit log**: each entry says where it happened - `workspace`, inside the hash chain - or `null` for the
+  server's own (its administrators, sign-ins, re-keying). A member reads their workspace's entries; a server-wide
+  role reads all of them, or one workspace's (`?workspace=`). Verifying the chain, its delivery to a SIEM and the
+  list of instances are the server's: server-wide roles only.
+- **Alerts** are the workspace's own - its keys, quotas, queries, connections, exports, writes waiting for approval.
+  The server's alerts (an open server, the shared key used, SSO, encryption, the audit trail, history) are for
+  server-wide roles.
+- **Live events** (`/events`, and `queryapigate events` at `/w/<workspace>/events`) reach the subscribers of the
+  workspace the run happened in.
+- **`/metrics`** counts a key or connection outside `default` under its workspace-qualified name -
+  `key="team-b/partner"`, `connection="team-b/lite"` - so two workspaces' `partner` keys are two series. `default`'s
+  names are as they were.
+
 ## Authentication and permissions
 
 `QUERYAPIGATE_API_KEY`, if set, is a full-access **admin** key - the break-glass key once named administrators

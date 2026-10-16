@@ -725,7 +725,7 @@ def revoke_admin_token(name, token_id):
 @bp.route('/alerts', methods=['GET'])
 def list_alerts():
     """What needs an admin's attention now (alerts.py), worked out afresh each time."""
-    return jsonify({'items': alerts.collect(), 'checked_at': store.now()}), 200
+    return jsonify({'items': alerts.collect(server_wide=g.permission.server_wide), 'checked_at': store.now()}), 200
 
 
 @bp.route('/write-requests', methods=['GET'])
@@ -769,6 +769,7 @@ def agent_usage():
 @bp.route('/instances', methods=['GET'])
 def list_instances():
     """The processes using this store right now (instances.py) - and what looks wrong about them."""
+    _require_server_wide("see the server's instances")
     return jsonify({'items': instances.alive(),
                     'problems': [{'kind': kind, 'message': message} for kind, message in instances.problems()]}), 200
 
@@ -798,13 +799,19 @@ def forget_history():
 def list_audit():
     """Administrative changes, newest first. `q` matches the time, actor or target."""
     args = request.args
+    # A server-wide role reads the whole log (or one workspace's, ?workspace=); a member, their workspace's entries.
+    if g.permission.server_wide:
+        workspace = args.get('workspace') or audit.ALL
+    else:
+        workspace = g.permission.workspace
     return jsonify(audit.listing(action=args.get('action'), actor=args.get('actor'), target=args.get('target'),
-                                 text=args.get('q'))), 200
+                                 text=args.get('q'), workspace=workspace)), 200
 
 
 @bp.route('/audit/delivery', methods=['GET'])
 def audit_delivery():
     """Each SIEM output's progress: delivered up to which entry, how far behind, its last error (ADR 0012)."""
+    _require_server_wide('see where the audit log is delivered')
     from . import auditstream
     return jsonify({'items': auditstream.status()}), 200
 
@@ -812,6 +819,7 @@ def audit_delivery():
 @bp.route('/audit/verify', methods=['GET'])
 def verify_audit():
     """Walk the audit log's hash chain (ADR 0012) from its anchor: intact, or the first entry that isn't."""
+    _require_server_wide("verify the whole server's audit log")
     from . import auditchain, db
     return jsonify(auditchain.verify(db.connection())), 200
 
@@ -909,6 +917,13 @@ def mcp_tools():
 
 def _cache():
     return current_app.extensions['queryapigate_cache']
+
+
+def _require_server_wide(what):
+    """For what is the server's, not one workspace's (ADR 0023): a server-wide role only."""
+    if not g.permission.server_wide:
+        raise ApiError(f'Only a server-wide role may {what} - a role in a workspace administers that workspace', 403,
+                       code='role_forbidden', capability='observe', role=g.permission.role)
 
 
 def _workspace_entries():

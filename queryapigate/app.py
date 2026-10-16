@@ -675,7 +675,7 @@ def _record_adhoc_and_broadcast(sql, params, entry, broadcaster=None):
     recorded = history.record_adhoc(entry, sql, params)
     if broadcaster is None:
         broadcaster = current_app.extensions['queryapigate_broadcaster']
-    broadcaster.publish(events.run_payload(None, None, recorded), entry['key_name'])
+    broadcaster.publish(events.run_payload(None, None, recorded), entry['key_name'], scope.current())
 
 
 def _record_and_broadcast(path, number, entry, broadcaster=None):
@@ -689,7 +689,7 @@ def _record_and_broadcast(path, number, entry, broadcaster=None):
     store.record_execution(path, number, entry)
     if broadcaster is None:
         broadcaster = current_app.extensions['queryapigate_broadcaster']
-    broadcaster.publish(events.run_payload(path, number, entry), entry['key_name'])
+    broadcaster.publish(events.run_payload(path, number, entry), entry['key_name'], scope.current())
 
 
 def _record_stream_history(rows, entry, record, permission=None):
@@ -1171,7 +1171,8 @@ def stream_events():
                            '`queryapigate events` instead', 503, retry_after=5, code='too_many_streams')
         _open_streams += 1
     broadcaster = current_app.extensions['queryapigate_broadcaster']
-    subscriber = broadcaster.subscribe(key_name=None if g.permission.admin else g.permission.name)
+    subscriber = broadcaster.subscribe(key_name=None if g.permission.admin else g.permission.name,
+                                       workspace=g.permission.workspace)
 
     released = []
 

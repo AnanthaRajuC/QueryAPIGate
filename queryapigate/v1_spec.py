@@ -423,6 +423,10 @@ SCHEMAS = {
                                    "QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. "
                                    'Absent on entries written before 0.16.'},
             'target': _NULLABLE_STRING,
+            'workspace': {'type': 'string', 'nullable': True,
+                          'description': "Where it happened (ADR 0023): a workspace's name, or null for the server's "
+                                         'own - its administrators, sign-ins, keys to the store. Absent on entries '
+                                         'written before 0.38; part of what the hash chain covers.'},
             'changes': {'nullable': True, 'description': 'For a change, each field as {from, to}; for a create or '
                                                          'delete, the whole record. Never a secret.'},
             'seq': {'type': 'integer', 'nullable': True,
@@ -1235,7 +1239,10 @@ PATHS = {
             {'name': 'actor', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
-             'description': 'Matches the time, actor or target.'}]),
+             'description': 'Matches the time, actor or target.'},
+            {'name': 'workspace', 'in': 'query', 'schema': {'type': 'string'},
+             'description': "A server-wide role's filter: one workspace's entries. A role in a workspace always "
+                            "reads that workspace's only."}]),
     },
     '/api/v1/audit/delivery': {
         'get': _op("Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",

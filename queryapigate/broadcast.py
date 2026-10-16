@@ -25,19 +25,20 @@ _QUEUE_SIZE = 100  # events buffered per slow subscriber before new ones are dro
 class Broadcaster:
     def __init__(self):
         self._lock = threading.Lock()
-        self._subscribers: dict[queue.Queue, str] = {}  # queue -> key_name filter (None = no filter)
+        # queue -> (workspace, key_name filter): a subscriber hears its own workspace only (ADR 0023); key None: all
+        self._subscribers: dict[queue.Queue, tuple] = {}
 
-    def subscribe(self, key_name=None):
+    def subscribe(self, key_name=None, workspace='default'):
         q = queue.Queue(maxsize=_QUEUE_SIZE)
         with self._lock:
-            self._subscribers[q] = key_name
+            self._subscribers[q] = (workspace, key_name)
         return q
 
     def unsubscribe(self, q):
         with self._lock:
             self._subscribers.pop(q, None)
 
-    def publish(self, event, key_name):
+    def publish(self, event, key_name, workspace='default'):
         """``key_name`` is whichever API key's activity this event reports ('admin', a scoped key's own
         name, or '-' for an unauthenticated/open-mode call) - required, not inferred from ``event`` itself,
         so this module never has to know the shape of what it's carrying. A subscriber registered with a
@@ -46,8 +47,8 @@ class Broadcaster:
         existed."""
         with self._lock:
             subscribers = list(self._subscribers.items())
-        for q, filter_key in subscribers:
-            if filter_key is not None and filter_key != key_name:
+        for q, (heard_in, filter_key) in subscribers:
+            if heard_in != workspace or (filter_key is not None and filter_key != key_name):
                 continue
             try:
                 q.put_nowait(event)

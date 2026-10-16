@@ -102,6 +102,24 @@ def _audit_via(actor):
     return actor if actor in ('cli', 'startup') else None
 
 
+# Audit actions about the server and the people who run it, not one workspace's things (ADR 0023): no workspace.
+SERVER_AUDIT_ACTIONS = frozenset({
+    'create_admin', 'update_admin', 'delete_admin', 'issue_admin_token', 'revoke_admin_token', 'link_admin_sso',
+    'sign_in', 'sign_in_refused', 'sign_out', 'break_glass_used', 'rekey', 'forget_caller', 'audit_key_rotated',
+    'audit_key_set'})
+# ... and those about a workspace itself, which belong to it: its target is the workspace's name.
+WORKSPACE_AUDIT_ACTIONS = frozenset({'create_workspace', 'update_workspace', 'delete_workspace',
+                                     'set_workspace_member', 'remove_workspace_member'})
+
+
+def _audit_workspace(action, target):
+    if action in SERVER_AUDIT_ACTIONS:
+        return None
+    if action in WORKSPACE_AUDIT_ACTIONS:
+        return target
+    return scope.current()
+
+
 def record_audit(actor, action, target, changes=None, via=None):
     """Append one entry (oldest first, capped at config.audit_log_limit() - same per-insert SQL trim
     record_execution() below uses for execution_history) and, when QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE is
@@ -110,8 +128,9 @@ def record_audit(actor, action, target, changes=None, via=None):
     write failing should not block the action it's recording, the same trade-off record_execution() already
     makes for query-run history; the two writes are independently fault-tolerant so a problem with one
     (e.g. the export path's directory missing) never suppresses the other."""
+    # `workspace`: where it happened - in the entry, so the hash chain covers it (ADR 0023 §5); None for the server
     entry = {'timestamp': now(), 'actor': actor, 'via': via or _audit_via(actor), 'action': action, 'target': target,
-             'changes': changes}
+             'changes': changes, 'workspace': _audit_workspace(action, target)}
     from . import auditchain
     link = None
     try:

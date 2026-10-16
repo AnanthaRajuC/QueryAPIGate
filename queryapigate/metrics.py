@@ -67,12 +67,23 @@ def label_for(permission):
     return permission.name or '-'
 
 
+def _in_workspace(name):
+    """A key's or connection's label, qualified by its workspace outside `default` - `team-b/partner` - since two
+    workspaces may each have a `partner` (ADR 0023). `default`'s names stay as they were, so a server with one
+    workspace counts exactly as before; `-` and `admin` (every administrator, server-wide) are never qualified."""
+    from . import scope
+    workspace = scope.current()
+    if workspace == 'default' or not isinstance(name, str) or name in ('-', 'admin'):
+        return name
+    return f'{workspace}/{name}'
+
+
 def _key_label(key):
     """Every signed-in user (jwtauth.py: callers named `jwt:<user>`) is counted under one `jwt` label: one label
     value per user would grow these counters - and every Prometheus series built on them - with the user base."""
     if isinstance(key, str) and key.startswith(('jwt:', 'mcp:')):
-        return key.split(':', 1)[0]
-    return key
+        return _in_workspace(key.split(':', 1)[0])
+    return _in_workspace(key)
 
 
 def observe_request(method, endpoint, status, elapsed, key='-'):
@@ -89,6 +100,7 @@ def observe_request(method, endpoint, status, elapsed, key='-'):
 
 
 def observe_query(connection_name, dialect, status, elapsed, key='-'):
+    connection_name = _in_workspace(connection_name)
     with _lock:
         count_key = (connection_name, dialect, status, _key_label(key))
         _query_counts[count_key] = _query_counts.get(count_key, 0) + 1
@@ -104,6 +116,7 @@ def observe_stream(connection_name, dialect, status, key='-'):
     meaningless for the fast, page-at-a-time queries it actually describes. There is deliberately no
     equivalent streaming latency histogram here for the same reason - just how many started and how they
     ended."""
+    connection_name = _in_workspace(connection_name)
     with _lock:
         count_key = (connection_name, dialect, status, _key_label(key))
         _stream_counts[count_key] = _stream_counts.get(count_key, 0) + 1
@@ -113,6 +126,7 @@ def observe_rows(connection_name, dialect, key, count):
     """Rows actually returned to the caller - the trimmed page for a paged query, or however many made it
     out before a streaming export finished or failed partway through (see engine._drain()); not split by
     status, since a partial streamed count is still data that left the server, not nothing."""
+    connection_name = _in_workspace(connection_name)
     with _lock:
         row_key = (connection_name, dialect, _key_label(key))
         _row_counts[row_key] = _row_counts.get(row_key, 0) + count
@@ -186,6 +200,7 @@ def summary_for_key(name):
     of those how many failed, and rows returned. No latency figure: the request/query duration histograms
     are deliberately not split by key (see observe_request()'s docstring), so there is nothing to average
     per key without changing that trade-off."""
+    name = _in_workspace(name)
     with _lock:
         queries = sum(count for (_, _, _, key), count in _query_counts.items() if key == name)
         errors = sum(count for (_, _, status, key), count in _query_counts.items()
@@ -198,6 +213,7 @@ def summary_for_connection(name):
     """Live usage for one connection name, aggregated the same way as summary_for_key() - plus an average
     query latency, which *is* available here: the duration histograms are keyed by (connection, dialect),
     and a connection has exactly one dialect, so this is an unambiguous per-connection average."""
+    name = _in_workspace(name)
     with _lock:
         queries = sum(count for (conn, _, _, _), count in _query_counts.items() if conn == name)
         errors = sum(count for (conn, _, status, _), count in _query_counts.items()

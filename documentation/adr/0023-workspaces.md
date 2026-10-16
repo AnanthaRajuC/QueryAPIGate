@@ -91,7 +91,10 @@ workspaces inside it.
 ### 5. Everything observable is per workspace
 
 Runs in history, audit entries, events, alerts and usage counters carry their `workspace`. A member sees only its
-workspace's; a server-wide auditor sees all, and can filter (`?workspace=`). The audit log stays one hash chain - an
+workspace's; a server-wide auditor sees all, and can filter (`?workspace=`). In metrics, a key's or connection's name
+is qualified by its workspace outside `default` (`team-b/partner`) rather than given a new `workspace` label: one more
+label on every series grows them all and changes every existing query, where qualified names leave `default`'s series
+exactly as they were. The audit log stays one hash chain - an
 entry's workspace is part of what is hashed - so a workspace's slice can't be edited without breaking the chain, and
 the SIEM stream gains the field. Cached responses are keyed by workspace too.
 
