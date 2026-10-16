@@ -35,6 +35,7 @@ _NAME = {'name': 'name', 'in': 'path', 'required': True, 'schema': {'type': 'str
 _VERSION = {'name': 'version', 'in': 'path', 'required': True, 'schema': {'type': 'integer'}}
 
 _NULLABLE_STRING = {'type': 'string', 'nullable': True}
+ROLE_SCHEMA = {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']}
 _INCREMENTAL = {
     'type': 'object', 'required': ['column', 'parameter'],
     'properties': {'column': {'type': 'string', 'description': 'Its largest value is the watermark.'},
@@ -422,6 +423,10 @@ SCHEMAS = {
                                    "QUERYAPIGATE_API_KEY, an open server, a CLI command or the server's own start-up. "
                                    'Absent on entries written before 0.16.'},
             'target': _NULLABLE_STRING,
+            'workspace': {'type': 'string', 'nullable': True,
+                          'description': "Where it happened (ADR 0023): a workspace's name, or null for the server's "
+                                         'own - its administrators, sign-ins, keys to the store. Absent on entries '
+                                         'written before 0.38; part of what the hash chain covers.'},
             'changes': {'nullable': True, 'description': 'For a change, each field as {from, to}; for a create or '
                                                          'delete, the whole record. Never a secret.'},
             'seq': {'type': 'integer', 'nullable': True,
@@ -449,11 +454,20 @@ SCHEMAS = {
         },
     },
     'Me': {
-        'type': 'object', 'required': ['name', 'role', 'via', 'capabilities', 'data_access'],
+        'type': 'object',
+        'required': ['name', 'role', 'via', 'capabilities', 'data_access', 'workspace', 'server_wide', 'workspaces'],
         'properties': {
             'name': {'type': 'string', 'nullable': True,
                      'description': "The administrator's name; 'admin' for the shared key, null on an open server."},
-            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor'], 'nullable': True,
+                     'description': 'Their role in `workspace`: server-wide, or from a membership there; null for an '
+                                    'administrator with roles only in other workspaces.'},
+            'workspace': {'type': 'string', 'description': 'The workspace this call acts in (ADR 0023).'},
+            'server_wide': {'type': 'boolean',
+                            'description': 'Whether `role` is server-wide; false when it comes from a membership, '
+                                           'which administers that one workspace.'},
+            'workspaces': {'type': 'object', 'additionalProperties': ROLE_SCHEMA,
+                           'description': 'Their roles in workspaces, by workspace.'},
             'via': {'type': 'string', 'enum': ['token', 'sso', 'break-glass', 'open']},
             'capabilities': {'type': 'array', 'items': {'type': 'string'},
                              'description': 'What the role may do in this API (adminroles.py).'},
@@ -462,10 +476,14 @@ SCHEMAS = {
     },
     'Administrator': {
         'type': 'object',
-        'required': ['name', 'role', 'email', 'active', 'created_at', 'created_by', 'last_seen_at', 'tokens'],
+        'required': ['name', 'role', 'email', 'active', 'created_at', 'created_by', 'last_seen_at', 'tokens',
+                     'workspaces'],
         'properties': {
             'name': {'type': 'string'},
-            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor'], 'nullable': True,
+                     'description': 'Server-wide; null: only the roles their workspace memberships give them.'},
+            'workspaces': {'type': 'object', 'additionalProperties': ROLE_SCHEMA,
+                           'description': 'Their roles in workspaces, by workspace (ADR 0023).'},
             'email': _NULLABLE_STRING, 'active': {'type': 'boolean'}, 'created_at': {'type': 'string'},
             'created_by': _NULLABLE_STRING,
             'last_seen_at': {'type': 'string', 'nullable': True,
@@ -486,13 +504,45 @@ SCHEMAS = {
         'type': 'object',
         'properties': {
             'name': {'type': 'string', 'description': "Create only. Not an API key's name; not 'admin' or 'cli'."},
-            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor']},
+            'role': {'type': 'string', 'enum': ['owner', 'admin', 'developer', 'auditor'], 'nullable': True,
+                     'description': 'Server-wide - required on create; null: roles only in workspaces.'},
             'email': _NULLABLE_STRING,
             'active': {'type': 'boolean', 'description': 'Update only; false stops all their tokens and sessions '
                                                          'at once.'},
             'sso': {'type': 'string', 'enum': ['pending'], 'nullable': True,
                     'description': 'Update only: "pending" binds them at their next SSO sign-in; null unlinks them.'},
         },
+    },
+    'Workspace': {
+        'type': 'object', 'required': ['name', 'description', 'created_at', 'created_by', 'members'],
+        'properties': {
+            'name': {'type': 'string'}, 'description': _NULLABLE_STRING, 'created_at': {'type': 'string'},
+            'created_by': _NULLABLE_STRING,
+            'members': {'type': 'integer', 'description': 'Administrators with a role in it.'},
+        },
+    },
+    'WorkspaceList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('Workspace')}},
+    },
+    'WorkspaceInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': "Create only: 1-100 letters, digits, '.', '_' or '-'."},
+            'description': _NULLABLE_STRING,
+        },
+    },
+    'WorkspaceMember': {
+        'type': 'object', 'required': ['admin', 'role', 'created_at', 'added_by'],
+        'properties': {'admin': {'type': 'string'}, 'role': ROLE_SCHEMA, 'created_at': {'type': 'string'},
+                       'added_by': _NULLABLE_STRING},
+    },
+    'WorkspaceMemberList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('WorkspaceMember')}},
+    },
+    'WorkspaceMemberInput': {
+        'type': 'object', 'required': ['role'], 'properties': {'role': ROLE_SCHEMA},
     },
     'AdminToken': {
         'type': 'object',
@@ -1052,6 +1102,8 @@ def _op(summary, responses, parameters=(), body=None, description=None):
 
 
 _ID = {'name': 'id', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}
+_ADMIN = {'name': 'admin', 'in': 'path', 'required': True, 'schema': {'type': 'string'},
+          'description': "An administrator's name."}
 _PRUNE = {'name': 'prune', 'in': 'query', 'schema': {'type': 'boolean'},
           'description': 'Also delete what a file manages and this one no longer has - never what was made in the '
                          'Console or this API.'}
@@ -1187,7 +1239,10 @@ PATHS = {
             {'name': 'actor', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'target', 'in': 'query', 'schema': {'type': 'string'}},
             {'name': 'q', 'in': 'query', 'schema': {'type': 'string'},
-             'description': 'Matches the time, actor or target.'}]),
+             'description': 'Matches the time, actor or target.'},
+            {'name': 'workspace', 'in': 'query', 'schema': {'type': 'string'},
+             'description': "A server-wide role's filter: one workspace's entries. A role in a workspace always "
+                            "reads that workspace's only."}]),
     },
     '/api/v1/audit/delivery': {
         'get': _op("Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",
@@ -1384,6 +1439,30 @@ PATHS = {
         'delete': _op('Revoke a token - your own, or anyone\'s as an owner', {'204': {'description': 'Revoked'}},
                       parameters=[_NAME, {'name': 'token_id', 'in': 'path', 'required': True,
                                           'schema': {'type': 'string'}}]),
+    },
+    '/api/v1/workspaces': {
+        'get': _op('List workspaces - every one for a server-wide owner, admin or auditor; your own otherwise',
+                   {'200': _ok(_ref('WorkspaceList'))}),
+        'post': _op('Create a workspace (owners)', {'201': _ok(_ref('Workspace'), etag=True), **_CONFLICT},
+                    body=_ref('WorkspaceInput')),
+    },
+    '/api/v1/workspaces/{name}': {
+        'get': _op('Get a workspace (404 for one you may not see, as for one that does not exist)',
+                   {'200': _ok(_ref('Workspace'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change its description (owners)', {'200': _ok(_ref('Workspace'), etag=True)},
+                     parameters=[_NAME], body=_ref('WorkspaceInput')),
+        'delete': _op("Remove an empty workspace and its memberships (owners); never 'default'",
+                      {'204': {'description': 'Removed'}, **_CONFLICT}, parameters=[_NAME]),
+    },
+    '/api/v1/workspaces/{name}/members': {
+        'get': _op('List who has a role in it', {'200': _ok(_ref('WorkspaceMemberList'))}, parameters=[_NAME]),
+    },
+    '/api/v1/workspaces/{name}/members/{admin}': {
+        'put': _op("Give an administrator a role in it, or change it - a server owner's, or the workspace's owner's",
+                   {'200': _ok(_ref('WorkspaceMember'))}, parameters=[_NAME, _ADMIN],
+                   body=_ref('WorkspaceMemberInput')),
+        'delete': _op('Take an administrator out of it', {'204': {'description': 'Removed'}},
+                      parameters=[_NAME, _ADMIN]),
     },
     '/api/v1/roles': {
         'get': _op('List roles (grant templates)', {'200': _ok(_ref('RoleList'))}),

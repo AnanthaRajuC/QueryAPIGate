@@ -161,7 +161,7 @@ class StoreTests(QuotaTestCase):
 
     def test_a_failed_write_keeps_the_counts(self):
         self.key({'calls': 9, 'per': 'day'})
-        quotas._counter.add('partner', quotas.period('day')[0], 2, 7)
+        quotas._counter.add('default', 'partner', quotas.period('day')[0], 2, 7)
         with mock.patch.object(quotas, '_write', side_effect=RuntimeError('store down')), \
                 self.assertRaises(RuntimeError):
             quotas.write()
@@ -210,17 +210,17 @@ class RedisTests(QuotaTestCase):
         self.client_redis = redis.Redis.from_url(REDIS_URL)
         for name in ('partner',):
             for per in ('day', 'month'):
-                self.client_redis.delete(f'qag:quota:{name}:{quotas.period(per)[0]}')
+                self.client_redis.delete(f'qag:quota:default~{name}:{quotas.period(per)[0]}')
 
     def test_every_instance_counts_against_one_counter_seeded_from_the_store(self):
         secret = self.key({'calls': 3, 'per': 'day'})
         key = quotas.period('day')[0]
-        self.client_redis.delete(f'qag:quota:partner:{key}')  # (the create response already read - and seeded - it)
-        quotas._counter.add('partner', key, 1, 10)  # a call counted before Redis held this period
+        self.client_redis.delete(f'qag:quota:default~partner:{key}')  # (the create response read - and seeded - it)
+        quotas._counter.add('default', 'partner', key, 1, 10)  # a call counted before Redis held this period
         quotas.write()
         self.assertEqual(self.get(secret).status_code, 200)  # seeds Redis from the store: 1, then counts: 2
-        self.assertEqual(int(self.client_redis.hget(f'qag:quota:partner:{key}', 'calls')), 2)
-        self.client_redis.hincrby(f'qag:quota:partner:{key}', 'calls', 1)  # another instance's call
+        self.assertEqual(int(self.client_redis.hget(f'qag:quota:default~partner:{key}', 'calls')), 2)
+        self.client_redis.hincrby(f'qag:quota:default~partner:{key}', 'calls', 1)  # another instance's call
         refused = self.get(secret)  # nothing written to the store meanwhile: only Redis knows it's used up
         self.assertEqual((refused.status_code, refused.get_json()['code']), (429, 'quota_exceeded'))
         listed = self.client.get('/api/v1/usage/quotas', headers=ADMIN).get_json()['items']

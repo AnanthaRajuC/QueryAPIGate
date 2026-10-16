@@ -44,6 +44,7 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 | `audit_log`, `audit_chain`, `audit_delivery` | Every administrative change: who, how they signed in, what changed (passwords only as "changed"); its hash chain; how far each SIEM output has got | Administrator's name | The newest `QUERYAPIGATE_AUDIT_LOG_LIMIT` entries - more while a SIEM output is behind | `observe` |
 | `api_keys`, `roles` | Keys' names, grants and the SHA-256 of their secrets; when each was last used | Key names | Until deleted | `access.read` (never a secret) |
 | `administrators`, `admin_tokens` | Administrators' names, roles, email addresses, SSO subjects, when last seen; their tokens' hashes | Name, email | Until deleted | `admins.read` |
+| `workspaces`, `workspace_members` | Each workspace's name and description; which administrators belong to which, with what role, added by whom ([ADR 0023](adr/0023-workspaces.md)) | Administrators' names | Until deleted - a member until removed or their administrator is deleted | `admins.read` |
 | `admin_sessions` | Console sessions through SSO, by the hash of their id | Administrator's name | `QUERYAPIGATE_SSO_SESSION_HOURS` | - |
 | `sso_logins` | A sign-in under way: its state and PKCE verifier | - | 10 minutes | - |
 | `write_requests` | An agent's write: its arguments, who asked, who approved or rejected it, the result | Caller, approver; the arguments may be personal | 30 days | `writes.approve` |

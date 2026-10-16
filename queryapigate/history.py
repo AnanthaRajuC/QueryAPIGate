@@ -53,10 +53,11 @@ TIME_FORMAT = '%Y-%m-%d %H:%M:%S'  # executed_at's format (store.now()) - a stri
 def _row(name, version, entry, keep=True, event=True):
     """A queued run: its history columns, whether history keeps it (``keep`` - false when sampled out), and its event
     log columns (None: not an event)."""
-    from . import events
+    from . import events, scope
+    workspace = scope.current()  # now, in the request: the writer thread that writes the row has none (scope.py)
     return (name, version, entry.get('executed_at') or datetime.now().strftime(TIME_FORMAT),
             json.dumps(entry, default=str), entry.get('status'), entry.get('key_name'), keep,
-            events.run_columns(name, version, entry) if event else None)
+            events.run_columns(name, version, entry, workspace) if event else None, workspace)
 
 
 class _Writer:
@@ -212,7 +213,8 @@ def record_adhoc(entry, sql, params=None, sample=True):
 
 def forget(caller, actor, dry_run=False):
     """Delete every run by `caller` - a person signed in as `jwt:alice@example.com`, or a key - their events and their
-    usage counts (ADR 0016). Recorded in the audit log by the caller's SHA-256, not their name, so the record of the
+    usage counts (ADR 0016) - in every workspace: erasing a person is the server's business, not one team's. Recorded
+    in the audit log by the caller's SHA-256, not their name, so the record of the
     erasure keeps nothing of what was erased. Returns {'runs': n, 'events': n, 'usage_periods': n}."""
     import hashlib
 
@@ -275,21 +277,21 @@ def write(rows, target=None):
     from . import events
     try:
         with db.transaction(append_only=True, target=target) as conn:
-            for name, version, executed_at, entry_json, status, key_name, keep, event in rows:
+            for name, version, executed_at, entry_json, status, key_name, keep, event, workspace in rows:
                 if event is not None:
                     conn.execute(events.INSERT, event)
                 if not keep:
                     continue
                 if name is None:  # an ad-hoc run: no saved query to belong to
-                    conn.execute('INSERT INTO execution_history (query_name, version, executed_at, entry_json, '
-                                 'status, key_name) VALUES (NULL, NULL, ?, ?, ?, ?)',
-                                 (executed_at, entry_json, status, key_name))
+                    conn.execute('INSERT INTO execution_history (workspace, query_name, version, executed_at, '
+                                 'entry_json, status, key_name) VALUES (?, NULL, NULL, ?, ?, ?, ?)',
+                                 (workspace, executed_at, entry_json, status, key_name))
                     continue
                 conn.execute(
-                    'INSERT INTO execution_history (query_name, version, executed_at, entry_json, status, key_name) '
-                    'SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS '
-                    '(SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?)',
-                    (name, version, executed_at, entry_json, status, key_name, name, version))
+                    'INSERT INTO execution_history (workspace, query_name, version, executed_at, entry_json, status, '
+                    'key_name) SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM saved_query_versions '
+                    'WHERE workspace = ? AND query_name = ? AND version = ?)',
+                    (workspace, name, version, executed_at, entry_json, status, key_name, workspace, name, version))
             if (target or db.current_target())[0] == 'postgres':
                 # Wakes `queryapigate events` (events.py) in every instance. Sent inside the transaction, so
                 # Postgres delivers it only once these rows are committed and visible to a listener's query.
@@ -300,11 +302,11 @@ def write(rows, target=None):
         return
     metrics.inc_history('recorded', sum(1 for row in rows if row[6]))
     if config.history_retention_days() is None:
-        for name, version in dict.fromkeys((row[0], row[1]) for row in rows if row[6]):
-            _trim(name, version, target)
+        for workspace, name, version in dict.fromkeys((row[8], row[0], row[1]) for row in rows if row[6]):
+            _trim(workspace, name, version, target)
 
 
-def _trim(name, version, target):
+def _trim(workspace, name, version, target):
     """Keep only the newest history_limit() rows of one version - or, for ad-hoc runs (name None), the newest
     history_adhoc_limit() of them all. Its own transaction, after the runs are safely
     recorded: on Postgres two concurrent trims of the same version can contend for the same rows, and losing
@@ -314,17 +316,17 @@ def _trim(name, version, target):
             if name is None:
                 conn.execute("""
                     DELETE FROM execution_history WHERE rowid IN (
-                        SELECT rowid FROM execution_history WHERE query_name IS NULL
+                        SELECT rowid FROM execution_history WHERE workspace = ? AND query_name IS NULL
                         ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
                     )
-                """, (config.history_adhoc_limit(),))
+                """, (workspace, config.history_adhoc_limit()))
                 return
             conn.execute("""
                 DELETE FROM execution_history WHERE rowid IN (
-                    SELECT rowid FROM execution_history WHERE query_name = ? AND version = ?
+                    SELECT rowid FROM execution_history WHERE workspace = ? AND query_name = ? AND version = ?
                     ORDER BY executed_at DESC, rowid DESC LIMIT -1 OFFSET ?
                 )
-            """, (name, version, config.history_limit()))
+            """, (workspace, name, version, config.history_limit()))
     except (OSError, *db.Error):
         log.debug('History trim for %s v%s lost a race or failed; the next one catches up', name, version,
                   exc_info=True)
@@ -420,7 +422,8 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     if not 1 <= limit <= MAX_PAGE:
         raise ApiError(f'limit must be between 1 and {MAX_PAGE}', code='invalid_filter')
     since, until = _time_bound(since, 'since'), _time_bound(until, 'until')
-    clauses, params = [], []
+    from . import scope
+    clauses, params = ['workspace = ?'], [scope.current()]  # the workspace this call acts in (ADR 0023)
     for column, value in (('query_name', query), ('version', version), ('status', status), ('key_name', key)):
         if value not in (None, ''):
             clauses.append(f'{column} = ?')
@@ -454,18 +457,20 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
 def last_run_times(name=None):
     """{query name: when it last ran} over every stored run - for one query, or (name None) for all of them in
     one grouped read rather than one per query."""
+    from . import scope
     flush()
-    where, params = ('WHERE query_name = ?', (name,)) if name is not None else ('', ())
+    where, params = ('AND query_name = ?', (name,)) if name is not None else ('', ())
     rows = db.connection().execute(
-        f'SELECT query_name, MAX(executed_at) AS last FROM execution_history {where} GROUP BY query_name',
-        params).fetchall()
+        f'SELECT query_name, MAX(executed_at) AS last FROM execution_history WHERE workspace = ? {where} '
+        'GROUP BY query_name', (scope.current(), *params)).fetchall()
     return {row['query_name']: row['last'] for row in rows}
 
 
 def run_counts(name):
     """{version: how many runs are stored} for one query."""
+    from . import scope
     flush()
     rows = db.connection().execute(
-        'SELECT version, COUNT(*) AS n FROM execution_history WHERE query_name = ? GROUP BY version',
-        (name,)).fetchall()
+        'SELECT version, COUNT(*) AS n FROM execution_history WHERE workspace = ? AND query_name = ? '
+        'GROUP BY version', (scope.current(), name)).fetchall()
     return {row['version']: row['n'] for row in rows}

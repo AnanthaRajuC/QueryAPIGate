@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import admins, apikeys, config, db, history, instances, metrics, oidc, ratelimit, usage
+from . import admins, apikeys, config, db, history, instances, metrics, oidc, ratelimit, scope, usage
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -72,12 +72,15 @@ def _plural(n, word):
     return f'{n} {word}' + ('' if n == 1 else 's')
 
 
-def collect(now=None):
-    """Every alert that holds now, most severe first."""
+def collect(now=None, server_wide=True):
+    """Every alert that holds now, most severe first: the workspace's this code acts in - its keys, quotas, queries,
+    connections, exports and writes awaiting approval (ADR 0023) - and, for `server_wide` (a server-wide role), the
+    server's own: open or break-glass access, SSO, encryption, the audit trail, client rate limits and history."""
     now = now or datetime.now()
-    found = [*_server(now), *_sso(), *_encryption(), *_secret_providers(), *_audit_chain(), *_audit_delivery(now),
-             *_writes(),
-             *_quotas(), *_keys(now), *_runs(now), *_rate_limited(), *_history_health()]
+    found = [*_writes(), *_quotas(), *_keys(now), *_runs(now), *_rate_limited(server_wide)]
+    if server_wide:
+        found += [*_server(now), *_sso(), *_encryption(), *_secret_providers(), *_audit_chain(),
+                  *_audit_delivery(now), *_history_health()]
     return sorted(found, key=lambda a: (SEVERITY_ORDER[a['severity']], a['kind'], a['id']))
 
 
@@ -276,8 +279,8 @@ def _recent_runs(now):
     """The newest runs, as (query_name, executed_at, entry) - written ones, including this process's queued."""
     history.flush()
     rows = db.connection().execute(
-        'SELECT query_name, executed_at, entry_json FROM execution_history ORDER BY rowid DESC LIMIT ?',
-        (RECENT_RUNS,)).fetchall()
+        'SELECT query_name, executed_at, entry_json FROM execution_history WHERE workspace = ? '
+        'ORDER BY rowid DESC LIMIT ?', (scope.current(), RECENT_RUNS)).fetchall()
     oldest = (now - QUERY_WINDOW).strftime(history.TIME_FORMAT)
     runs = []
     for row in rows:
@@ -388,8 +391,11 @@ def _queries(runs, now):
     return found
 
 
-def _rate_limited():
+def _rate_limited(server_wide=True):
+    """Keys of this workspace that keep hitting their own rate limit - and, server-wide, clients that keep hitting
+    the server's. A key's refusals are noted under (its workspace, its name): names repeat across workspaces."""
     found = []
+    workspace = scope.current()
     cutoff = time.monotonic() - 3600
     with _lock:
         counts = {}
@@ -402,11 +408,14 @@ def _rate_limited():
         if count < RATE_LIMITED_PER_HOUR:
             continue
         if kind == 'key':
+            if not isinstance(who, tuple) or who[0] != workspace:
+                continue
+            who = who[1]
             found.append(_alert(
                 'warning', 'key_rate_limited', who, f"API key '{who}' keeps hitting its rate limit",
                 f"{_plural(count, 'call')} refused in the last hour by its own rate_limit. Raise the limit if the "
                 'traffic is expected, or ask its owner to slow down or cache.', {'type': 'key', 'name': who}))
-        else:
+        elif server_wide:
             found.append(_alert(
                 'warning', 'client_rate_limited', who, f'Client {who} keeps hitting the rate limit',
                 f"{_plural(count, 'request')} refused in the last hour by QUERYAPIGATE_RATE_LIMIT, counted by "

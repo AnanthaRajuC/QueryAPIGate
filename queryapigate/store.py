@@ -15,7 +15,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, duckfiles, history
+from . import config, db, duckfiles, history, scope
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -102,6 +102,24 @@ def _audit_via(actor):
     return actor if actor in ('cli', 'startup') else None
 
 
+# Audit actions about the server and the people who run it, not one workspace's things (ADR 0023): no workspace.
+SERVER_AUDIT_ACTIONS = frozenset({
+    'create_admin', 'update_admin', 'delete_admin', 'issue_admin_token', 'revoke_admin_token', 'link_admin_sso',
+    'sign_in', 'sign_in_refused', 'sign_out', 'break_glass_used', 'rekey', 'forget_caller', 'audit_key_rotated',
+    'audit_key_set'})
+# ... and those about a workspace itself, which belong to it: its target is the workspace's name.
+WORKSPACE_AUDIT_ACTIONS = frozenset({'create_workspace', 'update_workspace', 'delete_workspace',
+                                     'set_workspace_member', 'remove_workspace_member'})
+
+
+def _audit_workspace(action, target):
+    if action in SERVER_AUDIT_ACTIONS:
+        return None
+    if action in WORKSPACE_AUDIT_ACTIONS:
+        return target
+    return scope.current()
+
+
 def record_audit(actor, action, target, changes=None, via=None):
     """Append one entry (oldest first, capped at config.audit_log_limit() - same per-insert SQL trim
     record_execution() below uses for execution_history) and, when QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE is
@@ -110,8 +128,9 @@ def record_audit(actor, action, target, changes=None, via=None):
     write failing should not block the action it's recording, the same trade-off record_execution() already
     makes for query-run history; the two writes are independently fault-tolerant so a problem with one
     (e.g. the export path's directory missing) never suppresses the other."""
+    # `workspace`: where it happened - in the entry, so the hash chain covers it (ADR 0023 §5); None for the server
     entry = {'timestamp': now(), 'actor': actor, 'via': via or _audit_via(actor), 'action': action, 'target': target,
-             'changes': changes}
+             'changes': changes, 'workspace': _audit_workspace(action, target)}
     from . import auditchain
     link = None
     try:
@@ -170,9 +189,20 @@ def _connection_row_to_dict(row):
     return details
 
 
+def workspace_names():
+    """Every workspace's name (ADR 0023) - `default` always among them, also on a store not yet upgraded to have
+    them (read before db.init_schema() by `queryapigate events`)."""
+    try:
+        return [row[0] for row in db.connection().execute('SELECT name FROM workspaces ORDER BY name').fetchall()]
+    except db.Error:
+        return [db.DEFAULT_WORKSPACE]
+
+
 def read_connections():
+    """Every connection of the workspace this code acts in (scope.py), by name."""
     rows = db.connection().execute(
-        'SELECT name, db, active, created_at, updated_at, details_json FROM connections').fetchall()
+        'SELECT name, db, active, created_at, updated_at, details_json FROM connections WHERE workspace = ?',
+        (scope.current(),)).fetchall()
     return {row['name']: _connection_row_to_dict(row) for row in rows}
 
 
@@ -296,8 +326,8 @@ def get_connection(connection_name):
     if not isinstance(connection_name, str) or not connection_name:
         raise ApiError('Connection name is missing', code='connection_required')
     row = db.connection().execute(
-        'SELECT db, active, created_at, updated_at, details_json FROM connections WHERE name = ?',
-        (connection_name,)).fetchone()
+        'SELECT db, active, created_at, updated_at, details_json FROM connections WHERE workspace = ? AND name = ?',
+        (scope.current(), connection_name)).fetchone()
     if not row:
         raise ApiError(f"Connection '{connection_name}' not found", 404, code='connection_not_found')
     if not row['active']:
@@ -375,11 +405,13 @@ def update_connections(connections):
                            f"{', '.join(config.SUPPORTED_DB_TYPES)}")
         if details.get('db') == 'duckdb':
             duckfiles.validate(details)
+    workspace = scope.current()
     with db.transaction() as conn:
         timestamp = now()
         for name, details in connections.items():
             existing_row = conn.execute(
-                'SELECT created_at, details_json FROM connections WHERE name = ?', (name,)).fetchone()
+                'SELECT created_at, details_json FROM connections WHERE workspace = ? AND name = ?',
+                (workspace, name)).fetchone()
             existing_details = json.loads(existing_row['details_json']) if existing_row else {}
             # GET masks passwords, so a client echoing the mask back means "keep the current one" - reused
             # exactly as stored (already encrypted, if it was), never re-encrypted.
@@ -398,18 +430,18 @@ def update_connections(connections):
             active = bool(details.get('active', False))
             extra = {k: v for k, v in details.items() if k not in ('db', 'active', 'created_at', 'updated_at')}
             conn.execute("""
-                INSERT INTO connections (name, db, active, created_at, updated_at, details_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
+                INSERT INTO connections (workspace, name, db, active, created_at, updated_at, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workspace, name) DO UPDATE SET
                     db = excluded.db, active = excluded.active,
                     created_at = excluded.created_at, updated_at = excluded.updated_at,
                     details_json = excluded.details_json
-            """, (name, dialect, int(active), created_at, timestamp, json.dumps(extra)))
+            """, (workspace, name, dialect, int(active), created_at, timestamp, json.dumps(extra)))
 
 
 def delete_connection(name):
     with db.transaction() as conn:
-        cur = conn.execute('DELETE FROM connections WHERE name = ?', (name,))
+        cur = conn.execute('DELETE FROM connections WHERE workspace = ? AND name = ?', (scope.current(), name))
         if cur.rowcount == 0:
             raise ApiError(f"Connection '{name}' not found", 404, code='connection_not_found')
 
@@ -431,7 +463,8 @@ def saved_query_exists(name):
     """A plain existence check by exact name - used by examples.py's conflict detection, which needs to
     know "is something already using this name" without resolve_saved_file()'s reference-parsing/403
     semantics (a conflict is never a client-facing path, just an internal decision)."""
-    return db.connection().execute('SELECT 1 FROM saved_queries WHERE name = ?', (name,)).fetchone() is not None
+    return db.connection().execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?',
+                                   (scope.current(), name)).fetchone() is not None
 
 
 def resolve_saved_file(ref):
@@ -459,7 +492,8 @@ def resolve_saved_file(ref):
         candidate = candidate[:-len('.json')]
     if '/' in candidate or not _FILENAME_RE.match(candidate) or candidate.startswith('.'):
         raise ApiError('Only .json files inside the saved_sql folder can be accessed', 403)
-    if db.connection().execute('SELECT 1 FROM saved_queries WHERE name = ?', (candidate,)).fetchone() is None:
+    if db.connection().execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?',
+                               (scope.current(), candidate)).fetchone() is None:
         raise ApiError(f"Saved query '{candidate}' not found", 404, code='query_not_found')
     return candidate
 
@@ -484,8 +518,10 @@ def load_versions(name, with_history=True):
     runs a query (app.run_saved()), which never reads its history but would otherwise load it on every call."""
     if with_history:
         history.flush()
+    workspace = scope.current()
     row = db.connection().execute(
-        'SELECT collection, example, published_version FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        'SELECT collection, example, published_version FROM saved_queries WHERE workspace = ? AND name = ?',
+        (workspace, name)).fetchone()
     if row is None:
         raise ApiError(f"Saved query '{name}' not found", 404, code='query_not_found')
     content = {}
@@ -497,7 +533,8 @@ def load_versions(name, with_history=True):
         content['published_version'] = row['published_version']
     version_rows = db.connection().execute(
         'SELECT version, uuid, status, created_at, last_modified_at, fields_json '
-        'FROM saved_query_versions WHERE query_name = ? ORDER BY version', (name,)).fetchall()
+        'FROM saved_query_versions WHERE workspace = ? AND query_name = ? ORDER BY version',
+        (workspace, name)).fetchall()
     for v in version_rows:
         try:
             fields = json.loads(v['fields_json'])
@@ -507,8 +544,8 @@ def load_versions(name, with_history=True):
             raise ApiError('Saved query data has an unexpected structure', 500)
         history_rows = db.connection().execute(
             'SELECT entry_json FROM (SELECT entry_json, executed_at, rowid FROM execution_history '
-            'WHERE query_name = ? AND version = ? ORDER BY executed_at DESC, rowid DESC LIMIT ?) AS newest '
-            'ORDER BY executed_at, rowid', (name, v['version'], config.history_limit())
+            'WHERE workspace = ? AND query_name = ? AND version = ? ORDER BY executed_at DESC, rowid DESC LIMIT ?) '
+            'AS newest ORDER BY executed_at, rowid', (workspace, name, v['version'], config.history_limit())
         ).fetchall() if with_history else []
         content[str(v['version'])] = {
             'uuid': v['uuid'],
@@ -609,24 +646,28 @@ def save_version(filename, fields, collection=_UNSET, example=False, publish=Tru
         validate_collection_name(collection)
     query_uuid = str(uuid.uuid4())
     timestamp = now()
+    ws = scope.current()
     with db.transaction() as conn:
-        exists = conn.execute('SELECT 1 FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        exists = conn.execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name)).fetchone()
         if exists is None:
-            conn.execute('INSERT INTO saved_queries (name, collection, example) VALUES (?, NULL, 0)', (name,))
-        row = conn.execute('SELECT MAX(version) AS m FROM saved_query_versions WHERE query_name = ?',
-                           (name,)).fetchone()
+            conn.execute('INSERT INTO saved_queries (workspace, name, collection, example) VALUES (?, ?, NULL, 0)',
+                         (ws, name))
+        row = conn.execute('SELECT MAX(version) AS m FROM saved_query_versions WHERE workspace = ? AND query_name = ?',
+                           (ws, name)).fetchone()
         number = (row['m'] or 0) + 1
         conn.execute("""
             INSERT INTO saved_query_versions
-                (query_name, version, uuid, status, created_at, last_modified_at, fields_json)
-            VALUES (?, ?, ?, 'active', ?, ?, ?)
-        """, (name, number, query_uuid, timestamp, timestamp, json.dumps(fields)))
+                (workspace, query_name, version, uuid, status, created_at, last_modified_at, fields_json)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+        """, (ws, name, number, query_uuid, timestamp, timestamp, json.dumps(fields)))
         if collection is not _UNSET:
-            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (collection, name))
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE workspace = ? AND name = ?',
+                         (collection, ws, name))
         if example:
-            conn.execute('UPDATE saved_queries SET example = 1 WHERE name = ?', (name,))
+            conn.execute('UPDATE saved_queries SET example = 1 WHERE workspace = ? AND name = ?', (ws, name))
         if publish:
-            conn.execute('UPDATE saved_queries SET published_version = ? WHERE name = ?', (number, name))
+            conn.execute('UPDATE saved_queries SET published_version = ? WHERE workspace = ? AND name = ?',
+                         (number, ws, name))
     return query_uuid, number
 
 
@@ -634,24 +675,27 @@ def publish_version(ref, version):
     """Make ``version`` the one a saved query serves. Returns the previously published version (or None).
     Any existing version can be published, older ones included - that is how a bad release is rolled back."""
     name = resolve_saved_file(ref)
+    ws = scope.current()
     with db.transaction() as conn:
-        row = conn.execute('SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
-                           (name, version)).fetchone()
+        row = conn.execute('SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
+                           (ws, name, version)).fetchone()
         if row is None:
             raise ApiError(f'Version {version} not found', 404, code='version_not_found')
-        previous = conn.execute('SELECT published_version FROM saved_queries WHERE name = ?',
-                                (name,)).fetchone()['published_version']
-        conn.execute('UPDATE saved_queries SET published_version = ? WHERE name = ?', (version, name))
+        previous = conn.execute('SELECT published_version FROM saved_queries WHERE workspace = ? AND name = ?',
+                                (ws, name)).fetchone()['published_version']
+        conn.execute('UPDATE saved_queries SET published_version = ? WHERE workspace = ? AND name = ?',
+                     (version, ws, name))
     return previous
 
 
 def unpublish(ref):
     """Stop serving a saved query at all (it keeps every version). Returns the previously published version."""
     name = resolve_saved_file(ref)
+    ws = scope.current()
     with db.transaction() as conn:
-        previous = conn.execute('SELECT published_version FROM saved_queries WHERE name = ?',
-                                (name,)).fetchone()['published_version']
-        conn.execute('UPDATE saved_queries SET published_version = NULL WHERE name = ?', (name,))
+        previous = conn.execute('SELECT published_version FROM saved_queries WHERE workspace = ? AND name = ?',
+                                (ws, name)).fetchone()['published_version']
+        conn.execute('UPDATE saved_queries SET published_version = NULL WHERE workspace = ? AND name = ?', (ws, name))
     return previous
 
 
@@ -661,11 +705,14 @@ def set_collection(ref, collection):
     if collection is not None:
         validate_collection_name(collection)
     name = resolve_saved_file(ref)
+    ws = scope.current()
     with db.transaction() as conn:
-        row = conn.execute('SELECT collection FROM saved_queries WHERE name = ?', (name,)).fetchone()
+        row = conn.execute('SELECT collection FROM saved_queries WHERE workspace = ? AND name = ?',
+                           (ws, name)).fetchone()
         previous = row['collection'] if row else None
         if previous != collection:
-            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (collection, name))
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE workspace = ? AND name = ?',
+                         (collection, ws, name))
     return previous
 
 
@@ -675,15 +722,16 @@ def set_cache_ttl(ref, version, ttl):
     stores the key when it's truthy rather than an explicit 0. Returns the resolved version number (the one
     actually changed, whether the caller asked for a specific one or the latest)."""
     name = resolve_saved_file(ref)
+    ws = scope.current()
     with db.transaction() as conn:
         if version is None:
             row = conn.execute(
-                'SELECT version, fields_json FROM saved_query_versions WHERE query_name = ? '
-                'ORDER BY version DESC LIMIT 1', (name,)).fetchone()
+                'SELECT version, fields_json FROM saved_query_versions WHERE workspace = ? AND query_name = ? '
+                'ORDER BY version DESC LIMIT 1', (ws, name)).fetchone()
         else:
             row = conn.execute(
-                'SELECT version, fields_json FROM saved_query_versions WHERE query_name = ? AND version = ?',
-                (name, version)).fetchone()
+                'SELECT version, fields_json FROM saved_query_versions WHERE workspace = ? AND query_name = ? '
+                'AND version = ?', (ws, name, version)).fetchone()
         if row is None:
             raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         fields = json.loads(row['fields_json'])
@@ -691,16 +739,18 @@ def set_cache_ttl(ref, version, ttl):
             fields['cache_ttl'] = ttl
         else:
             fields.pop('cache_ttl', None)
-        conn.execute('UPDATE saved_query_versions SET fields_json = ? WHERE query_name = ? AND version = ?',
-                    (json.dumps(fields), name, row['version']))
+        conn.execute('UPDATE saved_query_versions SET fields_json = ? WHERE workspace = ? AND query_name = ? '
+                     'AND version = ?', (json.dumps(fields), ws, name, row['version']))
         return row['version']
 
 
 def _saved_files():
     """(name, path, content) for every saved query - "path" is just the name itself (see
     resolve_saved_file()'s docstring for why); content is the same nested dict shape load_versions()
-    returns, reconstructed from SQL. The one shared query everything below iterates over."""
-    rows = db.connection().execute('SELECT name FROM saved_queries ORDER BY name').fetchall()
+    returns, reconstructed from SQL. The one shared query everything below iterates over - in the workspace this
+    code acts in."""
+    rows = db.connection().execute('SELECT name FROM saved_queries WHERE workspace = ? ORDER BY name',
+                                   (scope.current(),)).fetchall()
     for row in rows:
         name = row['name']
         try:
@@ -713,7 +763,8 @@ def _saved_files():
 def iter_saved(with_history=False):
     """(name, content) for every saved query, by name - the public form of _saved_files() for the Management API,
     which lists queries without their run history (load_versions()'s with_history)."""
-    rows = db.connection().execute('SELECT name FROM saved_queries ORDER BY name').fetchall()
+    rows = db.connection().execute('SELECT name FROM saved_queries WHERE workspace = ? ORDER BY name',
+                                   (scope.current(),)).fetchall()
     for row in rows:
         try:
             yield row['name'], load_versions(row['name'], with_history=with_history)
@@ -744,10 +795,13 @@ def move_collection(old, new):
     as safe/idempotent as collection_admin.rename_collection() already assumes."""
     validate_collection_name(new)
     moved = []
+    ws = scope.current()
     with db.transaction() as conn:
-        rows = conn.execute('SELECT name FROM saved_queries WHERE collection = ?', (old,)).fetchall()
+        rows = conn.execute('SELECT name FROM saved_queries WHERE workspace = ? AND collection = ?',
+                            (ws, old)).fetchall()
         for row in rows:
-            conn.execute('UPDATE saved_queries SET collection = ? WHERE name = ?', (new, row['name']))
+            conn.execute('UPDATE saved_queries SET collection = ? WHERE workspace = ? AND name = ?',
+                         (new, ws, row['name']))
             moved.append(row['name'])
     return moved
 
@@ -756,26 +810,30 @@ def delete_saved(ref, version=None):
     """Delete a saved query, or a single version of it (the query goes with its last version) - cascades to
     that version's/query's own execution_history via the schema's own ON DELETE CASCADE."""
     name = resolve_saved_file(ref)
+    ws = scope.current()
     with db.transaction() as conn:
         if version is None:
-            conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
+            conn.execute('DELETE FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name))
             return
         row = conn.execute(
-            'SELECT 1 FROM saved_query_versions WHERE query_name = ? AND version = ?',
-            (name, version)).fetchone()
+            'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
+            (ws, name, version)).fetchone()
         if row is None:
             raise ApiError(f'Version {version} not found', 404, code='version_not_found')
-        conn.execute('DELETE FROM saved_query_versions WHERE query_name = ? AND version = ?', (name, version))
+        conn.execute('DELETE FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
+                     (ws, name, version))
         remaining = conn.execute(
-            'SELECT 1 FROM saved_query_versions WHERE query_name = ? LIMIT 1', (name,)).fetchone()
+            'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? LIMIT 1',
+            (ws, name)).fetchone()
         if remaining is None:
-            conn.execute('DELETE FROM saved_queries WHERE name = ?', (name,))
+            conn.execute('DELETE FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name))
             return
         # Deleting the published version falls back to the newest version *older* than it - one that was live
         # before - never to a newer draft; with none older, the query is left unpublished.
         conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
-                     'WHERE query_name = ? AND version < ?) WHERE name = ? AND published_version = ?',
-                     (name, version, name, version))
+                     'WHERE workspace = ? AND query_name = ? AND version < ?) '
+                     'WHERE workspace = ? AND name = ? AND published_version = ?',
+                     (ws, name, version, ws, name, version))
 
 
 def record_execution(path, version, entry, live=True):

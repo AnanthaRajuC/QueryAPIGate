@@ -454,7 +454,9 @@ supported in place: restore the backup from step 2.
 ### Rolling upgrades (several instances on one store)
 
 Replace instances one at a time - no downtime - because of this rule: **within 1.x, a release changes the store only
-additively** (new tables, new nullable columns, new indexes; never a rename, a drop or a changed meaning). So while
+additively** (new tables, new nullable columns, new indexes; never a rename, a drop or a changed meaning). **One
+exception, before 1.x: the upgrade to 0.38** (workspaces, [ADR 0023](adr/0023-workspaces.md)) changes the store's
+primary keys, so stop every 0.37 instance before the first 0.38 one starts - see the changelog. So while
 some instances run the new release and have upgraded the store, the ones still on the previous release keep working
 against it. `tests/test_rolling_upgrade.py` checks exactly that on every CI run: the previous release from PyPI keeps
 serving, writing and recording runs on a store the current code has just upgraded, and each sees the other's changes.

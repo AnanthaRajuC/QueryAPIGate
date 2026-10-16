@@ -454,3 +454,47 @@ h1 .tag.experimental {
   color: var(--ink-3);
   font-size: 12px;
 }
+
+/* Workspaces (ADR 0023): the switcher under the wordmark, and the Workspaces screen's selected row and member form. */
+.ws-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 10px;
+  font-size: 12px;
+}
+.ws-switch select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  font: 12px var(--mono);
+}
+body.side-collapsed .ws-switch {
+  display: none;
+}
+#workspaces-table tbody tr {
+  cursor: pointer;
+}
+#workspaces-table tr.selected td {
+  background: var(--accent-soft);
+}
+#workspace-members {
+  margin-top: 16px;
+}
+.form-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.form-inline input {
+  width: 240px;
+}
+#workspace-members select {
+  width: auto;
+}
+#workspaces-table .actions,
+#workspace-members .actions {
+  text-align: right;
+  white-space: nowrap;
+}

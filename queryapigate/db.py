@@ -28,13 +28,13 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 16  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 17  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
 #                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied;
-#                    16: events - see _upgrade()
+#                    16: events; 17: workspaces - see _upgrade()
 
 _local = threading.local()
 _savepoints = itertools.count(1)  # names for nested transactions' savepoints - see transaction()
@@ -43,31 +43,54 @@ _inherited: list[object] = []  # connections a forked child must neither use nor
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
-CREATE TABLE IF NOT EXISTS connections (
+-- Workspaces (ADR 0023): what owns connections, queries, keys, roles, destinations and exports - each name is unique
+-- within its workspace. `default` holds everything a store had before schema 17, and can't be removed.
+CREATE TABLE IF NOT EXISTS workspaces (
   name TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL   -- description, created_by
+);
+-- An administrator's role in one workspace (ADR 0023 §3), beside any server-wide role administrators.role gives.
+CREATE TABLE IF NOT EXISTS workspace_members (
+  workspace TEXT NOT NULL REFERENCES workspaces(name) ON DELETE CASCADE,
+  admin_name TEXT NOT NULL,
+  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL,  -- added_by
+  PRIMARY KEY (workspace, admin_name)
+);
+
+CREATE TABLE IF NOT EXISTS connections (
+  workspace TEXT NOT NULL DEFAULT 'default',  -- schema 17: every owned table's names are unique per workspace
+  name TEXT NOT NULL,
   db TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  details_json TEXT NOT NULL  -- everything else: password, host, port, user, database, example, ...
+  details_json TEXT NOT NULL,  -- everything else: password, host, port, user, database, example, ...
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS saved_queries (
-  name TEXT PRIMARY KEY,
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
   collection TEXT,
   example INTEGER NOT NULL DEFAULT 0,
-  published_version INTEGER  -- the version /q/<name> serves; NULL = not published (schema 4; see _upgrade())
+  published_version INTEGER,  -- the version /q/<name> serves; NULL = not published (schema 4; see _upgrade())
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS saved_query_versions (
-  query_name TEXT NOT NULL REFERENCES saved_queries(name) ON DELETE CASCADE,
+  workspace TEXT NOT NULL DEFAULT 'default',
+  query_name TEXT NOT NULL,
   version INTEGER NOT NULL,
   uuid TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   last_modified_at TEXT NOT NULL,
   fields_json TEXT NOT NULL,
-  PRIMARY KEY (query_name, version)
+  PRIMARY KEY (workspace, query_name, version),
+  FOREIGN KEY (workspace, query_name) REFERENCES saved_queries(workspace, name) ON DELETE CASCADE
 );
 
 -- One row per run, `entry_json` holding the whole entry verbatim (connection_name/request_id/key_name/
@@ -83,15 +106,18 @@ CREATE TABLE IF NOT EXISTS execution_history (
   entry_json TEXT NOT NULL,
   status TEXT,    -- copies of entry_json's own status/key_name, as real columns so GET /api/v1/history can filter on
   key_name TEXT,  -- them the same way on both backends (schema 3; see _upgrade())
-  FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
+  workspace TEXT NOT NULL DEFAULT 'default',  -- the workspace the run belongs to, ad hoc or not (schema 17)
+  FOREIGN KEY (workspace, query_name, version) REFERENCES saved_query_versions(workspace, query_name, version)
+    ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);
 CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
-  name TEXT PRIMARY KEY,
-  hash TEXT NOT NULL UNIQUE,  -- authenticate() (apikeys.py) looks a supplied secret up by this column;
-                              -- UNIQUE gives it the index that keeps that a single lookup at any key count
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,  -- authenticate() (apikeys.py) looks a supplied secret up by this column, across every
+                              -- workspace; UNIQUE gives it the index that keeps that a single lookup at any key count
   active INTEGER NOT NULL DEFAULT 1,
   expires_at TEXT,           -- checked in Python (apikeys.is_expired()), kept a real column anyway to match
                               -- active/created_at as a plausible future "keys expiring soon" filter target
@@ -99,15 +125,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
   details_json TEXT NOT NULL, -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
                                -- allowed_write_ops, created_from_role, last_used_at - everything else
   previous_hash TEXT,          -- the secret before the last rotation (ADR 0009), accepted until previous_expires_at;
-  previous_expires_at TEXT     -- indexed by _upgrade(), which also adds both to an older store
+  previous_expires_at TEXT,    -- indexed by _upgrade(), which also adds both to an older store
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS roles (
-  name TEXT PRIMARY KEY,
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  details_json TEXT NOT NULL  -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
+  details_json TEXT NOT NULL, -- connections, allow_writes, queries, collections, rate_limit, allowed_ips,
                                -- allowed_write_ops, example - a role has no hash/active/expires_at/
                                -- created_from_role/last_used_at, so none of those become columns
+  PRIMARY KEY (workspace, name)
 );
 
 -- Mirrors execution_history's own shape: entry_json holds actor/action/target/changes verbatim, for the
@@ -151,7 +180,8 @@ CREATE TABLE IF NOT EXISTS instances (
 -- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
 CREATE TABLE IF NOT EXISTS administrators (
   name TEXT PRIMARY KEY,
-  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  role TEXT,                   -- owner, admin, developer or auditor (adminroles.py), server-wide; NULL: none - only
+                               -- the roles workspace_members gives them (schema 17)
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   details_json TEXT NOT NULL   -- email, created_by, last_seen_at
@@ -169,21 +199,25 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
 -- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
 CREATE TABLE IF NOT EXISTS destinations (
-  name TEXT PRIMARY KEY,
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  details_json TEXT NOT NULL   -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+  details_json TEXT NOT NULL,  -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+  PRIMARY KEY (workspace, name)
 );
 
 -- Saved exports (exports.py, ADR 0004): a query delivered to a destination, with its incremental watermark and the
 -- lease that keeps two runs of one export from overlapping.
 CREATE TABLE IF NOT EXISTS exports (
-  name TEXT PRIMARY KEY,
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   watermark TEXT,              -- JSON: the largest incremental value delivered so far, or NULL
   lease_until REAL,            -- epoch seconds; a run holds the export until then
-  details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
+  details_json TEXT NOT NULL,  -- query, params, format, destination, path, incremental, mask, skip_empty
+  PRIMARY KEY (workspace, name)
 );
 -- Secrets the server makes for itself, shared by every instance: the key masking's `hash` action is keyed with
 -- (masking.py, ADR 0005), unless QUERYAPIGATE_MASK_KEY sets one.
@@ -196,6 +230,7 @@ CREATE TABLE IF NOT EXISTS server_secrets (
 -- What tables and columns mean (descriptions.py, ADR 0006): one row per connection (table_name and column_name
 -- empty: its notes), table (column_name empty) or column, names lower case.
 CREATE TABLE IF NOT EXISTS descriptions (
+  workspace TEXT NOT NULL DEFAULT 'default',  -- its connection's
   connection_name TEXT NOT NULL,
   table_name TEXT NOT NULL,
   column_name TEXT NOT NULL,
@@ -203,7 +238,7 @@ CREATE TABLE IF NOT EXISTS descriptions (
   source TEXT NOT NULL,        -- written (by a person) or database (imported from its comments)
   updated_at TEXT NOT NULL,
   updated_by TEXT,
-  PRIMARY KEY (connection_name, table_name, column_name)
+  PRIMARY KEY (workspace, connection_name, table_name, column_name)
 );
 
 -- Console sign-in through SSO (sso.py, ADR 0007): a signed-in administrator's session - only its ID's SHA-256 hash -
@@ -237,27 +272,30 @@ CREATE TABLE IF NOT EXISTS write_requests (
   created_at TEXT NOT NULL,
   expires_at REAL NOT NULL,    -- epoch seconds: approve by then, and once approved, run by then
   idempotency_hash TEXT,       -- an insert-only write's idempotency key, hashed with its caller and query
-  details_json TEXT NOT NULL   -- mode, connection, sql, arguments and their hash, the decision, the result
+  details_json TEXT NOT NULL,  -- mode, connection, sql, arguments and their hash, the decision, the result
+  workspace TEXT NOT NULL DEFAULT 'default'  -- its query's (schema 17)
 );
 CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
 CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
 -- Usage quotas (quotas.py, ADR 0011): calls and rows per caller per day or month, added to in batches.
 CREATE TABLE IF NOT EXISTS usage_counters (
+  workspace TEXT NOT NULL DEFAULT 'default',  -- the caller's: a key's name is unique only within it
   caller TEXT NOT NULL,        -- a key's name, or jwt:<subject>
   period TEXT NOT NULL,        -- day:YYYY-MM-DD or month:YYYY-MM, in the server's time zone
   calls INTEGER NOT NULL DEFAULT 0,
   rows INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (caller, period)
+  PRIMARY KEY (workspace, caller, period)
 );
 -- What a configuration file manages (configcode.py, ADR 0014): an object it created, changed or named. Pruning only
 -- ever deletes these - never what was made in the Console or the API and no file has named.
 CREATE TABLE IF NOT EXISTS config_managed (
+  workspace TEXT NOT NULL DEFAULT 'default',
   kind TEXT NOT NULL,          -- connections, destinations, queries, roles, api_keys, descriptions, exports
   name TEXT NOT NULL,
   applied_at TEXT NOT NULL,
   file_hash TEXT NOT NULL,     -- SHA-256 of the file that last applied it
-  PRIMARY KEY (kind, name)
+  PRIMARY KEY (workspace, kind, name)
 );
 -- Every configuration file applied, by its hash: QUERYAPIGATE_CONFIG_FILE is applied at startup once per file, by
 -- whichever instance starts first.
@@ -278,7 +316,8 @@ CREATE TABLE IF NOT EXISTS events (
   connection_name TEXT,
   query_name TEXT,
   status TEXT,
-  payload_json TEXT NOT NULL   -- the event's data: exactly as sent
+  payload_json TEXT NOT NULL,  -- the event's data: exactly as sent
+  workspace TEXT NOT NULL DEFAULT 'default'  -- the run's (schema 17)
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
@@ -291,31 +330,51 @@ _SQLITE_HISTORY_V5 = _SQLITE_HISTORY_V5[:_SQLITE_HISTORY_V5.index(');') + 2]
 _PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
-CREATE TABLE IF NOT EXISTS connections (
+CREATE TABLE IF NOT EXISTS workspaces (
   name TEXT COLLATE "C" PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspace_members (
+  workspace TEXT COLLATE "C" NOT NULL REFERENCES workspaces(name) ON DELETE CASCADE,
+  admin_name TEXT COLLATE "C" NOT NULL,
+  role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  PRIMARY KEY (workspace, admin_name)
+);
+
+CREATE TABLE IF NOT EXISTS connections (
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   db TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  details_json TEXT NOT NULL
+  details_json TEXT NOT NULL,
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS saved_queries (
-  name TEXT COLLATE "C" PRIMARY KEY,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   collection TEXT COLLATE "C",
   example INTEGER NOT NULL DEFAULT 0,
-  published_version INTEGER
+  published_version INTEGER,
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS saved_query_versions (
-  query_name TEXT COLLATE "C" NOT NULL REFERENCES saved_queries(name) ON DELETE CASCADE,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  query_name TEXT COLLATE "C" NOT NULL,
   version INTEGER NOT NULL,
   uuid TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   last_modified_at TEXT NOT NULL,
   fields_json TEXT NOT NULL,
-  PRIMARY KEY (query_name, version)
+  PRIMARY KEY (workspace, query_name, version),
+  FOREIGN KEY (workspace, query_name) REFERENCES saved_queries(workspace, name) ON DELETE CASCADE
 );
 
 -- `rowid` stands in for SQLite's implicit column of the same name: store.py breaks executed_at ties and trims
@@ -328,26 +387,32 @@ CREATE TABLE IF NOT EXISTS execution_history (
   entry_json TEXT NOT NULL,
   status TEXT,
   key_name TEXT,
-  FOREIGN KEY (query_name, version) REFERENCES saved_query_versions(query_name, version) ON DELETE CASCADE
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  FOREIGN KEY (workspace, query_name, version) REFERENCES saved_query_versions(workspace, query_name, version)
+    ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_execution_history_qv ON execution_history(query_name, version, executed_at);
 CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
-  name TEXT COLLATE "C" PRIMARY KEY,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   hash TEXT NOT NULL UNIQUE,
   active INTEGER NOT NULL DEFAULT 1,
   expires_at TEXT,
   created_at TEXT NOT NULL,
   details_json TEXT NOT NULL,
   previous_hash TEXT,
-  previous_expires_at TEXT
+  previous_expires_at TEXT,
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS roles (
-  name TEXT COLLATE "C" PRIMARY KEY,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   created_at TEXT NOT NULL,
-  details_json TEXT NOT NULL
+  details_json TEXT NOT NULL,
+  PRIMARY KEY (workspace, name)
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -385,7 +450,7 @@ CREATE TABLE IF NOT EXISTS instances (
 -- Named administrators (admins.py, ADR 0003): the people and pipelines that manage this server, each with a role.
 CREATE TABLE IF NOT EXISTS administrators (
   name TEXT COLLATE "C" PRIMARY KEY,
-  role TEXT NOT NULL,          -- owner, admin, developer or auditor (adminroles.py)
+  role TEXT,                   -- owner, admin, developer or auditor (adminroles.py), server-wide; NULL: none
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   details_json TEXT NOT NULL   -- email, created_by, last_seen_at
@@ -403,21 +468,25 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
 -- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
 CREATE TABLE IF NOT EXISTS destinations (
-  name TEXT COLLATE "C" PRIMARY KEY,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  details_json TEXT NOT NULL   -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+  details_json TEXT NOT NULL,  -- url, storage, region, endpoint, url_style, use_ssl, account_id, user, password
+  PRIMARY KEY (workspace, name)
 );
 
 -- Saved exports (exports.py, ADR 0004): a query delivered to a destination, with its incremental watermark and the
 -- lease that keeps two runs of one export from overlapping.
 CREATE TABLE IF NOT EXISTS exports (
-  name TEXT COLLATE "C" PRIMARY KEY,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   watermark TEXT,              -- JSON: the largest incremental value delivered so far, or NULL
   lease_until DOUBLE PRECISION,            -- epoch seconds; a run holds the export until then
-  details_json TEXT NOT NULL   -- query, params, format, destination, path, incremental, mask, skip_empty
+  details_json TEXT NOT NULL,  -- query, params, format, destination, path, incremental, mask, skip_empty
+  PRIMARY KEY (workspace, name)
 );
 -- Secrets the server makes for itself, shared by every instance: the key masking's `hash` action is keyed with
 -- (masking.py, ADR 0005), unless QUERYAPIGATE_MASK_KEY sets one.
@@ -430,6 +499,7 @@ CREATE TABLE IF NOT EXISTS server_secrets (
 -- What tables and columns mean (descriptions.py, ADR 0006): one row per connection (table_name and column_name
 -- empty: its notes), table (column_name empty) or column, names lower case.
 CREATE TABLE IF NOT EXISTS descriptions (
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
   connection_name TEXT COLLATE "C" NOT NULL,
   table_name TEXT COLLATE "C" NOT NULL,
   column_name TEXT COLLATE "C" NOT NULL,
@@ -437,7 +507,7 @@ CREATE TABLE IF NOT EXISTS descriptions (
   source TEXT NOT NULL,        -- written (by a person) or database (imported from its comments)
   updated_at TEXT NOT NULL,
   updated_by TEXT,
-  PRIMARY KEY (connection_name, table_name, column_name)
+  PRIMARY KEY (workspace, connection_name, table_name, column_name)
 );
 
 -- Console sign-in through SSO (sso.py, ADR 0007): a signed-in administrator's session - only its ID's SHA-256 hash -
@@ -471,24 +541,27 @@ CREATE TABLE IF NOT EXISTS write_requests (
   created_at TEXT NOT NULL,
   expires_at DOUBLE PRECISION NOT NULL,    -- epoch seconds: approve by then, and once approved, run by then
   idempotency_hash TEXT,       -- an insert-only write's idempotency key, hashed with its caller and query
-  details_json TEXT NOT NULL   -- mode, connection, sql, arguments and their hash, the decision, the result
+  details_json TEXT NOT NULL,  -- mode, connection, sql, arguments and their hash, the decision, the result
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_write_requests_status ON write_requests(status);
 CREATE INDEX IF NOT EXISTS idx_write_requests_idempotency ON write_requests(idempotency_hash);
 CREATE TABLE IF NOT EXISTS usage_counters (
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
   caller TEXT COLLATE "C" NOT NULL,
   period TEXT COLLATE "C" NOT NULL,
   calls BIGINT NOT NULL DEFAULT 0,
   rows BIGINT NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (caller, period)
+  PRIMARY KEY (workspace, caller, period)
 );
 CREATE TABLE IF NOT EXISTS config_managed (
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
   kind TEXT COLLATE "C" NOT NULL,
   name TEXT COLLATE "C" NOT NULL,
   applied_at TEXT NOT NULL,
   file_hash TEXT NOT NULL,
-  PRIMARY KEY (kind, name)
+  PRIMARY KEY (workspace, kind, name)
 );
 CREATE TABLE IF NOT EXISTS config_applied (
   file_hash TEXT COLLATE "C" PRIMARY KEY,
@@ -504,7 +577,8 @@ CREATE TABLE IF NOT EXISTS events (
   connection_name TEXT COLLATE "C",
   query_name TEXT COLLATE "C",
   status TEXT,
-  payload_json TEXT NOT NULL
+  payload_json TEXT NOT NULL,
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
 """
@@ -663,12 +737,21 @@ def init_schema():
             check_shape(conn, postgres=True)
             _record_schema_version(conn)
         return
-    connection().executescript(_SCHEMA)
-    with transaction() as conn:  # BEGIN IMMEDIATE: another process starting at once can't upgrade alongside
-        _refuse_newer(conn)
-        _upgrade(conn, postgres=False)
-        check_shape(conn, postgres=False)
-        _record_schema_version(conn)
+    conn = connection()
+    # Foreign keys off while the store is created or upgraded: schema 17 rebuilds tables other tables refer to, and a
+    # DROP TABLE with them on would cascade - deleting every saved query's versions and runs. They're checked whole
+    # before the upgrade commits, and on again for everything after it. (A no-op inside a transaction, so it's here.)
+    conn.execute('PRAGMA foreign_keys=OFF')
+    try:
+        conn.executescript(_SCHEMA)
+        with transaction() as conn:  # BEGIN IMMEDIATE: another process starting at once can't upgrade alongside
+            _refuse_newer(conn)
+            _upgrade(conn, postgres=False)
+            check_shape(conn, postgres=False)
+            _check_foreign_keys(conn)
+            _record_schema_version(conn)
+    finally:
+        connection().execute('PRAGMA foreign_keys=ON')
 
 
 def backup_sqlite(destination):
@@ -735,7 +818,13 @@ def _upgrade(conn, postgres):
     16: events (ADR 0020) - a new table, made by CREATE TABLE IF NOT EXISTS. Until now a run's history row id was its
         event id, so the runs still in history from the retention window are copied in under those same ids, and
         the id sequence is seeded above every history row id: a client resuming with an id from before the upgrade
-        gets what it missed, nothing twice (_start_event_log()). Additive: a 0.32 process ignores the table."""
+        gets what it missed, nothing twice (_start_event_log()). Additive: a 0.32 process ignores the table.
+    17: workspaces (ADR 0023): the workspaces and workspace_members tables, and a `workspace` column on every table a
+        workspace owns - everything there is goes into `default`. Each owned name becomes unique per workspace, so
+        those tables' primary keys (and the foreign keys naming them) gain the column: SQLite rebuilds each table,
+        keeping its rowids; PostgreSQL alters it in place. **Not additive** - the one exception, before 1.x's rule:
+        a 0.37 process can't write to an upgraded store (its upserts name the old keys), so every instance is
+        stopped before the first 0.38 one starts (_add_workspaces())."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -780,7 +869,131 @@ def _upgrade(conn, postgres):
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_qv '
                          'ON execution_history(query_name, version, executed_at)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_time ON execution_history(executed_at)')
+    _add_workspaces(conn, postgres)
     _start_event_log(conn, postgres)
+
+
+# Schema 17 (ADR 0023): the tables a workspace owns, each with the primary key it now has - (workspace, ...) - and the
+# foreign keys between them. Run history keeps its rowid key; its foreign key gains the workspace.
+_WORKSPACE_KEYS = {
+    'connections': ('workspace', 'name'),
+    'saved_queries': ('workspace', 'name'),
+    'saved_query_versions': ('workspace', 'query_name', 'version'),
+    'execution_history': None,
+    'api_keys': ('workspace', 'name'),
+    'roles': ('workspace', 'name'),
+    'destinations': ('workspace', 'name'),
+    'exports': ('workspace', 'name'),
+    'descriptions': ('workspace', 'connection_name', 'table_name', 'column_name'),
+    'usage_counters': ('workspace', 'caller', 'period'),
+    'config_managed': ('workspace', 'kind', 'name'),
+}
+_WORKSPACE_FOREIGN_KEYS = (
+    ('saved_query_versions', '(workspace, query_name)', 'saved_queries(workspace, name)'),
+    ('execution_history', '(workspace, query_name, version)', 'saved_query_versions(workspace, query_name, version)'),
+)
+# Tagged with their workspace, their keys unchanged: an id is unique across the server.
+_WORKSPACE_TAGGED = ('write_requests', 'events')
+DEFAULT_WORKSPACE = 'default'
+
+
+def _add_workspaces(conn, postgres):
+    """Schema 17: each owned table gets its `workspace` column - `default` for every row it has - and the keys that
+    go with it; the tagged ones get the column alone. Each table is checked for itself, so this is safe to re-run."""
+    # A table missing more than its workspace isn't one this upgrade knows: left as it is, for check_shape() to refuse
+    # by name - a rebuild would otherwise make the missing column up, empty.
+    expected = expected_columns()
+    rekey = [table for table in _WORKSPACE_KEYS
+             if expected[table] - _columns(conn, table, postgres) == {'workspace'}]
+    if rekey:
+        if postgres:
+            _pg_add_workspaces(conn, rekey)
+        else:
+            for table in rekey:
+                _sqlite_rebuild(conn, table)
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_api_keys_previous_hash ON api_keys(previous_hash)')
+    if _role_required(conn, postgres):  # an administrator may have no server-wide role, only workspace ones
+        if postgres:
+            conn.execute('ALTER TABLE administrators ALTER COLUMN role DROP NOT NULL')
+        else:
+            _sqlite_rebuild(conn, 'administrators')
+    collation = ' COLLATE "C"' if postgres else ''
+    for table in _WORKSPACE_TAGGED:
+        if 'workspace' not in _columns(conn, table, postgres):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN workspace TEXT{collation} NOT NULL DEFAULT 'default'")
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_execution_history_ws ON execution_history(workspace, executed_at)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_events_ws ON events(workspace, id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_workspace_members_admin ON workspace_members(admin_name)')
+    conn.execute('INSERT OR IGNORE INTO workspaces (name, created_at, details_json) VALUES (?, ?, ?)',
+                 (DEFAULT_WORKSPACE, _now(), json.dumps({'description': 'Everything this server had before workspaces, '
+                                                                        'and what is made without naming one'})))
+
+
+def _role_required(conn, postgres):
+    """Whether administrators.role is still NOT NULL, as before schema 17."""
+    if postgres:
+        row = conn.execute("SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() "
+                           "AND table_name = 'administrators' AND column_name = 'role'").fetchone()
+        return row is not None and row[0] == 'NO'
+    return any(row[1] == 'role' and row[3] for row in conn.execute('PRAGMA table_info(administrators)').fetchall())
+
+
+def _table_ddl(table, schema=None):
+    """One table's CREATE TABLE statement, as this version's schema defines it."""
+    schema = _SCHEMA if schema is None else schema
+    start = schema.index(f'CREATE TABLE IF NOT EXISTS {table} (')
+    return schema[start:schema.index('\n);', start) + 3]
+
+
+def _sqlite_rebuild(conn, table):
+    """Rebuild `table` as this version's schema has it, every row with its rowid - SQLite can't change a primary key
+    or a NOT NULL in place. A column the old table hasn't takes its default: `workspace` is `default` for every row.
+    Foreign keys are off meanwhile (init_schema()), so dropping the old table cascades nothing; its indexes go with
+    it and are made again."""
+    new = f'{table}_v17'
+    conn.execute(_table_ddl(table).replace(f'CREATE TABLE IF NOT EXISTS {table} (', f'CREATE TABLE {new} (', 1))
+    wanted = {row[1] for row in conn.execute(f'PRAGMA table_info({new})').fetchall()}
+    columns = [row[1] for row in conn.execute(f'PRAGMA table_info({table})').fetchall() if row[1] in wanted]
+    listed = ', '.join(columns)
+    conn.execute(f'INSERT INTO {new} (rowid, {listed}) SELECT rowid, {listed} FROM {table}')
+    conn.execute(f'DROP TABLE {table}')
+    conn.execute(f'ALTER TABLE {new} RENAME TO {table}')
+    for statement in re.findall(rf'CREATE (?:UNIQUE )?INDEX IF NOT EXISTS \w+ ON {table}\([^)]*\);', _SCHEMA):
+        conn.execute(statement)
+
+
+def _pg_constraints(conn, table, kind):
+    return [row[0] for row in conn.execute(
+        'SELECT constraint_name FROM information_schema.table_constraints WHERE table_schema = current_schema() '
+        'AND table_name = ? AND constraint_type = ?', (table, kind)).fetchall()]
+
+
+def _pg_add_workspaces(conn, tables):
+    """PostgreSQL alters the tables in place, in one transaction: the column (every row `default`), then the foreign
+    keys off, the new primary keys, and the foreign keys back on the new keys."""
+    for table in tables:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN workspace TEXT COLLATE \"C\" NOT NULL DEFAULT 'default'")
+    for table in _WORKSPACE_KEYS:
+        for name in _pg_constraints(conn, table, 'FOREIGN KEY'):
+            conn.execute(f'ALTER TABLE {table} DROP CONSTRAINT {name}')
+    for table in tables:
+        key = _WORKSPACE_KEYS[table]
+        if key is None:
+            continue
+        for name in _pg_constraints(conn, table, 'PRIMARY KEY'):
+            conn.execute(f'ALTER TABLE {table} DROP CONSTRAINT {name}')
+        conn.execute(f'ALTER TABLE {table} ADD PRIMARY KEY ({", ".join(key)})')
+    for table, columns, target in _WORKSPACE_FOREIGN_KEYS:
+        conn.execute(f'ALTER TABLE {table} ADD FOREIGN KEY {columns} REFERENCES {target} ON DELETE CASCADE')
+
+
+def _check_foreign_keys(conn):
+    """Refuse to commit an upgrade that left a row pointing at nothing - SQLite checks nothing while they're off."""
+    broken = conn.execute('PRAGMA foreign_key_check').fetchall()
+    if broken:
+        tables = sorted({row[0] for row in broken})
+        raise ValueError(f'upgrading {describe()} would leave rows in {", ".join(tables)} that refer to nothing, so it '
+                         'was not upgraded. Restore it from a backup, or report this with the store attached.')
 
 
 def _events_sequence(conn, postgres):
@@ -1001,32 +1214,35 @@ Error = _error_types()
 # copies - execution_history's and audit_log's own row ids are left for Postgres to assign, in source order.
 # admin_sessions and sso_logins aren't copied: they last hours at most, and signing in again after a move is right.
 _MIGRATED_TABLES = (
-    ('connections', ('name', 'db', 'active', 'created_at', 'updated_at', 'details_json'), 'name'),
-    ('saved_queries', ('name', 'collection', 'example', 'published_version'), 'name'),
-    ('saved_query_versions', ('query_name', 'version', 'uuid', 'status', 'created_at', 'last_modified_at',
+    ('workspaces', ('name', 'created_at', 'details_json'), 'name'),
+    ('workspace_members', ('workspace', 'admin_name', 'role', 'created_at', 'details_json'), 'workspace, admin_name'),
+    ('connections', ('workspace', 'name', 'db', 'active', 'created_at', 'updated_at', 'details_json'), 'name'),
+    ('saved_queries', ('workspace', 'name', 'collection', 'example', 'published_version'), 'name'),
+    ('saved_query_versions', ('workspace', 'query_name', 'version', 'uuid', 'status', 'created_at', 'last_modified_at',
                               'fields_json'), 'query_name, version'),
-    ('execution_history', ('query_name', 'version', 'executed_at', 'entry_json', 'status', 'key_name'), 'rowid'),
-    ('api_keys', ('name', 'hash', 'active', 'expires_at', 'created_at', 'details_json', 'previous_hash',
+    ('execution_history', ('workspace', 'query_name', 'version', 'executed_at', 'entry_json', 'status',
+                           'key_name'), 'rowid'),
+    ('api_keys', ('workspace', 'name', 'hash', 'active', 'expires_at', 'created_at', 'details_json', 'previous_hash',
                   'previous_expires_at'), 'name'),
-    ('roles', ('name', 'created_at', 'details_json'), 'name'),
+    ('roles', ('workspace', 'name', 'created_at', 'details_json'), 'name'),
     ('audit_log', ('timestamp', 'entry_json', 'seq', 'prev_hash', 'hash'), 'id'),
     ('audit_chain', ('name', 'seq', 'hash'), 'name'),
     ('audit_delivery', ('output', 'last_seq', 'lease_until', 'details_json'), 'output'),
     ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),
     ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
-    ('destinations', ('name', 'created_at', 'updated_at', 'details_json'), 'name'),
-    ('exports', ('name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
+    ('destinations', ('workspace', 'name', 'created_at', 'updated_at', 'details_json'), 'name'),
+    ('exports', ('workspace', 'name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
     ('server_secrets', ('name', 'value', 'created_at'), 'name'),
-    ('descriptions', ('connection_name', 'table_name', 'column_name', 'description', 'source', 'updated_at',
-                      'updated_by'), 'connection_name, table_name, column_name'),
-    ('write_requests', ('id', 'query_name', 'version', 'caller', 'status', 'created_at', 'expires_at',
+    ('descriptions', ('workspace', 'connection_name', 'table_name', 'column_name', 'description', 'source',
+                      'updated_at', 'updated_by'), 'workspace, connection_name, table_name, column_name'),
+    ('write_requests', ('workspace', 'id', 'query_name', 'version', 'caller', 'status', 'created_at', 'expires_at',
                         'idempotency_hash', 'details_json'), 'created_at, id'),
-    ('usage_counters', ('caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
-    ('config_managed', ('kind', 'name', 'applied_at', 'file_hash'), 'kind, name'),
+    ('usage_counters', ('workspace', 'caller', 'period', 'calls', 'rows', 'updated_at'), 'caller, period'),
+    ('config_managed', ('workspace', 'kind', 'name', 'applied_at', 'file_hash'), 'kind, name'),
     ('config_applied', ('file_hash', 'applied_at', 'actor'), 'file_hash'),
     # With their ids: an event id is what a client resumes from (ADR 0020 §4)
-    ('events', ('id', 'type', 'source', 'occurred_at', 'key_name', 'connection_name', 'query_name', 'status',
-                'payload_json'), 'id'),
+    ('events', ('workspace', 'id', 'type', 'source', 'occurred_at', 'key_name', 'connection_name', 'query_name',
+                'status', 'payload_json'), 'id'),
 )
 
 
@@ -1054,6 +1270,9 @@ def migrate_sqlite_to_postgres(sqlite_path):
         init_schema()
         copied = {}
         with transaction() as conn:
+            # init_schema() gives every store its `default` workspace: that row alone isn't data
+            conn.execute('DELETE FROM workspaces WHERE name = ? AND NOT EXISTS (SELECT 1 FROM workspace_members)',
+                         (DEFAULT_WORKSPACE,))
             occupied = [table for table, _, _ in _MIGRATED_TABLES
                         if conn.execute(f'SELECT 1 FROM {table} LIMIT 1').fetchone() is not None]
             if occupied:

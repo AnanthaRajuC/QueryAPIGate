@@ -458,7 +458,7 @@ class LimitTests(EventServerTestCase):
             writer = mock.Mock()
             client = events._Client(None, writer)
             server = events.EventServer('127.0.0.1', 0)
-            server.by_key[None] = {client}
+            server.by_key[('default', None)] = {client}
             with mock.patch.object(events, '_QUEUE_SIZE', 3):
                 client.queue = asyncio.Queue(maxsize=3)
                 for rowid in range(1, 6):

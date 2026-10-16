@@ -221,6 +221,38 @@ await context.addInitScript(() => {
 await go('/', '#home-health .home-activity-row');
 await shot('home-dark', 900);
 
+// Workspaces (ADR 0023) - last, since a second workspace puts the switcher in every screen's sidebar: one for the
+// payments team, its lead an owner there and nothing on the server, a developer beside her.
+await context.addInitScript(() => {
+  try {
+    localStorage.setItem('queryapigate-ui-prefs', JSON.stringify({ theme: 'Light' }));
+  } catch {
+    // storage unavailable
+  }
+});
+await call('POST', '/api/v1/workspaces', { name: 'payments', description: 'The payments team' });
+await call('POST', '/api/v1/workspaces', { name: 'catalogue', description: 'Product catalogue and search' });
+for (const [name, role] of [
+  ['bea', 'owner'],
+  ['dmitri', 'developer'],
+]) {
+  await call('POST', '/api/v1/administrators', { name, role: null, email: `${name}@corp.example` });
+  await call('PUT', `/api/v1/workspaces/payments/members/${name}`, { role });
+}
+await call('POST', '/w/payments/api/v1/connections', {
+  name: 'orders-db',
+  db: 'postgres',
+  host: 'payments-db.internal',
+  port: 5432,
+  database: 'orders',
+  user: 'svc_payments',
+  active: true,
+});
+await go('/workspaces', '#workspaces-table tr[data-name="payments"]');
+await page.locator('#workspaces-table tr[data-name="payments"]').click();
+await page.waitForSelector('#workspace-members tr[data-name="bea"]');
+await shot('workspaces', 820);
+
 // Signed out: the sign-in page, in a tab with no key - the operating system's light and dark.
 for (const [name, colorScheme] of [
   ['sign-in', 'light'],

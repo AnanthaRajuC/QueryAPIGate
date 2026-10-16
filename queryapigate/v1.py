@@ -28,16 +28,19 @@ from . import (
     history,
     instances,
     schema,
+    scope,
     sqlflow,
     store,
     usage,
 )
 from .app import caller_key_name, get_int, get_json_body
+from .db import DEFAULT_WORKSPACE
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
 from .services import descriptions as description_service
 from .services import destinations as destination_service
 from .services import exports as export_service
+from .services import workspaces as workspace_service
 
 bp = Blueprint('v1', __name__, url_prefix='/api/v1')
 
@@ -79,8 +82,10 @@ def me():
     """Who the caller is: name, role, what that role may do, and how they authenticated."""
     permission = g.permission
     return jsonify({'name': permission.name, 'role': permission.role, 'via': permission.via,
-                    'capabilities': adminroles.capabilities(permission.role),
-                    'data_access': permission.role in adminroles.DATA_ROLES}), 200
+                    'capabilities': adminroles.capabilities(permission.role, permission.server_wide),
+                    'data_access': permission.role in adminroles.DATA_ROLES,
+                    'workspace': permission.workspace, 'server_wide': permission.server_wide,
+                    'workspaces': permission.memberships or {}}), 200
 
 
 # --------------------------------------------------------------------------------------
@@ -635,6 +640,62 @@ def delete_administrator(name):
     return '', 204
 
 
+# --------------------------------------------------------------------------------------
+# Workspaces and their members (ADR 0023)
+# --------------------------------------------------------------------------------------
+
+def _workspace_response(workspace, status=200):
+    response = jsonify(workspace)
+    response.headers['ETag'] = access.etag({k: workspace[k] for k in ('name', 'description')})
+    return response, status
+
+
+@bp.route('/workspaces', methods=['GET'])
+def list_workspaces():
+    """Every workspace for a server-wide owner, admin or auditor; the ones they belong to for anyone else."""
+    return jsonify({'items': workspace_service.list_visible(g.permission)}), 200
+
+
+@bp.route('/workspaces', methods=['POST'])
+def create_workspace():
+    return _workspace_response(workspace_service.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/workspaces/<name>', methods=['GET'])
+def get_workspace(name):
+    return _workspace_response(workspace_service.load(g.permission, name))
+
+
+@bp.route('/workspaces/<name>', methods=['PATCH'])
+def update_workspace(name):
+    return _workspace_response(workspace_service.update(name, get_json_body(), caller_key_name()))
+
+
+@bp.route('/workspaces/<name>', methods=['DELETE'])
+def delete_workspace(name):
+    """Only an empty one - what it owns is never deleted with it - and never `default`."""
+    workspace_service.delete(name, caller_key_name())
+    return '', 204
+
+
+@bp.route('/workspaces/<name>/members', methods=['GET'])
+def list_workspace_members(name):
+    return jsonify({'items': workspace_service.list_members(g.permission, name)}), 200
+
+
+@bp.route('/workspaces/<name>/members/<admin_name>', methods=['PUT'])
+def set_workspace_member(name, admin_name):
+    """Give an administrator a role in the workspace, or change it."""
+    return jsonify(workspace_service.set_member(g.permission, name, admin_name, get_json_body(),
+                                                caller_key_name())), 200
+
+
+@bp.route('/workspaces/<name>/members/<admin_name>', methods=['DELETE'])
+def remove_workspace_member(name, admin_name):
+    workspace_service.remove_member(g.permission, name, admin_name, caller_key_name())
+    return '', 204
+
+
 @bp.route('/administrators/<name>/tokens', methods=['GET'])
 def list_admin_tokens(name):
     administrators.require_self_or(g.permission, name, 'admins.read')
@@ -664,7 +725,7 @@ def revoke_admin_token(name, token_id):
 @bp.route('/alerts', methods=['GET'])
 def list_alerts():
     """What needs an admin's attention now (alerts.py), worked out afresh each time."""
-    return jsonify({'items': alerts.collect(), 'checked_at': store.now()}), 200
+    return jsonify({'items': alerts.collect(server_wide=g.permission.server_wide), 'checked_at': store.now()}), 200
 
 
 @bp.route('/write-requests', methods=['GET'])
@@ -708,6 +769,7 @@ def agent_usage():
 @bp.route('/instances', methods=['GET'])
 def list_instances():
     """The processes using this store right now (instances.py) - and what looks wrong about them."""
+    _require_server_wide("see the server's instances")
     return jsonify({'items': instances.alive(),
                     'problems': [{'kind': kind, 'message': message} for kind, message in instances.problems()]}), 200
 
@@ -737,13 +799,19 @@ def forget_history():
 def list_audit():
     """Administrative changes, newest first. `q` matches the time, actor or target."""
     args = request.args
+    # A server-wide role reads the whole log (or one workspace's, ?workspace=); a member, their workspace's entries.
+    if g.permission.server_wide:
+        workspace = args.get('workspace') or audit.ALL
+    else:
+        workspace = g.permission.workspace
     return jsonify(audit.listing(action=args.get('action'), actor=args.get('actor'), target=args.get('target'),
-                                 text=args.get('q'))), 200
+                                 text=args.get('q'), workspace=workspace)), 200
 
 
 @bp.route('/audit/delivery', methods=['GET'])
 def audit_delivery():
     """Each SIEM output's progress: delivered up to which entry, how far behind, its last error (ADR 0012)."""
+    _require_server_wide('see where the audit log is delivered')
     from . import auditstream
     return jsonify({'items': auditstream.status()}), 200
 
@@ -751,6 +819,7 @@ def audit_delivery():
 @bp.route('/audit/verify', methods=['GET'])
 def verify_audit():
     """Walk the audit log's hash chain (ADR 0012) from its anchor: intact, or the first entry that isn't."""
+    _require_server_wide("verify the whole server's audit log")
     from . import auditchain, db
     return jsonify(auditchain.verify(db.connection())), 200
 
@@ -791,12 +860,24 @@ def _config_document():
     """The configuration file a request carries: as JSON, or as YAML with a YAML Content-Type (ADR 0014)."""
     from . import configcode
     if request.mimetype in ('application/yaml', 'application/x-yaml', 'text/yaml'):
-        return configcode.load(request.get_data(as_text=True))
+        return _of_this_workspace(configcode.load(request.get_data(as_text=True)))
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         raise ApiError('The body is a configuration file: a JSON object, or YAML sent as application/yaml',
                        code='invalid_config')
-    return configcode.load(json.dumps(data))
+    return _of_this_workspace(configcode.load(json.dumps(data)))
+
+
+def _of_this_workspace(doc):
+    """A file is applied to the workspace it describes, and this call acts in one: they must be the same, so a file is
+    never applied anywhere it doesn't say (ADR 0023 §6) - and a member applies only their own workspace's."""
+    from . import configcode
+    described = configcode.workspace_of(doc)
+    if described != scope.current():
+        prefix = '' if described == DEFAULT_WORKSPACE else f'/w/{described}'
+        raise ApiError(f"This file describes the workspace '{described}', and this call is for "
+                       f"'{scope.current()}' - send it to {prefix}{request.path}", code='invalid_config')
+    return doc
 
 
 def _flag(name):
@@ -850,25 +931,49 @@ def _cache():
     return current_app.extensions['queryapigate_cache']
 
 
+def _require_server_wide(what):
+    """For what is the server's, not one workspace's (ADR 0023): a server-wide role only."""
+    if not g.permission.server_wide:
+        raise ApiError(f'Only a server-wide role may {what} - a role in a workspace administers that workspace', 403,
+                       code='role_forbidden', capability='observe', role=g.permission.role)
+
+
+def _workspace_entries():
+    """The cache's entries of the workspace this call acts in (ADR 0023) - one cache serves every workspace, and an
+    entry's body is a workspace's data. An entry from before workspaces, with none in its meta, is `default`'s."""
+    workspace = scope.current()
+    return [e for e in _cache().list_entries()
+            if ((e.get('meta') or {}).get('workspace') or DEFAULT_WORKSPACE) == workspace]
+
+
+def _require_entry(key):
+    if key not in {e['key'] for e in _workspace_entries()}:
+        raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404,
+                       code='cache_entry_not_found')
+
+
 @bp.route('/cache/entries', methods=['GET'])
 def list_cache_entries():
     """What is cached right now (in-process or Redis), soonest to expire first - each entry's query, version,
     connection, format, content type, size and time left; never the body."""
-    entries = _cache().list_entries()
+    entries = _workspace_entries()
     entries.sort(key=lambda e: e['ttl_remaining_s'])
     return jsonify({'items': entries}), 200
 
 
 @bp.route('/cache/entries', methods=['DELETE'])
 def clear_cache():
-    """Evict everything: the next call to each query runs it for real. Not audited - housekeeping, not a change."""
-    _cache().clear()
+    """Evict everything this workspace has cached: the next call to each query runs it for real. Not audited -
+    housekeeping, not a change."""
+    for entry in _workspace_entries():
+        _cache().delete(entry['key'])
     return '', 204
 
 
 @bp.route('/cache/entries/<key>', methods=['GET'])
 def get_cache_entry(key):
     """The cached body itself, with its real content type - what a caller receives on a hit."""
+    _require_entry(key)
     hit = _cache().get_body(key)
     if hit is None:
         raise ApiError('Cache entry not found (missing, expired, or already evicted)', 404,
@@ -879,8 +984,9 @@ def get_cache_entry(key):
 
 @bp.route('/cache/entries/<key>', methods=['DELETE'])
 def delete_cache_entry(key):
-    """Evict one entry early."""
-    _cache().delete(key)
+    """Evict one entry early - a no-op for one that's gone, or another workspace's."""
+    if key in {e['key'] for e in _workspace_entries()}:
+        _cache().delete(key)
     return '', 204
 
 

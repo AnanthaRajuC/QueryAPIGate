@@ -30,6 +30,15 @@ SQL editor, the demo video and the architecture.
 </tr>
 </table>
 
+<p align="center">
+  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png">
+    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png"
+         alt="The Workspaces screen (experimental): three workspaces - catalogue, default (this tab's) and payments - with their descriptions, member counts and Work here, edit and remove actions; below, the members of payments, bea as owner and dmitri as developer, each role changeable, and a form to add a member. The sidebar's workspace switcher sits under the wordmark" width="820">
+  </a>
+  <br>
+  <sub>Workspaces (experimental): teams on one server, each running its own connections, queries and keys - with the switcher under the wordmark, and each workspace's members.</sub>
+</p>
+
 <table>
 <tr>
 <td width="25%">

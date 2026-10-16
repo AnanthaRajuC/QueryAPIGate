@@ -113,6 +113,19 @@ const ME_QUERY = {
   staleTime: 60_000,
 };
 
+export type Workspace = Schemas['Workspace'];
+
+/** The workspaces this caller sees (ADR 0023): every one for a server-wide owner, admin or auditor; their own
+ * otherwise. */
+export function useWorkspaces(enabled = true) {
+  return useQuery({
+    queryKey: ['workspaces'],
+    queryFn: async () => unwrap(await api.GET('/api/v1/workspaces')).items,
+    enabled,
+    retry: false,
+  });
+}
+
 export function useMe() {
   return useQuery(ME_QUERY);
 }

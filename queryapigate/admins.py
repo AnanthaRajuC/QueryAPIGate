@@ -18,8 +18,9 @@ import re
 import secrets
 import time
 
-from . import apikeys, config, db, store
+from . import apikeys, config, db, store, workspaces
 from .adminroles import DATA_ROLES, ROLE_NAMES
+from .db import DEFAULT_WORKSPACE
 from .errors import ApiError
 
 TOKEN_PREFIX = 'qagadm_'
@@ -87,8 +88,10 @@ def get_admin(name):
 
 
 def _validate_role(role):
-    if role not in ROLE_NAMES:
-        raise ApiError(f"role must be one of {', '.join(ROLE_NAMES)}", code='invalid_body')
+    """A server-wide role, or None: no role here - only the ones their workspace memberships give them."""
+    if role is not None and role not in ROLE_NAMES:
+        raise ApiError(f"role must be one of {', '.join(ROLE_NAMES)}, or null (only roles in workspaces)",
+                       code='invalid_body')
     return role
 
 
@@ -135,12 +138,12 @@ def _refuse_ownerless(conn):
                        'administrators any more. Make someone else an owner first.', 409, code='last_owner')
 
 
-def update_admin(name, role=None, email=_UNSET, active=None):
+def update_admin(name, role=_UNSET, email=_UNSET, active=None):
     with db.transaction() as conn:
         admin = _get(conn, name)
         if admin is None:
             raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
-        if role is not None and _validate_role(role) != admin['role']:
+        if role is not _UNSET and _validate_role(role) != admin['role']:
             if linked(admin):
                 raise ApiError(f"{name} signs in through SSO: their role comes from their groups at the identity "
                                'provider - change it there', 409, code='sso_managed')
@@ -159,11 +162,13 @@ def update_admin(name, role=None, email=_UNSET, active=None):
 
 
 def delete_admin(name):
-    """Remove an administrator and every token it holds. Its name stays in the audit log as written."""
+    """Remove an administrator, every token it holds and its workspace memberships. Its name stays in the audit log
+    as written."""
     with db.transaction() as conn:
         if _get(conn, name) is None:
             raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
         conn.execute('DELETE FROM admin_tokens WHERE admin_name = ?', (name,))
+        conn.execute('DELETE FROM workspace_members WHERE admin_name = ?', (name,))  # their roles in workspaces too
         _end_sessions(conn, name)
         conn.execute('DELETE FROM administrators WHERE name = ?', (name,))
         _refuse_ownerless(conn)
@@ -224,14 +229,18 @@ def revoke_token(admin_name, token_id):
 # Authentication
 # --------------------------------------------------------------------------------------
 
-def permission_for(admin, via):
-    """The Permission an administrator acts with: its role for the Management API, and - for every role but
-    auditor - the same reach as the shared key for running SQL."""
-    data = admin['role'] in DATA_ROLES
+def permission_for(admin, via, workspace=DEFAULT_WORKSPACE):
+    """The Permission an administrator acts with in `workspace`: their server-wide role, or else the role a
+    membership gives them there (ADR 0023 §3) - or none, when they have neither. For every role but auditor, the
+    same reach as the shared key for running SQL: every connection *of that workspace*."""
+    memberships = workspaces.memberships(admin['name'])
+    role = admin['role'] or memberships.get(workspace)
+    data = role in DATA_ROLES
     return apikeys.Permission(
         name=admin['name'], admin=data, connections=apikeys.ALL_CONNECTIONS if data else frozenset(),
         allow_writes=data, queries=apikeys.ALL_QUERIES if data else {}, rate_limit=None, allowed_write_ops=None,
-        allowed_tables=None, role=admin['role'], via=via)
+        allowed_tables=None, role=role, via=via, workspace=workspace, memberships=memberships,
+        server_wide=admin['role'] is not None)
 
 
 def authenticate(supplied):
@@ -247,7 +256,8 @@ def authenticate(supplied):
     if admin is None or not admin['active'] or (config.sso_only() and linked(admin)):
         return None
     _record_use(row['id'], admin['name'])
-    return permission_for(admin, 'token')
+    from . import scope
+    return permission_for(admin, 'token', scope.current())  # the workspace the request names (app.gate())
 
 
 def _record_use(token_id, admin_name):

@@ -9,6 +9,7 @@ import { usePendingWrites } from './approvals';
 import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
 import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 import { useAlertFeed } from './alerts';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 // ui.py <aside class="side">, element for element.
 
@@ -82,6 +83,7 @@ export function Sidebar() {
           <span id="version">{health.data ? `v${health.data.version}` : '…'}</span>
         </span>
       </div>
+      <WorkspaceSwitcher />
       <nav id="tabs" role="tablist" aria-label="Sections">
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(shown);
@@ -132,8 +134,10 @@ const ROLE_LABEL: Record<string, string> = {
 /** Who the key in this tab signs in as: an administrator by name, the shared break-glass key, or an open server. */
 function identity(me: ReturnType<typeof useMe>['data'], key: string) {
   if (!me) return key ? 'API key applied' : 'No API key';
-  if (me.via === 'token') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role}`;
-  if (me.via === 'sso') return `Signed in as ${me.name} · ${ROLE_LABEL[me.role] ?? me.role} via SSO`;
+  // no role here: only in workspaces (ADR 0023)
+  const role = me.role === null ? 'Workspaces only' : (ROLE_LABEL[me.role] ?? me.role);
+  if (me.via === 'token') return `Signed in as ${me.name} · ${role}`;
+  if (me.via === 'sso') return `Signed in as ${me.name} · ${role} via SSO`;
   if (me.via === 'break-glass') return 'Shared admin key (owner)';
   return 'No API key needed';
 }

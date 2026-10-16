@@ -20,10 +20,16 @@ def _matches(entry, action, actor, target, text):
     return True
 
 
-def listing(action=None, actor=None, target=None, text=None):
+ALL = object()
+
+
+def listing(action=None, actor=None, target=None, text=None, workspace=ALL):
     """The matching entries, newest first, with what a filter needs: every action in the log (not only the
-    matching ones), the stored total and the retention cap."""
+    matching ones), the stored total and the retention cap. `workspace` (ADR 0023): only that workspace's entries -
+    None for the server's own, and every entry from before workspaces (which can't say whose it was) - or ALL."""
     entries = list(reversed(store.read_audit_entries()))
+    if workspace is not ALL:
+        entries = [e for e in entries if e.get('workspace') == workspace]
     return {
         'items': [e for e in entries if _matches(e, action, actor, target, (text or '').strip())],
         'total': len(entries),

@@ -19,12 +19,15 @@ What a check compares against:
   once written and re-read, so a burst shorter than that can get up to a quota's worth through each instance.
 
 Either way, the call that crosses the row quota completes: its rows aren't known before it runs (max_rows bounds it).
+
+A caller is counted in its workspace (ADR 0023): two workspaces' keys of one name are two callers, each with its own
+counts - `usage_counters.workspace`, and `<workspace>~<caller>` in Redis's key (no workspace name has a `~`).
 """
 import threading
 import time
 from datetime import datetime, timedelta
 
-from . import config, db
+from . import config, db, scope
 from .errors import ApiError
 
 PERIODS = ('day', 'month')
@@ -68,12 +71,12 @@ class _Counter:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.pending = {}  # (store, caller, period) -> [calls, rows] not written yet
-        self.read = {}     # (caller, period) -> (calls, rows, monotonic time read)
+        self.pending = {}  # (store, workspace, caller, period) -> [calls, rows] not written yet
+        self.read = {}     # (workspace, caller, period) -> (calls, rows, monotonic time read)
 
-    def add(self, caller, key, calls, rows):
+    def add(self, workspace, caller, key, calls, rows):
         with self.lock:
-            counts = self.pending.setdefault((db.current_target(), caller, key), [0, 0])
+            counts = self.pending.setdefault((db.current_target(), workspace, caller, key), [0, 0])
             counts[0] += calls
             counts[1] += rows
 
@@ -89,18 +92,18 @@ class _Counter:
                 counts[0] += calls
                 counts[1] += rows
 
-    def used(self, caller, key):
+    def used(self, workspace, caller, key):
         """(calls, rows) used in the period: the store, re-read at most once a flush interval, plus unwritten."""
         fresh_for = config.history_flush_interval() or config.DEFAULT_HISTORY_FLUSH_INTERVAL
         with self.lock:
-            cached = self.read.get((caller, key))
-            pending = list(self.pending.get((db.current_target(), caller, key), (0, 0)))
+            cached = self.read.get((workspace, caller, key))
+            pending = list(self.pending.get((db.current_target(), workspace, caller, key), (0, 0)))
         if cached is None or time.monotonic() - cached[2] >= fresh_for:
-            row = db.connection().execute('SELECT calls, rows FROM usage_counters WHERE caller = ? AND period = ?',
-                                          (caller, key)).fetchone()
+            row = db.connection().execute('SELECT calls, rows FROM usage_counters WHERE workspace = ? AND caller = ? '
+                                          'AND period = ?', (workspace, caller, key)).fetchone()
             cached = (row[0], row[1], time.monotonic()) if row else (0, 0, time.monotonic())
             with self.lock:
-                self.read[(caller, key)] = cached
+                self.read[(workspace, caller, key)] = cached
         return cached[0] + pending[0], cached[1] + pending[1]
 
     def forget_reads(self):
@@ -132,13 +135,13 @@ class _Shared:
         self._skip_until = time.monotonic() + self.RETRY_AFTER_FAILURE
         ratelimit._note_failure(error)
 
-    def _key(self, caller, key):
-        return f'qag:quota:{caller}:{key}'
+    def _key(self, workspace, caller, key):
+        return f'qag:quota:{workspace}~{caller}:{key}'
 
-    def used(self, caller, key, seed):
+    def used(self, workspace, caller, key, seed):
         if time.monotonic() < self._skip_until:
             return None
-        name = self._key(caller, key)
+        name = self._key(workspace, caller, key)
         try:
             calls, rows = self._client.hmget(name, 'calls', 'rows')
             if calls is None:  # first use of this period in Redis: start from what the store has
@@ -154,13 +157,14 @@ class _Shared:
             self._down(error)
             return None
 
-    def current(self, *keys):
-        """{(caller, period): (calls, rows)} for these periods, as Redis has them - {} if it can't answer."""
+    def current(self, workspace, *keys):
+        """{(caller, period): (calls, rows)} for these periods in `workspace`, as Redis has them - {} if it can't
+        answer."""
         found = {}
         try:
             for key in keys:
-                for name in self._client.scan_iter(match=f'qag:quota:*:{key}', count=500):
-                    caller = name.decode()[len('qag:quota:'):-len(key) - 1]
+                for name in self._client.scan_iter(match=f'qag:quota:{_glob_escape(workspace)}~*:{key}', count=500):
+                    caller = name.decode()[len('qag:quota:'):-len(key) - 1].split('~', 1)[1]
                     calls, rows = self._client.hmget(name, 'calls', 'rows')
                     found[(caller, key)] = (int(calls or 0), int(rows or 0))
         except self._error as error:
@@ -168,10 +172,10 @@ class _Shared:
             return {}
         return found
 
-    def add(self, caller, key, calls, rows):
+    def add(self, workspace, caller, key, calls, rows):
         if time.monotonic() < self._skip_until:
             return
-        name = self._key(caller, key)
+        name = self._key(workspace, caller, key)
         try:
             if not self._client.exists(name):
                 return  # not seeded yet: the next check seeds it from the store, which these counts will reach
@@ -195,19 +199,19 @@ def _redis():
     return _shared[url]
 
 
-def _used(caller, key):
+def _used(workspace, caller, key):
     """(calls, rows) this period, from Redis when it's set and answering, else the store's view (_Counter)."""
     shared = _redis()
     if shared is not None:
-        found = shared.used(caller, key, lambda: _stored(caller, key))
+        found = shared.used(workspace, caller, key, lambda: _stored(workspace, caller, key))
         if found is not None:
             return found
-    return _counter.used(caller, key)
+    return _counter.used(workspace, caller, key)
 
 
-def _stored(caller, key):
+def _stored(workspace, caller, key):
     """What the store has for the period, with this process's unwritten counts - Redis's starting point."""
-    return _counter.used(caller, key)
+    return _counter.used(workspace, caller, key)
 
 
 def write():
@@ -218,8 +222,8 @@ def write():
         if not taken:
             return
         by_target = {}
-        for (target, caller, key), counts in taken.items():
-            by_target.setdefault(target, {})[(caller, key)] = counts
+        for (target, workspace, caller, key), counts in taken.items():
+            by_target.setdefault(target, {})[(workspace, caller, key)] = counts
         stamp = datetime.now().strftime(_TIME)
         try:
             for target, counted in by_target.items():
@@ -232,11 +236,13 @@ def write():
 
 def _write(target, counted, stamp):
     with db.transaction(target=target) as tx:
-        for (caller, key), (calls, rows) in counted.items():
-            tx.execute('INSERT INTO usage_counters (caller, period, calls, rows, updated_at) VALUES (?, ?, ?, ?, ?) '
-                           'ON CONFLICT (caller, period) DO UPDATE SET calls = usage_counters.calls + excluded.calls, '
-                           'rows = usage_counters.rows + excluded.rows, updated_at = excluded.updated_at',
-                       (caller, key, calls, rows, stamp))
+        for (workspace, caller, key), (calls, rows) in counted.items():
+            tx.execute('INSERT INTO usage_counters (workspace, caller, period, calls, rows, updated_at) '
+                       'VALUES (?, ?, ?, ?, ?, ?) '
+                           'ON CONFLICT (workspace, caller, period) DO UPDATE SET '
+                           'calls = usage_counters.calls + excluded.calls, rows = usage_counters.rows + excluded.rows, '
+                           'updated_at = excluded.updated_at',
+                       (workspace, caller, key, calls, rows, stamp))
         cutoff = (datetime.now() - timedelta(days=KEEP_DAYS)).strftime(_TIME)
         tx.execute('DELETE FROM usage_counters WHERE updated_at < ?', (cutoff,))
 
@@ -259,14 +265,18 @@ def forget(caller):
     with _writing:
         write()
         with _counter.lock:
-            for slot in [s for s in _counter.read if s[0] == caller]:
+            for slot in [s for s in _counter.read if s[1] == caller]:  # in every workspace
                 del _counter.read[slot]
         with db.transaction() as tx:
             stored = tx.execute('DELETE FROM usage_counters WHERE caller = ?', (caller,)).rowcount
     shared = _redis()
     if shared is not None:
         try:
-            names = list(shared._client.scan_iter(match=f'qag:quota:{_glob_escape(caller)}:*', count=500))
+            escaped = _glob_escape(caller)
+            # in every workspace (`<workspace>~<caller>`), and as counted before workspaces - `qag:quota:<caller>:...`,
+            # what a 0.37 server left in Redis, kept up to 40 days: erasing a person erases those too
+            names = [*shared._client.scan_iter(match=f'qag:quota:*~{escaped}:*', count=500),
+                     *shared._client.scan_iter(match=f'qag:quota:{escaped}:*', count=500)]
             if names:
                 shared._client.delete(*names)
         except shared._error as error:
@@ -281,13 +291,18 @@ def _glob_escape(text):
     return ''.join('\\' + c if c in '*?[]\\' else c for c in text)
 
 
+def _workspace(permission):
+    """The workspace a caller is counted in: its key's or role's own."""
+    return getattr(permission, 'workspace', None) or scope.current()
+
+
 def check(permission):
     """Refuse a call - 429 quota_exceeded - once the caller's period is used up. None (no quota) passes."""
     quota = getattr(permission, 'quota', None)
     if not quota:
         return
     key, _start, resets = period(quota['per'])
-    calls, rows = _used(permission.name, key)
+    calls, rows = _used(_workspace(permission), permission.name, key)
     for name, used in (('calls', calls), ('rows', rows)):
         if quota.get(name) is not None and used >= quota[name]:
             raise ApiError(f"This caller's {ADJECTIVE[quota['per']]} quota of {quota[name]:,} {name} is used up - it "
@@ -302,10 +317,10 @@ def count(permission, rows):
     if not quota:
         return
     key, rows = period(quota['per'])[0], max(0, int(rows or 0))
-    _counter.add(permission.name, key, 1, rows)
+    _counter.add(_workspace(permission), permission.name, key, 1, rows)
     shared = _redis()
     if shared is not None:
-        shared.add(permission.name, key, 1, rows)
+        shared.add(_workspace(permission), permission.name, key, 1, rows)
     _ensure_written()
 
 
@@ -315,10 +330,10 @@ def count_rows(permission, rows):
     if not quota or not rows:
         return
     key = period(quota['per'])[0]
-    _counter.add(permission.name, key, 0, int(rows))
+    _counter.add(_workspace(permission), permission.name, key, 0, int(rows))
     shared = _redis()
     if shared is not None:
-        shared.add(permission.name, key, 0, int(rows))
+        shared.add(_workspace(permission), permission.name, key, 0, int(rows))
     _ensure_written()
 
 
@@ -328,7 +343,7 @@ def headers(permission):
     if not quota:
         return {}
     key, _start, resets = period(quota['per'])
-    calls, rows = _used(permission.name, key)
+    calls, rows = _used(_workspace(permission), permission.name, key)
     out = {'X-Quota-Reset': resets.strftime(_TIME)}
     if quota.get('calls') is not None:
         out['X-Quota-Remaining-Calls'] = str(max(0, quota['calls'] - calls))
@@ -342,7 +357,7 @@ def usage(caller, quota):
     if not quota:
         return None
     key, start, resets = period(quota['per'])
-    calls, rows = _used(caller, key)
+    calls, rows = _used(scope.current(), caller, key)
     return {'per': quota['per'], 'period_start': start.strftime(_TIME), 'resets_at': resets.strftime(_TIME),
             'calls': calls, 'rows': rows, 'calls_limit': quota.get('calls'), 'rows_limit': quota.get('rows')}
 
@@ -351,18 +366,19 @@ def current_counters():
     """Every caller's counters for the current day and month, from the store plus this process's unwritten counts -
     GET /api/v1/usage/quotas, for the deployer's own metering."""
     day, month = period('day')[0], period('month')[0]
+    workspace = scope.current()  # this workspace's callers (ADR 0023)
     found = {(r['caller'], r['period']): [r['calls'], r['rows'], r['updated_at']] for r in db.connection().execute(
-        'SELECT caller, period, calls, rows, updated_at FROM usage_counters WHERE period IN (?, ?)',
-        (day, month)).fetchall()}
+        'SELECT caller, period, calls, rows, updated_at FROM usage_counters WHERE workspace = ? AND period IN (?, ?)',
+        (workspace, day, month)).fetchall()}
     with _counter.lock:
-        for (target, caller, key), (calls, rows) in _counter.pending.items():
-            if key in (day, month) and target == db.current_target():
+        for (target, counted_in, caller, key), (calls, rows) in _counter.pending.items():
+            if key in (day, month) and target == db.current_target() and counted_in == workspace:
                 entry = found.setdefault((caller, key), [0, 0, None])
                 entry[0] += calls
                 entry[1] += rows
     shared = _redis()
     if shared is not None:  # every instance's counts as of now, not only the ones written so far
-        for (caller, key), (calls, rows) in shared.current(day, month).items():
+        for (caller, key), (calls, rows) in shared.current(workspace, day, month).items():
             entry = found.setdefault((caller, key), [0, 0, None])
             entry[0], entry[1] = calls, rows
     return [{'caller': caller, 'per': key.split(':')[0], 'period': key.split(':', 1)[1], 'calls': calls,

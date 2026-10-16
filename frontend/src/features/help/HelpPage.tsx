@@ -387,6 +387,12 @@ const DOCS = [
     path: 'how-to/59-verify-a-release-before-you-run-it.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-60',
+    title: 'Give each team its own workspace',
+    path: 'how-to/60-give-each-team-its-own-workspace.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

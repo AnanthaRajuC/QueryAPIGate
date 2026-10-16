@@ -55,6 +55,10 @@ const AlertsPage = lazy(() =>
   import('@/features/observability/AlertsPage').then((m) => ({ default: m.AlertsPage })),
 );
 
+const WorkspacesPage = lazy(() =>
+  import('@/features/workspaces/WorkspacesPage').then((m) => ({ default: m.WorkspacesPage })),
+);
+
 const AdministratorsPage = lazy(() =>
   import('@/features/administrators/AdministratorsPage').then((m) => ({ default: m.AdministratorsPage })),
 );
@@ -134,6 +138,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <DestinationsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="workspaces"
+          element={
+            <Suspense fallback={<Loading />}>
+              <WorkspacesPage />
             </Suspense>
           }
         />

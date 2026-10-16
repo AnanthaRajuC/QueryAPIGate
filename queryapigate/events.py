@@ -35,7 +35,7 @@ from collections import deque
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, instances, ratelimit, secheaders, tracing
+from . import config, cors, db, instances, ratelimit, scope, secheaders, tracing
 from .errors import code_for
 
 try:
@@ -62,9 +62,9 @@ _LAG_BUCKETS = (0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0)  # seconds; occurre
 RUN = 'query.run'  # the event type of a run, saved or ad-hoc - the only type written so far
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 INSERT = ('INSERT INTO events (type, source, occurred_at, key_name, connection_name, query_name, status, '
-          'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          'payload_json, workspace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
 INSERT_WITH_ID = ('INSERT INTO events (id, type, source, occurred_at, key_name, connection_name, query_name, status, '
-                  'payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                  'payload_json, workspace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
 
 
 def run_payload(query_name, version, entry):
@@ -77,11 +77,13 @@ def run_payload(query_name, version, entry):
             'connection_name': entry.get('connection_name'), 'entry': entry}
 
 
-def run_columns(query_name, version, entry):
-    """A run's row in the events table, for INSERT - every column after the id."""
+def run_columns(query_name, version, entry, workspace=None):
+    """A run's row in the events table, for INSERT - every column after the id; `workspace` the run's (ADR 0023),
+    the workspace this code acts in unless given."""
+    from . import scope
     payload = run_payload(query_name, version, entry)
     return (RUN, payload['source'], payload['occurred_at'], entry.get('key_name'), entry.get('connection_name'),
-            query_name, entry.get('status'), json.dumps(payload, default=str))
+            query_name, entry.get('status'), json.dumps(payload, default=str), workspace or scope.current())
 
 
 # ---- subscription filters (ADR 0020 §6) ----
@@ -136,7 +138,7 @@ def _format(event_id, payload_json):
 
 # ---- store access: plain blocking calls, run in a worker thread (asyncio.to_thread) ----
 
-_COLUMNS = 'id, key_name, type, query_name, connection_name, status, occurred_at, payload_json'
+_COLUMNS = 'id, workspace, key_name, type, query_name, connection_name, status, occurred_at, payload_json'
 
 
 def _newest_id():
@@ -159,18 +161,20 @@ def _rows(ids):
     return rows
 
 
-def _key_since(key_name):
+def _key_since(key_name, workspace='default'):
     """When the API key named ``key_name`` was created, or None (a signed-in user, an administrator). A key sees no
     event from before then: a deleted key's name can be given to a new one, and its runs aren't the new key's
     (ADR 0021)."""
-    row = db.connection().execute('SELECT created_at FROM api_keys WHERE name = ?', (key_name,)).fetchone()
+    row = db.connection().execute('SELECT created_at FROM api_keys WHERE workspace = ? AND name = ?',
+                                  (workspace, key_name)).fetchone()
     return row[0] if row else None
 
 
-def _replay_page(after, key_name, filters, since=None):
-    """One page of the events after ``after`` that ``key_name`` may see (None: every event) and ``filters`` ask for,
-    from ``since`` on, oldest first."""
+def _replay_page(after, key_name, filters, since=None, workspace='default'):
+    """One page of the events after ``after`` in ``workspace`` that ``key_name`` may see (None: every event there) and
+    ``filters`` ask for, from ``since`` on, oldest first."""
     where, params = _filter_sql(filters)
+    where, params = ' AND workspace = ?' + where, [workspace, *params]
     if since is not None:
         where, params = ' AND occurred_at >= ?' + where, [since, *params]
     if key_name is not None:
@@ -220,6 +224,19 @@ def _authenticate(credentials, client_ip):
     return authenticate(credentials[0], credentials[1], client_ip)
 
 
+def _settle_workspace(permission, named):
+    """app.settle_workspace()'s rules, for this server: a key's or a signed-in user's own workspace - naming another is
+    no workspace at all (None: 404) - and for an administrator, the named one, which must exist and be theirs."""
+    from . import workspaces
+    if permission.via is None:
+        return permission if named is None or named == permission.workspace else None
+    if named is None:
+        return permission
+    if not workspaces.exists(named) or (not permission.server_wide and named not in (permission.memberships or {})):
+        return None
+    return permission._replace(workspace=named)
+
+
 def _lag(occurred_at):
     """Seconds from when an event happened (server local time, to the second) to now."""
     try:
@@ -229,11 +246,12 @@ def _lag(occurred_at):
 
 
 class _Client:
-    __slots__ = ('queue', 'key_name', 'filters', 'since', 'writer', 'too_slow')
+    __slots__ = ('queue', 'workspace', 'key_name', 'filters', 'since', 'writer', 'too_slow')
 
-    def __init__(self, key_name, writer, filters=None, since=None):
+    def __init__(self, key_name, writer, filters=None, since=None, workspace='default'):
         self.queue = asyncio.Queue(maxsize=_QUEUE_SIZE)
-        self.key_name = key_name  # None: sees every event
+        self.workspace = workspace  # the only workspace whose events it hears (ADR 0023)
+        self.key_name = key_name  # None: sees every event there
         self.filters = filters or {}
         self.since = since  # an API key's created_at: nothing older is its (_key_since())
         self.writer = writer
@@ -247,7 +265,7 @@ class EventServer:
         self.max_connections = max_connections or config.events_max_connections()
         self.poll_interval = poll_interval or config.events_poll_interval()
         self.clients = set()
-        self.by_key = {}            # key name (None for "everything") -> set of clients
+        self.by_key = {}            # (workspace, key name - None for "everything") -> set of clients
         self.cursor = 0             # newest event id delivered
         self.recent = set()         # ids delivered in the lookback window
         self.recent_order = deque()
@@ -313,11 +331,11 @@ class EventServer:
         new = [i for i in ids if i not in self.recent]
         if not new:
             return False
-        for event_id, key_name, type_, query_name, connection, status, occurred_at, payload_json in \
+        for event_id, workspace, key_name, type_, query_name, connection, status, occurred_at, payload_json in \
                 await asyncio.to_thread(_rows, new[:_BATCH]):
             kind = 'saved' if query_name is not None else 'adhoc'
             self._deliver(event_id, key_name, (type_, kind, query_name, connection, status),
-                          _format(event_id, payload_json), occurred_at)
+                          _format(event_id, payload_json), occurred_at, workspace)
         return len(new) > _BATCH or len(ids) >= _BATCH + _LOOKBACK
 
     def _remember(self, rowid):
@@ -327,9 +345,9 @@ class EventServer:
         while self.recent_order and self.recent_order[0] < self.cursor - _LOOKBACK:
             self.recent.discard(self.recent_order.popleft())
 
-    def _deliver(self, rowid, key_name, event_fields, data, occurred_at=None):
+    def _deliver(self, rowid, key_name, event_fields, data, occurred_at=None, workspace='default'):
         self._remember(rowid)
-        for client in (*self.by_key.get(None, ()), *self.by_key.get(key_name, ())):
+        for client in (*self.by_key.get((workspace, None), ()), *self.by_key.get((workspace, key_name), ())):
             if client.too_slow or not matches(client.filters, event_fields) \
                     or (client.since is not None and (occurred_at or '') < client.since):
                 continue
@@ -400,6 +418,10 @@ class EventServer:
             return
         method, target, headers = request
         path, query = urlsplit(target).path, parse_qs(urlsplit(target).query)
+        prefixed = scope.PREFIX_RE.match(path)  # /w/<workspace>/events - the events of that workspace (ADR 0023)
+        named = None
+        if prefixed:
+            named, path = prefixed.group(1), prefixed.group(2) or '/'
         origin = headers.get('origin')
         allow_origin = cors.allow_origin_value(origin)
         try:
@@ -419,7 +441,7 @@ class EventServer:
             elif method != 'GET':
                 await _respond(writer, 405, {'error': 'Method not allowed'}, allow_origin)
             else:
-                await self._stream(reader, writer, headers, query, allow_origin)
+                await self._stream(reader, writer, headers, query, allow_origin, named)
         except (ConnectionError, asyncio.TimeoutError):
             pass
         except Exception:  # e.g. the store unreachable while checking a key: drop this client, keep serving
@@ -427,7 +449,7 @@ class EventServer:
         finally:
             writer.close()
 
-    async def _stream(self, reader, writer, headers, query, allow_origin):
+    async def _stream(self, reader, writer, headers, query, allow_origin, named=None):
         client_ip = _client_ip(writer, headers)
         limit = config.rate_limit()
         if limit is not None and not self.limiter.hit(client_ip, *limit)[0]:
@@ -439,9 +461,15 @@ class EventServer:
                            extra={'Retry-After': '5'})
             return
         secret = (headers.get('x-api-key', ''), headers.get('authorization', ''))
-        permission = await asyncio.to_thread(_authenticate, secret, client_ip)
+        with scope.using(named):  # a signed-in user's role is found by name in it - as app.gate() does
+            permission = await asyncio.to_thread(_authenticate, secret, client_ip)
         if permission is None:
             await _respond(writer, 401, {'error': 'Unauthorized'}, allow_origin)
+            return
+        permission = await asyncio.to_thread(_settle_workspace, permission, named)
+        if permission is None:
+            await _respond(writer, 404, {'error': f"No workspace named '{named}'", 'code': 'workspace_not_found'},
+                           allow_origin)
             return
         # One span for opening the stream (tracing.py) - not one per event: a stream can stay open for hours
         with tracing.span('GET /events', 'server', {
@@ -456,10 +484,11 @@ class EventServer:
             return
         last_id = _last_event_id(headers, query)
         key_name = None if permission.admin else permission.name
-        since = None if key_name is None else await asyncio.to_thread(_key_since, key_name)
-        client = _Client(key_name, writer, filters, since)
+        workspace = permission.workspace
+        since = None if key_name is None else await asyncio.to_thread(_key_since, key_name, workspace)
+        client = _Client(key_name, writer, filters, since, workspace)
         self.clients.add(client)
-        self.by_key.setdefault(key_name, set()).add(client)  # live events queue up from here on...
+        self.by_key.setdefault((workspace, key_name), set()).add(client)  # live events queue up from here on...
         try:
             head = ['HTTP/1.1 200 OK', 'Content-Type: text/event-stream', 'Cache-Control: no-cache',
                     'X-Accel-Buffering: no', 'Transfer-Encoding: chunked', 'Connection: close', *_SECURITY_HEADERS]
@@ -470,7 +499,7 @@ class EventServer:
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
                 after = last_id  # only what is replayed moves `sent`: an id from another store mustn't mute live events
                 while not client.too_slow:  # every page, up to the live stream (ADR 0020 §7)
-                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since)
+                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since, workspace)
                     for event_id, payload_json in page:
                         writer.write(_chunk(_format(event_id, payload_json)))
                         sent = after = event_id
@@ -487,7 +516,7 @@ class EventServer:
                 watcher.cancel()
         finally:
             self.clients.discard(client)
-            self.by_key.get(key_name, set()).discard(client)
+            self.by_key.get((workspace, key_name), set()).discard(client)
 
     async def _watch(self, reader, client):
         """End the stream as soon as the client hangs up, rather than at the next heartbeat write - otherwise a

@@ -55,6 +55,24 @@ describe('the sign-in page', () => {
     expect(shell()).toBeNull();
   });
 
+  it('stays up while a tried token is being checked - the shell never shows in between', async () => {
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/me': (call) =>
+        call.headers.get('X-API-Key')
+          ? new Promise((resolve) => setTimeout(() => resolve(UNAUTHORIZED()), 150)) // a slow refusal
+          : UNAUTHORIZED(),
+    });
+    renderAt('/');
+    await userEvent.type(await screen.findByLabelText('Admin token or API key'), 'tok_wrong');
+    const before = calls.length;
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('wasn’t accepted');
+    expect(shell()).toBeNull();
+    // nothing but the token's own check was asked while it was out: no screen of the shell came and went
+    expect(calls.slice(before).map((c) => c.path)).toEqual(['/api/v1/me']);
+  });
+
   it('offers SSO first when the server has it, coming back to this page', async () => {
     fakeBackend({
       ...baseRoutes(),

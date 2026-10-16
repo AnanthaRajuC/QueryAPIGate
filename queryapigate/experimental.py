@@ -35,6 +35,17 @@ FEATURES: dict[str, dict[str, Any]] = {
         'db_types': ('h2', 'jdbc'),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2 and jdbc'),
     },
+    'workspaces': {
+        'name': 'Workspaces',
+        'why': 'new in 0.38 (ADR 0023) - the routes, memberships and `workspace` fields may change once a real '
+               'multi-team deployment uses them; a server with only `default` behaves exactly as before',
+        'operations': (('get', '/api/v1/workspaces'), ('post', '/api/v1/workspaces'),
+                       ('get', '/api/v1/workspaces/{name}'), ('patch', '/api/v1/workspaces/{name}'),
+                       ('delete', '/api/v1/workspaces/{name}'), ('get', '/api/v1/workspaces/{name}/members'),
+                       ('put', '/api/v1/workspaces/{name}/members/{admin}'),
+                       ('delete', '/api/v1/workspaces/{name}/members/{admin}')),
+        'docs': ('documentation/API.md', 'Workspaces'),
+    },
     'tracing': {
         'name': 'Tracing with OpenTelemetry',
         'why': 'new in 0.23 - span names and attributes may change as the OpenTelemetry conventions for databases and '
@@ -56,11 +67,15 @@ SETTINGS = frozenset(s for f in FEATURES.values() for s in f.get('settings', ())
 OPERATIONS = frozenset(op for f in FEATURES.values() for op in f.get('operations', ()))
 
 
-def in_use(environ, connections):
-    """The experimental features this server is using - an environment variable of theirs set, or a connection of an
-    experimental type active - as {feature id: what shows it}. An inactive connection isn't in use: `queryapigate init`
-    seeds an inactive template of every type, H2 included, and that alone shouldn't warn."""
+def in_use(environ, connections, workspaces=()):
+    """The experimental features this server is using - an environment variable of theirs set, a connection of an
+    experimental type active, or a workspace besides `default` (`workspaces`: their names) - as {feature id: what shows
+    it}. An inactive connection isn't in use: `queryapigate init` seeds an inactive template of every type, H2
+    included, and that alone shouldn't warn."""
     used = {}
+    others = sorted(name for name in workspaces if name != 'default')
+    if others:
+        used['workspaces'] = 'workspace ' + ', '.join(others)
     for key, feature in FEATURES.items():
         set_here = sorted(s for s in feature.get('settings', ()) if environ.get(s, '').strip())
         typed = sorted(name for name, details in connections.items()
@@ -74,9 +89,9 @@ def in_use(environ, connections):
     return used
 
 
-def warn_in_use(log, environ, connections):
+def warn_in_use(log, environ, connections, workspaces=()):
     """One warning per experimental feature in use, so nobody comes to depend on one without having been told."""
-    used = in_use(environ, connections)
+    used = in_use(environ, connections, workspaces)
     for key, evidence in sorted(used.items()):
         feature = FEATURES[key]
         log.warning('Experimental: %s (%s) - may change in any minor release, noted in the changelog - %s.',

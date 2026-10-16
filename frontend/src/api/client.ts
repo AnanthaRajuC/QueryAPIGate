@@ -2,6 +2,7 @@ import createClient, { type Middleware } from 'openapi-fetch';
 
 import { getApiKey } from '@/auth/apiKey';
 import { getCsrf, loadSession } from '@/auth/session';
+import { workspacePath } from '@/auth/workspace';
 
 import type { components, paths } from './schema';
 
@@ -42,7 +43,28 @@ const withRate: Middleware = {
   },
 };
 
+// Every request in this tab's workspace (auth/workspace.ts): /w/<workspace>/... unless it's `default`.
+const withWorkspace: Middleware = {
+  async onRequest({ request }) {
+    const url = new URL(request.url);
+    const path = workspacePath(url.pathname);
+    if (path === url.pathname) return request;
+    url.pathname = path;
+    // A body read whole, rather than passed on as a stream: a Request built from a streamed body needs `duplex`,
+    // which not every fetch accepts.
+    const body =
+      request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
+    return new Request(url, {
+      method: request.method,
+      headers: request.headers,
+      body,
+      signal: request.signal,
+    });
+  },
+};
+
 api.use(withApiKey);
+api.use(withWorkspace);
 api.use(withRate);
 
 export type Schemas = components['schemas'];
@@ -104,7 +126,10 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   else if ((await loadSession()).signed_in) headers.set('X-QAG-CSRF', getCsrf());
   return globalThis
     .fetch(
-      new Request(new URL(path, globalThis.location?.origin ?? 'http://localhost'), { ...init, headers }),
+      new Request(new URL(workspacePath(path), globalThis.location?.origin ?? 'http://localhost'), {
+        ...init,
+        headers,
+      }),
     )
     .then((response) => {
       noteRate(response);
