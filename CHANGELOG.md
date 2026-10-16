@@ -49,6 +49,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-16
+
+A role for customer-facing APIs: its signed-in users run only saved queries that bind their own token, so a query
+granted to it without a `from_claim` parameter can't show every customer every row. And image builds no longer depend
+on one CDN for the H2 driver.
+
+### Upgrading from 0.35
+- **Nothing to change.** No schema change, no setting. Roles you have work as they did: `require_claim_binding` is
+  off unless you turn it on - through the API, a configuration file, or the switch in the Console's role form.
+- **MongoDB stays experimental** a release longer than 0.35 said: it graduates in 0.37, with streaming exports.
+
 ### Added
 - **`require_claim_binding` on a role, for customer-facing APIs** ([Signed-in users](documentation/API.md#signed-in-users-jwt)).
   A `from_claim` parameter limits a query to the signed-in user's own rows - but only that query: another granted to
@@ -2608,7 +2619,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...v0.36.0
 [0.35.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.2...v0.35.0
 [0.34.2]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.34.1...v0.34.2
