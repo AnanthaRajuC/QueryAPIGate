@@ -114,7 +114,8 @@ documentation. #99 workspaces only if asked for.
     bind their token, never a connection; the H2 driver from Maven Central or a mirror. (0.36.0, 2026-10-16.)
 25. **0.37: MongoDB graduates**, with streaming exports - the one essential tier-1 feature it lacked (ADR 0022).
     (0.37.0, 2026-10-16.)
-26. **Then, only on demand:** #99 workspaces.
+26. **0.38: #99 workspaces** (experimental), delegated administration for teams on one server
+    ([ADR 0023](documentation/adr/0023-workspaces.md)) - and a sign-in page for the Console. Not a rolling upgrade.
 27. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
 28. **1.0.0.**
@@ -3077,7 +3078,9 @@ fetched when a connection is opened and cached until it nears expiry; each an op
 
 ## 99. Workspaces: delegated administration for teams
 
-**Status: open; only if larger organisations ask for it.**
+**Status: shipped (experimental) in 0.38** - [ADR 0023](documentation/adr/0023-workspaces.md). Brought forward
+from "only if larger organisations ask": an enterprise running one gateway for many teams will, and the change to the
+store's keys had to come before 1.x's additive-only rule.
 
 **Impact:** there's one namespace: every administrator's role applies to every connection, key and query on the server.
 "Team A manages its own connections and keys, and can't see team B's" needs a server per team today.

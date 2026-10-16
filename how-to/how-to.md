@@ -58,6 +58,8 @@ guide covers one scenario end to end, and every command and response in it was r
     with roles, their own tokens, and the shared key retired.
 48. [**Sign in to the Console through your identity provider**](48-sign-in-to-the-console-through-your-identity-provider.md)
     - SSO for administrators: roles from groups, people who had tokens linked, SSO only.
+60. [**Give each team its own workspace**](60-give-each-team-its-own-workspace.md) (experimental) - several teams on
+    one server, each running its own connections, queries and keys; its lead an owner there and nowhere else.
 45. [**Hide personal data from a partner or an AI agent**](45-hide-personal-data-from-a-partner-or-an-ai-agent.md)
     - column masking: hash, mask or drop values, whatever the SQL calls them.
 50. [**Rotate an API key without downtime**](50-rotate-an-api-key-without-downtime.md) - a new secret, the old one

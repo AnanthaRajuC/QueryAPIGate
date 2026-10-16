@@ -178,6 +178,42 @@ administrator a Console link that said what they liked in the Console's own erro
 Now only the code travels, and the Console says what each one means in its own words; the reason, with whatever the
 provider said, is in the audit log.
 
+### Workspaces: one team's reach, not another's (ADR 0023, experimental)
+
+Workspaces ([ADR 0023](adr/0023-workspaces.md)) let several teams administer one server: each owns its connections,
+saved queries, keys, roles, destinations and exports. The boundary they draw is **between teams who share a server**,
+not between a hosted service's tenants. What it holds against, and how:
+
+- **Every lookup is in one workspace.** A request's workspace is settled once (`app.settle_workspace()`, kept on the
+  request, never on a thread a later request reuses) and every statement on a workspace's table filters on it - names
+  are unique per workspace in the store's own keys, so there is nothing for a forgotten filter to match by name
+  alone across workspaces. Work that outlives the request - a stream's rows, queued history, events and usage counts
+  - carries the workspace it was started in. `tests/test_workspace_isolation.py` builds two workspaces with the same
+  names for everything and checks each route reaches only its own: a lookup that forgot its workspace shows up there
+  as the other workspace's data.
+- **A key can't leave its workspace**, prefix or not: its secret says which workspace it is in. Naming another, or
+  one that doesn't exist, is the same `404` - a caller can't use the error to list workspaces.
+- **A role from a membership is bounded twice**: its reach is its workspace's connections only, and it never holds
+  what only a server-wide role does (`adminroles.SERVER_ONLY`): administrators, settings, re-keying, erasing a
+  person, creating workspaces, `/metrics` and the instance list. A member naming a workspace they aren't in gets
+  `404`.
+- **What happened is per workspace**: audit entries carry their workspace inside the hash chain, so rewriting whose
+  an entry was breaks the chain; a member reads only their workspace's. Events reach only their workspace's
+  subscribers; the response cache, and its management, are per workspace.
+
+What it doesn't protect against - stated in the documentation's first paragraph about it:
+
+- **The people who run the server.** Server-wide owners and admins see and change every workspace, by design.
+- **Shared infrastructure.** One process, one store, one encryption key for every workspace's connection passwords.
+  A bug outside the lookups above - in the process, or in a driver - is a bug for every workspace.
+- **The databases themselves.** Two workspaces can each have a connection to the same database host; what a
+  workspace's connection can read is its database account's grants, as it always was.
+- **Folders.** A local-folder destination is allowed only in `default`: `QUERYAPIGATE_EXPORT_DIRS` is the server's,
+  and two workspaces writing under it could reach each other's files.
+
+Workspaces are experimental until a security review of this boundary, as `experimental.GRADUATION` requires of
+anything that guards access.
+
 ### Column masking: which values leave
 
 A `mask` grant on a key, role or export (ADR 0005) hashes, masks, nulls or drops the values of named

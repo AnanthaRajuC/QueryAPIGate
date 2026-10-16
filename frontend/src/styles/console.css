@@ -487,3 +487,14 @@ body.side-collapsed .ws-switch {
   align-items: center;
   margin-top: 12px;
 }
+.form-inline input {
+  width: 240px;
+}
+#workspace-members select {
+  width: auto;
+}
+#workspaces-table .actions,
+#workspace-members .actions {
+  text-align: right;
+  white-space: nowrap;
+}

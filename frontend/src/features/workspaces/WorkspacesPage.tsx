@@ -7,7 +7,7 @@ import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { useSwitchWorkspace } from '@/app/workspaceHooks';
 import { getWorkspace } from '@/auth/workspace';
 import { ExperimentalTag } from '@/components/Experimental';
-import { TrashIcon } from '@/components/icons';
+import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
 
 // Workspaces and their members (ADR 0023): delegated administration for teams on one server. Everyone sees the
@@ -137,14 +137,16 @@ function WorkspaceTable({
             </td>
             <td className="actions">
               {w.name !== current && (
-                <button type="button" className="btn sm" onClick={() => switchTo(w.name)}>
+                <button type="button" className="btn ghost sm" onClick={() => switchTo(w.name)}>
                   Work here
                 </button>
               )}
               {owner && (
                 <button
                   type="button"
-                  className="btn sm"
+                  className="btn ghost sm icon"
+                  title={`Edit ${w.name}`}
+                  aria-label="Edit"
                   onClick={(e) => {
                     e.stopPropagation();
                     openDrawer({
@@ -154,13 +156,13 @@ function WorkspaceTable({
                     });
                   }}
                 >
-                  Edit
+                  <PencilIcon />
                 </button>
               )}
               {owner && w.name !== 'default' && (
                 <button
                   type="button"
-                  className="btn sm danger"
+                  className="btn ghost sm icon danger"
                   title="Remove - only once it owns nothing"
                   aria-label={`Remove ${w.name}`}
                   onClick={(e) => {
@@ -336,7 +338,7 @@ function Members({ name }: { name: string }) {
                   {manages && (
                     <button
                       type="button"
-                      className="btn sm"
+                      className="btn ghost sm"
                       onClick={() => {
                         if (window.confirm(`Take ${m.admin} out of ${name}?`)) remove.mutate(m.admin);
                       }}

@@ -58,6 +58,31 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   Nothing changes for a server with one workspace, which is every server until a second is created.
 
 ### Added
+- **Workspaces** (experimental - [ADR 0023](documentation/adr/0023-workspaces.md), [guide 60](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/60-give-each-team-its-own-workspace.md)):
+  delegated administration for teams on one server. A workspace owns connections, saved queries, API keys, roles,
+  destinations and exports - each name unique within it - and its own run history, audit entries, alerts, events,
+  usage quotas and cached responses. Everything a server had is in `default`, and a server with only `default`
+  behaves exactly as before.
+  - **Reaching one**: every route also answers at `/w/<workspace>/...`. An API key works in the workspace it was
+    created in, with or without the prefix; naming another - or one that doesn't exist - is `404
+    workspace_not_found`, so a caller can't learn which there are. A signed-in user's role is found in the workspace
+    the path names.
+  - **Who administers what**: an administrator's role is server-wide, as before, or `null` - with roles only in
+    workspaces (`/api/v1/workspaces/{name}/members`). A role from a membership is that role in one workspace, without
+    what only a server-wide one gives (administrators, settings, re-keying, erasing a person, creating workspaces);
+    a workspace's owner manages its members and applies its configuration file. With roles only in other
+    workspaces, an unprefixed call is `403 workspace_required`.
+  - **`/api/v1/workspaces`**: create, describe, remove (owners; only an empty workspace, never `default`) - every
+    change audited.
+  - **Seeing what happened**: audit entries say their `workspace` (in the hash chain; `null` for the server's own),
+    and a member reads their workspace's; alerts and events are the workspace's own, the server's alerts for
+    server-wide roles; in `/metrics` a key or connection outside `default` is named `<workspace>/<name>`.
+  - **Configuration files** take an optional `workspace:` and are applied there only; the CLI's `export`, `exports`,
+    `collection`, `config export` and `examples` take `--workspace`.
+  - **The Console**: a workspace switcher once there is a second workspace, every screen in the tab's workspace, and
+    a Workspaces screen.
+  - **Limits, for now**: a local-folder destination only in `default`; no per-workspace limits; identity-provider
+    groups aren't mapped to memberships.
 - **A sign-in page for the Console.** On a server that needs credentials, a tab without them sees only the sign-in
   page - **Sign in with SSO** when it's set up, and a field for an admin token or API key - instead of the whole
   Console with every screen failing. A refused token, or an SSO sign-in the server refused, is said there. **Sign out**

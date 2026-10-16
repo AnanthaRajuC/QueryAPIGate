@@ -23,6 +23,8 @@ _DESCRIPTION_MAX = 500
 # What a workspace owns, as the store keeps it: a workspace with a row in any of these isn't empty.
 OWNED = (('connections', 'connections'), ('saved_queries', 'queries'), ('api_keys', 'API keys'), ('roles', 'roles'),
          ('destinations', 'destinations'), ('exports', 'exports'))
+_ONE = {'connections': 'connection', 'queries': 'query', 'API keys': 'API key', 'roles': 'role',
+        'destinations': 'destination', 'exports': 'export'}
 
 
 def _not_found(name):
@@ -120,7 +122,7 @@ def delete_workspace(name):
             raise _not_found(name)
         owned = contents(conn, name)
         if owned:
-            listed = ', '.join(f'{count} {label}' for label, count in owned.items())
+            listed = ', '.join(f'{count} {_ONE[label] if count == 1 else label}' for label, count in owned.items())
             raise ApiError(f"Workspace '{name}' still has {listed} - delete or move them first", 409,
                            code='workspace_not_empty', contents=owned)
         conn.execute('DELETE FROM workspace_members WHERE workspace = ?', (name,))

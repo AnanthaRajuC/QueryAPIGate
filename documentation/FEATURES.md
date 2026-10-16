@@ -25,6 +25,10 @@ QueryAPIGate is built to expose specific query results, not database credentials
 - Scoped API keys: restrict a key to a set of connections, and/or to a specific allow-list of saved queries,
   independent of any connection grant - individual queries in that list can also be curated for write access,
   without granting it anywhere else reachable through the key.
+- Workspaces (experimental, [ADR 0023](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/adr/0023-workspaces.md)): several teams on one server, each with its own
+  connections, saved queries, API keys, roles, destinations and exports - names unique within it - and its own
+  history, audit entries, alerts and events. An administrator can have a role in one workspace only; a workspace's
+  owner manages its members. Every route also answers at `/w/<workspace>/...`; a key works in its own.
 - Example APIs: `queryapigate examples load` installs four worked scenarios - a reporting API, dashboard data,
   a streaming export and a partner integration - as collections, queries, roles and a ready-to-use API key per
   scenario, touching nothing of yours, and removable again with one command.

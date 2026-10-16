@@ -100,6 +100,8 @@ safely". Use cases, how it compares to PostgREST, Hasura and others, and the thi
   connection, per query or per collection; expiry, IP allow-lists, rate limits, quotas, table allow-lists.
 - **[Named administrators and SSO](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#administrators-and-admin-roles)** - admin roles and
   tokens, Console sign-in through your identity provider, signed-in users' JWTs.
+- **[Workspaces](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#workspaces)** (experimental) - several teams on one server,
+  each running its own connections, queries and keys, and administering nothing of another's.
 - **[Column masking](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#column-masking)** - hash, mask or drop what a caller mustn't see, traced
   through the SQL to the source column.
 - **[An MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as tools, OAuth sign-in, write tools that

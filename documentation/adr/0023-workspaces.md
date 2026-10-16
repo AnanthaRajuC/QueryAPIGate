@@ -172,6 +172,10 @@ boundary like this needs.
 
 ## Delivery
 
+Delivered in 0.38, experimental, in the six steps below; the walkthrough is
+[guide 60](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/60-give-each-team-its-own-workspace.md), and
+the threat model's *Workspaces* section says what the boundary holds against and what it doesn't.
+
 One feature branch, in reviewable steps, each with its tests green:
 
 1. **The store:** the `workspaces` and memberships tables, the `workspace` columns and per-workspace keys, the
