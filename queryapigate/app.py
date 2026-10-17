@@ -1,4 +1,5 @@
 """The Flask application: HTTP routes on top of the store, engine and formatters."""
+import ipaddress
 import json
 import logging
 import math
@@ -163,6 +164,28 @@ def warn_env_references():
                     ', '.join(used))
 
 
+class _CapturePeer:
+    """Record the real socket address (`REMOTE_ADDR`) before ProxyFix can replace it with an X-Forwarded-For value,
+    so the open-access loopback check (gate()) judges the actual connection and never a header a client can forge."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
+        return self.app(environ, start_response)
+
+
+def _peer_is_local():
+    """Whether the request's real socket peer is a loopback address. Fails closed: an address that can't be parsed,
+    or none at all (e.g. a Unix socket), counts as remote - in open-access mode the caller must then configure a key."""
+    peer = request.environ.get('queryapigate.peer_addr') or ''
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
+
+
 def create_app():
     from . import __version__
     config.check_settings()
@@ -178,6 +201,10 @@ def create_app():
     hops = config.proxy_hops()
     if hops:  # behind reverse proxies: take the client address and scheme from their X-Forwarded-* headers
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops)
+    app.wsgi_app = _CapturePeer(app.wsgi_app)  # outermost: the real socket address, before ProxyFix can rewrite it
+    if not apikeys.auth_required():
+        log.warning('No API key, administrator, JWT or MCP OAuth is configured: open-access mode. The server answers '
+                    'only local (loopback) clients; set QUERYAPIGATE_API_KEY to allow access from other hosts.')
     app.extensions['queryapigate_limiter'] = ratelimit.client_limiter(config.redis_url())
     app.extensions['queryapigate_key_limiter'] = ratelimit.key_limiters(config.redis_url())
     app.extensions['queryapigate_broadcaster'] = broadcast.Broadcaster()
@@ -302,6 +329,12 @@ def create_app():
         g.permission = resolve_permission()
         if request.endpoint not in PUBLIC_ENDPOINTS and g.permission is None:
             return jsonify(error_body('Unauthorized', 401)), 401
+        # Open-access mode (no credential configured anywhere) answers local clients only: without a key, anyone who
+        # could reach the port would otherwise be an unrestricted admin. The real socket peer decides, never a
+        # forgeable header. The public endpoints (health, docs, the Console shell) are reachable either way.
+        if g.permission is apikeys.OPEN and request.endpoint not in PUBLIC_ENDPOINTS and not _peer_is_local():
+            raise ApiError('This server has no API key set, so it answers only local clients. Set '
+                           'QUERYAPIGATE_API_KEY to allow access from other hosts.', 403, code='open_access_remote')
         if g.permission is not None:
             g.permission = settle_workspace(g.permission, named)
         limited = check_key_rate_limit()

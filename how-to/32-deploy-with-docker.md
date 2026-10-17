@@ -79,7 +79,10 @@ WAREHOUSE_PASSWORD=<your database's password>
 chmod 600 .env
 ```
 
-`QUERYAPIGATE_API_KEY` is the admin key: full control, so make it long and random and give it to few people.
+`QUERYAPIGATE_API_KEY` is the admin key: full control, so make it long and random and give it to few people. It
+isn't optional in a container: with no key (or administrator, JWT or MCP OAuth) the server runs in open-access mode,
+which answers only local clients - and from inside a container the caller's address is the Docker or pod network,
+not loopback, so every real request is refused `403 open_access_remote` until you set one.
 `QUERYAPIGATE_SECRET_KEY` encrypts connection passwords in the store
 ([guide 22](22-encrypt-passwords-at-rest.md)); keep a copy in your secret manager.
 
