@@ -49,6 +49,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+- **License: from the Functional Source License, Version 1.1, MIT Future License (`FSL-1.1-MIT`) to the Apache License,
+  Version 2.0 (`Apache-2.0`).** QueryAPIGate is now open source: use, modify and redistribute it for any purpose,
+  commercial or not, including offering it as a service. A `NOTICE` file carries the copyright notice. Versions 0.7.0
+  through 0.38.0 were released under FSL-1.1-MIT and versions up to 0.6.1 under MIT; a copy already obtained keeps the
+  license it came with. The code is unchanged; only the license and its metadata are (`LICENSE`, `NOTICE`, the
+  package's `License-Expression`, the container image label, the README).
+
 ## [0.38.0] - 2026-10-16
 
 Workspaces (experimental): several teams on one server, each running its own connections, saved queries, keys,

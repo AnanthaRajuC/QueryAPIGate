@@ -78,5 +78,5 @@ guide](documentation/INSTALLATION_AND_SETUP.md); with Docker, `docker compose up
 - [Features](documentation/FEATURES.md), feature by feature, [configuration](documentation/CONFIGURATION.md) - every
   setting - and [a tour of the Console](documentation/SCREENSHOTS.md), screen by screen.
 - [Roadmap](BACKLOG.md) - what's shipped and what's planned, in priority order.
-- [License](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE) - source-available under FSL-1.1-MIT: free to use,
-  not to resell as a competing product, and each version becomes MIT after two years. Versions up to 0.6.1 were MIT but are no longer distributed; 0.7.0 onward is FSL-1.1-MIT.
+- [License](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE) - open source under Apache-2.0 from 0.39.0
+  (0.7.0 to 0.38.0 were FSL-1.1-MIT; versions up to 0.6.1 were MIT).
