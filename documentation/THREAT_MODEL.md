@@ -193,6 +193,12 @@ not between a hosted service's tenants. What it holds against, and how:
   as the other workspace's data.
 - **A key can't leave its workspace**, prefix or not: its secret says which workspace it is in. Naming another, or
   one that doesn't exist, is the same `404` - a caller can't use the error to list workspaces.
+- **A signed-in user can't leave their workspace either.** A federated (JWT) user's workspace comes from the token -
+  the `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` claim, or the default workspace when that isn't configured - never from the
+  request path. The role is looked up in that workspace, and a path naming a different one is the same `404` as for
+  an API key. So a user signed in for one team can't reach another team's data by changing the `/w/<workspace>/`
+  prefix, even where both workspaces happen to have a role of the same name. (Before this was enforced, the role was
+  resolved in whatever workspace the path named - the finding the 0.39 boundary review turned up and closed.)
 - **A role from a membership is bounded twice**: its reach is its workspace's connections only, and it never holds
   what only a server-wide role does (`adminroles.SERVER_ONLY`): administrators, settings, re-keying, erasing a
   person, creating workspaces, `/metrics` and the instance list. A member naming a workspace they aren't in gets
@@ -205,7 +211,13 @@ What it doesn't protect against - stated in the documentation's first paragraph 
 
 - **The people who run the server.** Server-wide owners and admins see and change every workspace, by design.
 - **Shared infrastructure.** One process, one store, one encryption key for every workspace's connection passwords.
-  A bug outside the lookups above - in the process, or in a driver - is a bug for every workspace.
+  A bug outside the lookups above - in the process, or in a driver - is a bug for every workspace. No per-workspace
+  resource limits yet: one workspace can exhaust the shared connection pool, event-stream slots or database load for
+  the others (each key's own rate limits and quotas still apply).
+- **The JVM, for a workspace owner.** Creating a connection is a workspace owner's to do (`connections.write` isn't
+  server-only), and an experimental H2 or JDBC connection is opened read-write on one shared JVM with only the SQL
+  guard as its lock - so the H2/JDBC process-level risk above now reaches any workspace's owner, where before it took
+  a server administrator. Leave H2/JDBC off (they are experimental) where workspace owners aren't fully trusted.
 - **The databases themselves.** Two workspaces can each have a connection to the same database host; what a
   workspace's connection can read is its database account's grants, as it always was.
 - **Folders.** A local-folder destination is allowed only in `default`: `QUERYAPIGATE_EXPORT_DIRS` is the server's,
