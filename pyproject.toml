@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Turn SQL into governed REST APIs over MySQL, PostgreSQL, ClickHouse, SQLite, DuckDB, H2, MongoDB, and Parquet/CSV/JSON files - JSON, CSV, Parquet or Excel out, with scoped keys, an admin Console and MCP for AI agents."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "FSL-1.1-MIT"
+license = "Apache-2.0"
 authors = [{ name = "Anantha Raju C", email = "arcswdev@gmail.com" }]
 keywords = ["sql", "api", "rest", "rest-api", "data-api", "flask", "database", "mysql", "postgresql", "clickhouse",
             "sqlite", "duckdb", "mongodb", "h2", "jdbc", "parquet", "s3", "mcp", "ai-agents"]

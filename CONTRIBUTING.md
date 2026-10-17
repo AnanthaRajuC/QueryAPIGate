@@ -2,7 +2,7 @@
 
 > **Not accepting outside code contributions at the moment.** Bug reports, questions and suggestions are welcome as
 > issues; security problems go through [SECURITY.md](SECURITY.md). The pull-request process below describes how it
-> would work if that changes, and any code accepted would be licensed under the project's terms (see
+> would work if that changes, and any code accepted would be licensed under the Apache License, Version 2.0 (see
 > [LICENSE](LICENSE)). Please do not spend time on a pull request without agreeing it with the maintainer first.
 
 When contributing to this repository, please first discuss the change you wish to make via issue,

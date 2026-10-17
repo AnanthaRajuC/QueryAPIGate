@@ -4,7 +4,7 @@
 [![codecov](https://codecov.io/gh/AnanthaRajuC/QueryAPIGate/branch/main/graph/badge.svg)](https://codecov.io/gh/AnanthaRajuC/QueryAPIGate)
 [![PyPI](https://img.shields.io/pypi/v/queryapigate.svg)](https://pypi.org/project/queryapigate/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/queryapigate.svg)](https://pypi.org/project/queryapigate/)
-[![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-blue.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AnanthaRajuC/QueryAPIGate/badge)](https://scorecard.dev/viewer/?uri=github.com/AnanthaRajuC/QueryAPIGate)
 [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md#slsa-level)
@@ -248,23 +248,14 @@ locally by `queryapigate examples load`; no third-party datasets are included.
 
 ## License
 
-QueryAPIGate is **source-available**, under the
-[Functional Source License, Version 1.1, MIT Future License](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE)
-(`FSL-1.1-MIT`) © Anantha Raju C. It is not an OSI-approved open source license.
+QueryAPIGate is open source, under the
+[Apache License, Version 2.0](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE) (`Apache-2.0`)
+© Anantha Raju C - see [NOTICE](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/NOTICE). Use it, modify it and
+redistribute it, commercially or not, under that license's terms.
 
-In plain terms - the [LICENSE](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/LICENSE) is the only authoritative text:
-
-- **You may** use, copy, modify and redistribute it for any purpose that is not a *Competing Use* - including running it
-  inside your own company, non-commercial education and research, and professional services you provide to someone who
-  is themselves licensed to use it.
-- **You may not** make it available to others in a commercial product or service that substitutes for QueryAPIGate or
-  offers the same or substantially similar functionality (for example, selling it, or hosting it as a paid service).
-- **Each version becomes MIT** on the second anniversary of the date it was released, and can then be used under MIT terms.
-- **Versions up to and including 0.6.1** were released under the MIT license. They are no longer distributed (and the
-  repository history was reset in 0.7.0), but a copy you already obtained under MIT remains yours under those terms.
-
-Need something the license does not cover, such as offering it as part of a hosted service? Get in touch - commercial
-licensing may be available. This is a summary, not legal advice.
+Earlier versions: 0.39.0 onward is Apache-2.0; 0.7.0 to 0.38.0 were released under the Functional Source License,
+Version 1.1, MIT Future License (`FSL-1.1-MIT`), and versions up to 0.6.1 under MIT. A copy you already obtained keeps
+the license it came with.
 
 ## Contact
 

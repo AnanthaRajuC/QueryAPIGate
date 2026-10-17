@@ -17,7 +17,7 @@ ARG WITH_H2=false
 LABEL org.opencontainers.image.title="QueryAPIGate" \
       org.opencontainers.image.description="Turn saved SQL queries into secure REST APIs and MCP tools, on PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and more." \
       org.opencontainers.image.source="https://github.com/AnanthaRajuC/QueryAPIGate" \
-      org.opencontainers.image.licenses="FSL-1.1-MIT"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
