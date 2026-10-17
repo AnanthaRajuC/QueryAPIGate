@@ -1476,6 +1476,7 @@ Turn it on with **one** way to verify tokens, and a role saying what signed-in u
 | `QUERYAPIGATE_JWT_ROLE` | The [role](#permission-roles-templates) every signed-in user gets. |
 | `QUERYAPIGATE_JWT_ROLE_CLAIM` | Or: a claim naming each user's role (a string or a list - the first existing role wins; dotted paths such as `app_metadata.roles` work). Falls back to `QUERYAPIGATE_JWT_ROLE`. |
 | `QUERYAPIGATE_JWT_USER_CLAIM` | The claim identifying the user (default `sub`). |
+| `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` | A claim naming the [workspace](#workspaces) a user belongs to (experimental). The token, not the request path, decides a signed-in user's workspace, so a user signed in for one team can't reach another's by changing the `/w/<workspace>/` prefix. Unset, every signed-in user acts in the default workspace. |
 
 Needs `pip install "queryapigate[jwt]"` (included in the Docker image). Settings that would make checking unsafe
 stop startup: both or neither of a secret and a JWKS URL, a JWKS URL without issuer and audience (a provider

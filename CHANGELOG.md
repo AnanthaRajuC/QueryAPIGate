@@ -49,6 +49,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+- **Workspaces (experimental): a signed-in user's workspace now comes from their token, not the request path.** A
+  security review of the workspace boundary found that a federated (JWT) user's role was resolved in whatever
+  workspace the `/w/<workspace>/` prefix named, so a user signed in for one team could reach another team's data by
+  changing the prefix where both workspaces had a role of the same name. A signed-in user is now confined to one
+  workspace: the new `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` claim names it, or the default workspace when that is unset,
+  and a path naming a different workspace is a `404`, exactly as for an API key. If you relied on signed-in users
+  addressing several workspaces by path (experimental, 0.38 only), set `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` to a claim
+  your tokens carry. The threat model's *Workspaces* section now also records the shared-JVM risk a workspace owner's
+  H2/JDBC connection carries, and that there are no per-workspace resource limits yet.
+
 ## [0.39.0] - 2026-10-17
 
 QueryAPIGate is now open source, under Apache-2.0. The code is unchanged.
