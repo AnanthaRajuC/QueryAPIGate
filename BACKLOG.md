@@ -117,9 +117,10 @@ documentation. #99 workspaces only if asked for.
 26. **0.38: #99 workspaces** (experimental), delegated administration for teams on one server
     ([ADR 0023](documentation/adr/0023-workspaces.md)) - and a sign-in page for the Console. Not a rolling upgrade.
     (0.38.0, 2026-10-16.)
-27. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+27. **0.39: Apache-2.0** - open source, from FSL-1.1-MIT; the code unchanged. (0.39.0, 2026-10-17.)
+28. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-28. **1.0.0.**
+29. **1.0.0.**
 
 ## 1. Per-key API permissions
 

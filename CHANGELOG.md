@@ -49,6 +49,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-17
+
+QueryAPIGate is now open source, under Apache-2.0. The code is unchanged.
+
 ### Changed
 - **License: from the Functional Source License, Version 1.1, MIT Future License (`FSL-1.1-MIT`) to the Apache License,
   Version 2.0 (`Apache-2.0`).** QueryAPIGate is now open source: use, modify and redistribute it for any purpose,
@@ -2717,7 +2721,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.35.1...v0.36.0
