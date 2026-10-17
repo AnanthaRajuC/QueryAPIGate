@@ -56,6 +56,7 @@ nav:
       - 0021 Live events and secrets graduate: documentation/adr/0021-live-events-and-secrets-graduate.md
       - 0022 MongoDB streaming and graduation: documentation/adr/0022-mongodb-streaming-and-graduation.md
       - 0023 Workspaces: documentation/adr/0023-workspaces.md
+      - 0024 Fail-closed auditing: documentation/adr/0024-fail-closed-auditing.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md
