@@ -79,13 +79,20 @@ Every request carries (or omits) an `X-API-Key` header, checked once per request
 
 #### Open-access mode: a deliberate default worth understanding
 
-If `QUERYAPIGATE_API_KEY` is never set, no scoped keys or administrators exist and JWT is off, QueryAPIGate does not
-refuse requests -
-every caller authenticates as an implicit, unrestricted admin. This is intentional (the code calls it
-"open by design"), aimed at a local trial or a fully trusted internal network where standing up a key
-first would just be friction. It is **not** a safe default for anything reachable beyond a machine you
-control. SECURITY.md's first checklist item exists because of exactly this: the moment you deploy this
-somewhere another party can reach, setting `QUERYAPIGATE_API_KEY` stops being optional.
+If `QUERYAPIGATE_API_KEY` is never set, no scoped keys or administrators exist, and JWT and MCP OAuth are off,
+QueryAPIGate treats every caller as an implicit, unrestricted admin - but **answers local (loopback) clients only**.
+A request whose real socket peer isn't a loopback address is refused `403 open_access_remote`, pointing the operator
+at `QUERYAPIGATE_API_KEY`. The peer is the actual TCP connection, read before `ProxyFix`, so a forged
+`X-Forwarded-For` can't make a remote caller look local; an address that can't be parsed (or none, as over a Unix
+socket) counts as remote. The public endpoints (`/health`, `/`, `/docs`, `/openapi.json`, the Console shell) stay
+reachable, as they are even when a key is set.
+
+So the zero-config local trial still works, and the "deployed open on a network by accident" footgun is closed:
+exposing the port no longer exposes the data. This is aimed at a local trial or a fully trusted internal network
+where standing up a key first would just be friction. It is still **not** how to run a server other parties use:
+the moment more than loopback should reach it, setting `QUERYAPIGATE_API_KEY` (or configuring administrators, JWT or
+MCP OAuth) stops being optional - SECURITY.md's first checklist item. Behind a reverse proxy or in a container, the
+peer is the proxy or the pod network, not loopback, so open-access mode is refused there too: set a key.
 
 ### Authorization: what a scoped key can actually do
 

@@ -2261,6 +2261,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `unauthorized` | 401 | Missing or wrong `X-API-Key` or bearer token |
 | `insufficient_scope` | 403 | On the MCP server: a valid access token that doesn't carry `QUERYAPIGATE_MCP_SCOPE` |
 | `admin_only` | 403 | Only an administrator may do this (manage the server, query or browse another database) |
+| `open_access_remote` | 403 | Open-access mode (no API key, administrator, JWT or MCP OAuth configured) answers only local clients; set `QUERYAPIGATE_API_KEY` to allow other hosts |
 | `role_forbidden` | 403 | The administrator's role can't do this; `capability` names what it needed, `role` the caller's role. For a move or merge that would widen access, `gaining` lists the keys and roles |
 | `workspace_required` | 403 | An administrator with no role in the workspace the call is for - only in others, which `workspaces` lists ([Workspaces](#workspaces)) |
 | `connection_forbidden` | 403 | This key may not use this connection |

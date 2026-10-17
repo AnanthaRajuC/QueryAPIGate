@@ -44,8 +44,8 @@ def _serve(args):
     args.port = args.port or config.port_setting('QUERYAPIGATE_PORT', 5000)  # checked by create_app() above
     if args.host not in LOOPBACK_HOSTS and not config.api_key():
         logging.getLogger('queryapigate').warning(
-            'Listening on %s without QUERYAPIGATE_API_KEY set: anyone who can reach this port can run SQL '
-            'on your active connections.', args.host)
+            'Listening on %s without QUERYAPIGATE_API_KEY set: in open-access mode the server answers only local '
+            'clients, so callers on other hosts are refused. Set QUERYAPIGATE_API_KEY to serve them.', args.host)
     logging.getLogger('queryapigate').info('Using %s (metadata: %s)', config.home(), db.describe())
     # SIGTERM - what a container runtime or `kill` sends - as a clean exit, so what runs at exit does: Vault leases
     # revoked (ADR 0015), the audit stream's lease given back. Python's default ends the process without it.

@@ -49,6 +49,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+- **Open-access mode now answers local clients only.** When no API key, administrator, JWT or MCP OAuth is
+  configured, the server still treats every caller as an unrestricted admin - the zero-config local trial - but a
+  request whose real socket peer isn't a loopback address is now refused `403 open_access_remote`, pointing at
+  `QUERYAPIGATE_API_KEY`. The peer is the actual TCP connection, read before `ProxyFix`, so a forged
+  `X-Forwarded-For` can't make a remote caller look local. The public endpoints (`/health`, `/`, `/docs`,
+  `/openapi.json`, the Console shell) stay reachable. This closes the "deployed open on a network by accident"
+  footgun: exposing the port no longer exposes the data. Behind a reverse proxy or in a container the peer isn't
+  loopback, so open-access mode is refused there too - set `QUERYAPIGATE_API_KEY` (as the deployment guides already
+  show). A server that already sets any credential is unaffected.
+
 ## [0.39.0] - 2026-10-17
 
 QueryAPIGate is now open source, under Apache-2.0. The code is unchanged.

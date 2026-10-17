@@ -135,6 +135,47 @@ class CorsTests(AppTestCase):
             self.assertIsNone(config.cors_origins())
 
 
+class OpenAccessTests(AppTestCase):
+    """Open-access mode (no API key, administrator, JWT or MCP OAuth) answers local clients only, so exposing the
+    port doesn't expose the data (threat model: Open-access mode). The real socket peer decides, never a header."""
+
+    _UNSET = object()
+
+    def get(self, path, remote_addr=_UNSET, **headers):
+        base = {} if remote_addr is self._UNSET else {'REMOTE_ADDR': remote_addr}
+        return self.client().get(path, headers=headers, environ_base=base)
+
+    def test_a_local_caller_is_served(self):
+        self.assertEqual(self.get('/api/v1/connections', '127.0.0.1').status_code, 200)
+
+    def test_ipv6_loopback_is_local_too(self):
+        self.assertEqual(self.get('/api/v1/connections', '::1').status_code, 200)
+
+    def test_a_remote_caller_is_refused(self):
+        res = self.get('/api/v1/connections', '10.0.0.5')
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.get_json()['code'], 'open_access_remote')
+
+    def test_a_remote_caller_cannot_look_local_with_a_forged_header(self):
+        res = self.get('/api/v1/connections', '10.0.0.5', **{'X-Forwarded-For': '127.0.0.1'})
+        self.assertEqual(res.status_code, 403)  # X-Forwarded-For isn't trusted (no proxy), and never the peer anyway
+
+    def test_public_endpoints_stay_reachable_from_anywhere(self):
+        for path in ('/health', '/', '/openapi.json'):
+            with self.subTest(path=path):
+                # reachable - not the open-access refusal (/ redirects to the Console, hence 200 or 302)
+                self.assertNotEqual(self.get(path, '10.0.0.5').status_code, 403)
+
+    def test_an_unparseable_peer_counts_as_remote(self):
+        self.assertEqual(self.get('/api/v1/connections', '').status_code, 403)
+
+    def test_a_configured_key_lifts_the_restriction_for_that_caller(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
+        self.assertEqual(self.get('/api/v1/connections', '10.0.0.5', **{'X-API-Key': 'k3y'}).status_code, 200)
+        # and the server is no longer open: a remote caller with no key is now a plain 401, not 403
+        self.assertEqual(self.get('/api/v1/connections', '10.0.0.5').status_code, 401)
+
+
 class RateLimitTests(AppTestCase):
     def test_off_by_default(self):
         client = self.client()
@@ -191,8 +232,10 @@ class RateLimitTests(AppTestCase):
 
     def test_clients_are_counted_separately_by_address(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'  # a key: the IP limiter applies either way, remote peers served
         client = self.client()
-        get = lambda ip: client.get('/api/v1/connections', environ_base={'REMOTE_ADDR': ip}).status_code  # noqa: E731
+        get = lambda ip: client.get('/api/v1/connections', headers={'X-API-Key': 'k3y'},  # noqa: E731
+                                    environ_base={'REMOTE_ADDR': ip}).status_code
         self.assertEqual([get('10.0.0.1'), get('10.0.0.1'), get('10.0.0.2')], [200, 429, 200])
 
     def test_forwarded_headers_are_ignored_unless_a_proxy_is_trusted(self):
@@ -206,18 +249,20 @@ class RateLimitTests(AppTestCase):
     def test_behind_a_trusted_proxy_the_real_client_address_is_used(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         os.environ['QUERYAPIGATE_TRUST_PROXY'] = '1'
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'  # the proxy forwards callers; open-access mode would refuse it
         client = self.client()
-        get = lambda ip: client.get('/api/v1/connections', headers={'X-Forwarded-For': ip},  # noqa: E731
+        get = lambda ip: client.get('/api/v1/connections', headers={'X-Forwarded-For': ip, 'X-API-Key': 'k3y'},  # noqa: E731
                                     environ_base={'REMOTE_ADDR': '172.17.0.2'}).status_code  # the proxy itself
         self.assertEqual([get('203.0.113.1'), get('203.0.113.1'), get('203.0.113.2')], [200, 429, 200])
 
     def test_only_the_trusted_hop_is_believed(self):
         os.environ['QUERYAPIGATE_RATE_LIMIT'] = '1/minute'
         os.environ['QUERYAPIGATE_TRUST_PROXY'] = '1'
+        os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
         client = self.client()
         # the proxy appends the address it actually saw; anything a client prepended is not trusted
         get = lambda forged: client.get('/api/v1/connections',  # noqa: E731
-                                        headers={'X-Forwarded-For': f'{forged}, 203.0.113.9'},
+                                        headers={'X-Forwarded-For': f'{forged}, 203.0.113.9', 'X-API-Key': 'k3y'},
                                         environ_base={'REMOTE_ADDR': '172.17.0.2'}).status_code
         self.assertEqual([get('1.1.1.1'), get('2.2.2.2'), get('3.3.3.3')], [200, 429, 429])
 
