@@ -40,7 +40,8 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from . import apikeys, config, oidc
+from . import apikeys, config, oidc, scope
+from .db import DEFAULT_WORKSPACE
 
 log = logging.getLogger('queryapigate')
 
@@ -136,6 +137,18 @@ def _role_for(claims, mcp=False):
     return None, None
 
 
+def _token_workspace(claims):
+    """The workspace a signed-in user acts in (ADR 0023 §4): the QUERYAPIGATE_JWT_WORKSPACE_CLAIM claim's value, or
+    the default workspace when that is unset or the claim is missing. It comes from the token, never the request path,
+    so a federated user can't reach another team's workspace by changing the `/w/<workspace>/` prefix - a workspace
+    they don't belong to is a 404 in settle_workspace(), as it is for an API key."""
+    claim_name = config.jwt_workspace_claim()
+    if not claim_name:
+        return DEFAULT_WORKSPACE
+    value = claim(claims, claim_name)
+    return value if isinstance(value, str) and value else DEFAULT_WORKSPACE
+
+
 def authenticate(authorization, client_ip=None):
     """A Permission for a valid bearer token, or None - see the module docstring."""
     if not config.jwt_enabled():
@@ -149,14 +162,16 @@ def authenticate(authorization, client_ip=None):
     user = claim(claims, config.jwt_user_claim())
     if not isinstance(user, (str, int)) or isinstance(user, bool) or str(user) == '':
         return None
-    role_name, role = _role_for(claims)
-    if role is None:
-        log.warning('A valid token for %s names no existing role - refused (QUERYAPIGATE_JWT_ROLE / '
-                    'QUERYAPIGATE_JWT_ROLE_CLAIM)', user)
-        return None
-    if not apikeys.ip_allowed(role, client_ip):
-        return None
-    return apikeys.permission_from_grants(f'{NAME_PREFIX}{user}', role, claims=claims)
+    workspace = _token_workspace(claims)
+    with scope.using(workspace):  # the role is this user's workspace's, not the one the path happens to name
+        role_name, role = _role_for(claims)
+        if role is None:
+            log.warning('A valid token for %s names no existing role in workspace %r - refused (QUERYAPIGATE_JWT_ROLE '
+                        '/ QUERYAPIGATE_JWT_ROLE_CLAIM)', user, workspace)
+            return None
+        if not apikeys.ip_allowed(role, client_ip):
+            return None
+        return apikeys.permission_from_grants(f'{NAME_PREFIX}{user}', role, claims=claims, workspace=workspace)
 
 
 # --- The MCP server (ADR 0006) -----------------------------------------------------------------------------------

@@ -813,7 +813,7 @@ JWT_ASYMMETRIC_ALGORITHMS = ('RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512
 JWT_SYMMETRIC_ALGORITHMS = ('HS256', 'HS384', 'HS512')
 _JWT_VARS = ('QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_JWT_JWKS_URL', 'QUERYAPIGATE_JWT_ISSUER',
              'QUERYAPIGATE_JWT_AUDIENCE', 'QUERYAPIGATE_JWT_ALGORITHMS', 'QUERYAPIGATE_JWT_ROLE',
-             'QUERYAPIGATE_JWT_ROLE_CLAIM', 'QUERYAPIGATE_JWT_USER_CLAIM')
+             'QUERYAPIGATE_JWT_ROLE_CLAIM', 'QUERYAPIGATE_JWT_USER_CLAIM', 'QUERYAPIGATE_JWT_WORKSPACE_CLAIM')
 
 
 def _env(name):
@@ -868,6 +868,13 @@ def jwt_role_claim():
 def jwt_user_claim():
     """QUERYAPIGATE_JWT_USER_CLAIM: the claim identifying the user - default `sub`."""
     return _env('QUERYAPIGATE_JWT_USER_CLAIM') or 'sub'
+
+
+def jwt_workspace_claim():
+    """QUERYAPIGATE_JWT_WORKSPACE_CLAIM: a claim naming the workspace a signed-in user belongs to (ADR 0023). The
+    token, not the request path, decides a federated user's workspace, so a user signed in for one team can't reach
+    another's by changing the `/w/<workspace>/` prefix. Unset, every signed-in user acts in the default workspace."""
+    return _env('QUERYAPIGATE_JWT_WORKSPACE_CLAIM')
 
 
 def check_jwt_settings():
@@ -1340,7 +1347,9 @@ def describe_settings():
             row('Role', 'Role whose grants every token caller gets.', 'QUERYAPIGATE_JWT_ROLE', jwt_role() or 'not set'),
             row('Role claim', 'Claim naming a caller\'s role instead.', 'QUERYAPIGATE_JWT_ROLE_CLAIM',
                 jwt_role_claim() or 'not set'),
-            row('User claim', 'Claim identifying the user.', 'QUERYAPIGATE_JWT_USER_CLAIM', jwt_user_claim())]},
+            row('User claim', 'Claim identifying the user.', 'QUERYAPIGATE_JWT_USER_CLAIM', jwt_user_claim()),
+            row('Workspace claim', 'Claim naming the workspace a user belongs to (ADR 0023); unset, the default '
+                'workspace.', 'QUERYAPIGATE_JWT_WORKSPACE_CLAIM', jwt_workspace_claim() or 'not set')]},
         {'id': 'execution', 'title': 'Query execution',
          'description': 'Limits applied to every statement this server runs.', 'rows': [
             row('Query timeout', 'Server-wide statement limit. A request may ask for less, never more. '

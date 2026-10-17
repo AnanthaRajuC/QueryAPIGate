@@ -481,3 +481,71 @@ class EventsServerTests(JwtTestCase):
             stream = self.open(token(exp=int(time.time()) + 2))
             self.assertEqual(stream.status, 200)
             self.assertTrue(stream.closed(timeout=8))
+
+
+class _WorkspaceJwtBase(JwtTestCase):
+    """A second workspace, team-b, with its own connection and a query and role of the SAME names default has - so a
+    lookup that crossed the boundary would show up as team-b's data (ADR 0023 §4)."""
+
+    def setUp(self):
+        super().setUp()
+        self._post('/api/v1/workspaces', {'name': 'team-b'}, 201)
+        data = os.path.join(self.tmp.name, 'data.db')
+        self._post('/w/team-b/api/v1/connections',
+                   {'name': 'lite', 'db': 'sqlite', 'database': data, 'active': True}, 201)
+        self._post('/w/team-b/api/v1/queries',
+                   {'name': 'all_orders', 'description': 'd', 'connection_name': 'lite', 'publish': True,
+                    'sql': 'SELECT item FROM orders ORDER BY item'}, 201)
+        self._post('/w/team-b/api/v1/roles', {'name': 'mobile', 'connections': [], 'queries': ['all_orders']}, 201)
+
+    def _post(self, url, body, status):
+        res = self.client.post(url, headers=self.admin, json=body)
+        self.assertEqual(res.status_code, status, res.get_data(as_text=True))
+        return res
+
+
+class WorkspaceConfinementTests(_WorkspaceJwtBase):
+    """With no QUERYAPIGATE_JWT_WORKSPACE_CLAIM set, every signed-in user acts in the default workspace, and a path
+    naming another is a 404 - as it is for an API key, never the other workspace's data."""
+
+    def test_the_user_acts_in_the_default_workspace(self):
+        self.assertEqual(self.items(self.client.get('/q/my_orders', headers=bearer(token()))), ['apples', 'avocados'])
+
+    def test_naming_another_workspace_in_the_path_is_404(self):
+        res = self.client.get('/w/team-b/q/all_orders', headers=bearer(token()))
+        self.assertEqual(res.status_code, 404, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['code'], 'workspace_not_found')
+
+    def test_a_workspace_claim_is_ignored_until_it_is_configured(self):
+        # the token carries tenant=team-b, but without the setting it means nothing: still the default workspace
+        res = self.client.get('/w/team-b/q/all_orders', headers=bearer(token(tenant='team-b')))
+        self.assertEqual(res.status_code, 404, res.get_data(as_text=True))
+
+
+class WorkspaceClaimTests(_WorkspaceJwtBase):
+    """With QUERYAPIGATE_JWT_WORKSPACE_CLAIM set, the token - not the path - decides the user's workspace."""
+
+    env = {'QUERYAPIGATE_JWT_SECRET': SECRET, 'QUERYAPIGATE_JWT_ROLE': 'mobile',
+           'QUERYAPIGATE_JWT_WORKSPACE_CLAIM': 'tenant'}
+
+    def test_the_claim_places_the_user_in_that_workspace(self):
+        res = self.client.get('/w/team-b/q/all_orders', headers=bearer(token(tenant='team-b')))
+        self.assertEqual(self.items(res), ['apples', 'avocados', 'bananas', 'numbered'])
+
+    def test_the_prefix_is_optional_the_token_is_what_counts(self):
+        # no /w/ prefix: the user still acts in team-b, so default's my_orders isn't theirs to reach
+        res = self.client.get('/q/my_orders', headers=bearer(token(tenant='team-b')))
+        self.assertEqual(res.status_code, 404, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['code'], 'query_not_found')
+
+    def test_a_user_of_one_workspace_cannot_reach_another_by_the_prefix(self):
+        res = self.client.get('/w/team-b/q/all_orders', headers=bearer(token(tenant='default')))
+        self.assertEqual(res.status_code, 404, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['code'], 'workspace_not_found')
+
+    def test_no_claim_on_the_token_falls_back_to_the_default_workspace(self):
+        self.assertEqual(self.items(self.client.get('/q/my_orders', headers=bearer(token()))), ['apples', 'avocados'])
+
+    def test_a_workspace_with_no_such_role_is_refused(self):
+        # tenant names a workspace that has no `mobile` role: a plain 401, like any token that maps to no role
+        self.assertEqual(self.client.get('/q/my_orders', headers=bearer(token(tenant='nonesuch'))).status_code, 401)

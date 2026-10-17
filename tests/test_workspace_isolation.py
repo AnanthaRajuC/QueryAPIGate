@@ -252,14 +252,16 @@ class CacheAdminTests(IsolationTestCase):
 
 
 class SignedInUserTests(IsolationTestCase):
-    def test_a_users_role_is_found_in_the_workspace_the_path_names(self):
+    def test_a_signed_in_user_is_confined_to_their_workspace_not_the_path(self):
+        """With no QUERYAPIGATE_JWT_WORKSPACE_CLAIM configured, a signed-in user acts in the default workspace
+        whatever the path names (ADR 0023 §4). team-b's role of the same name never lets a default user reach
+        team-b's rows by changing the /w/ prefix - the security review's finding (the full matrix is in test_jwt)."""
         from unittest import mock
 
         from tests.test_jwt import SECRET, bearer, token
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_JWT_SECRET': SECRET, 'QUERYAPIGATE_JWT_ROLE': 'mobile'}):
-            self.ok('post', f'{B}/api/v1/roles', status=201, json={'name': 'mobile', 'connections': ['lite']})
-            user = bearer(token({'sub': 'bea@team-b.example'}))
-            self.assertEqual(self.titles(f'{B}/q/films', headers=user), ['Bravo', 'Bolero', 'Brazil'])
-            # default has no role `mobile`: not let in there, and never handed team-b's rows
-            res = self.client.get('/q/films', headers=user)
-            self.assertIn(res.status_code, (401, 403), res.get_data(as_text=True))
+            for prefix in ('', B):  # a `mobile` role of the same name in each workspace
+                self.ok('post', f'{prefix}/api/v1/roles', status=201, json={'name': 'mobile', 'connections': ['lite']})
+            user = bearer(token({'sub': 'alice'}))
+            self.assertEqual(self.titles('/q/films', headers=user), ['Alpha', 'Beta'])  # default's, the user's own
+            self.assertEqual(self.code('get', f'{B}/q/films', 404, headers=user), 'workspace_not_found')

@@ -50,15 +50,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Changed
-- **Open-access mode now answers local clients only.** When no API key, administrator, JWT or MCP OAuth is
-  configured, the server still treats every caller as an unrestricted admin - the zero-config local trial - but a
-  request whose real socket peer isn't a loopback address is now refused `403 open_access_remote`, pointing at
-  `QUERYAPIGATE_API_KEY`. The peer is the actual TCP connection, read before `ProxyFix`, so a forged
-  `X-Forwarded-For` can't make a remote caller look local. The public endpoints (`/health`, `/`, `/docs`,
-  `/openapi.json`, the Console shell) stay reachable. This closes the "deployed open on a network by accident"
-  footgun: exposing the port no longer exposes the data. Behind a reverse proxy or in a container the peer isn't
-  loopback, so open-access mode is refused there too - set `QUERYAPIGATE_API_KEY` (as the deployment guides already
-  show). A server that already sets any credential is unaffected.
+- **Workspaces (experimental): a signed-in user's workspace now comes from their token, not the request path.** A
+  security review of the workspace boundary found that a federated (JWT) user's role was resolved in whatever
+  workspace the `/w/<workspace>/` prefix named, so a user signed in for one team could reach another team's data by
+  changing the prefix where both workspaces had a role of the same name. A signed-in user is now confined to one
+  workspace: the new `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` claim names it, or the default workspace when that is unset,
+  and a path naming a different workspace is a `404`, exactly as for an API key. If you relied on signed-in users
+  addressing several workspaces by path (experimental, 0.38 only), set `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` to a claim
+  your tokens carry. The threat model's *Workspaces* section now also records the shared-JVM risk a workspace owner's
+  H2/JDBC connection carries, and that there are no per-workspace resource limits yet.
 
 ## [0.39.0] - 2026-10-17
 

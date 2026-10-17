@@ -155,8 +155,9 @@ curl -X DELETE http://127.0.0.1:5000/api/v1/workspaces/payments -H 'X-API-Key: d
 
 - A **local-folder destination** is only in `default` - the folders exports may write under are the server's. Use an
   object-storage destination in a workspace.
-- **Signed-in app users** (JWT): a token's role is found by name in the workspace the path names, so a team's users
-  call `/w/<workspace>/...`.
+- **Signed-in app users** (JWT): set `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` to a claim that names each user's workspace,
+  so the token decides it - a user can't reach another team's by changing the `/w/<workspace>/` prefix. Unset, every
+  signed-in user acts in `default`.
 - No per-workspace limits yet (each key's own rate limits and quotas work as before), and no mapping of identity-
   provider groups to memberships.
 
