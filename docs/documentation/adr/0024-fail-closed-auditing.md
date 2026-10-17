@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0024-fail-closed-auditing.md"

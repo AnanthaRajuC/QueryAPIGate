@@ -32,6 +32,7 @@ one it supersedes.
 | [0021](0021-live-events-and-secrets-graduate.md) | Live events, and secrets from files and Vault, graduate | Accepted |
 | [0022](0022-mongodb-streaming-and-graduation.md) | MongoDB streaming exports, and MongoDB graduates | Accepted |
 | [0023](0023-workspaces.md) | Workspaces: delegated administration for teams | Accepted |
+| [0024](0024-fail-closed-auditing.md) | Fail-closed auditing: an action may require its audit entry | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
