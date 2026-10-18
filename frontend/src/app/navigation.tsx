@@ -109,6 +109,24 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
+    label: 'MCP',
+    items: [
+      {
+        tab: 'mcp',
+        needs: 'observe',
+        group: 'MCP',
+        label: 'MCP server',
+        path: '/mcp',
+        icon: svg(
+          <>
+            <rect x="3" y="4" width="18" height="14" rx="2" />
+            <path d="M8 20h8M7 9l2.5 2.5L7 14M12 14h4" />
+          </>,
+        ),
+      },
+    ],
+  },
+  {
     label: 'Delivery',
     items: [
       {

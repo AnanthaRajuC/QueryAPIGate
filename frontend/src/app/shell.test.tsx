@@ -20,7 +20,7 @@ describe('Console shell - the classic frame', () => {
     renderAt('/queries/films');
     const nav = screen.getByRole('tablist', { name: 'Sections' });
     const groups = [...nav.querySelectorAll('.nav-label')].map((n) => n.textContent);
-    expect(groups).toEqual(['Overview', 'Data', 'API', 'Delivery', 'Access', 'Observability']);
+    expect(groups).toEqual(['Overview', 'Data', 'API', 'MCP', 'Delivery', 'Access', 'Observability']);
     const labels = [...nav.querySelectorAll('.nav-text')].map((n) => n.textContent);
     expect(labels).toEqual([
       'Home',
@@ -28,6 +28,7 @@ describe('Console shell - the classic frame', () => {
       'Caching',
       'API Repository',
       'API Designer',
+      'MCP server',
       'Exports',
       'Destinations',
       'API keys',
@@ -69,6 +70,7 @@ describe('Console shell - the classic frame', () => {
       'Connections',
       'API Repository',
       'API Designer',
+      'MCP server',
       'Workspaces',
       'Administrators',
       'Alerts',

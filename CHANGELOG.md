@@ -49,6 +49,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **A dedicated MCP screen in the Console.** The MCP server's tools, a reachability check and the connect snippet
+  (the URL and `X-API-Key` header, as Claude Desktop takes them) now have their own top-level **MCP** item in the
+  sidebar, instead of living under Settings. The tools shown are the current workspace's. The MCP *settings*
+  (`QUERYAPIGATE_MCP_PORT`, `QUERYAPIGATE_MCP_MAX_ROWS`) stay read-only under Settings → MCP server. No API change -
+  the page uses the existing `GET /api/v1/mcp/tools` and `/api/v1/mcp/status` (both need `observe`).
+
 ### Changed
 - **Workspaces (experimental): a signed-in user's workspace now comes from their token, not the request path.** A
   security review of the workspace boundary found that a federated (JWT) user's role was resolved in whatever

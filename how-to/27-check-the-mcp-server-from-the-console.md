@@ -4,14 +4,17 @@
 without installing an MCP client.
 
 `queryapigate mcp` is a separate process from the server that serves the Console, so the Console can't know about it
-on its own. **Settings → MCP server** asks on request.
+on its own. The **MCP** screen in the sidebar asks on request - and lists the tools a client would see.
 
-## What the section shows
+## What the MCP screen shows
 
-**The settings** - `QUERYAPIGATE_MCP_PORT` (default `5001`) and `QUERYAPIGATE_MCP_MAX_ROWS` (default `200`), with
-whether each comes from the environment or the default. These are the values the *Console's* server was started
-with. Start both processes with the same variables (one `.env` file for both is easiest), or this shows the wrong
-port.
+**Connect a client** - the config an MCP client needs: the server's URL and a scoped API key as the `X-API-Key`
+header - the same one-entry snippet you paste into Claude Desktop's config.
+
+> The MCP server's own *settings* stay under **Settings → MCP server**, read-only: `QUERYAPIGATE_MCP_PORT` (default
+> `5001`) and `QUERYAPIGATE_MCP_MAX_ROWS` (default `200`), with whether each comes from the environment or the
+> default. These are the values the *Console's* server was started with - start both processes with the same
+> variables (one `.env` file for both is easiest), or the reachability check uses the wrong port.
 
 **Reachability → Check now** - tries a TCP connection to that port on `127.0.0.1`. It runs only when you press the
 button, never on its own. Verified both ways:
