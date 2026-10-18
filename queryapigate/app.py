@@ -1097,12 +1097,13 @@ def _execute_agent_write(request, saved, path, number, connection_name, values, 
     from . import agentwrites
     entry = {**run_entry(connection_name), 'request': request['id'],
              **({'approved_by': request['decided_by']} if request['decided_by'] else {})}
+    effective_mask = (saved.get('mask') or []) + (g.permission.mask or []) or None
     try:
         result, affected = engine.execute_agent_write(sql, connection_name, values, saved.get('max_affected_rows') or 1,
                                                       timeout, key_name=metrics_key_name(),
                                                       allowed_write_ops=g.permission.allowed_write_ops,
                                                       allowed_tables=g.permission.allowed_tables,
-                                                      mask=(saved.get('mask') or []) + (g.permission.mask or []) or None)
+                                                      mask=effective_mask)
     except ApiError as error:
         agentwrites.finish(request['id'], error={'error': error.message, 'code': error.code or 'internal_error'})
         _record_and_broadcast(path, number,

@@ -172,7 +172,8 @@ SCHEMAS = {
                                   'description': 'With agent_writes: the most rows one agent write may change '
                                                  '(default 1).'},
             'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True,
-                     'description': 'Column-masking rules for this query\'s result, applied to every caller (ADR 0005).'},
+                     'description': 'Column-masking rules for this query\'s result, applied to every caller '
+                                    '(ADR 0005).'},
             'mcp': {'type': 'boolean', 'default': True,
                     'description': 'Expose this query as an MCP tool (default true). Toggle later with PATCH on the '
                                    'version.'},

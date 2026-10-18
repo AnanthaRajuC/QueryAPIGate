@@ -133,7 +133,7 @@ test('API Designer to a published API: run, save as draft, publish, call it', as
   await page.locator('.side-tab[data-side-tab="settings"]').click();
   await page.getByLabel(/Bound parameters/).fill('{"id": 1}');
   await page.keyboard.press('Control+Enter');
-  await expect(page.locator('#run-quick-stats')).toContainText('200 OK');
+  await expect(page.locator('.resbar').first()).toContainText('200 OK');
   await page.getByRole('button', { name: 'Save as New API' }).click();
   const panel = page.locator('#run-save-panel');
   await panel.getByLabel('Filename').fill('e2e_film_title');
