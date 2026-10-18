@@ -71,6 +71,7 @@ SCHEMAS = {
             'min_length': {'type': 'integer'}, 'max_length': {'type': 'integer'},
             'pattern': {'type': 'string'},
             'description': {'type': 'string'},
+            'example': {'description': 'A sample value, shown to callers and in the MCP tool input schema.'},
             'from_claim': {'type': 'string', 'description': "Bound from the signed-in caller's token claim."},
         },
     },

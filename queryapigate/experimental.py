@@ -53,6 +53,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
         'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
     },
+    'embeddings': {
+        'name': 'Semantic search (embed parameters)',
+        'why': 'new (ADR 0025) - the embeddings-endpoint settings and the `embed` parameter rule may change as '
+               'they meet more vector stores; Postgres/pgvector only for now, and off unless an endpoint is set',
+        'settings': ('QUERYAPIGATE_EMBEDDING_URL', 'QUERYAPIGATE_EMBEDDING_MODEL', 'QUERYAPIGATE_EMBEDDING_API_KEY'),
+        'docs': ('documentation/API.md', 'Semantic search'),
+    },
     'aws_secrets': {
         'name': 'Secrets and credentials from AWS',
         'why': 'tested against a Secrets Manager stand-in, not AWS, and RDS IAM authentication against neither - the '

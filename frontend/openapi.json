@@ -2715,6 +2715,9 @@
             "items": {},
             "type": "array"
           },
+          "example": {
+            "description": "A sample value, shown to callers and in the MCP tool input schema."
+          },
           "from_claim": {
             "description": "Bound from the signed-in caller's token claim.",
             "type": "string"

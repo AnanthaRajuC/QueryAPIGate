@@ -105,10 +105,10 @@ class ListToolsForTests(McpTestCase):
         self.save('q2', sql='SELECT id FROM t WHERE id = :id')
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
         catalog_names = {q['name'] for q in self.catalog(self.admin_headers)}
-        # The admin key also always sees the two fixed, ad-hoc tools (list_tables/execute_sql) - catalog
+        # The admin key also always sees the fixed, ad-hoc tools (list_tables/describe_table/execute_sql) - catalog
         # has no equivalent concept, so they're the one expected difference here.
-        self.assertEqual(tool_names, catalog_names | {'list_tables', 'execute_sql'})
-        self.assertEqual(tool_names, {'q1', 'q2', 'list_tables', 'execute_sql'})
+        self.assertEqual(tool_names, catalog_names | {'list_tables', 'describe_table', 'execute_sql'})
+        self.assertEqual(tool_names, {'q1', 'q2', 'list_tables', 'describe_table', 'execute_sql'})
 
     def test_matches_catalog_for_a_scoped_key(self):
         self.save('reachable')
@@ -124,7 +124,7 @@ class ListToolsForTests(McpTestCase):
         self.save('reader', sql='SELECT * FROM t')
         self.save('writer', sql='DELETE FROM t')
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
-        self.assertEqual(tool_names, {'reader', 'list_tables', 'execute_sql'})
+        self.assertEqual(tool_names, {'reader', 'list_tables', 'describe_table', 'execute_sql'})
 
     def test_a_query_with_mcp_off_is_not_a_tool_but_still_serves_rest(self):
         self.save('shown')
@@ -339,11 +339,27 @@ class FixedToolsTests(McpTestCase):
         tool_names = {t['name'] for t in mcp_server.fixed_tools_for(permission)}
         self.assertEqual(tool_names, set())
 
-    def test_a_connection_scoped_key_sees_both_fixed_tools(self):
+    def test_a_connection_scoped_key_sees_the_fixed_tools(self):
         key = self.create_scoped_key(connections=['a'])
         permission = apikeys.authenticate(key)
         tool_names = {t['name'] for t in mcp_server.fixed_tools_for(permission)}
-        self.assertEqual(tool_names, {'list_tables', 'execute_sql'})
+        self.assertEqual(tool_names, {'list_tables', 'describe_table', 'execute_sql'})
+
+    def test_describe_table_returns_one_table_and_its_columns(self):
+        result = mcp_server.describe_table_tool(apikeys.OPEN, {'connection_name': 'a', 'table': 't'})
+        self.assertNotIn('isError', result)
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+        self.assertEqual(result['structuredContent']['table']['name'], 't')
+        self.assertEqual({c['name'] for c in result['structuredContent']['table']['columns']}, {'id', 'name'})
+
+    def test_describe_table_requires_a_table(self):
+        result = mcp_server.describe_table_tool(apikeys.OPEN, {'connection_name': 'a'})
+        self.assertEqual(result['structuredContent']['code'], 'table_required')
+
+    def test_describe_table_is_table_not_found_for_a_table_the_key_cannot_reach(self):
+        permission = apikeys.authenticate(self.create_scoped_key(connections=['a'], allowed_tables=['other']))
+        result = mcp_server.describe_table_tool(permission, {'connection_name': 'a', 'table': 't'})
+        self.assertEqual(result['structuredContent']['code'], 'table_not_found')
 
     def test_list_tables_returns_the_table_and_its_columns(self):
         result = mcp_server.list_tables_tool(apikeys.OPEN, {'connection_name': 'a'})
@@ -418,6 +434,22 @@ class FixedToolsTests(McpTestCase):
             result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
         self.assertEqual(len(result['structuredContent']['rows']), 2)
         self.assertTrue(result['structuredContent']['truncated'])
+
+    def test_a_capped_result_carries_an_agent_facing_note(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_MAX_ROWS': '2'}):
+            result = mcp_server.execute_sql_tool(apikeys.OPEN, {'connection_name': 'a', 'sql': 'SELECT * FROM t'})
+        self.assertIn('note', result['structuredContent'])
+        self.assertIn('aggregate', result['structuredContent']['note'])
+        # the note is also a separate text block, so the first block stays parseable JSON
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+        self.assertEqual(result['content'][1]['text'], result['structuredContent']['note'])
+
+    def test_an_uncapped_result_has_no_note(self):
+        result = mcp_server.execute_sql_tool(apikeys.OPEN,
+                                             {'connection_name': 'a', 'sql': 'SELECT * FROM t WHERE id = 1'})
+        self.assertFalse(result['structuredContent']['truncated'])
+        self.assertNotIn('note', result['structuredContent'])
+        self.assertEqual(len(result['content']), 1)
 
     def test_dispatch_routes_fixed_tools_and_falls_back_to_saved_queries(self):
         self.save('q1')

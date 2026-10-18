@@ -52,6 +52,10 @@ endpoints either):
 - **`list_tables`** - `{"connection_name": "...", "database": "..."}` (`database` is admin-key only, same
   as REST). Returns the same shape `GET /connections/<name>/schema` does: each table/view (or Mongo
   collection) with its columns, types, nullability, and primary/foreign keys where the dialect supports it.
+- **`describe_table`** - `{"connection_name": "...", "table": "...", "database": "..."}`. One table's columns,
+  types and primary/foreign keys - the same, masking-aware, so a masked or dropped column is flagged rather than
+  shown as readable. A table the key can't reach answers exactly as a missing one (`table_not_found`), so it
+  can't be used to probe for a table outside the key's `allowed_tables`. Handy before writing an `execute_sql`.
 - **`execute_sql`** - `{"connection_name": "...", "sql": "...", "params": {...}, "page_size": N,
   "database": "..."}`. Runs a single read-only statement - **always read-only over MCP**, regardless of the
   calling key's own `allow_writes` grant; a key's `allowed_tables` restriction, if it has one, is still
@@ -228,8 +232,10 @@ in run history, with `key_name` `cli`.
 
 A tool call caps its result at `QUERYAPIGATE_MCP_MAX_ROWS` (default 200) rows, independent of
 `QUERYAPIGATE_MAX_PAGE_SIZE` - an LLM's context window can't hold a result the way a human paging through the
-admin UI can. A truncated result says so in its own text. A caller-supplied `page_size` smaller than the cap
-is still honored.
+admin UI can. A capped result says so: `truncated` is `true`, and it carries an agent-facing `note` ("…more rows
+match; add a filter, or ask for a summary with an aggregate") both as a field in `structuredContent` and as a
+second text block - so a model narrows the query or aggregates instead of assuming the rows it got are the whole
+answer. The first text block stays pure JSON. A caller-supplied `page_size` smaller than the cap is still honored.
 
 ## Configuration
 
@@ -237,6 +243,9 @@ is still honored.
 |----------|---------|--------|
 | `QUERYAPIGATE_MCP_PORT` | `5001` | Bind port for `queryapigate mcp`. |
 | `QUERYAPIGATE_MCP_MAX_ROWS` | `200` | Row cap for a tool call's result. Always a positive count; a malformed value stops startup. |
+| `QUERYAPIGATE_EMBEDDING_URL` | *(off)* | An OpenAI-compatible embeddings endpoint, to enable [semantic search](API.md#semantic-search) (`embed` parameters). Experimental; `https://` or `localhost`. |
+| `QUERYAPIGATE_EMBEDDING_MODEL` | — | The embedding model name sent to that endpoint. Required when the URL is set. |
+| `QUERYAPIGATE_EMBEDDING_API_KEY` | — | Bearer token for the embeddings endpoint, if it needs one. Omit for a local Ollama. |
 
 The OAuth settings are under [Sign-in for AI clients](#sign-in-for-ai-clients-oauth).
 

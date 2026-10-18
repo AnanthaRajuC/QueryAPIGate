@@ -413,6 +413,13 @@ def check_settings():
     if raw and (not _secure_url(raw) or urllib.parse.urlsplit(raw).path not in ('', '/')):
         raise ValueError('QUERYAPIGATE_CONSOLE_URL is the https:// address the Console is reached at, with no path - '
                          'https://data.example.com')
+    raw = _env('QUERYAPIGATE_EMBEDDING_URL')
+    if raw and not _secure_url(raw):
+        raise ValueError('QUERYAPIGATE_EMBEDDING_URL must be an https:// (or localhost) embeddings endpoint, e.g. '
+                         'https://api.openai.com/v1/embeddings or http://localhost:11434/v1/embeddings')
+    if raw and not embedding_model():
+        raise ValueError('QUERYAPIGATE_EMBEDDING_URL is set but QUERYAPIGATE_EMBEDDING_MODEL is not - which model '
+                         'should embed the text?')
     raw = os.environ.get('QUERYAPIGATE_ALERT_AGENT_ROWS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_ALERT_AGENT_ROWS must be a whole number of rows (0 turns the check off)')
@@ -1159,6 +1166,33 @@ def mcp_max_rows():
     return int(raw) if raw else DEFAULT_MCP_MAX_ROWS
 
 
+_EMBEDDING_VARS = ('QUERYAPIGATE_EMBEDDING_URL', 'QUERYAPIGATE_EMBEDDING_MODEL', 'QUERYAPIGATE_EMBEDDING_API_KEY')
+
+
+def embedding_url():
+    """QUERYAPIGATE_EMBEDDING_URL: an OpenAI-compatible embeddings endpoint (OpenAI's own, or a local Ollama's
+    http://localhost:11434/v1/embeddings). With a model set, an `embed` query parameter turns a caller's text
+    into a vector for a pgvector search. Experimental - see embeddings.py."""
+    return _env('QUERYAPIGATE_EMBEDDING_URL')
+
+
+def embedding_model():
+    """QUERYAPIGATE_EMBEDDING_MODEL: the model name sent to the embeddings endpoint (e.g. text-embedding-3-small,
+    or nomic-embed-text on Ollama)."""
+    return _env('QUERYAPIGATE_EMBEDDING_MODEL')
+
+
+def embedding_api_key():
+    """QUERYAPIGATE_EMBEDDING_API_KEY: bearer token for the embeddings endpoint, if it needs one (omit for a
+    local Ollama)."""
+    return _env('QUERYAPIGATE_EMBEDDING_API_KEY')
+
+
+def embeddings_configured():
+    """Whether semantic search is available: both an endpoint and a model are set."""
+    return bool(embedding_url() and embedding_model())
+
+
 def alert_error_rate():
     """QUERYAPIGATE_ALERT_ERROR_RATE: the percentage of a saved query's recent runs that may fail before
     GET /api/v1/alerts calls it out (alerts.py). Default 20; 0 turns the check off. Validated at startup."""
@@ -1497,6 +1531,12 @@ def describe_settings():
             row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
             row('MCP max rows', 'Row cap for a tools/call result - an LLM\'s context can\'t hold a huge one.',
                 'QUERYAPIGATE_MCP_MAX_ROWS', f'{mcp_max_rows()} rows'),
+            row('Embeddings endpoint', 'An OpenAI-compatible embeddings URL - turns an `embed` parameter\'s text '
+                'into a vector for a pgvector search.', 'QUERYAPIGATE_EMBEDDING_URL', embedding_url() or 'off'),
+            row('Embeddings model', 'Model name sent to the embeddings endpoint.', 'QUERYAPIGATE_EMBEDDING_MODEL',
+                embedding_model() or 'not set'),
+            row('Embeddings API key', 'Bearer token for the embeddings endpoint, if it needs one.',
+                'QUERYAPIGATE_EMBEDDING_API_KEY', 'configured' if embedding_api_key() else 'not set', secret=True),
             row('Write approval window', 'Minutes an agent\'s write waits for a person to approve it, and then to run.',
                 'QUERYAPIGATE_WRITE_APPROVAL_MINUTES', f'{write_approval_minutes()} minutes'),
             row('Console URL', 'Where people reach the Console - for the approval links agents are given.',

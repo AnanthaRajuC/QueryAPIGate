@@ -10,7 +10,8 @@ A saved query declares its parameters in ``query_parameters``. The short form is
     }
 
 Rules: ``type`` (int, float, str, bool), ``required`` (default: true unless a ``default`` is given), ``default``,
-``enum``, ``min``/``max`` (numbers), ``min_length``/``max_length``/``pattern`` (text) and ``description``.
+``enum``, ``min``/``max`` (numbers), ``min_length``/``max_length``/``pattern`` (text), ``description`` and
+``example`` (a sample value, shown in ``/openapi.json`` and in the MCP tool's input schema).
 An optional parameter that is neither supplied nor defaulted is bound as NULL.
 
 Definitions are validated strictly when a query is saved. At run time they are read leniently, so older saved
@@ -24,7 +25,7 @@ from .errors import ApiError
 _TYPES = {'int': 'integer', 'integer': 'integer', 'float': 'number', 'number': 'number',
           'str': 'string', 'string': 'string', 'bool': 'boolean', 'boolean': 'boolean'}
 _RULE_KEYS = {'type', 'required', 'default', 'enum', 'min', 'max', 'min_length', 'max_length', 'pattern',
-              'description', 'from_claim'}
+              'description', 'example', 'embed', 'from_claim'}
 _MAX_CLAIM_NAME_LENGTH = 200
 _NAME_RE = re.compile(r'^[A-Za-z_]\w*$')
 _MAX_PATTERN_LENGTH = 500
@@ -51,7 +52,7 @@ def _is_number(value):
 def _plain(spec):
     return {'type': None, 'required': True, 'has_default': False, 'default': None, 'enum': None, 'min': None,
             'max': None, 'min_length': None, 'max_length': None, 'pattern': None, 'description': None,
-            'from_claim': None, **spec}
+            'has_example': False, 'example': None, 'embed': False, 'from_claim': None, **spec}
 
 
 def _coerce(type_name, value):
@@ -156,6 +157,17 @@ def _parse_strict(spec):
         if 'default' in spec or spec.get('required') is False:
             raise _Invalid("a 'from_claim' parameter is always required and cannot have a default")
         parsed['from_claim'] = claim.strip()
+    if 'embed' in spec:
+        # The caller supplies text; the server embeds it into a vector for a semantic (pgvector) search before
+        # it is bound. So it must be text, and it can't also be a server-only from_claim value.
+        if not isinstance(spec['embed'], bool):
+            raise _Invalid("'embed' must be true or false")
+        if spec['embed']:
+            if type_name not in (None, 'string'):
+                raise _Invalid("an 'embed' parameter takes text (type str) - it is the text the server embeds")
+            if parsed['from_claim'] is not None:
+                raise _Invalid("a parameter cannot be both 'embed' and 'from_claim'")
+        parsed['embed'] = spec['embed']
 
     numeric = type_name in (None, 'integer', 'number')
     textual = type_name in (None, 'string')
@@ -204,6 +216,14 @@ def _parse_strict(spec):
         except _Invalid as error:
             raise _Invalid(f"has a 'default' that {error}") from None
         parsed['has_default'] = True
+    if 'example' in spec:
+        # A sample value, shown to callers (and to AI agents, in the MCP tool's input schema). It must itself
+        # satisfy the parameter's rules, so a bad example is caught at save time rather than misleading a caller.
+        try:
+            parsed['example'] = _check(parsed, spec['example'])
+        except _Invalid as error:
+            raise _Invalid(f"has an 'example' that {error}") from None
+        parsed['has_example'] = True
     return parsed
 
 
@@ -292,6 +312,12 @@ def json_schema(spec):
                       ('max_length', 'maxLength'), ('pattern', 'pattern')):
         if spec[rule] is not None:
             schema[key] = spec[rule]
+    # description and example make the parameter self-describing - for /openapi.json and, importantly, for the
+    # MCP tool input schema an agent reads to decide how to call the tool.
+    if spec['description'] is not None:
+        schema['description'] = spec['description']
     if spec['has_default']:
         schema['default'] = spec['default']
+    if spec['has_example']:
+        schema['example'] = spec['example']
     return schema

@@ -21,8 +21,8 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2 and JDBC
-connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), and secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`). The list is `queryapigate/experimental.py`.
+connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
+(`${aws-sm:...}`, `aws-rds-iam`), and semantic search (embed parameters). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -50,6 +50,22 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Added
+- **Stronger MCP tools for agents (four changes).**
+  - **Self-describing parameters.** A query parameter can now carry an `example`, and both `description` and
+    `example` now flow into the MCP tool's input schema (and `/openapi.json`) - so an agent sees what each argument
+    means and a sample value, not just its type.
+  - **A `describe_table` MCP tool.** One table's columns, types and primary/foreign keys on a connection the key
+    can use - masking-aware, so a masked or dropped column is flagged, never shown as readable. A table the key
+    can't reach answers as a missing one.
+  - **Clearer capped results.** When a tools/call result hits `QUERYAPIGATE_MCP_MAX_ROWS`, it now carries an
+    agent-facing `note` ("…more rows match; add a filter or ask for a summary") as a field and a second text
+    block, so a model narrows or aggregates instead of assuming it saw everything. The first content block stays
+    pure JSON.
+  - **Semantic search (experimental).** A text parameter marked `"embed": true` lets a caller (or an agent) search
+    by meaning: the server turns the text into a vector via a configured OpenAI-compatible embeddings endpoint
+    (`QUERYAPIGATE_EMBEDDING_URL`/`_MODEL`/`_API_KEY`, Ollama-compatible) and binds it for a `pgvector` search -
+    still masked, row-filtered and audited. Postgres/`pgvector` only, off unless an endpoint is set, and refused
+    (`embedding_unavailable`) rather than run unfiltered when it isn't. See ADR 0025 and API.md "Semantic search".
 - **Hide a saved query from MCP, while it keeps serving over REST.** A query version now carries an `mcp` flag
   (default `true`). When `false`, the query is not listed as an MCP tool and a call to it over MCP is refused with
   the new `mcp_disabled` code (`404`); it still answers over REST as before. Toggle it in place from the API
