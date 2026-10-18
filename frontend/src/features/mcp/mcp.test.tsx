@@ -14,7 +14,13 @@ const routes = () => ({
   ...baseRoutes(),
   'GET /api/v1/mcp/tools': () => ({
     items: [
-      { name: 'execute_sql', description: 'Run SQL', kind: 'ad-hoc', params: ['connection', 'sql'], read_only: true },
+      {
+        name: 'execute_sql',
+        description: 'Run SQL',
+        kind: 'ad-hoc',
+        params: ['connection', 'sql'],
+        read_only: true,
+      },
       { name: 'films', description: 'All films', kind: 'saved query', params: [], read_only: true },
     ],
   }),

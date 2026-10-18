@@ -43,8 +43,8 @@ export function McpPage() {
         <div className="titles">
           <h1>MCP server</h1>
           <span className="sub">
-            Your saved queries, as tools an AI agent can call over MCP. Each key sees only its own workspace&apos;s
-            tools.
+            Your saved queries, as tools an AI agent can call over MCP. Each key sees only its own
+            workspace&apos;s tools.
           </span>
         </div>
         <span className="spacer" />
@@ -59,8 +59,9 @@ export function McpPage() {
           <span className="dim"> — any MCP client that speaks streamable HTTP</span>
         </div>
         <p className="hint" style={{ padding: '0 14px' }}>
-          Start the MCP server with <code>queryapigate mcp</code>, then point a client at its URL with a scoped API
-          key as the <code>X-API-Key</code> header. In Claude Desktop, that is one entry in its MCP-servers config:
+          Start the MCP server with <code>queryapigate mcp</code>, then point a client at its URL with a
+          scoped API key as the <code>X-API-Key</code> header. In Claude Desktop, that is one entry in its
+          MCP-servers config:
         </p>
         <pre className="curlbox" style={{ margin: '0 14px 14px' }}>
           {CONFIG}
