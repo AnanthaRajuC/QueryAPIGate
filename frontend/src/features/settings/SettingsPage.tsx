@@ -1,7 +1,6 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { api, unwrap, type Schemas } from '@/api/client';
+import { type Schemas } from '@/api/client';
 import { useSettings } from '@/app/data';
 import { copyText, Loading, useFeedback } from '@/app/feedback';
 import { setPref, usePrefValues, type Prefs } from '@/app/prefs';
@@ -9,9 +8,9 @@ import { setPref, usePrefValues, type Prefs } from '@/app/prefs';
 import { lastSection, rememberSection } from './state';
 import { ExperimentalTag } from '@/components/Experimental';
 
-// The classic Settings screen (ui.py #tab-settings, renderSettings, renderMcpExtras, the copy-env button): the
-// server's configuration by section from /api/v1/settings, read-only, plus this browser's appearance preferences.
-// The MCP section adds a reachability check, run only when asked, and the tools an MCP client would see.
+// The classic Settings screen (ui.py #tab-settings, renderSettings, the copy-env button): the server's configuration
+// by section from /api/v1/settings, read-only, plus this browser's appearance preferences. The MCP server's tools and
+// reachability live on their own screen now (features/mcp/McpPage); the MCP *settings* stay here.
 
 type Section = Schemas['SettingsSection'];
 
@@ -124,7 +123,6 @@ export function SettingsPage() {
           </span>
         </div>
         <SectionPanel section={current} />
-        {current.id === 'mcp' && <McpExtras />}
       </>
     );
   }
@@ -212,76 +210,6 @@ function PrefsPanel({ title, rows }: { title: string; rows: PrefRow[] }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-/** The MCP section's extras: a reachability check, only when asked, and what tools/list returns now. */
-function McpExtras() {
-  const tools = useQuery({
-    queryKey: ['mcp', 'tools'],
-    queryFn: async () => unwrap(await api.GET('/api/v1/mcp/tools')).items,
-    retry: false,
-    gcTime: 0, // loaded once per visit to the section, as in /ui
-  });
-  const check = useMutation({
-    mutationFn: async () => unwrap(await api.GET('/api/v1/mcp/status')),
-  });
-  const status = check.data;
-  const dot = check.isPending ? 'checking' : !status ? 'unknown' : status.reachable ? 'ok' : 'bad';
-  const dotText = check.isPending
-    ? 'Checking…'
-    : !status
-      ? 'Not checked yet'
-      : (status.reachable ? 'Reachable on port ' : 'Not reachable on port ') + status.port;
-  const list = tools.data ?? [];
-  return (
-    <div className="panel" style={{ marginTop: 12 }}>
-      <div className="set-head">
-        <h2>Reachability</h2>
-        <span>A plain TCP connect attempt against the port above - not started or probed automatically.</span>
-      </div>
-      <div className="set-row">
-        <div className="set-what">
-          <span className={'dot ' + dot} />
-          <span className="set-label">{dotText}</span>
-        </div>
-        <button type="button" className="btn" disabled={check.isPending} onClick={() => check.mutate()}>
-          Check now
-        </button>
-      </div>
-      <div className="set-head" style={{ marginTop: 14 }}>
-        <h2>Tools</h2>
-        <span>What tools/list currently returns for an unrestricted MCP caller.</span>
-      </div>
-      {tools.isPending ? (
-        <div className="hint">Loading…</div>
-      ) : !list.length ? (
-        <div className="hint">No saved queries or connections are reachable yet.</div>
-      ) : (
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Kind</th>
-              <th>Params</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((t) => (
-              <tr key={t.name}>
-                <td className="mono">{t.name}</td>
-                <td>
-                  <span className="tag">{t.kind}</span>
-                </td>
-                <td className="mono">{t.params.length ? t.params.join(', ') : '—'}</td>
-                <td>{t.description}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
     </div>
   );
 }

@@ -71,6 +71,8 @@ const DestinationsPage = lazy(() =>
   import('@/features/exports/DestinationsPage').then((m) => ({ default: m.DestinationsPage })),
 );
 
+const McpPage = lazy(() => import('@/features/mcp/McpPage').then((m) => ({ default: m.McpPage })));
+
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
@@ -186,6 +188,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <AgentsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="mcp"
+          element={
+            <Suspense fallback={<Loading />}>
+              <McpPage />
             </Suspense>
           }
         />

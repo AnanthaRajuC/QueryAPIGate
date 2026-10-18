@@ -98,18 +98,14 @@ describe('Settings', () => {
     expect(await navigator.clipboard.readText()).toBe('QUERYAPIGATE_HOME=/data\n');
   });
 
-  it('MCP: lists the tools, and checks reachability only when asked', async () => {
-    const { calls } = fakeBackend(routes());
+  it('keeps the MCP server section as read-only settings (tools/reachability moved to the MCP screen)', async () => {
+    fakeBackend(routes());
     renderAt('/settings');
     const nav = document.getElementById('settings-nav')!;
     await userEvent.click(await within(nav).findByRole('button', { name: /MCP server/ }));
-    expect(await screen.findByText('execute_sql')).toBeInTheDocument();
-    expect(screen.getByText('connection, sql')).toBeInTheDocument();
-    expect(screen.getByText('Not checked yet')).toBeInTheDocument();
-    expect(calls.some((c) => c.path === '/api/v1/mcp/status')).toBe(false);
-    await userEvent.click(screen.getByRole('button', { name: 'Check now' }));
-    expect(await screen.findByText('Not reachable on port 8765')).toBeInTheDocument();
-    expect(document.querySelector('.set-row .dot')).toHaveClass('bad');
+    expect(await screen.findByText('QUERYAPIGATE_MCP_PORT')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check now' })).toBeNull();
+    expect(screen.queryByText('execute_sql')).toBeNull();
   });
 
   it('Appearance preferences apply at once and are kept in this browser', async () => {
