@@ -33,6 +33,7 @@ one it supersedes.
 | [0022](0022-mongodb-streaming-and-graduation.md) | MongoDB streaming exports, and MongoDB graduates | Accepted |
 | [0023](0023-workspaces.md) | Workspaces: delegated administration for teams | Accepted |
 | [0024](0024-fail-closed-auditing.md) | Fail-closed auditing: an action may require its audit entry | Proposed |
+| [0025](0025-semantic-retrieval.md) | Semantic retrieval: an `embed` parameter, not a vector store | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

@@ -28,6 +28,7 @@ from . import (
     definitions,
     deprecations,
     descriptions,
+    embeddings,
     engine,
     events,
     examples,
@@ -930,6 +931,22 @@ def bind_claims(saved, raw):
     return raw
 
 
+def bind_embeddings(saved, values, connection_name):
+    """Replace each `embed` parameter's text with its embedding vector, as a pgvector literal (embeddings.py),
+    for a semantic search. Postgres/pgvector only; refused when embeddings aren't configured - never run with
+    the plain text bound where a vector belongs, which would error or silently miss. Experimental."""
+    declared = param_rules.read_definitions(saved.get('query_parameters'))
+    to_embed = [name for name, spec in declared.items() if spec.get('embed') and values.get(name)]
+    if not to_embed:
+        return values
+    if store.get_connection(connection_name)['db'] != 'postgres':
+        raise ApiError("An 'embed' parameter needs a Postgres (pgvector) connection", code='unsupported_operation')
+    values = dict(values)
+    for name in to_embed:
+        values[name] = embeddings.vector_literal(embeddings.embed(values[name]))
+    return values
+
+
 def run_saved(ref, body, url_params):
     """_run_saved(), in its own span (tracing.py): named once the query is found, never by what the caller sent."""
     with tracing.span('query') as span:
@@ -1004,6 +1021,7 @@ def _run_saved(ref, body, url_params):
 
     used = set(sqltools.placeholder_names(saved['sql_query']))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
+    values = bind_embeddings(saved, values, connection_name)
     sql = sqltools.fill_placeholders(saved['sql_query'], values)
     # A saved query's own mask rules (ADR 0005) apply to every caller, unioned with any the caller's key has - the
     # strictest rule wins per column (masking.py), so neither can weaken the other.

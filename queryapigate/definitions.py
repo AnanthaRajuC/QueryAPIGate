@@ -106,6 +106,10 @@ def validate_definition(data):
         raise ApiError('tags must be a string or a list', code='invalid_body')
     query_parameters = as_object(data.get('query_parameters'), 'query_parameters')
     param_rules.parse_definitions(query_parameters)
+    if query_type == 'mongo' and any(spec.get('embed')
+                                     for spec in param_rules.read_definitions(query_parameters).values()):
+        raise ApiError('embed is not supported on a Mongo query (it needs a pgvector SQL search)',
+                       code='invalid_body')
     if query_type == 'mongo':
         mongo_filter = mongotools.validate_filter(as_object(data.get('mongo_filter'), 'mongo_filter'))
         used = set(mongotools.placeholder_names(mongo_filter))

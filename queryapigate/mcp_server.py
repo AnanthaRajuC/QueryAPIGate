@@ -57,7 +57,7 @@ def _in_callers_workspace(position):
 # A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
 # hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
 # same thing.
-RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql'})
+RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql', 'describe_table'})
 log = logging.getLogger('queryapigate')
 
 # Generic result-envelope outputSchemas, deliberately not per-query/per-column: a saved query's actual result
@@ -71,6 +71,8 @@ ROWS_OUTPUT_SCHEMA = {
     'properties': {
         'rows': {'type': 'array', 'items': {'type': 'object'}},
         'truncated': {'type': 'boolean'},
+        'note': {'type': 'string',
+                 'description': 'Present when the result was capped: how to get the rest, or a summary instead.'},
     },
     'required': ['rows', 'truncated'],
 }
@@ -96,6 +98,13 @@ TABLES_OUTPUT_SCHEMA = {
         'truncated': {'type': 'boolean'},
     },
     'required': ['tables', 'truncated'],
+}
+TABLE_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'table': {'type': 'object', 'description': 'One table: its columns, types, keys and (masking-aware) flags.'},
+    },
+    'required': ['table'],
 }
 
 
@@ -268,6 +277,26 @@ def fixed_tools_for(permission):
             'readOnlyHint': True,
             'idempotentHint': True,
         },
+        {
+            'name': 'describe_table',
+            'description': "Describe one table on a connection this key can use: its columns, types, primary and "
+                          "foreign keys, and any descriptions - masking-aware, so a masked or dropped column is "
+                          "flagged, not shown as readable. Use it before writing SQL with execute_sql.",
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'connection_name': {'type': 'string',
+                                        'description': 'A connection name this key is permitted to use.'},
+                    'table': {'type': 'string', 'description': 'The table (or view) name to describe.'},
+                    'database': {'type': 'string',
+                                'description': 'A different database on the same server - admin key only.'},
+                },
+                'required': ['connection_name', 'table'],
+            },
+            'outputSchema': TABLE_OUTPUT_SCHEMA,
+            'readOnlyHint': True,
+            'idempotentHint': True,
+        },
     ]
 
 
@@ -315,7 +344,23 @@ def call_tool_for(flask_app, permission, name, arguments):
             return {'content': [{'type': 'text', 'text': json.dumps(structured, default=str)}],
                     'structuredContent': structured}
         structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
-        return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
+        return _rows_result(structured)
+
+
+def _rows_result(structured):
+    """A rows/truncated tool result. When the result was capped (``truncated``), add an agent-facing ``note`` -
+    both as a field in structuredContent and as a second text block - so a model adds a filter or asks for a
+    summary instead of assuming the rows it got are the whole answer. The first content block stays pure JSON,
+    so a client parsing it (or structuredContent) is unaffected."""
+    content = [{'type': 'text', 'text': json.dumps(structured)}]
+    if structured.get('truncated'):
+        shown = len(structured.get('rows') or [])
+        note = (f'Showing the first {shown} rows; more rows match. Add a WHERE filter to narrow the result, '
+                f'or ask for a summary with an aggregate (COUNT, SUM, GROUP BY) to get the answer itself '
+                f'instead of raw rows.')
+        structured = {**structured, 'note': note}
+        content = [{'type': 'text', 'text': json.dumps(structured)}, {'type': 'text', 'text': note}]
+    return {'content': content, 'structuredContent': structured}
 
 
 def _error(message, status, code=None, **extra):
@@ -360,6 +405,34 @@ def list_tables_tool(permission, arguments):
         result = descriptions.annotate(result, connection_name, mask=permission.mask,
                                         allowed_tables=permission.allowed_tables)
     return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result}
+
+
+def describe_table_tool(permission, arguments):
+    """One table's columns/types/keys on a connection this key can use, masking-aware (reusing the same
+    descriptions.annotate() list_tables uses, so a masked or dropped column is flagged). A table the key can't
+    reach answers exactly as a missing one (table_not_found), so a table-restricted key can't probe for it -
+    the same rule fetch_table_ddl() enforces."""
+    arguments = arguments or {}
+    connection_name = arguments.get('connection_name')
+    table_name = arguments.get('table')
+    database = arguments.get('database') or None
+    error = _connection_error(permission, connection_name, database)
+    if error is not None:
+        return error
+    if not table_name:
+        return _error('table is required', 400, 'table_required')
+    try:
+        result = schema.fetch_schema(connection_name, database=database, allowed_tables=permission.allowed_tables)
+    except ApiError as error:
+        return _error(error.message, error.status, error.code)
+    if not database:
+        result = descriptions.annotate(result, connection_name, mask=permission.mask,
+                                        allowed_tables=permission.allowed_tables)
+    table = next((t for t in result['tables'] if t['name'] == table_name), None)
+    if table is None:
+        return _error(f"'{table_name}' is not a table on '{connection_name}'", 404, 'table_not_found')
+    structured = {'table': table}
+    return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
 
 
 DICTIONARY_URI = 'queryapigate://connections/{}/dictionary'
@@ -434,7 +507,7 @@ def execute_sql_tool(permission, arguments):
                           **({'masked': result.masked} if result.masked else {})}, sql, query_params)
     rows = [dict(zip(result.columns, row, strict=False)) for row in result.rows]
     structured = {'rows': rows, 'truncated': result.has_more}
-    return {'content': [{'type': 'text', 'text': json.dumps(structured)}], 'structuredContent': structured}
+    return _rows_result(structured)
 
 
 def dispatch_tool_call(flask_app, permission, name, arguments):
@@ -442,6 +515,8 @@ def dispatch_tool_call(flask_app, permission, name, arguments):
     RESERVED_TOOL_NAMES guarantees these two names are never also a saved query's."""
     if name == 'list_tables':
         return list_tables_tool(permission, arguments)
+    if name == 'describe_table':
+        return describe_table_tool(permission, arguments)
     if name == 'execute_sql':
         return execute_sql_tool(permission, arguments)
     return call_tool_for(flask_app, permission, name, arguments)

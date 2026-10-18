@@ -278,7 +278,9 @@ authorized caller could not already see by running the query itself.
 | `min`, `max` | numbers | Inclusive bounds. |
 | `min_length`, `max_length` | text | Length bounds. |
 | `pattern` | text | A regular expression the whole value must match (at most 500 characters). |
-| `description` | any | Shown in `/docs`. |
+| `description` | any | Shown in `/docs` and in the MCP tool's input schema - what an agent reads to call it. |
+| `example` | any | A sample value, shown in `/openapi.json` and in the MCP tool's input schema. It must itself satisfy the other rules. |
+| `embed` | text | [Semantic search](#semantic-search), experimental: the caller passes text, and the server turns it into a vector (`pgvector`) before binding it. Text only; not combinable with `from_claim`. |
 | `from_claim` | any | Take the value from a claim of the caller's [sign-in token](#signed-in-users-jwt) - e.g. `"sub"` - never from the request. Always required; no `default`. |
 
 Requests that break a rule are rejected with **400** before anything reaches the database, with every problem listed:
@@ -1638,6 +1640,40 @@ the metric names listed above, with panels for request/query rate and latency (p
 rows returned, active queries, pool occupancy and rate-limit rejections. Each QueryAPIGate process needs its own
 scrape target, and the dashboard sums across them.
 
+## Semantic search
+
+> **Experimental** - the embeddings-endpoint settings and the `embed` parameter rule may change as they meet
+> more vector stores. Postgres/`pgvector` only for now, and off unless `QUERYAPIGATE_EMBEDDING_URL` is set
+> ([what experimental means](../CHANGELOG.md#versioning-and-compatibility), ADR 0025).
+
+A saved query can take **text from the caller and search by meaning**, not just by exact match. Mark a text
+parameter `"embed": true`: the caller passes words, and the server turns them into a vector (an *embedding*)
+and binds that vector, so the query's SQL can rank rows by [`pgvector`](https://github.com/pgvector/pgvector)
+similarity. The embedding is computed on the server, so a caller - or an AI agent - only ever supplies text; it
+never sees or chooses the vector, exactly as a [`from_claim`](#signed-in-users-jwt) value is the server's to set.
+
+```json
+{"filename": "find_articles", "connection_name": "docs_pg",
+ "sql_query": "SELECT id, title FROM article ORDER BY embedding <=> CAST(:q AS vector) LIMIT :k",
+ "query_parameters": {"q": {"type": "str", "embed": true, "description": "What to search for, in your own words",
+                            "example": "comfortable running shoes"},
+                      "k": {"type": "int", "default": 5, "max": 50}}}
+```
+
+Turn it on with an OpenAI-compatible embeddings endpoint:
+
+| Setting | Meaning |
+|---|---|
+| `QUERYAPIGATE_EMBEDDING_URL` | The embeddings endpoint - OpenAI's (`https://api.openai.com/v1/embeddings`), Azure OpenAI's, or a local Ollama's (`http://localhost:11434/v1/embeddings`). |
+| `QUERYAPIGATE_EMBEDDING_MODEL` | The model name, e.g. `text-embedding-3-small` or (Ollama) `nomic-embed-text`. |
+| `QUERYAPIGATE_EMBEDDING_API_KEY` | A bearer token for the endpoint, if it needs one. Omit for a local Ollama. |
+
+The same governance applies to a semantic query as any other: column [masking](#column-masking), row-level
+[`from_claim`](#signed-in-users-jwt) filtering, rate limits and the audit log all still hold - so an agent can
+search your data by meaning while still seeing only what it's allowed to. A query with an `embed` parameter is
+refused with `embedding_unavailable` when no endpoint is configured, and with `unsupported_operation` on a
+non-Postgres connection - never run with the raw text bound where a vector belongs.
+
 ## Tracing (OpenTelemetry)
 
 > **Experimental** - new in 0.23 ([ADR 0010](adr/0010-tracing-and-security-headers.md)); span names and attributes may
@@ -2247,6 +2283,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_config` | 400 | A configuration file (ADR 0014) that isn't one, or has problems - each one listed in `problems` |
 | `redis_unavailable` | 503 | Forgetting a caller needed Redis - which holds their usage counts - and it couldn't be reached; the store's were deleted, run it again |
 | `secret_unavailable` | 503 | A secret provider couldn't give a connection's secret, and no value still within its time was held (ADR 0015) |
+| `embedding_unavailable` | 503 | A query has an `embed` parameter but [semantic search](#semantic-search) isn't configured (`QUERYAPIGATE_EMBEDDING_URL`/`_MODEL`) |
+| `embedding_failed` | 502 | The embeddings endpoint couldn't be reached or answered in a shape the server couldn't read |
 | `config_managed` | 409 | With `QUERYAPIGATE_CONFIG_LOCKED`, a change to something a configuration file manages - change it in the file |
 | `sql_required` | 400 | No SQL given |
 | `connection_required` | 400 | No connection named, and the saved query has none |

@@ -1152,10 +1152,12 @@ class SavedQueryOpenApiTests(ApiTestCase):
         self.assertEqual(operation['summary'], 'Actors from an id')
         self.assertIn('demo, actors', operation['description'])
         p = self.parameters(spec, '/q/rules')
-        self.assertEqual(p['min_id']['schema'], {'type': 'integer', 'minimum': 1, 'maximum': 25, 'default': 1})
+        self.assertEqual(p['min_id']['schema'], {'type': 'integer', 'minimum': 1, 'maximum': 25,
+                                                 'description': 'First actor id to include', 'default': 1})
         self.assertFalse(p['min_id']['required'])
         self.assertEqual(p['min_id']['description'], 'First actor id to include')
-        self.assertEqual(p['q']['schema'], {'type': 'string', 'minLength': 2})
+        self.assertEqual(p['q']['schema'], {'type': 'string', 'minLength': 2,
+                                            'description': 'Name filter, e.g. Actor 2%'})
         self.assertFalse(p['q']['required'])
 
     def test_connection_is_required_only_when_the_query_has_no_default(self):

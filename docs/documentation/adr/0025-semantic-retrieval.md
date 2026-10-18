@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0025-semantic-retrieval.md"

@@ -68,6 +68,33 @@ class DefinitionTests(unittest.TestCase):
         text = params.json_schema(params.read_definition({'type': 'str', 'min_length': 2, 'pattern': 'a+'}))
         self.assertEqual(text, {'type': 'string', 'minLength': 2, 'pattern': 'a+'})
 
+    def test_description_and_example_are_self_describing(self):
+        spec = params.read_definition({'type': 'str', 'description': 'MPAA rating', 'example': 'PG'})
+        schema = params.json_schema(spec)
+        self.assertEqual(schema, {'type': 'string', 'description': 'MPAA rating', 'example': 'PG'})
+
+    def test_an_example_must_satisfy_the_parameter_rules(self):
+        params.parse_definitions({'n': {'type': 'int', 'min': 1, 'max': 9, 'example': 3}})  # ok
+        with self.assertRaises(ApiError):
+            params.parse_definitions({'n': {'type': 'int', 'min': 1, 'max': 9, 'example': 50}})
+        with self.assertRaises(ApiError):
+            params.parse_definitions({'n': {'type': 'int', 'example': 'not-an-int'}})
+
+    def test_embed_marks_a_text_parameter(self):
+        spec = params.read_definition({'type': 'str', 'embed': True})
+        self.assertTrue(spec['embed'])
+        self.assertFalse(params.read_definition({'type': 'str'})['embed'])
+
+    def test_embed_must_be_text_and_not_also_from_claim(self):
+        params.parse_definitions({'q': {'type': 'str', 'embed': True}})  # ok
+        params.parse_definitions({'q': {'embed': True}})  # untyped text is ok too
+        with self.assertRaises(ApiError):
+            params.parse_definitions({'q': {'type': 'int', 'embed': True}})
+        with self.assertRaises(ApiError):
+            params.parse_definitions({'q': {'embed': 'yes'}})  # not a bool
+        with self.assertRaises(ApiError):
+            params.parse_definitions({'q': {'embed': True, 'from_claim': 'sub'}})
+
 
 class ResolveTests(unittest.TestCase):
     def test_strings_are_converted_to_the_declared_type(self):
