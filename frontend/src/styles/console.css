@@ -498,3 +498,38 @@ body.side-collapsed .ws-switch {
   text-align: right;
   white-space: nowrap;
 }
+
+/* Collapsible nav groups: the group label is a button (overriding the generic `#tabs button` item styling), with a
+   chevron that points down when open and right when collapsed. */
+#tabs button.nav-label {
+  height: auto;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 10px 6px;
+  font: 600 10.5px var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: none;
+}
+#tabs button.nav-label:hover {
+  color: var(--ink-2);
+  background: var(--surface-2);
+}
+.nav-chevron {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+}
+.nav-group.collapsed .nav-chevron {
+  transform: rotate(-90deg);
+}
+
+/* The text caret in the SQL editors: drawSelection() replaces the native caret with .cm-cursor, which has no colour
+   of its own, so it was invisible on the dark theme. */
+.editor.cm-host .cm-cursor,
+.editor.cm-host .cm-dropCursor {
+  border-left-color: var(--ink);
+}

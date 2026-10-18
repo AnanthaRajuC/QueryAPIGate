@@ -10,6 +10,8 @@ import { pageZoom } from '@/app/prefs';
 import { readResult, Results, widestColumn, type ResultData } from '@/components/Results';
 import { SchemaField, useSchema } from '@/components/SchemaBrowser';
 import { SqlEditor, type SqlEditorHandle } from '@/components/SqlEditor';
+import { MaskRulesField } from '@/features/access/MaskRules';
+import { maskPayload } from '@/features/access/maskRules';
 import { useSaveQuery, type QueryCreateInput, type QueryVersionInput } from '@/features/repository/api';
 import { Impact } from '@/features/repository/forms';
 import { shQuote, sqlParams } from '@/lib/sql';
@@ -196,6 +198,8 @@ export function DesignerPage() {
       path = `/execute_sql?${qs}`;
       body = { sql: opts.explain ? 'EXPLAIN ' + text : text, connection_name: target, params };
       if (target === connection && databaseOverride) body.database = databaseOverride;
+      const mask = maskPayload(state.mask, undefined);
+      if (mask && !opts.explain) body.mask = mask;
     }
     setLastExplain(Boolean(opts.explain));
     set({ page });
@@ -570,6 +574,14 @@ export function DesignerPage() {
                     onChange={(e) => set({ timeout: e.target.value })}
                   />
                 </div>
+                {!isMongo && (
+                  <MaskRulesField
+                    id="run-mask"
+                    rules={state.mask}
+                    onChange={(mask) => set({ mask })}
+                    who="this preview"
+                  />
+                )}
               </>
             }
             schema={
@@ -596,27 +608,9 @@ export function DesignerPage() {
         </div>
       </form>
       <div id="run-quick-stats">
-        {stats && (
-          <>
-            <span className={`dot ${stats.status < 400 ? 'ok' : 'bad'}`} />
-            <span>
-              <b>{stats.status}</b>
-              {stats.status < 400 ? ' OK' : ' error'}
-            </span>
-            {stats.rows !== null && (
-              <span>
-                <b>{stats.rows}</b>
-                {stats.rows === 1 ? ' row' : ' rows'}
-              </span>
-            )}
-            <span>
-              <b>{stats.elapsed}</b> ms
-            </span>
-            <span className="dim">{stats.format}</span>
-            {stats.widest && (
-              <span className="dim">{`Widest column: ${stats.widest.column} (~${stats.widest.maxLen} chars)`}</span>
-            )}
-          </>
+        {/* Status, rows, time and format are shown in the results bar below; only the widest-column hint is unique. */}
+        {stats?.widest && (
+          <span className="dim">{`Widest column: ${stats.widest.column} (~${stats.widest.maxLen} chars)`}</span>
         )}
       </div>
       <div className="panel" id="run-save-panel" hidden={!saveOpen} style={{ marginTop: 12 }}>

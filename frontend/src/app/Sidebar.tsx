@@ -46,6 +46,27 @@ export function Sidebar() {
   const can = useCan();
   const shown = (item: NavItem) => !item.needs || can(item.needs);
 
+  // Collapsible nav groups - which are collapsed is kept in this browser (per viewer convenience).
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('queryapigate-nav-collapsed') ?? '[]') as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleGroup = (label: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      try {
+        localStorage.setItem('queryapigate-nav-collapsed', JSON.stringify([...next]));
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
+
   const go = (item: NavItem) => navigate(item.path);
   const button = (item: NavItem, extraClass?: string) => (
     <button
@@ -88,11 +109,31 @@ export function Sidebar() {
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(shown);
           if (!items.length) return null;
+          const isCollapsed = collapsed.has(group.label);
           return (
-            <div className="nav-group" key={group.label}>
-              <div className="nav-label">{group.label}</div>
+            <div className={`nav-group${isCollapsed ? ' collapsed' : ''}`} key={group.label}>
+              <button
+                type="button"
+                className="nav-label"
+                aria-expanded={!isCollapsed}
+                aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+                onClick={() => toggleGroup(group.label)}
+              >
+                <span>{group.label}</span>
+                <svg
+                  className="nav-chevron"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
               <div className="nav-rule" />
-              {items.map((item) => button(item))}
+              {!isCollapsed && items.map((item) => button(item))}
             </div>
           );
         })}

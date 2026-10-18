@@ -133,6 +133,33 @@ describe('API Repository - detail and publishing', () => {
     expect(within(detail()).getByText('partner')).toBeInTheDocument();
     expect(within(detail()).getByText('60/minute')).toBeInTheDocument();
   });
+
+  it('toggles MCP exposure in place from the MCP tab, conditionally on the loaded version', async () => {
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'PATCH /api/v1/queries/films/versions/2': () => ({ ...FILMS }),
+    });
+    renderAt('/queries/films');
+    await userEvent.click(await screen.findByRole('tab', { name: 'MCP' }));
+    const toggle = within(detail()).getByRole('checkbox', { name: /Expose this query as an MCP tool/ });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/v1/queries/films/versions/2')).toBe(true));
+    const patch = calls.find((c) => c.path === '/api/v1/queries/films/versions/2')!;
+    expect(patch.method).toBe('PATCH');
+    expect(patch.body).toEqual({ mcp: false });
+    expect(patch.headers.get('If-Match')).toBe(ETAG);
+    expect(await screen.findByText("'films' is no longer an MCP tool")).toBeInTheDocument();
+  });
+
+  it('filters History to MCP-only runs', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    await userEvent.click(await screen.findByRole('tab', { name: /History/ }));
+    expect(within(detail()).getByText('partner')).toBeInTheDocument();
+    await userEvent.click(within(detail()).getByRole('checkbox', { name: /MCP only/ }));
+    expect(within(detail()).queryByText('partner')).not.toBeInTheDocument();
+  });
 });
 
 describe('API Repository - the New version drawer', () => {
@@ -175,6 +202,27 @@ describe('API Repository - the New version drawer', () => {
     await userEvent.click(within(drawer).getByRole('button', { name: 'Save as v3' }));
     expect(document.getElementById('error-banner')).toHaveTextContent('query_parameters is not valid JSON');
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('carries a query-level column mask into the saved version', async () => {
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      'POST /api/v1/queries/films/versions': () =>
+        jsonResponse(
+          { ...FILMS, latest_version: 3, versions: [...FILMS.versions, version(3, 'draft')] },
+          201,
+        ),
+    });
+    renderAt('/queries/films');
+    await userEvent.click(await screen.findByRole('button', { name: 'New version' }));
+    const drawer = document.getElementById('drawer')!;
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Add a masking rule' }));
+    await userEvent.type(within(drawer).getByLabelText('Masked column 1'), 'film.title');
+    await userEvent.selectOptions(within(drawer).getByLabelText('Masking action 1'), 'hash');
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Save as draft' }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/v1/queries/films/versions')).toBe(true));
+    const saved = calls.find((c) => c.path === '/api/v1/queries/films/versions')!;
+    expect(saved.body).toMatchObject({ mask: [{ column: 'film.title', action: 'hash' }] });
   });
 
   it('New API creates a query, published at once like Save always did', async () => {

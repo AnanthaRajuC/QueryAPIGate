@@ -120,6 +120,10 @@ def build_spec(version, saved_queries=None, jwt=None):
                 'requestBody': _body({'sql': {'type': 'string'}, 'connection_name': {'type': 'string'},
                                       'params': {'type': 'object', 'additionalProperties': True,
                                                  'description': 'Values for :name bound parameters.'},
+                                      'mask': {'type': 'array', 'items': {'$ref': '#/components/schemas/MaskRule'},
+                                               'description': 'Ad-hoc column-masking rules for this result (ADR 0005), '
+                                                              "e.g. previewing a query's mask - unioned with the "
+                                                              "caller's own key mask."},
                                       'database': {'type': 'string', 'description':
                                           'Run against a different database on the same server than this '
                                           "connection's own configured one (admin only - 403 for a scoped "

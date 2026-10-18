@@ -1,6 +1,6 @@
 """Validation of a saved-query definition - shared by everything that creates one (``POST /api/v1/queries``
 and ``queryapigate collection import``), so a query is held to the same rules however it arrives."""
-from . import mongotools, sqltools, store
+from . import masking, mongotools, sqltools, store
 from . import params as param_rules
 from .errors import ApiError
 
@@ -123,6 +123,16 @@ def validate_definition(data):
     validate_cache_ttl(cache_ttl)
     column_descriptions = validate_column_descriptions(data.get('column_descriptions'))
     agent_writes = validate_agent_writes(data, query_type)
+    # Query-level masking (ADR 0005): rules applied to this query's result for every caller, unioned with any the
+    # caller's key has. SQL only - masking traces result columns to their source through the SQL (masking.py).
+    mask = masking.validate_rules(data.get('mask'))
+    if mask and query_type == 'mongo':
+        raise ApiError('mask is not supported on a Mongo query (masking needs SQL column tracing)',
+                       code='invalid_body')
+    # Whether this query is exposed as an MCP tool (default on). Stored only when off, to keep the shape minimal.
+    mcp = data.get('mcp', True)
+    if not isinstance(mcp, bool):
+        raise ApiError('mcp must be true or false', code='invalid_body')
     collection = NO_COLLECTION_GIVEN
     if 'collection' in data:
         collection = data['collection']
@@ -138,6 +148,8 @@ def validate_definition(data):
         **({'cache_ttl': cache_ttl} if cache_ttl else {}),
         **({'column_descriptions': column_descriptions} if column_descriptions else {}),
         **agent_writes,
+        **({'mask': mask} if mask else {}),
+        **({} if mcp else {'mcp': False}),
     }
     if query_type == 'mongo':
         # No 'query_type' field at all for a plain SQL query (query_type's own default) - every saved query

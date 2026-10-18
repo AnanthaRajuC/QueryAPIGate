@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router';
 import { ApiError, api, apiJson, unwrap } from '@/api/client';
 import { useAllQueries, useCollections, useConnections, type CollectionsInfo } from '@/app/data';
 import { Field, FormActions, useFeedback } from '@/app/feedback';
+import { MaskRulesField } from '@/features/access/MaskRules';
+import { maskPayload, type MaskRule } from '@/features/access/maskRules';
 import { SchemaField, useSchema } from '@/components/SchemaBrowser';
 import { SqlEditor, type SqlEditorHandle } from '@/components/SqlEditor';
 import { sqlParams } from '@/lib/sql';
@@ -80,6 +82,7 @@ export function QueryForm({
   const [description, setDescription] = useState(prefill?.description ?? '');
   const [collection, setCollection] = useState('');
   const [tags, setTags] = useState(prefill?.tags.join(', ') ?? '');
+  const [mask, setMask] = useState<MaskRule[]>(prefill?.mask ?? []);
   const [params, setParams] = useState(
     prefill && Object.keys(prefill.parameters).length ? JSON.stringify(prefill.parameters, null, 2) : '',
   );
@@ -148,6 +151,8 @@ export function QueryForm({
         if (doc.sort) body.mongo_sort = doc.sort as Record<string, never>;
       } else {
         body.sql = sql;
+        const rules = maskPayload(mask, undefined);
+        if (rules) body.mask = rules;
       }
       // As before: saving under a name that already exists adds a version to it.
       const existing = queries.data?.find((q) => q.name === name);
@@ -320,6 +325,9 @@ export function QueryForm({
           onChange={(e) => setParams(e.target.value)}
         />
       </Field>
+      {!isMongo && (
+        <MaskRulesField id="q-mask" rules={mask} onChange={setMask} who="every caller of this query" />
+      )}
       <FormActions onCancel={closeDrawer}>
         <button
           type="button"

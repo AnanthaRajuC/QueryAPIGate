@@ -19,6 +19,7 @@ import {
   AccessTab,
   CacheTab,
   CliTab,
+  McpTab,
   CurlTab,
   HistoryTab,
   KeysTab,
@@ -35,7 +36,8 @@ import { ManagedTag } from '@/components/Managed';
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
 // with the classic pill and buttons: Published / Draft / Previous, and Publish, Roll back or Unpublish.
 
-type TabId = 'run' | 'sql' | 'history' | 'curl' | 'keys' | 'roles' | 'access' | 'cache' | 'metrics' | 'cli';
+type TabId =
+  'run' | 'sql' | 'history' | 'curl' | 'keys' | 'roles' | 'access' | 'cache' | 'metrics' | 'cli' | 'mcp';
 
 const STATUS_LABEL: Record<QueryVersion['status'], string> = {
   published: 'Published',
@@ -177,6 +179,7 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           {tabButton('cache', 'Cache')}
           {tabButton('metrics', 'Metrics')}
           {tabButton('cli', 'CLI')}
+          {tabButton('mcp', 'MCP')}
         </div>
       </div>
       <div className="d-body">
@@ -190,6 +193,7 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
         {tab === 'cache' && <CacheTab query={query} v={v} etag={etag} />}
         {tab === 'metrics' && <MetricsTab v={v} runs={runs} />}
         {tab === 'cli' && <CliTab query={query} v={v} />}
+        {tab === 'mcp' && <McpTab query={query} v={v} etag={etag} />}
       </div>
     </div>
   );

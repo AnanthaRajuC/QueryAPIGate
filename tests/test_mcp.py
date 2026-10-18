@@ -126,6 +126,30 @@ class ListToolsForTests(McpTestCase):
         tool_names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
         self.assertEqual(tool_names, {'reader', 'list_tables', 'execute_sql'})
 
+    def test_a_query_with_mcp_off_is_not_a_tool_but_still_serves_rest(self):
+        self.save('shown')
+        self.save('hidden', mcp=False)
+        names = {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)}
+        self.assertIn('shown', names)
+        self.assertNotIn('hidden', names)
+        self.assertEqual(self.client.get('/q/hidden', headers=self.admin_headers).status_code, 200)
+
+    def test_an_mcp_off_query_called_by_name_is_refused(self):
+        self.save('hidden', mcp=False)
+        result = mcp_server.handle_call(self.app, 'admin-key', '', '10.0.0.1', 'hidden', {})
+        self.assertTrue(result.get('isError'))
+        self.assertEqual(result['structuredContent']['code'], 'mcp_disabled')
+
+    def test_mcp_exposure_toggles_in_place(self):
+        self.save('toggle')
+        self.assertIn('toggle', {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)})
+        off = self.client.patch('/api/v1/queries/toggle/versions/1', json={'mcp': False}, headers=self.admin_headers)
+        self.assertEqual(off.status_code, 200, off.get_data(as_text=True))
+        self.assertNotIn('toggle', {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)})
+        on = self.client.patch('/api/v1/queries/toggle/versions/1', json={'mcp': True}, headers=self.admin_headers)
+        self.assertEqual(on.status_code, 200, on.get_data(as_text=True))
+        self.assertIn('toggle', {t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)})
+
     def test_a_write_query_called_by_name_is_refused_whatever_the_grant(self):
         """Unlisted isn't enough: a key allowed to run a write over REST must still not run it as a tool, nor reach an
         older version that writes through `version` (fixed in 0.20.1)."""

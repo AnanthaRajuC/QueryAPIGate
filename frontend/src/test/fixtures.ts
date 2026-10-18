@@ -27,6 +27,8 @@ export function version(
     parameters: { film_id: { type: 'integer', required: true, min: 1 } },
     placeholders: ['film_id'],
     cache_ttl: null,
+    mask: [],
+    mcp: true,
     created_at: '2026-10-03 10:00:00',
     last_modified_at: '2026-10-03 10:00:00',
     ...extra,

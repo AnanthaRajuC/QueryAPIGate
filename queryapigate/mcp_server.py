@@ -149,6 +149,8 @@ def list_tools_for(permission):
     for name, _number, data, collection in store.live_versions():
         if name in RESERVED_TOOL_NAMES or not _is_runnable(data):
             continue
+        if data.get('mcp') is False:  # exposure turned off for this query (BACKLOG #54); default is on
+            continue
         connection_name = data.get('connection_name')
         if not apikeys.can_run_saved(permission, name, collection, connection_name, data.get('query_parameters')):
             continue
