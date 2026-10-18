@@ -9,9 +9,10 @@ Every command and response below was run against a real server with the
 
 ## Step 1: Give the caller its rules
 
-Masking rules belong to the **caller** - an API key, a role (and so the keys made from it and the signed-in users
-mapped to it), or an export - never to the query, so one saved query serves your own team as it is and a partner
-masked.
+Masking rules most often belong to the **caller** - an API key, a role (and so the keys made from it and the
+signed-in users mapped to it), or an export - so one saved query serves your own team as it is and a partner masked.
+A rule can also belong to the **query itself**, when a column should be masked for *everyone* who runs it, admins
+included - see [Step 6](#step-6-or-mask-a-column-for-everyone-on-the-query).
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
@@ -118,6 +119,27 @@ customer_id,first_name,contact
 
 The codes match the partner's API key's: one hash key per store, so a partner can join a file to an API response on
 them. Masking an export's incremental column is refused - the watermark is made of its values.
+
+## Step 6: Or mask a column for everyone, on the query
+
+When a column should never leave a particular query unmasked - no matter who calls it, admins included - put the rule
+on the **query** rather than on each caller. In the Console it's the **Column masking** field on the save form (API
+Repository → New version, or the API Designer's **Save as New API**); the same field in the Designer's **Settings**
+pane masks a preview before you save. In a query definition it's a `mask` array, the same shape as a caller's:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/v1/queries -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
+  "name": "customer_contacts", "connection_name": "examples",
+  "sql": "SELECT customer_id, first_name, last_name, email AS contact FROM customer",
+  "mask": [{"column": "customer.email", "action": "hash"}]
+}'
+```
+
+Now *everyone* who runs `customer_contacts` gets `contact` hashed, including `demo-key`. A caller that also carries a
+mask on its key gets **both**: per column, the stricter action wins (`drop` > `null` > `mask` > `hash`), so a
+query's `hash` and a key's `drop` on the same column drops it. Query-level masking traces SQL columns the same way,
+so it's not available on Mongo queries, and a query whose mask can't be traced is refused rather than served
+unmasked - exactly as for a caller's rules.
 
 ## What masking doesn't stop
 

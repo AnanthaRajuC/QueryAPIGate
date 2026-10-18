@@ -744,6 +744,33 @@ def set_cache_ttl(ref, version, ttl):
         return row['version']
 
 
+def set_mcp(ref, version, enabled):
+    """Turn one version's MCP exposure on or off in place (BACKLOG #54) - not a new version, same treatment as
+    set_cache_ttl() above. Stored only when off (`mcp: false`), so a query exposed over MCP - the default - keeps its
+    stored shape unchanged. Returns the resolved version number actually changed."""
+    name = resolve_saved_file(ref)
+    ws = scope.current()
+    with db.transaction() as conn:
+        if version is None:
+            row = conn.execute(
+                'SELECT version, fields_json FROM saved_query_versions WHERE workspace = ? AND query_name = ? '
+                'ORDER BY version DESC LIMIT 1', (ws, name)).fetchone()
+        else:
+            row = conn.execute(
+                'SELECT version, fields_json FROM saved_query_versions WHERE workspace = ? AND query_name = ? '
+                'AND version = ?', (ws, name, version)).fetchone()
+        if row is None:
+            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
+        fields = json.loads(row['fields_json'])
+        if enabled:
+            fields.pop('mcp', None)
+        else:
+            fields['mcp'] = False
+        conn.execute('UPDATE saved_query_versions SET fields_json = ? WHERE workspace = ? AND query_name = ? '
+                     'AND version = ?', (json.dumps(fields), ws, name, row['version']))
+        return row['version']
+
+
 def _saved_files():
     """(name, path, content) for every saved query - "path" is just the name itself (see
     resolve_saved_file()'s docstring for why); content is the same nested dict shape load_versions()

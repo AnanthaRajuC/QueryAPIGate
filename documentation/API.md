@@ -329,13 +329,13 @@ tag.
 | Method and path | What it does |
 |---|---|
 | `GET /api/v1/queries` | Every saved query's summary, including `created_at` (its first version), `last_used_at` (its newest stored run) and `cache_ttl`. Filters: `search` (name, description or tag), `collection`, `connection`, `status` (`published`, `unpublished`, `draft`). |
-| `POST /api/v1/queries` | Create a query with its first version: `name`, `description`, `sql`, `connection_name`, `parameters`, `tags`, `cache_ttl`, `collection`. A draft unless `"publish": true`. 409 `query_exists` if the name is taken. |
+| `POST /api/v1/queries` | Create a query with its first version: `name`, `description`, `sql`, `connection_name`, `parameters`, `tags`, `cache_ttl`, `collection`, `mask` (query-level [column masking](#column-masking), SQL only), `mcp` (expose as an MCP tool, default `true`). A draft unless `"publish": true`. 409 `query_exists` if the name is taken. |
 | `GET /api/v1/queries/{name}` | The query with every version, each with its `status` (`published`, `draft` or `previous`) and `run_count` (its runs stored in history). |
 | `PATCH /api/v1/queries/{name}` | Change its `collection` (`null` removes it). |
 | `DELETE /api/v1/queries/{name}` | Delete it and every version. |
 | `POST /api/v1/queries/{name}/versions` | Add a version: a draft unless `"publish": true`. The published version keeps serving. |
 | `GET /api/v1/queries/{name}/versions/{n}` | One version. |
-| `PATCH /api/v1/queries/{name}/versions/{n}` | Change its `cache_ttl` in place. |
+| `PATCH /api/v1/queries/{name}/versions/{n}` | Change its `cache_ttl` or `mcp` (MCP-tool exposure) in place - not a new version. |
 | `DELETE /api/v1/queries/{name}/versions/{n}` | Delete one version; see [Drafts and publishing](#drafts-and-publishing) for what happens to the published one. |
 | `POST /api/v1/queries/{name}/publish` | `{"version": n}`: publish a draft, or an older version to roll back. |
 | `POST /api/v1/queries/{name}/unpublish` | Stop serving it; every version is kept. |
@@ -594,8 +594,8 @@ queryapigate collection import reporting.json --on-conflict skip
 ~~~
 
 A bundle (`"format": "queryapigate-collection"`, `"format_version": 1`) holds the **latest version of each
-query's definition** - SQL, description, tags, declared parameters, default connection name, `cache_ttl` - and
-nothing else: no execution history, no API keys or roles, no connection details (a connection is referenced by
+query's definition** - SQL, description, tags, declared parameters, default connection name, `cache_ttl`, any
+query-level `mask`, and `mcp` exposure - and nothing else: no execution history, no API keys or roles, no connection details (a connection is referenced by
 name and must exist where you import; missing ones are reported as a warning).
 
 Import is held to exactly the rules saving a query is, and is all-or-nothing up to the point of writing: the
@@ -1382,8 +1382,9 @@ use.
 > ever refused instead by a security fix, if serving it could let a value out. Limits: callers with rules are refused
 > on H2, JDBC and MongoDB connections, and masking hides values, not answers about them (below).
 
-A `mask` grant - on an API key, a role (copied to keys made from it, and applied to signed-in users mapped to it), or
-an export - hides the values of named **source** columns in everything that caller receives
+A `mask` grant - on an API key, a role (copied to keys made from it, and applied to signed-in users mapped to it), an
+export, or a **saved query itself** (`mask` in its definition, applied to every caller including administrators) -
+hides the values of named **source** columns in everything that caller receives
 ([ADR 0005](adr/0005-column-masking.md)):
 
 ~~~json
@@ -1400,7 +1401,8 @@ an export - hides the values of named **source** columns in everything that call
 from - aliases, expressions, CTEs, subqueries, unions, joins, window functions - with the connection's schema to
 expand `SELECT *`; one computed from a masked column is masked as a whole (`lower(email)` is hashed). Applied on
 `/q/<name>` and `/execute_sql` in every format, paged or streamed, MCP tools and exports; a cached response is kept per
-set of rules.
+set of rules. A query's own rules and the caller's are **unioned** - per column the strictest action wins - so a
+query-level mask can only ever tighten what a caller sees, never loosen it.
 
 **Refused, never served unmasked** (`403 mask_unresolvable`, before the query runs): a result column that can't be
 traced - table functions, whole-row references (`SELECT c FROM customer c`), a table alias that renames columns,
@@ -2283,6 +2285,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `claim_binding_required` | 403 | The caller's role has `require_claim_binding`, and the query takes no parameter from the sign-in token |
 | `forbidden` | 403 | Any other refusal |
 | `query_not_found` | 404 | No such saved query |
+| `mcp_disabled` | 404 | The saved query exists but isn't exposed as an MCP tool (its `mcp` is off); it still serves over REST |
 | `version_not_found` | 404 | No such version - or a draft, to a key that can't see drafts |
 | `not_published` | 404 | The query has no published version |
 | `connection_not_found` | 404 | No such connection |

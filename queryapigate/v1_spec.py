@@ -77,7 +77,8 @@ SCHEMAS = {
     'QueryVersion': {
         'type': 'object',
         'required': ['version', 'status', 'uuid', 'author', 'description', 'tags', 'query_type', 'sql', 'mongo',
-                     'connection_name', 'parameters', 'placeholders', 'cache_ttl', 'created_at', 'last_modified_at'],
+                     'connection_name', 'parameters', 'placeholders', 'cache_ttl', 'mask', 'mcp', 'created_at',
+                     'last_modified_at'],
         'properties': {
             'version': {'type': 'integer'},
             'status': {'type': 'string', 'enum': ['published', 'draft', 'previous'],
@@ -104,6 +105,10 @@ SCHEMAS = {
             'max_affected_rows': {'type': 'integer', 'nullable': True,
                                   'description': 'The most rows one agent write may change; more, and it is rolled '
                                                  'back.'},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'),
+                     'description': 'Column-masking rules applied to this query\'s result for every caller (ADR 0005), '
+                                    'unioned with any the caller\'s key has.'},
+            'mcp': {'type': 'boolean', 'description': 'Whether this version is exposed as an MCP tool (default true).'},
             'created_at': _NULLABLE_STRING,
             'last_modified_at': _NULLABLE_STRING,
             'run_count': {'type': 'integer', 'description': "Runs of this version stored in history - in a "
@@ -166,6 +171,11 @@ SCHEMAS = {
             'max_affected_rows': {'type': 'integer', 'minimum': 1,
                                   'description': 'With agent_writes: the most rows one agent write may change '
                                                  '(default 1).'},
+            'mask': {'type': 'array', 'items': _ref('MaskRule'), 'nullable': True,
+                     'description': 'Column-masking rules for this query\'s result, applied to every caller (ADR 0005).'},
+            'mcp': {'type': 'boolean', 'default': True,
+                    'description': 'Expose this query as an MCP tool (default true). Toggle later with PATCH on the '
+                                   'version.'},
             'mongo_collection': {'type': 'string'}, 'mongo_filter': {'type': 'object'},
             'mongo_projection': {'type': 'object'}, 'mongo_sort': {'type': 'object'},
             'publish': {'type': 'boolean', 'default': False,
@@ -1145,9 +1155,10 @@ PATHS = {
     },
     '/api/v1/queries/{name}/versions/{version}': {
         'get': _op('Get one version', {'200': _ok(_ref('QueryVersion'))}, parameters=[_NAME, _VERSION]),
-        'patch': _op("Change a version's cache_ttl", {'200': _QUERY, **_PRECONDITION},
+        'patch': _op("Change a version's cache_ttl, or its MCP exposure (mcp)", {'200': _QUERY, **_PRECONDITION},
                      parameters=[_NAME, _VERSION, _IF_MATCH],
-                     body={'type': 'object', 'properties': {'cache_ttl': {'type': 'integer', 'nullable': True}}}),
+                     body={'type': 'object', 'properties': {'cache_ttl': {'type': 'integer', 'nullable': True},
+                                                            'mcp': {'type': 'boolean'}}}),
         'delete': _op('Delete one version (publishing an older one if it was the published version)',
                       {'200': _QUERY, '204': {'description': 'Deleted the last version, and so the query'},
                        **_PRECONDITION}, parameters=[_NAME, _VERSION, _IF_MATCH]),

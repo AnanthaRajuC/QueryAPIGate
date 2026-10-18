@@ -1,4 +1,5 @@
 import { preferredPageSize, readPrefs } from '@/app/prefs';
+import type { MaskRule } from '@/features/access/maskRules';
 
 // The API Designer's working state, kept for the life of the page so leaving the screen and coming back finds the
 // query where it was - as the classic UI, which only hides its tab, always did. Not persisted beyond the page.
@@ -14,6 +15,7 @@ export interface DesignerState {
   page: number;
   pageSize: number;
   timeout: string;
+  mask: MaskRule[];
 }
 
 const preferredFormat = () => readPrefs().format;
@@ -32,6 +34,7 @@ export function loadDesignerState(): DesignerState {
     page: 1,
     pageSize: preferredPageSize(),
     timeout: '',
+    mask: [],
   };
   return saved;
 }

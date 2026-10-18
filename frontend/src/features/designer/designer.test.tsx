@@ -105,9 +105,25 @@ describe('API Designer', () => {
       params: { id: 1 },
     });
     expect(run.search.get('page_size')).toBe('10');
-    expect(document.getElementById('run-quick-stats')).toHaveTextContent('200 OK');
+    expect(document.querySelector('.resbar')).toHaveTextContent('200'); // status shows in the results bar, once
     await userEvent.click(document.querySelector('.side-tab[data-side-tab="recent"]')!);
     expect(screen.getByRole('button', { name: /SELECT id, title FROM film/ })).toHaveTextContent('1 row');
+  });
+
+  it('sends the preview with a column mask when one is set in Settings', async () => {
+    const { calls } = fakeBackend(routes());
+    renderAt('/designer');
+    await waitFor(() => expect(screen.getByLabelText('Connection')).toHaveValue('lite'));
+    await userEvent.type(screen.getByLabelText('SQL'), 'SELECT title FROM film');
+    await userEvent.click(document.querySelector('.side-tab[data-side-tab="settings"]')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Add a masking rule' }));
+    await userEvent.type(screen.getByLabelText('Masked column 1'), 'film.title');
+    await userEvent.selectOptions(screen.getByLabelText('Masking action 1'), 'hash');
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/execute_sql')).toBe(true));
+    expect(calls.find((c) => c.path === '/execute_sql')!.body).toMatchObject({
+      mask: [{ column: 'film.title', action: 'hash' }],
+    });
   });
 
   it('Explain prefixes EXPLAIN and Ctrl+Enter runs', async () => {

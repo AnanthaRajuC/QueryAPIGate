@@ -52,7 +52,15 @@ be part of the cache key.
 - **Not on administrators.** Owners, admins and developers see data as it is - masking is for the callers they
   hand data to. Auditors see no data at all.
 - **Not on saved queries**, for now: a query is shared by callers with different rights, so the rule belongs to the
-  caller. Authors can still select `hash(...)`-like expressions themselves.
+  caller. Authors can still select `hash(...)`-like expressions themselves. *(Amended 2026-10-18 - see below.)*
+
+> **Amendment (2026-10-18): also on saved queries.** A saved-query version may now carry its own `mask` array (a
+> definition field, versioned like the SQL), set on the save form or previewed from the API Designer's Settings. It
+> applies to *every* caller, administrators included - for a column that must never leave a particular query
+> unmasked whoever runs it. A query's rules and a caller's rules are **unioned**, and per column the strictest
+> action wins (`drop` > `null` > `mask` > `hash`), so the fail-closed and tracing guarantees are unchanged. The
+> original reasoning still holds for the common case (share a query, mask per caller); the query-level rule is the
+> exception for a column that is sensitive in the query itself. SQL-only, like all tracing-based masking.
 
 ### 3. How rules are applied
 

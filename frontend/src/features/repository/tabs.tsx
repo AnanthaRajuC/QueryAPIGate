@@ -306,6 +306,7 @@ export function SqlTab({ query, v }: { query: Query; v: QueryVersion }) {
 export function HistoryTab({ v, runs }: { v: QueryVersion; runs: HistoryEntry[] }) {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
+  const [mcpOnly, setMcpOnly] = useState(false);
   const newest = useMemo(() => [...runs].reverse(), [runs]);
   if (!runs.length)
     return <Empty title="No runs recorded">{`Runs of v${v.version} through /q/ appear here.`}</Empty>;
@@ -313,6 +314,7 @@ export function HistoryTab({ v, runs }: { v: QueryVersion; runs: HistoryEntry[] 
   const rows = newest.filter(
     (x) =>
       (!status || x.status === status) &&
+      (!mcpOnly || x.transport === 'mcp') &&
       (!needle ||
         [x.connection_name, x.key_name, x.request_id, x.error].join(' ').toLowerCase().includes(needle)),
   );
@@ -324,6 +326,19 @@ export function HistoryTab({ v, runs }: { v: QueryVersion; runs: HistoryEntry[] 
           <option value="success">Success</option>
           <option value="error">Failed</option>
         </select>
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: '12.5px',
+            whiteSpace: 'nowrap',
+          }}
+          title="Show only runs an AI agent made over MCP"
+        >
+          <input type="checkbox" checked={mcpOnly} onChange={(e) => setMcpOnly(e.target.checked)} />
+          MCP only
+        </label>
         <input
           className="search"
           type="search"
@@ -882,6 +897,66 @@ export function CacheTab({ query, v, etag }: { query: Query; v: QueryVersion; et
       >
         Save
       </button>
+    </div>
+  );
+}
+
+/** The MCP tab: whether this query is exposed as a tool (toggled in place, like cache_ttl), and a read-only summary
+ * of the tool it becomes - its name, kind (read-only / write with approval / insert) and any agent-write row ceiling.
+ * Agent-write settings themselves are part of the version definition, so they change by adding a version. */
+export function McpTab({ query, v, etag }: { query: Query; v: QueryVersion; etag: string | null }) {
+  const { showError, toast } = useFeedback();
+  const actions = useQueryActions(query.name);
+  const toggle = (next: boolean) =>
+    actions.setMcp.mutate(
+      { version: v.version, mcp: next, etag },
+      {
+        onSuccess: () => {
+          showError('');
+          toast(next ? `'${query.name}' is now an MCP tool` : `'${query.name}' is no longer an MCP tool`);
+        },
+        onError: (e) => showError((e as Error).message),
+      },
+    );
+  const ceiling = v.max_affected_rows ?? 1;
+  const kind =
+    v.agent_writes === 'approval'
+      ? 'a write tool — each call approved by a person'
+      : v.agent_writes === 'insert'
+        ? 'an insert tool — a single INSERT, no approval'
+        : 'a read-only tool';
+  return (
+    <div className="form" style={{ maxWidth: 560 }}>
+      <label className="switch">
+        <input
+          id="mcp-on"
+          type="checkbox"
+          checked={v.mcp}
+          disabled={actions.setMcp.isPending}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+        Expose this query as an MCP tool
+        <span className="hint">
+          {' '}
+          — when off, the query still serves over REST, but AI agents can’t see or call it over MCP.
+        </span>
+      </label>
+      {v.mcp && (
+        <div className="panel" style={{ marginTop: 12, padding: '12px 14px' }}>
+          <div>
+            <strong>As a tool:</strong> <span className="mono">{query.name}</span> — {kind}
+            {v.agent_writes ? `, at most ${ceiling} row${ceiling === 1 ? '' : 's'} per write` : ''}.
+          </div>
+          <p className="hint" style={{ margin: '8px 0 0' }}>
+            Agent-write settings are part of the query definition — change them by adding a version.
+          </p>
+          {v.mask.length > 0 && (
+            <p className="hint" style={{ margin: '6px 0 0' }}>
+              {`Masks ${v.mask.length} column${v.mask.length === 1 ? '' : 's'} in its result — the same for an agent.`}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

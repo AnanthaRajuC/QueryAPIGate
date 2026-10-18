@@ -783,10 +783,14 @@ def execute_sql_endpoint():
     params = get_object(data.get('params'), 'params')
     output_format = get_output_format(data)
     timeout = get_timeout(data)
+    # Optional ad-hoc masking (ADR 0005), e.g. the API Designer previewing a query's mask - unioned with the caller's
+    # own key mask, so a preview can never reveal a column the key already hides.
+    mask = masking.validate_rules(data.get('mask'))
+    effective_mask = (mask or []) + (g.permission.mask or []) or None
     if get_stream_flag():
         return stream_sql_response(data['sql'], data['connection_name'], params, timeout, output_format,
                                    filename=data['connection_name'], allowed_tables=g.permission.allowed_tables,
-                                   database=database, mask=g.permission.mask)
+                                   database=database, mask=effective_mask)
     limit, offset, page = get_pagination()
     entry = run_entry(data['connection_name'])
     if database:
@@ -796,7 +800,7 @@ def execute_sql_endpoint():
                                           params, timeout, allow_writes=g.permission.allow_writes,
                                           key_name=metrics_key_name(), allowed_write_ops=g.permission.allowed_write_ops,
                                           database=database, allowed_tables=g.permission.allowed_tables,
-                                          mask=g.permission.mask)
+                                          mask=effective_mask)
     except ApiError as error:
         _record_adhoc_and_broadcast(data['sql'], params,
                                     {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -979,6 +983,10 @@ def _run_saved(ref, body, url_params):
     if not isinstance(saved.get('sql_query'), str):
         raise ApiError('Saved query has no SQL', 500)
     agent_write = False
+    if g.get('transport') == 'mcp' and saved.get('mcp') is False:
+        # Exposure turned off for this query (BACKLOG #54): not a tool over MCP, by name or not - though it still
+        # serves over REST. Hidden from tools/list too (mcp_server.list_tools_for).
+        raise ApiError(f"'{query_name}' is not available over MCP", 404, code='mcp_disabled')
     if g.get('transport') == 'mcp' and not sqltools.is_read_only(saved['sql_query'],
                                                                   store.get_connection(connection_name)['db']):
         # Over MCP a saved query that writes runs only as an agent write (ADR 0008): its author marked it, the
@@ -997,6 +1005,9 @@ def _run_saved(ref, body, url_params):
     used = set(sqltools.placeholder_names(saved['sql_query']))
     values = param_rules.resolve(saved.get('query_parameters'), raw, used=used)
     sql = sqltools.fill_placeholders(saved['sql_query'], values)
+    # A saved query's own mask rules (ADR 0005) apply to every caller, unioned with any the caller's key has - the
+    # strictest rule wins per column (masking.py), so neither can weaken the other.
+    effective_mask = (saved.get('mask') or []) + (g.permission.mask or []) or None
     if agent_write:
         return run_agent_write(saved, path, number, query_name, connection_name, values, sql, timeout)
 
@@ -1005,7 +1016,7 @@ def _run_saved(ref, body, url_params):
         # defeating the point - but the run is still recorded once the stream finishes, same as any other.
         return stream_sql_response(sql, connection_name, values, timeout, output_format, filename=ref,
                                    saved=(path, number), allowed_tables=g.permission.allowed_tables,
-                                   mask=g.permission.mask)
+                                   mask=effective_mask)
 
     limit, offset, page = get_pagination()
 
@@ -1019,7 +1030,7 @@ def _run_saved(ref, body, url_params):
             # Callers with different masking rules get different responses, so they never share one.
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
                                                 values=values, format=output_format, page=page, page_size=limit,
-                                                mask=masking.fingerprint(g.permission.mask),
+                                                mask=masking.fingerprint(effective_mask),
                                                 workspace=scope.current())
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
                          'format': output_format, 'page': page, 'workspace': scope.current()}
@@ -1033,7 +1044,7 @@ def _run_saved(ref, body, url_params):
         result, elapsed_ms = engine.timed(engine.execute_sql, sql, connection_name, limit, offset, values, timeout,
                                           allow_writes=effective_allow_writes, key_name=metrics_key_name(),
                                           allowed_write_ops=g.permission.allowed_write_ops,
-                                          allowed_tables=g.permission.allowed_tables, mask=g.permission.mask)
+                                          allowed_tables=g.permission.allowed_tables, mask=effective_mask)
     except ApiError as error:
         _record_and_broadcast(path, number,
                               {**entry, 'status': 'error', 'error': error.message, 'code': error.code})
@@ -1091,7 +1102,7 @@ def _execute_agent_write(request, saved, path, number, connection_name, values, 
                                                       timeout, key_name=metrics_key_name(),
                                                       allowed_write_ops=g.permission.allowed_write_ops,
                                                       allowed_tables=g.permission.allowed_tables,
-                                                      mask=g.permission.mask)
+                                                      mask=(saved.get('mask') or []) + (g.permission.mask or []) or None)
     except ApiError as error:
         agentwrites.finish(request['id'], error={'error': error.message, 'code': error.code or 'internal_error'})
         _record_and_broadcast(path, number,

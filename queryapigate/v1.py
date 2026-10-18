@@ -185,22 +185,28 @@ def version_flow(name, version):
 
 @bp.route('/queries/<name>/versions/<int:version>', methods=['PATCH'])
 def update_version(name, version):
-    """A version's `cache_ttl` (null or 0 turns caching off) - the one thing that changes in place."""
+    """A version's `cache_ttl` (null or 0 turns caching off) or `mcp` (whether it's exposed as an MCP tool) - the
+    two things that change in place. Everything else changes by adding a version."""
     name, content = queries.load(name)
     _check_if_match(content)
     data = get_json_body()
-    unknown = sorted(set(data) - {'cache_ttl'})
+    unknown = sorted(set(data) - {'cache_ttl', 'mcp'})
     if unknown:
-        raise ApiError(f"Only 'cache_ttl' can be changed on a version (unknown: {', '.join(unknown)})",
+        raise ApiError(f"Only 'cache_ttl' and 'mcp' can be changed on a version (unknown: {', '.join(unknown)})",
                        code='unknown_field')
+    if not isinstance(content.get(str(version)), dict):
+        raise ApiError(f'Version {version} not found', 404, code='version_not_found')
     if 'cache_ttl' in data:
         from . import definitions
         definitions.validate_cache_ttl(data['cache_ttl'])
-        if not isinstance(content.get(str(version)), dict):
-            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
         store.set_cache_ttl(name, version, data['cache_ttl'])
         store.record_audit(caller_key_name(), 'set_cache_ttl', name,
                            {'version': version, 'cache_ttl': data['cache_ttl'] or None})
+    if 'mcp' in data:
+        if not isinstance(data['mcp'], bool):
+            raise ApiError('mcp must be true or false', code='invalid_body')
+        store.set_mcp(name, version, data['mcp'])
+        store.record_audit(caller_key_name(), 'set_mcp', name, {'version': version, 'mcp': data['mcp']})
     return _detail_response(name)
 
 

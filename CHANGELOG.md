@@ -50,11 +50,28 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ## [Unreleased]
 
 ### Added
+- **Hide a saved query from MCP, while it keeps serving over REST.** A query version now carries an `mcp` flag
+  (default `true`). When `false`, the query is not listed as an MCP tool and a call to it over MCP is refused with
+  the new `mcp_disabled` code (`404`); it still answers over REST as before. Toggle it in place from the API
+  Repository's new **MCP** tab (no new version needed), set it when saving a version (`"mcp": false` in the query
+  definition), or change it with `PATCH /api/v1/queries/{name}/versions/{version}` alongside `cache_ttl`. The MCP
+  tab also summarises how the query appears as a tool (read-only / write-with-approval / insert, and its row ceiling).
+- **Query-level column masking.** A saved query can now carry its own `mask` rules (same shape as a key's grant
+  mask, ADR 0005), set in the API Designer's Settings pane for a preview and on the save form for the query itself.
+  The query's mask applies to *every* caller, admins included, and is unioned with any mask on the caller's key -
+  per column, the stricter action wins (`drop` > `null` > `mask` > `hash`). Masking traces SQL columns, so it is
+  not available on Mongo queries. A query whose mask can't be traced is refused, never served unmasked.
+- **Console: the API Repository's History tab can filter to MCP-only runs**, and the left sidebar's section
+  headings (Data, API, MCP, …) are now collapsible, remembering what you collapsed.
 - **A dedicated MCP screen in the Console.** The MCP server's tools, a reachability check and the connect snippet
   (the URL and `X-API-Key` header, as Claude Desktop takes them) now have their own top-level **MCP** item in the
   sidebar, instead of living under Settings. The tools shown are the current workspace's. The MCP *settings*
   (`QUERYAPIGATE_MCP_PORT`, `QUERYAPIGATE_MCP_MAX_ROWS`) stay read-only under Settings → MCP server. No API change -
   the page uses the existing `GET /api/v1/mcp/tools` and `/api/v1/mcp/status` (both need `observe`).
+
+### Fixed
+- **Console: the API Designer shows a text cursor in the SQL editor**, and after a run the status line
+  (`200 OK · 13 ms · …`) is shown once, not twice.
 
 ### Changed
 - **Workspaces (experimental): a signed-in user's workspace now comes from their token, not the request path.** A

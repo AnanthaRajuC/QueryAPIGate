@@ -134,6 +134,16 @@ export function useQueryActions(name: string) {
         ),
       onSettled: settle,
     }),
+    setMcp: useMutation({
+      mutationFn: async ({ version, mcp, etag }: { version: number; mcp: boolean; etag: string | null }) =>
+        unwrap(
+          await api.PATCH('/api/v1/queries/{name}/versions/{version}', {
+            params: { path: { name, version }, header: ifMatch(etag) },
+            body: { mcp },
+          }),
+        ),
+      onSettled: settle,
+    }),
   };
 }
 

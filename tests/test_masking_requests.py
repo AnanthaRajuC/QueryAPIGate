@@ -211,5 +211,33 @@ class ExportTests(MaskingTestCase):
         self.assertEqual(caught.exception.code, 'mask_unresolvable')
 
 
+class QueryLevelMaskTests(MaskingTestCase):
+    """A saved query's own mask rules (ADR 0005) apply to every caller - the admin included - and union with any the
+    caller's key has, the strictest winning per column."""
+
+    def setUp(self):
+        super().setUp()
+        save_query(self.client, headers=ADMIN, body={
+            'filename': 'masked_customers', 'description': 'd', 'connection_name': 'shop', 'publish': True,
+            'sql_query': 'SELECT id, email AS contact, phone, name FROM customers ORDER BY id',
+            'mask': [{'column': 'customers.email', 'action': 'hash'}]})
+
+    def test_query_mask_applies_to_everyone_including_admin(self):
+        rows = self.client.get('/q/masked_customers', headers=ADMIN).get_json()
+        self.assertTrue(HEX16.match(rows[0]['contact']))  # email hashed even for the admin key
+        self.assertEqual(rows[0]['phone'], '+44 7700 900123')  # phone untouched - no rule for it
+
+    def test_query_mask_unions_with_key_mask(self):
+        secret = apikeys.create_key('p2', connections=['shop'], mask=[{'column': '*.phone', 'action': 'mask'}])
+        rows = self.client.get('/q/masked_customers', headers={'X-API-Key': secret}).get_json()
+        self.assertTrue(HEX16.match(rows[0]['contact']))  # email hashed by the query's rule
+        self.assertNotEqual(rows[0]['phone'], '+44 7700 900123')  # phone masked by the key's rule - union
+
+    def test_a_query_mask_rule_is_validated(self):
+        res = save_query(self.client, headers=ADMIN, body={
+            'filename': 'bad', 'description': 'd', 'connection_name': 'shop',
+            'sql_query': 'SELECT id FROM customers', 'mask': [{'column': 'email', 'action': 'hash'}]})
+        self.assertEqual(res.status_code, 400)  # column must be table.column
+
 if __name__ == '__main__':
     unittest.main()

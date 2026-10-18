@@ -2997,10 +2997,21 @@
             "nullable": true,
             "type": "string"
           },
+          "mask": {
+            "description": "Column-masking rules applied to this query's result for every caller (ADR 0005), unioned with any the caller's key has.",
+            "items": {
+              "$ref": "#/components/schemas/MaskRule"
+            },
+            "type": "array"
+          },
           "max_affected_rows": {
             "description": "The most rows one agent write may change; more, and it is rolled back.",
             "nullable": true,
             "type": "integer"
+          },
+          "mcp": {
+            "description": "Whether this version is exposed as an MCP tool (default true).",
+            "type": "boolean"
           },
           "mongo": {
             "additionalProperties": true,
@@ -3072,6 +3083,8 @@
           "parameters",
           "placeholders",
           "cache_ttl",
+          "mask",
+          "mcp",
           "created_at",
           "last_modified_at"
         ],
@@ -3109,10 +3122,23 @@
           "description": {
             "type": "string"
           },
+          "mask": {
+            "description": "Column-masking rules for this query's result, applied to every caller (ADR 0005).",
+            "items": {
+              "$ref": "#/components/schemas/MaskRule"
+            },
+            "nullable": true,
+            "type": "array"
+          },
           "max_affected_rows": {
             "description": "With agent_writes: the most rows one agent write may change (default 1).",
             "minimum": 1,
             "type": "integer"
+          },
+          "mcp": {
+            "default": true,
+            "description": "Expose this query as an MCP tool (default true). Toggle later with PATCH on the version.",
+            "type": "boolean"
           },
           "mongo_collection": {
             "type": "string"
@@ -10141,6 +10167,9 @@
                   "cache_ttl": {
                     "nullable": true,
                     "type": "integer"
+                  },
+                  "mcp": {
+                    "type": "boolean"
                   }
                 },
                 "type": "object"
@@ -10219,7 +10248,7 @@
             "description": "Changed since read (If-Match)"
           }
         },
-        "summary": "Change a version's cache_ttl",
+        "summary": "Change a version's cache_ttl, or its MCP exposure (mcp)",
         "tags": [
           "Management API v1"
         ]
@@ -12698,6 +12727,13 @@
                   "database": {
                     "description": "Run against a different database on the same server than this connection's own configured one (admin only - 403 for a scoped key, even one already granted this connection).",
                     "type": "string"
+                  },
+                  "mask": {
+                    "description": "Ad-hoc column-masking rules for this result (ADR 0005), e.g. previewing a query's mask - unioned with the caller's own key mask.",
+                    "items": {
+                      "$ref": "#/components/schemas/MaskRule"
+                    },
+                    "type": "array"
                   },
                   "params": {
                     "additionalProperties": true,
