@@ -49,6 +49,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-18
+
+MCP for AI agents: a dedicated MCP screen in the Console, per-query control over what's exposed, and tools agents
+can actually use - self-describing parameters, table inspection, capped-result guidance, and semantic search
+(experimental). Plus a workspace-boundary security fix for signed-in users.
+
 ### Added
 - **Stronger MCP tools for agents (four changes).**
   - **Self-describing parameters.** A query parameter can now carry an `example`, and both `description` and
@@ -2772,7 +2778,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.36.0...v0.37.0
