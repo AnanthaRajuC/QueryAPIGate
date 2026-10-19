@@ -236,7 +236,18 @@
   .tag { display: inline-block; font: 11px/1.5 var(--mono); padding: 0 6px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
   .tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .name { font: 600 12.5px var(--mono); }
+  button.as-link { background: none; border: 0; padding: 0; margin: 0; cursor: pointer; color: var(--accent); text-align: left; }
+  button.as-link:hover { text-decoration: underline; }
   .dim { color: var(--ink-3); }
+  /* GitHub-style per-key activity sparkline (KeyActivity.tsx) - one series, drawn in the accent. */
+  .spark-link { display: inline-block; line-height: 0; border-radius: 4px; }
+  .spark-link:hover { background: var(--accent-soft); }
+  .spark, .spark-empty svg { display: block; overflow: visible; }
+  .spark-base { stroke: var(--line); stroke-width: 1; }
+  .spark-area { fill: var(--accent); fill-opacity: 0.14; stroke: none; }
+  .spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .spark.has-err .spark-area { fill-opacity: 0.1; }
+  .spark-skeleton { display: inline-block; width: 116px; height: 30px; border-radius: 4px; background: var(--surface-2); }
   .empty { padding: 44px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--ink-2); }
   .empty strong { color: var(--ink); font-size: 14px; font-weight: 600; }
   .loading { padding: 28px 16px; color: var(--ink-3); display: flex; align-items: center; gap: 10px; justify-content: center; }

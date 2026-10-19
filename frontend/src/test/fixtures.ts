@@ -102,6 +102,8 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       formatted: null,
       error: null,
     }),
+    // Activity sparklines (KeyActivity/ConnectionActivity/etc.) read this; empty by default, overridden per test.
+    'GET /api/v1/history': () => ({ items: [], next_cursor: null }),
     'GET /api/v1/api-keys': () => ({
       items: [apiKey('partner', { connections: [], collections: ['catalog'], rate_limit: '60/minute' })],
     }),

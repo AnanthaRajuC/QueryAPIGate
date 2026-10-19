@@ -8,6 +8,8 @@ import { Empty, Field, FormActions, Loading, useFeedback } from '@/app/feedback'
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
 import { ManagedTag } from '@/components/Managed';
+import { ActivitySpark } from '@/features/access/KeyActivity';
+import { useConnectionActivity } from '@/features/access/activity';
 
 // The classic Connections screen (ui.py #tab-connections, renderConnections, openConnectionForm,
 // openDeleteConnectionForm): All / Active / Inactive / Deleted, a filter, the table with each connection's live
@@ -63,6 +65,7 @@ export function ConnectionsPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const deleted = useDeleted(true);
+  const activity = useConnectionActivity();
   const all = list.data ?? [];
   const activeCount = all.filter((c) => c.active).length;
   const deletedItems = deleted.data ?? [];
@@ -173,6 +176,7 @@ export function ConnectionsPage() {
                 'User',
                 'Status',
                 'Usage',
+                'Activity (30d)',
                 'Created',
                 'Last modified',
                 '',
@@ -226,6 +230,14 @@ export function ConnectionsPage() {
                       No activity yet
                     </td>
                   )}
+                  <td className="spark-cell">
+                    <ActivitySpark
+                      label={c.name}
+                      items={activity.by[c.name]}
+                      isPending={activity.isPending}
+                      isError={activity.isError}
+                    />
+                  </td>
                   <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
                     <Time value={c.created_at} />
                   </td>

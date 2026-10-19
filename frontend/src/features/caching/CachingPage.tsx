@@ -8,6 +8,8 @@ import { useFeedback } from '@/app/feedback';
 import { useMetricsSeries } from '@/app/metrics';
 import { readResult, Results, type ResultData } from '@/components/Results';
 import { StatTile } from '@/components/StatTile';
+import { ActivitySpark } from '@/features/access/KeyActivity';
+import { useQueryActivityMap } from '@/features/access/activity';
 import { metricGauge } from '@/lib/metrics';
 
 // The classic Caching screen (ui.py #tab-caching, renderCaching, renderCacheEntriesPanel, showCacheEntry): how the
@@ -30,6 +32,7 @@ export function CachingPage() {
   const settings = useSettings();
   const metrics = useMetricsSeries();
   const queries = useAllQueries();
+  const activity = useQueryActivityMap();
   const series = metrics.data ?? [];
   const backend = settings.data?.find((s) => s.id === 'cache')?.rows[0]?.value ?? '…';
   const hits = metricGauge(series, 'queryapigate_cache_hits_total');
@@ -78,7 +81,7 @@ export function CachingPage() {
             <table className="grid">
               <thead>
                 <tr>
-                  {['Query', 'Collection', 'Connection', 'cache_ttl'].map((t, i) => (
+                  {['Query', 'Collection', 'Connection', 'cache_ttl', 'Activity (30d)'].map((t, i) => (
                     <th key={t} className={i === 3 ? 'num' : ''}>
                       {t}
                     </th>
@@ -100,6 +103,14 @@ export function CachingPage() {
                     <td>{q.collection || <span className="dim">—</span>}</td>
                     <td className="mono">{q.connection_name || '—'}</td>
                     <td className="mono num">{q.cache_ttl + 's'}</td>
+                    <td className="spark-cell">
+                      <ActivitySpark
+                        label={q.name}
+                        items={activity.by[q.name]}
+                        isPending={activity.isPending}
+                        isError={activity.isError}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
