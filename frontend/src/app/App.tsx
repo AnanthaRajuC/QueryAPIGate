@@ -21,6 +21,10 @@ const ApiKeysPage = lazy(() =>
   import('@/features/access/ApiKeysPage').then((m) => ({ default: m.ApiKeysPage })),
 );
 
+const ApiKeyDetailPage = lazy(() =>
+  import('@/features/access/ApiKeyDetailPage').then((m) => ({ default: m.ApiKeyDetailPage })),
+);
+
 const RolesPage = lazy(() => import('@/features/access/RolesPage').then((m) => ({ default: m.RolesPage })));
 
 const MetricsPage = lazy(() =>
@@ -116,6 +120,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <ApiKeysPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="api-keys/:name"
+          element={
+            <Suspense fallback={<Loading />}>
+              <ApiKeyDetailPage />
             </Suspense>
           }
         />

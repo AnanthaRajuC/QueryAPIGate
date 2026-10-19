@@ -75,6 +75,35 @@ describe('Connections', () => {
     expect(table()).toHaveTextContent('retired');
   });
 
+  it('draws a per-connection activity sparkline from run history', async () => {
+    const recent = (daysAgo: number) =>
+      new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
+    fakeBackend({
+      ...routes(),
+      // History has no connection filter: the page fetches the window once and groups by connection_name.
+      'GET /api/v1/history': () => ({
+        items: [
+          { executed_at: recent(1), status: 'success', connection_name: 'shop' },
+          { executed_at: recent(1), status: 'error', connection_name: 'shop' },
+          { executed_at: recent(6), status: 'success', connection_name: 'shop' },
+        ],
+        next_cursor: null,
+      }),
+    });
+    renderAt('/connections');
+    const shopRow = await waitFor(() => {
+      const r = table().querySelector('tr[data-name="shop"]');
+      if (!r) throw new Error('no row yet');
+      return r as HTMLElement;
+    });
+    const spark = await within(shopRow).findByRole('img', { name: /shop: 3 runs over 30 days · 1 failed/ });
+    expect(spark.querySelector('path.spark-line')).not.toBeNull();
+    // A connection with no runs shows the empty baseline.
+    expect(
+      within(table().querySelector('tr[data-name="old"]') as HTMLElement).getByRole('img'),
+    ).toHaveAccessibleName(/no activity in 30 days/i);
+  });
+
   it("shows timestamps in the viewer's chosen zone and format, the exact time on hover", async () => {
     fakeBackend({
       ...routes(),

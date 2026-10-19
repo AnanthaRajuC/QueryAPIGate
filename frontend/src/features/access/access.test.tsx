@@ -15,6 +15,10 @@ afterEach(() => {
 
 const soon = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+/** A run timestamp `daysAgo` days back, in the server's 'YYYY-MM-DD HH:MM:SS' format - for activity sparklines. */
+const recent = (daysAgo: number) =>
+  new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
+
 const routes = () => ({
   ...baseRoutes(),
   'GET /api/v1/api-keys': () => ({
@@ -297,6 +301,117 @@ describe('API keys', () => {
     renderAt('/api-keys');
     expect(await screen.findByText('No scoped API keys yet')).toBeInTheDocument();
   });
+
+  it('links each key to its details screen', async () => {
+    fakeBackend(routes());
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('partner')).not.toBeNull());
+    expect(within(row('partner')).getByRole('link', { name: 'Details' })).toHaveAttribute(
+      'href',
+      '/api-keys/partner',
+    );
+  });
+
+  it('draws a GitHub-style activity sparkline per key from its run history', async () => {
+    fakeBackend({
+      ...routes(),
+      // The list fetches the whole window once and groups by key_name; partner has runs, old has none.
+      'GET /api/v1/history': () => ({
+        items: [
+          { executed_at: recent(1), status: 'success', key_name: 'partner' },
+          { executed_at: recent(1), status: 'error', key_name: 'partner' },
+          { executed_at: recent(5), status: 'success', key_name: 'partner' },
+          { executed_at: recent(20), status: 'success', key_name: 'partner' },
+        ],
+        next_cursor: null,
+      }),
+    });
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('partner')).not.toBeNull());
+    // partner has runs -> a drawn sparkline linking to its details; old has none -> the empty baseline.
+    const spark = await within(row('partner')).findByRole('img', { name: /4 runs over 30 days/ });
+    expect(spark.querySelector('path.spark-line')).not.toBeNull();
+    expect(spark).toHaveAccessibleName(/1 failed/);
+    await waitFor(() =>
+      expect(within(row('old')).getByRole('img', { name: /no activity in 30 days/i })).toBeInTheDocument(),
+    );
+  });
+
+  it('shows a key’s reach, databases, tables and usage history on its details screen', async () => {
+    fakeBackend({
+      ...routes(),
+      // The page fetches this key's window once (key=partner); the usage panel lists it and the per-API
+      // sparklines group it by query. One saved run of films, one failed ad-hoc run.
+      'GET /api/v1/history': ({ search }: { search: URLSearchParams }) => {
+        expect(search.get('key')).toBe('partner');
+        return {
+          items: [
+            {
+              query: 'films',
+              version: 1,
+              kind: 'saved',
+              executed_at: recent(2),
+              connection_name: 'lite',
+              transport: 'rest',
+              status: 'success',
+              rows: 3,
+              duration_ms: 7,
+              request_id: 'r1',
+            },
+            {
+              query: null,
+              version: null,
+              kind: 'adhoc',
+              executed_at: recent(3),
+              connection_name: 'lite',
+              transport: 'mcp',
+              status: 'error',
+              code: 'read_only',
+              error: 'writes are not allowed',
+              request_id: 'r2',
+            },
+          ],
+          next_cursor: null,
+        };
+      },
+    });
+    renderAt('/api-keys/partner');
+
+    // The reachable saved queries (APIs), by endpoint.
+    expect(await screen.findByText('/q/films')).toBeInTheDocument();
+    expect(screen.getByText('/q/rentals')).toBeInTheDocument();
+    // Each reachable API has its own activity sparkline (films has a run; rentals has none).
+    const filmsRow = screen.getByText('/q/films').closest('tr') as HTMLElement;
+    expect(
+      await within(filmsRow).findByRole('img', { name: /films: 1 run over 30 days/ }),
+    ).toBeInTheDocument();
+    // The connection (database) it reaches, with its type.
+    const dbRow = document.querySelector('tr[data-conn="lite"]') as HTMLElement;
+    expect(dbRow).toHaveTextContent('lite');
+    expect(dbRow).toHaveTextContent('sqlite');
+    // Usage history rows, including a failed ad-hoc run surfacing its error code.
+    expect(await screen.findByText('ad-hoc SQL')).toBeInTheDocument();
+    expect(screen.getByText('read_only')).toBeInTheDocument();
+  });
+
+  it('opens the query’s SQL in a popup when a reachable query is clicked', async () => {
+    fakeBackend({ ...routes(), 'GET /api/v1/history': () => ({ items: [], next_cursor: null }) });
+    renderAt('/api-keys/partner');
+    const filmsRow = (await screen.findByText('/q/films')).closest('tr') as HTMLElement;
+    await userEvent.click(within(filmsRow).getByRole('button', { name: 'films' }));
+    const drawer = document.getElementById('drawer')!;
+    await waitFor(() => expect(drawer).toHaveAttribute('aria-hidden', 'false'));
+    expect(within(drawer).getByRole('heading', { name: 'films' })).toBeInTheDocument();
+    expect(await within(drawer).findByRole('button', { name: 'Copy SQL' })).toBeInTheDocument();
+    // The SQL itself is shown (CodeBox tokenizes it, so match on a fragment of the text content).
+    expect(drawer.textContent).toContain('film_id');
+  });
+
+  it('says so when the key name is unknown', async () => {
+    fakeBackend(routes());
+    renderAt('/api-keys/ghost');
+    expect(await screen.findByText('No such API key')).toBeInTheDocument();
+  });
 });
 
 describe('Roles', () => {
@@ -312,6 +427,37 @@ describe('Roles', () => {
     await userEvent.click(within(analyst).getByRole('button', { name: 'New key from this' }));
     const drawer = document.getElementById('drawer')!;
     await waitFor(() => expect(within(drawer).getByLabelText('Create from')).toHaveValue('analyst'));
+  });
+
+  it('charts a role’s activity as the combined runs of the keys created from it', async () => {
+    fakeBackend({
+      ...routes(),
+      // Two keys were minted from the analyst role; the sparkline sums their runs.
+      'GET /api/v1/api-keys': () => ({
+        items: [
+          apiKey('analyst-ci', { created_from_role: 'analyst' }),
+          apiKey('analyst-bi', { created_from_role: 'analyst' }),
+          apiKey('adhoc', { created_from_role: null }),
+        ],
+      }),
+      'GET /api/v1/history': () => ({
+        items: [
+          { executed_at: recent(1), status: 'success', key_name: 'analyst-ci' },
+          { executed_at: recent(3), status: 'error', key_name: 'analyst-bi' },
+          { executed_at: recent(9), status: 'success', key_name: 'adhoc' }, // not from analyst - excluded
+        ],
+        next_cursor: null,
+      }),
+    });
+    renderAt('/roles');
+    const analyst = await waitFor(() => {
+      const r = rolesTable().querySelector('tr[data-name="analyst"]');
+      if (!r) throw new Error('no analyst row');
+      return r as HTMLElement;
+    });
+    expect(
+      await within(analyst).findByRole('img', { name: /analyst: 2 runs over 30 days · 1 failed/ }),
+    ).toBeInTheDocument();
   });
 
   it('creates a role', async () => {

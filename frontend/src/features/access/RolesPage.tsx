@@ -1,8 +1,10 @@
-import { useCan, useCollections, useRoles } from '@/app/data';
+import { useApiKeys, useCan, useCollections, useRoles } from '@/app/data';
 import { Loading } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { AccessCell } from '@/features/repository/reach';
 
+import { ActivitySpark } from './KeyActivity';
+import { useKeyActivityMap } from './activity';
 import { useAccessDrawers, useDeleteRole } from './forms';
 import { ExampleBadge, queryGrantTags } from './grants';
 import { ManagedTag } from '@/components/Managed';
@@ -13,9 +15,17 @@ export function RolesPage() {
   const can = useCan();
   const roles = useRoles();
   const collections = useCollections();
+  const keys = useApiKeys();
+  const activity = useKeyActivityMap();
   const drawers = useAccessDrawers();
   const remove = useDeleteRole();
   const names = Object.keys(roles.data ?? {}).sort();
+
+  // A role doesn't run queries itself; its activity is the combined runs of the keys created from it.
+  const roleRuns = (role: string) =>
+    Object.values(keys.data ?? {})
+      .filter((k) => k.created_from_role === role)
+      .flatMap((k) => activity.by[k.name] ?? []);
 
   let body: React.ReactNode;
   if (roles.isPending) {
@@ -49,11 +59,18 @@ export function RolesPage() {
         <table className="grid">
           <thead>
             <tr>
-              {['Name', 'Connections', 'Queries / collections', 'Access', 'Rate limit', 'Keys', ''].map(
-                (t, i) => (
-                  <th key={i}>{t}</th>
-                ),
-              )}
+              {[
+                'Name',
+                'Connections',
+                'Queries / collections',
+                'Access',
+                'Rate limit',
+                'Keys',
+                'Keys’ activity (30d)',
+                '',
+              ].map((t, i) => (
+                <th key={i}>{t}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -103,6 +120,14 @@ export function RolesPage() {
                   </td>
                   <td className={r.keys_created ? 'mono' : 'mono dim'} title="Keys created from this role">
                     {r.keys_created}
+                  </td>
+                  <td className="spark-cell">
+                    <ActivitySpark
+                      label={name}
+                      items={roleRuns(name)}
+                      isPending={activity.isPending || keys.isPending}
+                      isError={activity.isError || keys.isError}
+                    />
                   </td>
                   <td>
                     <div className="actions">

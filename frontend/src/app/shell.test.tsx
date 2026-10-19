@@ -131,14 +131,20 @@ describe('Console shell - the classic frame', () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');
     expect(document.body).not.toHaveClass('side-collapsed');
-    await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
+    // Await each page settling before leaving it: some tabs (API keys) load data-heavy pages whose async
+    // queries, if still resolving as we navigate on, re-render mid-transition and can race the collapse toggle.
+    const open = async (tab: RegExp, heading: string) => {
+      await userEvent.click(screen.getByRole('tab', { name: tab }));
+      await screen.findByRole('heading', { name: heading });
+    };
+    await open(/Help/, 'Help');
     await waitFor(() => expect(document.body).toHaveClass('side-collapsed'));
     await userEvent.click(screen.getByRole('button', { name: 'Expand sidebar' })); // still yours to open on Help
     expect(document.body).not.toHaveClass('side-collapsed');
-    await userEvent.click(screen.getByRole('tab', { name: /API keys/ }));
-    await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
+    await open(/API keys/, 'API keys');
+    await open(/Help/, 'Help');
     await waitFor(() => expect(document.body).toHaveClass('side-collapsed')); // collapsed again on the next visit
-    await userEvent.click(screen.getByRole('tab', { name: /API keys/ }));
+    await open(/API keys/, 'API keys');
     await waitFor(() => expect(document.body).not.toHaveClass('side-collapsed'));
     expect(localStorage.getItem('queryapigate-ui-side-collapsed')).toBe('0');
   });

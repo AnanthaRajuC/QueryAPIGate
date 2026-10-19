@@ -1,3 +1,5 @@
+import { Link } from 'react-router';
+
 import type { Schemas } from '@/api/client';
 import { useApiKeys, useCan, useCollections } from '@/app/data';
 import { Loading } from '@/app/feedback';
@@ -5,6 +7,8 @@ import { AccessCell } from '@/features/repository/reach';
 
 import { useAccessDrawers, useRevokeKey } from './forms';
 import { ScopeNode } from './grants';
+import { ActivitySpark } from './KeyActivity';
+import { useKeyActivityMap } from './activity';
 import { Time } from '@/components/Time';
 import { PencilIcon } from '@/components/icons';
 import { ManagedTag } from '@/components/Managed';
@@ -55,6 +59,7 @@ export function ApiKeysPage() {
   const can = useCan();
   const keys = useApiKeys();
   const collections = useCollections();
+  const activity = useKeyActivityMap();
   const drawers = useAccessDrawers();
   const revoke = useRevokeKey();
   const names = Object.keys(keys.data ?? {}).sort();
@@ -97,11 +102,20 @@ export function ApiKeysPage() {
         <table className="grid">
           <thead>
             <tr>
-              {['Name', 'Scope', 'Access', 'Rate limit', 'IPs', 'Expires', 'Last used', 'Usage', ''].map(
-                (t, i) => (
-                  <th key={i}>{t}</th>
-                ),
-              )}
+              {[
+                'Name',
+                'Scope',
+                'Access',
+                'Rate limit',
+                'IPs',
+                'Expires',
+                'Last used',
+                'Usage',
+                'Activity (30d)',
+                '',
+              ].map((t, i) => (
+                <th key={i}>{t}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -194,8 +208,24 @@ export function ApiKeysPage() {
                       No activity yet
                     </td>
                   )}
+                  <td className="spark-cell">
+                    <ActivitySpark
+                      label={name}
+                      items={activity.by[name]}
+                      isPending={activity.isPending}
+                      isError={activity.isError}
+                      to={`/api-keys/${encodeURIComponent(name)}`}
+                    />
+                  </td>
                   <td>
                     <div className="actions">
+                      <Link
+                        to={`/api-keys/${encodeURIComponent(name)}`}
+                        className="btn ghost sm"
+                        title={`Full details of ${name}`}
+                      >
+                        Details
+                      </Link>
                       <button
                         hidden={!can('access.write')}
                         type="button"

@@ -51,7 +51,18 @@ const routes = () => ({
     ),
   'GET /api/v1/cache/entries': () => ({ items: [entry] }),
   'GET /api/v1/cache/entries/abc123def456ghi': () => jsonResponse([{ id: 1, title: 'Alpha' }]),
+  // Each cached query shows its request activity: the page fetches the window once and groups by query.
+  'GET /api/v1/history': () => ({
+    items: [
+      { executed_at: recent(2), status: 'success', query: 'films' },
+      { executed_at: recent(2), query: 'films' },
+    ],
+    next_cursor: null,
+  }),
 });
+
+const recent = (daysAgo: number) =>
+  new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
 
 describe('Caching', () => {
   it('shows the cache backend, hit rate, the cached queries and what is cached now', async () => {
@@ -63,6 +74,8 @@ describe('Caching', () => {
     expect(within(body).getByRole('button', { name: 'films' })).toBeInTheDocument();
     expect(within(body).queryByText('rentals')).toBeNull(); // no cache_ttl
     expect(within(body).getByText('60s')).toBeInTheDocument();
+    // The cached query carries an activity sparkline from its run history.
+    expect(await within(body).findByRole('img', { name: /films: 2 runs over 30 days/ })).toBeInTheDocument();
     const entries = document.getElementById('cache-entries-panel')!;
     await waitFor(() => expect(entries).toHaveTextContent('1 live entry right now.'));
     expect(entries).toHaveTextContent('2.0 KB');

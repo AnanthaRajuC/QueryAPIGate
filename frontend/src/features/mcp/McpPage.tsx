@@ -2,6 +2,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { api, unwrap, type Schemas } from '@/api/client';
 import { Loading } from '@/app/feedback';
+import { ActivitySpark } from '@/features/access/KeyActivity';
+import { useQueryActivityMap } from '@/features/access/activity';
 
 // The MCP server screen: your saved queries, exposed as tools an AI agent can call over MCP (ADR 0006). A
 // reachability check (run only when asked), the tools a client would see in this workspace, and how to connect one.
@@ -28,6 +30,7 @@ export function McpPage() {
   const check = useMutation({
     mutationFn: async () => unwrap(await api.GET('/api/v1/mcp/status')),
   });
+  const activity = useQueryActivityMap();
   const status = check.data;
   const dot = check.isPending ? 'checking' : !status ? 'unknown' : status.reachable ? 'ok' : 'bad';
   const dotText = check.isPending
@@ -106,6 +109,7 @@ export function McpPage() {
                 <th>Kind</th>
                 <th>Parameters</th>
                 <th>Description</th>
+                <th>MCP activity (30d)</th>
               </tr>
             </thead>
             <tbody>
@@ -118,6 +122,20 @@ export function McpPage() {
                   </td>
                   <td className="mono">{t.params.length ? t.params.join(', ') : '—'}</td>
                   <td>{t.description}</td>
+                  <td className="spark-cell">
+                    {t.kind === 'saved query' ? (
+                      <ActivitySpark
+                        label={t.name}
+                        items={(activity.by[t.name] ?? []).filter((r) => r.transport === 'mcp')}
+                        isPending={activity.isPending}
+                        isError={activity.isError}
+                      />
+                    ) : (
+                      <span className="dim" title="Built-in tool - its calls aren't tracked per tool">
+                        —
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
