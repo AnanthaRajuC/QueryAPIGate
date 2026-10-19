@@ -127,7 +127,8 @@ def is_paginated(sql, dialect=None):
     return dialect != 'jdbc' and first_keyword(sql, dialect) in PAGINATED_STATEMENTS
 
 
-def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, allowed_tables=None):
+def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, allowed_tables=None,
+                 default_catalog=None, default_schema=None):
     """Normalise a client-supplied statement and enforce the single-statement/read-only rules.
 
     ``dialect`` should be the target connection's ``db`` value, so literals are read with the rules that
@@ -170,10 +171,14 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
                            f"{', '.join(sorted(allowed_write_ops))}.", 403, code='write_op_not_allowed')
     if allowed_tables is not None:
         from . import tableguard  # deferred: keeps this module's own import surface as light as today
-        found = tableguard.extract_tables(sql, dialect)                          # unless this is actually used
-        forbidden = found - allowed_tables
+        found = tableguard.extract_tables(sql, dialect, default_catalog, default_schema)  # unless this is used
+        # Trino names come back catalog.schema.table; qualify the grants the same way so a bare grant doesn't
+        # match the same table name in another catalog (ADR 0026). Every other dialect matches bare, as before.
+        allowed = ({tableguard.qualify_grant(g, default_catalog, default_schema) for g in allowed_tables}
+                   if dialect == 'trino' else allowed_tables)
+        forbidden = found - allowed
         if forbidden:
-            raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed_tables))}. "
+            raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed))}. "
                            f"Forbidden: {', '.join(sorted(forbidden))}.", 403, code='table_not_allowed')
     return sql
 
@@ -232,6 +237,8 @@ def paginate(sql, limit, offset, params=None, dialect=None):
         sql = sql[:match.start()]
         break
     window = limit if own_limit is None else max(0, min(limit, own_limit - offset))
+    if dialect == 'trino':  # Trino (ANSI order) wants OFFSET before LIMIT, not MySQL/Postgres's LIMIT ... OFFSET
+        return f'{sql}\nOFFSET {own_offset + offset} LIMIT {window}'
     return f'{sql}\nLIMIT {window} OFFSET {own_offset + offset}'
 
 

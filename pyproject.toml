@@ -37,6 +37,7 @@ clickhouse = ["clickhouse-driver>=0.2"]
 h2 = ["JayDeBeApi>=1.2", "JPype1>=1.4"]  # also needs a Java runtime
 duckdb = ["duckdb>=1.2"]  # allowed_directories/allowed_paths, which lock every connection (duckfiles.py), arrived in 1.2
 mongo = ["pymongo>=4.0"]
+trino = ["trino>=0.330"]  # the trino DB-API client (runners._Trino); experimental, ADR 0026
 flow = ["sqlglot>=25.2,<26"]  # the Access tab's tables and joins (sqlflow.py) and column masking's tracing (masking.py)
 encryption = ["cryptography>=41"]  # only needed when QUERYAPIGATE_SECRET_KEY is set - see store.py's _get_fernet()
 redis = ["redis>=5"]  # only needed when QUERYAPIGATE_REDIS_URL is set - see rediscache.py
@@ -46,7 +47,7 @@ mcp = ["mcp>=1.21.1,<2"]  # only needed for `queryapigate mcp` - see mcp_server.
 jwt = ["PyJWT[crypto]>=2.14"]  # only needed when QUERYAPIGATE_JWT_SECRET or QUERYAPIGATE_JWT_JWKS_URL is set - see jwtauth.py.
                                # 2.14 is the floor because that is where PyJWKClient stops refetching the JWKS for
                                # every unknown key id: before it, forged tokens could make the server hammer the provider.
-all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,flow,encryption,jwt]"]
+all = ["queryapigate[mysql,postgres,clickhouse,h2,duckdb,mongo,trino,flow,encryption,jwt]"]
 # only needed when an OTLP endpoint is set (OTEL_EXPORTER_OTLP_ENDPOINT) - see tracing.py
 otel = ["opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
 server = ["gunicorn>=21"]

@@ -44,7 +44,7 @@ ACTIONS = ('drop', 'null', 'mask', 'hash', 'keep')  # strictest first
 _STRICTNESS = {action: rank for rank, action in enumerate(ACTIONS)}
 _PATTERN_RE = re.compile(r'^[A-Za-z0-9_*$]+(\.[A-Za-z0-9_*$]+){1,2}$')
 _DIALECT_MAP = {'mysql': 'mysql', 'postgres': 'postgres', 'clickhouse': 'clickhouse', 'sqlite': 'sqlite',
-                'duckdb': 'duckdb'}  # as tableguard.py's
+                'duckdb': 'duckdb', 'trino': 'trino'}  # as tableguard.py's
 _KEY_NAME = 'mask_hash_key'
 _ALIAS = '__qag_mask_{}'
 

@@ -16,12 +16,12 @@ import { ManagedTag } from '@/components/Managed';
 type Connection = Schemas['Connection'];
 type ConnectionInput = Schemas['ConnectionInput'];
 
-const DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo'];
+const DB_TYPES = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'duckdb', 'mongo', 'trino'];
 // Outside the compatibility promise (queryapigate/experimental.py) - labelled where an admin picks one.
 /** The Console's name for a DuckDB connection made only of files (database ':memory:', auto_views on). */
 const FILES = 'files';
-const EXPERIMENTAL_DB_TYPES = ['h2', 'jdbc'];
-const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
+const EXPERIMENTAL_DB_TYPES = ['h2', 'jdbc', 'trino'];
+const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo', 'trino'];
 
 type Filter = 'all' | 'active' | 'inactive' | 'deleted';
 

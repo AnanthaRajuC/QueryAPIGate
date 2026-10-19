@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0026-trino-connections.md"

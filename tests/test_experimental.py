@@ -130,7 +130,7 @@ class StartupWarningTests(unittest.TestCase):
         write_connections({'legacy': {'db': 'jdbc', 'host': 'j', 'database': 'd', 'active': True},
                            'docs': {'db': 'mongo', 'host': 'm', 'database': 'd', 'active': True}})
         [line] = self.warnings()  # MongoDB graduated in 0.37 (ADR 0022)
-        self.assertIn('Experimental: H2 and JDBC connections (connection legacy)', line)
+        self.assertIn('Experimental: H2, JDBC and Trino connections (connection legacy)', line)
         self.assertNotIn('docs', line)
 
     def test_an_inactive_connection_isnt_in_use(self):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import experimental
 
-SUPPORTED_DB_TYPES = ('mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'jdbc', 'duckdb', 'mongo')
+SUPPORTED_DB_TYPES = ('mysql', 'postgres', 'clickhouse', 'sqlite', 'h2', 'jdbc', 'duckdb', 'mongo', 'trino')
 PASSWORD_MASK = '********'
 CONNECT_TIMEOUT = 10  # seconds
 HISTORY_LIMIT = 50  # executions remembered per saved-query version (QUERYAPIGATE_HISTORY_LIMIT)
@@ -48,6 +48,9 @@ EXAMPLE_CONNECTIONS = {
                                'user': 'default', 'password': '', 'active': False},
         'example-h2': {'db': 'h2', 'host': 'localhost', 'database': 'test', 'user': 'SA', 'password': '',
                        'active': False},
+        'example-trino': {'db': 'trino', 'host': 'localhost', 'port': 8080, 'database': 'tpch',
+                          'user': 'queryapigate', 'options': {'schema': 'tiny', 'http_scheme': 'http'},
+                          'active': False},
     }
 }
 

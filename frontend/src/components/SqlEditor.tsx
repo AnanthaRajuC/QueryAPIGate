@@ -33,6 +33,7 @@ const DIALECTS: Record<string, SQLDialect> = {
   sqlite: SQLite,
   mssql: MSSQL,
   duckdb: PostgreSQL,
+  trino: PostgreSQL,
 };
 
 // The classic .k/.s/.n/.p/.c token styles (classic.css).

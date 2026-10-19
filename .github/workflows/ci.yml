@@ -80,12 +80,16 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
           --health-retries 20
+      trino:  # Trino (experimental, ADR 0026); its built-in HEALTHCHECK gates readiness, plus a wait step below
+        image: trinodb/trino:484
+        ports: ["8085:8080"]
     env:
       QUERYAPIGATE_IT_POSTGRES: '{"host": "localhost", "port": 5432, "user": "postgres", "password": "pw", "database": "postgres"}'
       QUERYAPIGATE_IT_MYSQL: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
       QUERYAPIGATE_IT_CLICKHOUSE: '{"host": "localhost", "port": 9000, "user": "default", "password": "pw", "database": "default"}'
       QUERYAPIGATE_IT_H2: '{"host": "localhost", "user": "SA", "password": "", "database": "it"}'
       QUERYAPIGATE_IT_MONGO: '{"host": "localhost", "port": 27017, "database": "it"}'
+      QUERYAPIGATE_IT_TRINO: '{"host": "localhost", "port": 8085, "user": "ci", "database": "memory", "options": {"schema": "default"}}'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -102,6 +106,13 @@ jobs:
         run: |
           java -cp queryapigate/lib/h2-2.2.224.jar org.h2.tools.Server -tcp -tcpPort 9092 -ifNotExists &
           sleep 5
+      - name: Wait for Trino to finish starting (JVM boot)
+        run: |
+          for i in $(seq 90); do
+            curl -sf http://localhost:8085/v1/info | grep -q '"starting":false' && break
+            sleep 2
+          done
+          curl -sf http://localhost:8085/v1/info
       - name: Every database against its real server - none may skip
         run: |
           set -o pipefail  # the tests' own result, not tee's

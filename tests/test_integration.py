@@ -27,6 +27,7 @@ CREATE = {
 }
 CREATE['jdbc'] = CREATE['h2']  # JdbcViaH2Tests points the generic jdbc driver at the same real H2 server
 CREATE['duckdb'] = CREATE['postgres']  # DuckDB's SQL dialect accepts the same CREATE TABLE as Postgres
+CREATE['trino'] = 'CREATE TABLE queryapigate_it (id INTEGER, name VARCHAR, price DECIMAL(8, 2), added TIMESTAMP)'
 INSERT = {
     'postgres': "INSERT INTO queryapigate_it VALUES ({i}, 'Item {i}', {i}.50, '2024-01-{i:02d} 10:00:00')",
     'mysql': "INSERT INTO queryapigate_it VALUES ({i}, 'Item {i}', {i}.50, '2024-01-{i:02d} 10:00:00')",
@@ -35,6 +36,7 @@ INSERT = {
 }
 INSERT['jdbc'] = INSERT['h2']
 INSERT['duckdb'] = INSERT['postgres']
+INSERT['trino'] = "INSERT INTO queryapigate_it VALUES ({i}, 'Item {i}', {i}.50, TIMESTAMP '2024-01-{i:02d} 10:00:00')"
 COMMENTS = {  # a table comment and a column comment, as each database writes them
     'postgres': ["COMMENT ON TABLE queryapigate_it IS 'Items for sale'",
                  "COMMENT ON COLUMN queryapigate_it.price IS 'Price in EUR, VAT included'"],
@@ -57,6 +59,10 @@ MASKED_DIALECT = {
                    'SELECT toString(name) AS c FROM queryapigate_it', 'SELECT `name` FROM queryapigate_it'],
 }
 MASKED_DIALECT['duckdb'] = MASKED_DIALECT['postgres']
+MASKED_DIALECT['trino'] = ['SELECT CAST(name AS varchar) AS c FROM queryapigate_it',
+                           "SELECT name || '!' AS c FROM queryapigate_it",
+                           'SELECT "name" FROM "queryapigate_it"',
+                           "SELECT coalesce(name, '-') AS c FROM queryapigate_it"]
 MASKED_SHAPES = [  # every one of these must come back masked - not refused
     'SELECT name FROM queryapigate_it',
     'SELECT name AS n FROM queryapigate_it',
@@ -476,6 +482,30 @@ class DuckDBTests(IntegrationBase, unittest.TestCase):
         run = runners.RUNNERS[self.db]
         run(self.details, 'SELECT * FROM queryapigate_it', None, 10, 0, True, 5, shared)
         self.assertEqual(len(self.query('SELECT * FROM queryapigate_it', '?page_size=100').get_json()), 7)
+
+
+class TrinoTests(IntegrationBase, unittest.TestCase):
+    """Trino (experimental, ADR 0026): run against a real Trino, writing to its in-memory `memory` catalog. No
+    driver read-only (the SQL guard alone), and no stable per-request connection id (stateless HTTP), so the
+    pooling-identity tests self-skip, as for DuckDB. slow_sql is a federated cross join of the generated tpch data."""
+    db, env_var = 'trino', 'QUERYAPIGATE_IT_TRINO'
+    slow_sql = 'SELECT count(*) FROM tpch.sf1000.orders a, tpch.sf1000.orders b'
+    finite_slow_sql = None  # no version-stable ~2-second primitive, as for DuckDB
+    connection_id_sql = None  # Trino is stateless HTTP - no per-connection id
+
+    def test_allowed_tables_is_qualified_across_catalogs(self):
+        """A bare grant reaches only the connection's own catalog/schema, never the same table name elsewhere in
+        the federation (ADR 0026) - the behaviour that graduates Trino's allowed_tables."""
+        secret = self.client.post('/api/v1/api-keys', json={
+            'name': 'scoped', 'connections': ['it'], 'allowed_tables': ['queryapigate_it']}).get_json()['secret']
+        headers = {'X-API-Key': secret}
+        own = self.client.post('/execute_sql?page_size=1', headers=headers,
+                               json={'sql': 'SELECT id FROM queryapigate_it', 'connection_name': 'it'})
+        self.assertEqual(own.status_code, 200, own.get_data(as_text=True))  # memory.default.queryapigate_it: granted
+        elsewhere = self.client.post('/execute_sql', headers=headers,
+                                     json={'sql': 'SELECT name FROM tpch.tiny.nation', 'connection_name': 'it'})
+        self.assertEqual(elsewhere.status_code, 403)  # a different catalog/schema is not the grant
+        self.assertEqual(elsewhere.get_json()['code'], 'table_not_allowed')
 
 
 class MongoTests(unittest.TestCase):

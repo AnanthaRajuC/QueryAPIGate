@@ -78,6 +78,16 @@ _QUERIES = {
         WHERE t.table_schema = 'main'
         ORDER BY t.table_name, c.ordinal_position
     """,
+    'trino': """
+        SELECT t.table_schema AS table_schema, t.table_name AS table_name, t.table_type AS table_type,
+               c.column_name AS column_name, c.data_type AS data_type, c.is_nullable AS is_nullable,
+               c.ordinal_position AS ordinal_position
+        FROM information_schema.tables t
+        JOIN information_schema.columns c
+          ON c.table_schema = t.table_schema AND c.table_name = t.table_name
+        WHERE t.table_schema = current_schema
+        ORDER BY t.table_name, c.ordinal_position
+    """,
 }
 
 # Primary/foreign key markers for the schema browser's Columns tab - a second, additive query per dialect
@@ -147,17 +157,34 @@ def fetch_schema(connection_name, database=None, allowed_tables=None):
     ``allowed_tables`` (a key's grant, lower-case names, or None) leaves out every other table - see
     _only_allowed()."""
     result = _fetch_schema(connection_name, database)
-    return result if allowed_tables is None else _only_allowed(result, allowed_tables)
+    if allowed_tables is None:
+        return result
+    details = store.get_connection(connection_name)
+    catalog = (database or details.get('database')) if details.get('db') == 'trino' else None
+    schema = (details.get('schema') or 'default') if details.get('db') == 'trino' else None
+    return _only_allowed(result, allowed_tables, details.get('db'), catalog, schema)
 
 
-def _only_allowed(result, allowed_tables):
+def _only_allowed(result, allowed_tables, dialect=None, default_catalog=None, default_schema=None):
     """A table-restricted key sees only its tables: the others aren't listed, and a foreign key pointing at one is
     shown as none - its name is the thing being kept from the key. Matched as tableguard matches a statement's
-    tables: the bare name, case-insensitively."""
-    allowed = {name.lower() for name in allowed_tables}
+    tables: the bare name, case-insensitively - except on Trino, where it is the fully-qualified
+    catalog.schema.table, so the same grants apply in the browser as in a query (ADR 0026)."""
+    if dialect == 'trino':
+        from . import tableguard
+        allowed = {tableguard.qualify_grant(g, default_catalog, default_schema) for g in allowed_tables}
+
+        def key(name, table_schema):
+            return f'{(default_catalog or "").lower()}.{(table_schema or "").lower()}.{name.lower()}'
+    else:
+        allowed = {name.lower() for name in allowed_tables}
+
+        def key(name, table_schema):
+            return name.lower()
+
     tables = []
     for table in result['tables']:
-        if table['name'].lower() not in allowed:
+        if key(table['name'], table.get('schema')) not in allowed:
             continue
         columns = [{**column, 'foreign_key': None}
                    if (column.get('foreign_key') or {}).get('table', '').lower() not in allowed

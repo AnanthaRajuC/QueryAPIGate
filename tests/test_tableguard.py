@@ -153,5 +153,64 @@ class ValidateSqlAllowedTablesTests(unittest.TestCase):
         self.assertIn('write operations', ctx.exception.message)
 
 
+class TrinoQualificationTests(unittest.TestCase):
+    """Trino's three-part names are extracted and matched fully-qualified, filled from the connection's default
+    catalog/schema (ADR 0026), so a grant never matches the same table name in another catalog or schema."""
+    C, S = 'hive', 'analytics'  # default catalog, schema
+
+    def extract(self, sql):
+        return tableguard.extract_tables(sql, 'trino', self.C, self.S)
+
+    def test_a_bare_reference_is_qualified_with_the_defaults(self):
+        self.assertEqual(self.extract('SELECT * FROM orders'), {'hive.analytics.orders'})
+
+    def test_schema_and_catalog_qualified_references_keep_their_parts(self):
+        self.assertEqual(self.extract('SELECT * FROM sales.orders'), {'hive.sales.orders'})
+        self.assertEqual(self.extract('SELECT * FROM iceberg.sales.orders'), {'iceberg.sales.orders'})
+
+    def test_a_join_across_catalogs_keeps_each_fully_qualified(self):
+        sql = 'SELECT a.* FROM orders a JOIN tpch.sf1.customer b ON a.id = b.id'
+        self.assertEqual(self.extract(sql), {'hive.analytics.orders', 'tpch.sf1.customer'})
+
+    def test_a_cte_is_still_excluded_on_its_bare_name(self):
+        self.assertEqual(self.extract('WITH recent AS (SELECT * FROM orders) SELECT * FROM recent'),
+                         {'hive.analytics.orders'})
+
+    def test_qualify_grant_fills_the_missing_parts(self):
+        self.assertEqual(tableguard.qualify_grant('orders', self.C, self.S), 'hive.analytics.orders')
+        self.assertEqual(tableguard.qualify_grant('sales.orders', self.C, self.S), 'hive.sales.orders')
+        self.assertEqual(tableguard.qualify_grant('iceberg.sales.orders', self.C, self.S), 'iceberg.sales.orders')
+
+    def _check(self, sql, allowed):
+        return sqltools.validate_sql(sql, dialect='trino', allowed_tables=allowed,
+                                     default_catalog=self.C, default_schema=self.S)
+
+    def test_a_bare_grant_does_not_reach_another_schema_or_catalog(self):
+        self._check('SELECT * FROM orders', {'orders'})  # ok
+        self._check('SELECT * FROM hive.analytics.orders', {'orders'})  # ok: the same table, fully written out
+        for crosses in ('SELECT * FROM hive.sales.orders', 'SELECT * FROM tpch.analytics.orders'):
+            with self.assertRaises(ApiError) as ctx:
+                self._check(crosses, {'orders'})
+            self.assertEqual(ctx.exception.code, 'table_not_allowed')
+
+    def test_a_qualified_grant_does_not_match_a_bare_reference_elsewhere(self):
+        with self.assertRaises(ApiError) as ctx:
+            self._check('SELECT * FROM orders', {'tpch.sf1.orders'})  # orders == hive.analytics.orders, not sf1's
+        self.assertEqual(ctx.exception.code, 'table_not_allowed')
+        self._check('SELECT * FROM tpch.sf1.orders', {'tpch.sf1.orders'})  # the exact table is allowed
+
+    def test_a_data_reading_table_function_is_refused(self):
+        # Trino's TABLE(...) polymorphic functions can read data the allow-list can't see (system.query pass-through,
+        # table_changes), so they are refused for a table-restricted key, as read_parquet()/url() are elsewhere.
+        for sql in ("SELECT * FROM TABLE(system.query(query => 'SELECT 1'))",
+                    "SELECT * FROM TABLE(system.table_changes('c', 's', 't'))"):
+            with self.assertRaises(ApiError) as ctx:
+                self.extract(sql)
+            self.assertEqual(ctx.exception.code, 'table_not_allowed')
+
+    def test_a_pure_generator_names_no_table(self):
+        self.assertEqual(self.extract('SELECT * FROM UNNEST(ARRAY[1, 2, 3])'), set())
+
+
 if __name__ == '__main__':
     unittest.main()

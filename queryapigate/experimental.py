@@ -29,11 +29,12 @@ GRADUATION = (
 
 FEATURES: dict[str, dict[str, Any]] = {
     'connection_types': {
-        'name': 'H2 and JDBC connections',
-        'why': 'not every feature works on them - allowed_tables on either, schema browsing and the query time limit '
-               'on JDBC (the support matrix in DATABASE_CONNECTION_CONFIGURATION.md)',
-        'db_types': ('h2', 'jdbc'),
-        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2 and jdbc'),
+        'name': 'H2, JDBC and Trino connections',
+        'why': 'not every feature works on them - allowed_tables on either H2 or JDBC, schema browsing and the query '
+               'time limit on JDBC; Trino is fully governed and security-reviewed (ADR 0026) and awaits a release of '
+               'stable shape and real use (the support matrix in DATABASE_CONNECTION_CONFIGURATION.md)',
+        'db_types': ('h2', 'jdbc', 'trino'),
+        'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and trino'),
     },
     'workspaces': {
         'name': 'Workspaces',

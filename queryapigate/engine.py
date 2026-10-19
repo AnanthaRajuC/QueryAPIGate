@@ -43,6 +43,14 @@ def _sql_connection(connection_name):
     return details
 
 
+def _trino_defaults(details):
+    """The (catalog, schema) that fill a Trino reference's or grant's missing parts for qualified `allowed_tables`
+    matching (ADR 0026, tableguard.py); (None, None) for every other type, where the guard matches bare names."""
+    if details.get('db') != 'trino':
+        return None, None
+    return details.get('database'), (details.get('schema') or 'default')
+
+
 def _db_span(details, sql, connection_name):
     """The client span around a database call (tracing.py): which statement kind, on which database - never the
     statement itself."""
@@ -77,8 +85,10 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     if database:
         details = {**details, 'database': database}
     effective_allow_writes = config.allow_writes() and allow_writes
+    default_catalog, default_schema = _trino_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,
-                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables)
+                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables,
+                       default_catalog=default_catalog, default_schema=default_schema)
     # The caller's column-masking rules (masking.py): traced before the query runs, so a query masking can't follow
     # is refused without touching the database.
     masked = masking.prepare(mask, sql, connection_name, details['db'], database)
@@ -272,11 +282,12 @@ LIST_DATABASES_QUERIES = {
     'mysql': 'SELECT schema_name AS name FROM information_schema.schemata ORDER BY schema_name',
     'postgres': 'SELECT datname AS name FROM pg_database WHERE NOT datistemplate ORDER BY datname',
     'clickhouse': 'SELECT name FROM system.databases ORDER BY name',
+    'trino': 'SHOW CATALOGS',  # Trino's "databases" are catalogs; switching database switches catalog (ADR 0026)
 }
 # PostgreSQL has no server-wide connection, only a connection to one specific database - so listing every
 # *other* database first needs some database that (almost) always exists to connect to. MySQL and ClickHouse
 # have no such requirement; they are omitted here on purpose.
-_LIST_DATABASES_BOOTSTRAP = {'postgres': 'postgres'}
+_LIST_DATABASES_BOOTSTRAP = {'postgres': 'postgres', 'trino': 'system'}  # Trino's `system` catalog always exists
 
 
 def list_databases(details):
@@ -387,7 +398,9 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     is exhausted, errors, or a client disconnect closes it early (see runners._make_stream_runner).
     """
     details = _sql_connection(connection_name)
-    sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables)
+    default_catalog, default_schema = _trino_defaults(details)
+    sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables,
+                       default_catalog=default_catalog, default_schema=default_schema)
     masked = masking.prepare(mask, sql, connection_name, details['db'])  # before the query runs, as execute_sql's
     timeout = limits.timeout(timeout)
     row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns

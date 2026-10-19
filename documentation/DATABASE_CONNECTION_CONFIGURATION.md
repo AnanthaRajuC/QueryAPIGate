@@ -38,8 +38,9 @@ object; `GET /api/v1/connections/{name}` returns them under `options`.
 | `jdbc` | `JayDeBeApi` + your own JDBC jar | Any other JDBC-compliant database (Oracle, SQL Server, DB2, Snowflake, ...) - see [Generic JDBC connections](#generic-jdbc-connections) |
 | `duckdb` | `duckdb` | An embedded analytical database that can also query CSV/JSON/Parquet files directly - see [DuckDB connections](#duckdb-connections) |
 | `mongo` | `pymongo` | `find()` queries only, never writes - see [MongoDB connections](#mongodb-connections) |
+| `trino` | `trino` (DB-API) | The Trino distributed SQL engine, federating many catalogs - see [Trino connections](#trino-connections) |
 
-`h2` and `jdbc` are [experimental](#experimental-h2-and-jdbc).
+`h2`, `jdbc` and `trino` are [experimental](#experimental-h2-jdbc-and-trino).
 
 ## Support matrix
 
@@ -48,25 +49,25 @@ promise and runs against a real server in CI on every push. Types marked `*` are
 [experimental](#experimental-h2-and-jdbc): they work, with the gaps below, and may change in a minor release.
 
 <!-- support-matrix:start - generated from queryapigate/databases.py; tests/test_databases.py checks it -->
-| | PostgreSQL | MySQL | SQLite | DuckDB | ClickHouse | H2 * | JDBC * | MongoDB |
-|---|---|---|---|---|---|---|---|---|
-| Saved queries and ad-hoc runs | yes | yes | yes | yes | yes | yes | yes | find() only |
-| Read-only by default (SQL check) | yes | yes | yes | yes | yes | yes | yes | always (find() only) |
-| Read-only enforced by the database too | yes | yes | yes | no | yes | no | no | n/a |
-| Writes, when allowed | yes | yes | yes | yes | yes | yes | yes | no |
-| Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes |
-| `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | collections |
-| Schema browser, MCP `list_tables` | yes | yes | yes | yes | yes | yes | no | yes |
-| Primary and foreign keys in the schema | yes | yes | yes | yes | no | no | no | n/a |
-| Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes |
-| Table DDL | no | yes | yes | no | yes | no | no | n/a |
-| Descriptions from database comments | yes | yes | n/a | yes | yes | no | no | n/a |
-| Streaming exports | yes | yes | yes | yes | yes | yes | yes | yes |
-| Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes | no | no | no | no |
-| Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no |
-| MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no |
-| Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a |
-| Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | yes |
+| | PostgreSQL | MySQL | SQLite | DuckDB | ClickHouse | H2 * | JDBC * | MongoDB | Trino * |
+|---|---|---|---|---|---|---|---|---|---|
+| Saved queries and ad-hoc runs | yes | yes | yes | yes | yes | yes | yes | find() only | yes |
+| Read-only by default (SQL check) | yes | yes | yes | yes | yes | yes | yes | always (find() only) | yes |
+| Read-only enforced by the database too | yes | yes | yes | no | yes | no | no | n/a | no |
+| Writes, when allowed | yes | yes | yes | yes | yes | yes | yes | no | yes |
+| Query time limit | yes | SELECT only | yes | yes | yes | yes | no | yes | yes |
+| `allowed_tables` (refused where not supported) | yes | yes | yes | yes | yes | no | no | collections | yes |
+| Schema browser, MCP `list_tables` | yes | yes | yes | yes | yes | yes | no | yes | yes |
+| Primary and foreign keys in the schema | yes | yes | yes | yes | no | no | no | n/a | no |
+| Listing and switching databases | yes | yes | n/a | n/a | yes | no | no | yes | yes |
+| Table DDL | no | yes | yes | no | yes | no | no | n/a | no |
+| Descriptions from database comments | yes | yes | n/a | yes | yes | no | no | n/a | no |
+| Streaming exports | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Files: Parquet, CSV, JSON, local or on S3/GCS/R2/HTTP | no | no | no | yes | no | no | no | no | no |
+| Response caching (`cache_ttl`) | yes | yes | yes | yes | yes | yes | yes | no | yes |
+| MCP `execute_sql` | yes | yes | yes | yes | yes | yes | yes | no | yes |
+| Tables-and-joins diagram | yes | yes | yes | yes | yes | no | no | n/a | yes |
+| Tested against a real server in CI | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 <!-- support-matrix:end -->
 
 `n/a` is a feature the database has no use for (a SQLite file has no other database to switch to; MongoDB has no SQL).
@@ -100,6 +101,7 @@ cancelled and its resources released rather than merely abandoned:
 | `h2` | `SET QUERY_TIMEOUT` | |
 | `jdbc` | *not enforced* | No portable way to cancel a statement across arbitrary JDBC drivers - see [Generic JDBC connections](#generic-jdbc-connections) |
 | `duckdb` | `Connection.interrupt()` on a background timer | |
+| `trino` | `cursor.cancel()` on a background timer, plus a `query_max_run_time` session backstop | Cancels the running query on the Trino cluster. |
 
 ## Connection pooling
 
@@ -146,16 +148,20 @@ distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_
 | `user`, `password` | usually | Credentials |
 | `jar`, `driver_class`, `jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
 
-## Experimental: h2 and jdbc
+## Experimental: h2, jdbc and trino
 
 > **Experimental** - may change in any minor release, always noted in the changelog
 > ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
 
-These two types work, with the gaps the [support matrix](#support-matrix) shows: `allowed_tables` refuses queries on
-them rather than guess (fail closed); both rest their read-only default on the SQL check alone; and JDBC has no query
-time limit and no schema browser. Both are tested against a real server in CI. A server with one configured logs a
-warning at startup saying so. The matrix also lists what each needs to become tier 1. (MongoDB was experimental too,
-until 0.37 - [below](#mongodb-connections).)
+These types work, with the gaps the [support matrix](#support-matrix) shows: on H2 and JDBC, `allowed_tables` refuses
+queries rather than guess (fail closed); all three rest their read-only default on the SQL check alone; and JDBC has
+no query time limit and no schema browser. **Trino** (ADR 0026) is fully governed - masking, the schema browser, the
+query time limit and catalog/schema-qualified `allowed_tables` all work. A read-only, catalog/schema-scoped Trino
+user is still recommended as an outer boundary; the federation boundary has a security review (the threat model's
+"Trino" section), and what remains before it graduates is a release of unchanged shape and real use. H2, JDBC and
+Trino are all tested against a real server in CI. A server with an
+experimental connection configured logs a warning at startup saying so. The matrix also lists what each needs to
+become tier 1. (MongoDB was experimental too, until 0.37 - [below](#mongodb-connections).)
 
 ## MongoDB connections
 
@@ -308,6 +314,36 @@ read-only and read-write connections separately would trip constantly):
   guarantee rests on the SQL guard alone**, same as `h2`/`jdbc`.
 - Unlike `h2`/`jdbc`, the query time limit **is** enforced (`Connection.interrupt()`, see the table above) - this
   is a DuckDB Python client capability the JDBC-based drivers don't have access to.
+
+## Trino connections
+
+> Experimental (ADR 0026). `trino` turns the [Trino](https://trino.io/) distributed SQL engine - which federates
+> many catalogs (Hive, Iceberg, Delta, Kafka, object stores, other databases) behind one endpoint - into a governed
+> source. Install with `pip install "queryapigate[trino]"`.
+
+```json
+{
+  "name": "warehouse", "db": "trino",
+  "host": "trino.internal", "port": 8080, "user": "queryapigate",
+  "database": "hive",
+  "options": { "schema": "analytics", "http_scheme": "https" }
+}
+```
+
+- **`database` is the Trino *catalog*.** The optional `options.schema` sets the default schema; `options.http_scheme`
+  is `http` or `https`. A `password` is sent as HTTP basic auth over `https`. "Switch database" in the Console lists
+  catalogs (`SHOW CATALOGS`) and switches between them.
+- **The schema browser and MCP `list_tables`** read the catalog's `information_schema`, scoped to the connection's
+  default schema (`current_schema`). Primary/foreign keys and table DDL are not shown (Trino has no enforced
+  constraints, and three-part identifiers need more handling) - as for ClickHouse.
+- **Governance is the same as any SQL connection:** column masking, the tables-and-joins diagram and `allowed_tables`
+  all work through sqlglot's `trino` dialect; the query time limit cancels the running query on the cluster.
+- **`allowed_tables` is catalog/schema-qualified** (ADR 0026): a grant of `orders` means the connection's default
+  catalog and schema's `orders` only - never `orders` in another catalog or schema. Grant elsewhere by writing
+  `schema.table` or `catalog.schema.table`. A read-only, catalog/schema-scoped Trino user is still recommended as an
+  outer boundary; QueryAPIGate's grants narrow within it.
+- **Read-only** rests on the SQL guard alone (Trino has no read-only session mode), same as `h2`/`jdbc`/`duckdb`.
+  **Agent writes are not supported** on Trino in this release.
 
 ## Files on S3, GCS, R2 and the web
 
