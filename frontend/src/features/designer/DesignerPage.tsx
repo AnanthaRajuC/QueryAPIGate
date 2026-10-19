@@ -35,7 +35,7 @@ import {
 // draggable splitter, Explain, the quick-stats strip, the results panel, and "Save as New API" inline below the
 // editor. Same markup and classes, so classic.css lays it out exactly as before.
 
-const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo'];
+const DB_SWITCHABLE_TYPES = ['mysql', 'postgres', 'clickhouse', 'mongo', 'trino'];
 const SIDE_TAB_KEY = 'queryapigate-ui-run-side-tab';
 const SIDE_W_KEY = 'queryapigate-ui-runner-side-w';
 const MIN_SIDE_W = 220;

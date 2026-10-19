@@ -11,7 +11,7 @@ from . import sqltools
 # sqlglot dialect to guess at, so those (and mongo, which has no SQL at all) are left out on
 # purpose, not as a gap to fill later.
 _DIALECT_MAP = {'mysql': 'mysql', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
-                'sqlite': 'sqlite', 'duckdb': 'duckdb'}
+                'sqlite': 'sqlite', 'duckdb': 'duckdb', 'trino': 'trino'}
 
 
 def pretty_print(sql, dialect):

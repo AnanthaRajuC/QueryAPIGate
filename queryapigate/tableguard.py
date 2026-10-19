@@ -11,9 +11,13 @@ only under WITH RECURSIVE. Anywhere else, and always when qualified (``public.se
 every table that merely shared a CTE's name let `WITH secret AS (SELECT * FROM secret) SELECT * FROM secret` past a
 key allowed only `orders` (fixed 2026-10-15).
 
-Known, accepted limitations: a table name is extracted bare (``information_schema.tables`` -> ``'tables'``),
-not schema-qualified - matches allowed_write_ops's own bare-keyword-list style, but can't disambiguate two
-identically-named tables in different schemas. A table-valued function names no table, so one that reads data -
+Known, accepted limitations: for most dialects a table name is extracted bare (``information_schema.tables`` ->
+``'tables'``), not schema-qualified - matches allowed_write_ops's own bare-keyword-list style, but can't
+disambiguate two identically-named tables in different schemas. **Trino is the exception** (ADR 0026): because one
+Trino connection federates many catalogs, its names are extracted **fully qualified** (``catalog.schema.table``),
+filling a reference's missing parts from the connection's defaults, and grants are qualified the same way
+(``qualify_grant``) - so a grant of ``orders`` does not match ``orders`` in every catalog. A table-valued function
+names no table, so one that reads data -
 DuckDB's ``read_parquet(...)``, ``read_csv(...)``, ``glob(...)``, a ClickHouse ``url(...)`` - is refused outright
 for a table-restricted key; only pure generators (``range``, ``numbers``, ``generate_series``, ``unnest``) pass.
 """
@@ -21,13 +25,20 @@ from . import sqltools
 from .errors import ApiError
 
 _DIALECT_MAP = {'mysql': 'mysql', 'postgres': 'postgres', 'clickhouse': 'clickhouse',
-                'sqlite': 'sqlite', 'duckdb': 'duckdb'}  # kept in sync with sqlflow.py's own map
+                'sqlite': 'sqlite', 'duckdb': 'duckdb', 'trino': 'trino'}  # kept in sync with sqlflow.py's own map
 
 
-def extract_tables(sql, dialect):
+def extract_tables(sql, dialect, default_catalog=None, default_schema=None):
     """The real base tables ``sql`` touches, lowercased - or raises ApiError if that can't be determined for
     this dialect or this specific query. A failure here must reject the query, never degrade quietly the
-    way sqlflow.py's own extraction does for its visualization - see the module docstring."""
+    way sqlflow.py's own extraction does for its visualization - see the module docstring.
+
+    For ``trino``, whose names are three-part, each table comes back **fully qualified** as
+    ``catalog.schema.table``: the catalog and schema a reference leaves out are filled from the connection's
+    defaults (``default_catalog``/``default_schema``), so `orders`, `sf1.orders` and `hive.sf1.orders` are
+    distinguished rather than all collapsed to `orders`. For every other dialect, names are bare as before
+    (``default_catalog``/``default_schema`` are ignored). Match the result against grants run through
+    ``qualify_grant()`` with the same defaults."""
     if dialect not in _DIALECT_MAP:
         raise ApiError(f"Table access restrictions aren't supported for '{dialect}' connections yet", 403,
                        code='table_check_unsupported')
@@ -49,22 +60,42 @@ def extract_tables(sql, dialect):
             name = function.sql_name().lower() if not isinstance(function, exp.Anonymous) else function.name.lower()
             raise ApiError(f'This API key may only query its allowed tables - a table function such as {name}() '
                            "reads data the allow-list can't see, so it isn't allowed", 403, code='table_not_allowed')
+    if dialect == 'trino':
+        def qualify(node):  # fully-qualified catalog.schema.table, defaults filling what the reference omits
+            catalog = (node.catalog or default_catalog or '').lower()
+            schema = (node.db or default_schema or '').lower()
+            return f'{catalog}.{schema}.{node.name.lower()}'
+    else:
+        def qualify(node):
+            return node.name.lower()
     try:
-        return _real_tables(parsed, frozenset())
+        return _real_tables(parsed, frozenset(), qualify)
     except RecursionError:  # nested deeper than can be walked: refused, never let through
         raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
                        code='table_check_failed') from None
 
 
-def _real_tables(node, visible):
-    """The tables under ``node`` that aren't references to a CTE in ``visible`` (lower-case names) - see the
-    module docstring for the scoping rule."""
+def qualify_grant(name, default_catalog, default_schema):
+    """A Trino ``allowed_tables`` grant - ``table``, ``schema.table`` or ``catalog.schema.table`` - filled to
+    ``catalog.schema.table`` with the connection's defaults, so it matches extract_tables()'s qualified names."""
+    parts = [p.lower() for p in name.split('.')]
+    if len(parts) == 1:
+        parts = [(default_catalog or '').lower(), (default_schema or '').lower(), parts[0]]
+    elif len(parts) == 2:
+        parts = [(default_catalog or '').lower(), *parts]
+    return '.'.join(parts[-3:])
+
+
+def _real_tables(node, visible, qualify):
+    """The tables under ``node`` that aren't references to a CTE in ``visible`` (lower-case bare names) - see the
+    module docstring for the scoping rule. ``qualify`` turns a real table node into the name it is matched by
+    (bare, or fully-qualified for trino)."""
     from sqlglot import exp
     if isinstance(node, exp.Table):
-        name = node.name.lower()
+        name = node.name.lower()  # the CTE-shadowing rule is on the bare name; a CTE is never catalog/schema-qualified
         if not name or (name in visible and not node.args.get('db') and not node.args.get('catalog')):
             return set()
-        return {name} | _children(node, visible)
+        return {qualify(node)} | _children(node, visible, qualify)
     found = set()
     with_ = node.args.get('with') if isinstance(node, exp.Expression) else None
     if isinstance(with_, exp.With):
@@ -72,19 +103,19 @@ def _real_tables(node, visible):
         if with_.args.get('recursive'):
             visible = visible | {name for name, _ in ctes}
             for _, body in ctes:
-                found |= _real_tables(body, visible)
+                found |= _real_tables(body, visible, qualify)
         else:
             for name, body in ctes:  # each body sees the CTEs before it, not itself or those after
-                found |= _real_tables(body, visible)
+                found |= _real_tables(body, visible, qualify)
                 visible = visible | {name}
-    return found | _children(node, visible, skip=with_)
+    return found | _children(node, visible, qualify, skip=with_)
 
 
-def _children(node, visible, skip=None):
+def _children(node, visible, qualify, skip=None):
     found = set()
     for child in node.iter_expressions():
         if child is not skip:
-            found |= _real_tables(child, visible)
+            found |= _real_tables(child, visible, qualify)
     return found
 
 

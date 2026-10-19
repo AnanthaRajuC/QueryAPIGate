@@ -9,14 +9,14 @@ gives.
 from . import descriptions, engine, experimental, schema, sqlflow, tableguard
 from .runners import RUNNERS, STREAM_RUNNERS
 
-TYPES = ('postgres', 'mysql', 'sqlite', 'duckdb', 'clickhouse', 'h2', 'jdbc', 'mongo')
+TYPES = ('postgres', 'mysql', 'sqlite', 'duckdb', 'clickhouse', 'h2', 'jdbc', 'mongo', 'trino')
 NAMES = {'postgres': 'PostgreSQL', 'mysql': 'MySQL', 'sqlite': 'SQLite', 'duckdb': 'DuckDB', 'clickhouse': 'ClickHouse',
-         'h2': 'H2', 'jdbc': 'JDBC', 'mongo': 'MongoDB'}
+         'h2': 'H2', 'jdbc': 'JDBC', 'mongo': 'MongoDB', 'trino': 'Trino'}
 TIER_1 = tuple(t for t in TYPES if t not in experimental.DB_TYPES)
 
 # Run against a real server (or, for SQLite, a real file) on every CI push: tests/test_integration.py's classes, and
 # the main suite for SQLite. CI fails if one skips.
-INTEGRATION_TESTED = frozenset({'postgres', 'mysql', 'clickhouse', 'duckdb', 'h2', 'jdbc', 'sqlite', 'mongo'})
+INTEGRATION_TESTED = frozenset({'postgres', 'mysql', 'clickhouse', 'duckdb', 'h2', 'jdbc', 'sqlite', 'mongo', 'trino'})
 
 # Where the database itself refuses writes in a read-only session, beside QueryAPIGate's own SQL check (sqltools):
 # MySQL and PostgreSQL read-only transactions, ClickHouse readonly=1, SQLite mode=ro. DuckDB, H2 and JDBC rest on

@@ -20,7 +20,7 @@ is a minor release, called out under **Breaking** - never a patch.
 **Experimental** features are outside that promise: they may change or be removed in any minor release (a patch
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
-its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2 and JDBC
+its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
 connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
 (`${aws-sm:...}`, `aws-rds-iam`), and semantic search (embed parameters). The list is `queryapigate/experimental.py`.
 
@@ -48,6 +48,18 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Added
+- **Trino as a native connection type (experimental).** A `trino` connection turns the Trino distributed SQL engine
+  - which federates many catalogs (Hive, Iceberg, Delta, Kafka, object stores, other databases) behind one endpoint
+  - into a governed source, instead of the minimal generic-JDBC path. The connection's `database` field is a Trino
+  catalog; the schema browser, column masking, the tables-and-joins diagram, `allowed_tables`, and a real query time
+  limit (cancellation on the cluster) all work, through sqlglot's `trino` dialect. `allowed_tables` is matched
+  **fully qualified** (`catalog.schema.table`), so a grant never reaches the same table name in another catalog or
+  schema. Install with `pip install "queryapigate[trino]"`. **Experimental** (ADR 0026): a read-only, scoped Trino
+  user is still recommended as the outer boundary, and a security review of the federation boundary remains before
+  it graduates. Read-only rests on the SQL guard; agent writes are not supported on Trino yet. See
+  `documentation/DATABASE_CONNECTION_CONFIGURATION.md` → Trino connections.
 
 ## [0.40.0] - 2026-10-18
 

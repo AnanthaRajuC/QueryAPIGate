@@ -34,7 +34,7 @@ one it supersedes.
 | [0023](0023-workspaces.md) | Workspaces: delegated administration for teams | Accepted |
 | [0024](0024-fail-closed-auditing.md) | Fail-closed auditing: an action may require its audit entry | Proposed |
 | [0025](0025-semantic-retrieval.md) | Semantic retrieval: an `embed` parameter, not a vector store | Accepted |
-| [0026](0026-trino-connections.md) | Trino as a native connection type | Proposed |
+| [0026](0026-trino-connections.md) | Trino as a native connection type | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

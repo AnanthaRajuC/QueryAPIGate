@@ -1,10 +1,10 @@
 # ADR 0026: Trino as a native connection type
 
-- **Status:** Proposed
-- **Date:** 2026-10-19
+- **Status:** Accepted (2026-10-19)
 - **Backlog:** roadmap item #76 (Trino / Presto as a native connection type). Launches `trino` experimental (#64),
-  to graduate against the connection-type criteria (`databases.GRADUATION`, #66). A proposal: the decisions are
-  recorded; the code is not written yet.
+  to graduate against the connection-type criteria (`databases.GRADUATION`, #66). Implemented, with fully-qualified
+  `allowed_tables` (§2), tested against a real Trino in CI, and reviewed for security (THREAT_MODEL.md, "Trino"); a
+  release of stable shape and real-deployment use remain before it graduates.
 
 ## Context
 
@@ -45,21 +45,20 @@ The connection reaches whatever that Trino **user** is allowed to reach. We trea
 outer boundary and recommend a **read-only, catalog/schema-scoped Trino user** per connection - QueryAPIGate's
 grants then narrow *within* that.
 
-### 2. `allowed_tables`: bare-name first, qualification-aware to graduate
+### 2. `allowed_tables` is matched fully qualified
 
-Every table matcher in the server today extracts a **bare, lower-cased** table name (sqlglot's `.name`), dropping
-catalog and schema, and matches it against the grant as a set. For a single database this is a documented
-limitation (schema-blind). For a **federation** engine it is more dangerous: a grant of `orders` would match
-`orders` in *every* catalog the connection can see.
+For every other dialect a table matcher extracts a **bare, lower-cased** table name (sqlglot's `.name`), dropping
+catalog and schema. For a **federation** engine that would be dangerous: a grant of `orders` would match `orders`
+in *every* catalog the connection can see.
 
-- **First cut (experimental):** keep bare-name matching for `trino` too, and **state the limitation loudly** in the
-  docs - on Trino, `allowed_tables` does not distinguish catalog or schema, so it must be paired with a read-only,
-  scoped Trino user, which is the real boundary.
-- **Graduation blocker:** make extraction **qualification-aware** for `trino`. sqlglot with `read='trino'` already
-  parses `exp.Table.catalog` / `.db`; the work is to emit and match `catalog.schema.table` in `tableguard`,
-  `schema._only_allowed`, and the grant format. Until that lands, `trino` stays experimental.
-
-This is the single biggest design item and the reason the type launches experimental rather than tier-1.
+So for `trino`, extraction and matching are **fully qualified**. sqlglot with `read='trino'` parses
+`exp.Table.catalog` / `.db`; `tableguard` emits each real table as `catalog.schema.table`, filling the parts a
+reference omits from the connection's defaults (the connection's catalog = its `database` field, and schema). A
+grant is qualified the same way (`tableguard.qualify_grant`): `orders` → `<catalog>.<schema>.orders`,
+`sales.orders` → `<catalog>.sales.orders`, `hive.sales.orders` as written. So a grant of `orders` reaches only the
+default catalog+schema's `orders`, never `orders` in another catalog or schema. The same qualified matching is used
+by the schema browser (`schema._only_allowed`). A scoped, read-only Trino user is still recommended as an outer
+boundary, but `allowed_tables` is now catalog/schema-accurate - not the schema-blind limitation other dialects carry.
 
 ### 3. Read-only rests on the SQL guard, not the driver
 
@@ -87,10 +86,11 @@ timeout integration test (unlike JDBC, which self-skips it).
 
 ### 6. Experimental, with a graduation checklist
 
-`trino` joins `experimental.FEATURES['connection_types'].db_types`. It graduates (per `databases.GRADUATION`) when:
-a real Trino runs in the integration CI job and the read-only check, the time limit and `allowed_tables` are each
-tested against it; `allowed_tables` is qualification-aware; a security review of the federation boundary is done;
-the shape is unchanged for a release; and the docs record what may still be added (writes, more metadata).
+`trino` joins `experimental.FEATURES['connection_types'].db_types`. Already met: a real Trino runs in the
+integration CI job, with the read-only check, the time limit and (fully-qualified) `allowed_tables` each tested
+against it; and the federation boundary has a security review (THREAT_MODEL.md, "Trino"). Remaining to graduate (per
+`databases.GRADUATION`): the shape unchanged for a release and real-deployment use; the docs record what may still
+be added (writes, more metadata).
 
 ## Consequences
 

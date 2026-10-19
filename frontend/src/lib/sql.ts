@@ -83,4 +83,4 @@ export function formatSql(sql: string): string {
     .join('\n');
 }
 
-export const PARSEABLE_DIALECTS = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'duckdb'];
+export const PARSEABLE_DIALECTS = ['mysql', 'postgres', 'clickhouse', 'sqlite', 'duckdb', 'trino'];

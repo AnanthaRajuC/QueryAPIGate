@@ -687,6 +687,78 @@ class _JDBC(_Driver):
         yield from _stream_cursor(session.conn.cursor(), sql, params, 'qmark', self.DIALECT)
 
 
+class _Trino(_Driver):
+    """Trino (and its ancestor Presto): a distributed SQL engine that federates many catalogs behind one
+    endpoint - Hive, Iceberg, Delta, Kafka, object stores, other databases (ADR 0026). Experimental (#64).
+
+    The connection's generic `database` field is a Trino **catalog**; an optional `schema` sets the default
+    schema. Like DuckDB/H2/jdbc, Trino has no read-only session mode, so the read-only guarantee rests on
+    validate_sql() alone (`trino` is not in databases.DRIVER_READ_ONLY). Trino's own access control - a
+    read-only, catalog/schema-scoped Trino user per connection - is the outer boundary; see the ADR.
+
+    Sessions are cheap, stateless HTTP, so reset() is a no-op and is_alive() is a cheap SELECT 1. The query
+    time limit is enforced by cancelling the running query on a background timer (as DuckDB does), with the
+    server's static QUERYAPIGATE_QUERY_TIMEOUT also set as a per-session `query_max_run_time` backstop.
+    """
+    DIALECT = 'trino'
+    PARAM_STYLE = 'qmark'
+
+    def connect(self, details, read_only):
+        import trino
+        host, user = details.get('host'), details.get('user')
+        catalog = details.get('database')  # the generic `database` field is a Trino catalog
+        if not host or not user:
+            raise ApiError('A Trino connection needs a host and a user', code='connection_misconfigured')
+        if not catalog:
+            raise ApiError("A Trino connection needs a catalog (the connection's database field)",
+                           code='connection_misconfigured')
+        kwargs = {'host': host, 'port': int(details.get('port') or 8080), 'user': user, 'catalog': catalog,
+                  'schema': details.get('schema') or 'default',
+                  'http_scheme': details.get('http_scheme') or 'http'}
+        if details.get('password'):
+            from trino.auth import BasicAuthentication
+            kwargs['auth'] = BasicAuthentication(user, details['password'])
+            kwargs['http_scheme'] = 'https'  # Trino requires HTTPS for password (basic) auth
+        limit = config.query_timeout()
+        if limit:  # a static backstop; the per-query timer below enforces the actual (possibly lower) timeout
+            kwargs['session_properties'] = {'query_max_run_time': f'{math.ceil(limit)}s'}
+        return trino.dbapi.connect(**kwargs)
+
+    def is_alive(self, session):
+        try:
+            cursor = session.conn.cursor()
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+            return True
+        except Exception:
+            return False
+
+    def query(self, session, sql, params, limit, offset, read_only, timeout):
+        cursor = session.conn.cursor()
+        cancelled = {'fired': False}
+
+        def _cancel():
+            cancelled['fired'] = True
+            try:
+                cursor.cancel()
+            except Exception:  # noqa: BLE001 - best effort; the query may have just finished
+                pass
+
+        timer = threading.Timer(timeout, _cancel) if timeout else None
+        if timer:
+            timer.daemon = True
+            timer.start()
+        try:
+            return _fetch_page(cursor, sql, params, 'qmark', limit, offset, self.DIALECT)
+        except Exception:
+            if cancelled['fired']:
+                raise _timed_out(timeout) from None
+            raise
+        finally:
+            if timer:
+                timer.cancel()
+
+
 def _make_runner(driver):
     def run(details, sql, params, limit, offset, read_only, timeout=None, pool=None):
         if pool is None:
@@ -728,12 +800,14 @@ _run_clickhouse = _make_runner(_ClickHouse())
 _run_h2 = _make_runner(_H2())
 _run_jdbc = _make_runner(_JDBC())
 _run_duckdb = _make_runner(_DuckDB())
+_run_trino = _make_runner(_Trino())
 _stream_mysql = _make_stream_runner(_MySQL())
 _stream_postgres = _make_stream_runner(_Postgres())
 _stream_clickhouse = _make_stream_runner(_ClickHouse())
 _stream_h2 = _make_stream_runner(_H2())
 _stream_jdbc = _make_stream_runner(_JDBC())
 _stream_duckdb = _make_stream_runner(_DuckDB())
+_stream_trino = _make_stream_runner(_Trino())
 
 
 def _run_sqlite(details, sql, params, limit, offset, read_only, timeout=None, pool=None):
@@ -805,6 +879,7 @@ RUNNERS = {
     'h2': _run_h2,
     'jdbc': _run_jdbc,
     'duckdb': _run_duckdb,
+    'trino': _run_trino,
 }
 
 # Every dialect above supports streaming too - each stream_*() generator here yields the column names
@@ -817,6 +892,7 @@ STREAM_RUNNERS = {
     'h2': _stream_h2,
     'jdbc': _stream_jdbc,
     'duckdb': _stream_duckdb,
+    'trino': _stream_trino,
 }
 
 # --------------------------------------------------------------------------------------

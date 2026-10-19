@@ -29,7 +29,8 @@ _ENDPOINTS = ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 
 # connection type -> OpenTelemetry's db.system.name
 DB_SYSTEMS = {'postgres': 'postgresql', 'mysql': 'mysql', 'sqlite': 'sqlite', 'duckdb': 'duckdb',
-              'clickhouse': 'clickhouse', 'h2': 'h2database', 'jdbc': 'other_sql', 'mongo': 'mongodb'}
+              'clickhouse': 'clickhouse', 'h2': 'h2database', 'jdbc': 'other_sql', 'mongo': 'mongodb',
+              'trino': 'trino'}
 
 
 def enabled():

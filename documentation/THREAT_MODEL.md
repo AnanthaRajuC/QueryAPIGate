@@ -350,6 +350,44 @@ operation exists. Reviewed for its graduation to tier 1 in 0.37 ([ADR
   server-side JavaScript survives into what MongoDB is sent and no parameter becomes an operator; the CI integration
   job sends them to a real MongoDB 8.0.
 
+### Trino: a federation engine behind one grant (ADR 0026, experimental)
+
+A `trino` connection reaches every catalog the Trino cluster federates - Hive, Iceberg, Kafka, other databases -
+through one QueryAPIGate connection. That reach is the point, and the risk: the controls other SQL connections have
+within one database must hold *across catalogs*. Reviewed for its introduction (experimental,
+[ADR 0026](adr/0026-trino-connections.md)):
+
+- **`allowed_tables` is matched fully qualified** (`catalog.schema.table`), not by bare name. A reference's missing
+  parts are filled from the connection's default catalog (its `database` field) and schema, and a grant is filled the
+  same way (`tableguard.qualify_grant`). So a grant of `orders` reaches only the default catalog+schema's `orders` -
+  never `orders` in another catalog or schema - and `hive.sales.orders` reaches exactly that table. This is the
+  federation-specific fix: bare-name matching would have let one grant read the same table name in every catalog the
+  connection can see. The schema browser applies the same qualified grants (`schema._only_allowed`).
+- **A data-reading table function is refused.** `tableguard` passes only pure value generators; a Trino `TABLE(...)`
+  polymorphic function that reads data - `system.query(...)` (a pass-through that would run arbitrary SQL on a
+  backend), `table_changes(...)` - names no base table the allow-list can account for, so a table-restricted key is
+  refused (`table_not_allowed`), as `read_parquet()`/`url()` are on other dialects.
+- **Read-only rests on the SQL guard alone** (Trino has no read-only session mode), as for DuckDB, H2 and JDBC. A
+  non-read-only statement is refused with `read_only` before it runs, including a write hidden behind a read-only
+  first keyword - a writable CTE, `EXPLAIN ANALYZE` (`sqltools.write_operations`). Trino's write surface is covered:
+  INSERT/UPDATE/DELETE/MERGE, `CREATE TABLE AS`, `CALL`, and `ANALYZE` (which collects statistics, treated as a write).
+- **Masking is traced with sqlglot's `trino` dialect** and fails closed: a query masking can't follow is refused
+  (`mask_unresolvable`), never served unmasked - as on every SQL connection.
+- **Parameters are bound, never interpolated** (qmark); only a single statement runs; the time limit **cancels** the
+  running query on the cluster (`cursor.cancel()` on a timer, plus a `query_max_run_time` session backstop),
+  releasing its resources rather than merely abandoning it.
+- **The Trino user is the outer boundary.** A key granted the whole connection (not a table list) gets read-only
+  ad-hoc `execute_sql`, and can reach every catalog and schema the *Trino user* can; QueryAPIGate narrows within
+  that, never beyond it. So a Trino connection must use a **read-only, catalog/schema-scoped Trino user** - Trino's
+  own access control is the floor, QueryAPIGate's grants the ceiling. This is the one operational control an operator
+  must get right, and it is stated with the type.
+- **Tested against a real Trino in CI** (`tests/test_integration.py::TrinoTests`): the read-only refusal, the time
+  limit, masking, and the qualified `allowed_tables` (a bare grant refusing another catalog) each run against a live
+  Trino, not only in unit tests.
+
+What remains before tier 1 is a release of unchanged shape and real-deployment use; agent writes (ADR 0008) are not
+offered on Trino, and the schema browser not showing keys or DDL is a capability gap, not a security one.
+
 ### Secrets at rest
 
 Connection passwords in the store can be a literal string, an
