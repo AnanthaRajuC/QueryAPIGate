@@ -8,7 +8,7 @@ on:
 env:
   # The release before this one: the rolling-upgrade test serves beside it on an upgraded store, and the Helm chart is
   # upgraded from it on a real cluster. Bumped after each release (CONTRIBUTING.md, Releasing).
-  PREVIOUS_RELEASE: "0.40.0"
+  PREVIOUS_RELEASE: "0.41.0"
   # Pinned tools for the Helm chart's jobs (ADR 0013), each download checked against its published checksum.
   KIND_VERSION: v0.33.0
   KUBECTL_VERSION: v1.37.0
