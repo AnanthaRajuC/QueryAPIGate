@@ -44,7 +44,7 @@ by accident.
 (plain manifests are in `deploy/kubernetes/`), OIDC discovery beyond the current JWKS support.
 
 **More sources, after 1.0** (each starts experimental, #64): #75 files and data lakes through DuckDB (shipped),
-#76 Trino, #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
+#76 Trino (shipped), #77 cloud warehouses, #78 MongoDB aggregation pipelines, #79 Elasticsearch and Cypher, #80 stored
 procedures. **More from DuckDB:** #81 Parquet and Arrow output, #82 snapshots of slow queries, #83 Iceberg and Delta
 tables (federation considered and deferred, see #83).
 
@@ -121,9 +121,12 @@ documentation. #99 workspaces only if asked for.
 28. **0.40: MCP for agents** - a dedicated MCP Console screen; per-query MCP exposure and query-level masking;
     self-describing tool parameters, a `describe_table` tool, capped-result guidance, and semantic search
     (experimental, `embed` + pgvector, [ADR 0025](documentation/adr/0025-semantic-retrieval.md)). (0.40.0, 2026-10-18.)
-29. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+29. **0.41: Trino, and Console access insights** - Trino as a native connection type (experimental,
+    [ADR 0026](documentation/adr/0026-trino-connections.md)); plus a per-key details screen and 30-day activity
+    sparklines across the access screens (API keys, connections, cached queries, MCP tools, roles). (0.41.0, 2026-10-20.)
+30. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-30. **1.0.0.**
+31. **1.0.0.**
 
 ## 1. Per-key API permissions
 
