@@ -14,6 +14,8 @@ guide covers one scenario end to end, and every command and response in it was r
    Server, DB2, Snowflake, or any database with a JDBC driver, and what doesn't work on it.
 4. [**Connect to MongoDB**](04-connect-to-mongodb.md) - `find()`-only saved queries, filters, projections, sort,
    and whole results streamed as NDJSON, CSV or Parquet.
+61. [**Connect to Trino**](61-connect-to-trino.md) (experimental) - one connection federating many catalogs, with
+   fully-qualified `allowed_tables`, masking and a schema browser.
 5. [**Try it without any setup, using the built-in example APIs**](05-try-the-built-in-example-apis.md) -
    `queryapigate examples load`, what it installs, and how to explore it in the Console.
 
@@ -119,6 +121,8 @@ guide covers one scenario end to end, and every command and response in it was r
     alert rules.
 36. [**Read the logs and trace one request end to end**](36-trace-a-request-in-the-logs.md) - `X-Request-Id`, JSON
     logs, slow queries.
+62. [**See what's being used, from the Console**](62-see-whats-being-used-from-the-console.md) - the 30-day activity
+    sparklines, a key's usage history, quotas, the Metrics and Agents screens, and the run log behind them all.
 51. [**See QueryAPIGate in your traces**](51-see-queryapigate-in-your-traces.md) (experimental) - OpenTelemetry: one
     trace from your app through QueryAPIGate to the database, in Jaeger; what it costs.
 37. [**Diagnose and tune the connection pool**](37-tune-the-connection-pool.md) - measured, with symptoms and fixes.

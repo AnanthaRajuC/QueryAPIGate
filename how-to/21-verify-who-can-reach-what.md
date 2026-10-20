@@ -63,8 +63,13 @@ For the whole picture, use the Access map, or reason it out from `GET /api/v1/ap
 
 ## One key: what can it reach?
 
-Ask as the key itself. `GET /catalog` lists exactly the saved queries this caller can run through `/q/<name>`, and the
-terms it runs them on - verified with the `example-executive` key:
+In the Console, **Access → API keys → (the key) → Details** is the key-centric view: the saved queries (APIs) it can
+reach and how each is granted, the connections and tables behind them, its limits and masking, and its full run
+history - clicking a query there opens its SQL. Each key on the list also carries a 30-day activity sparkline (and so
+does each API, connection, cached query and MCP tool), so "granted but never used" shows at a glance.
+
+Ask as the key itself over the API. `GET /catalog` lists exactly the saved queries this caller can run through
+`/q/<name>`, and the terms it runs them on - verified with the `example-executive` key:
 
 ```bash
 curl http://127.0.0.1:5000/catalog -H 'X-API-Key: <example-executive secret>'

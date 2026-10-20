@@ -393,6 +393,18 @@ const DOCS = [
     path: 'how-to/60-give-each-team-its-own-workspace.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-61',
+    title: 'Connect to Trino',
+    path: 'how-to/61-connect-to-trino.md',
+    group: 'How-to guides',
+  },
+  {
+    id: 'howto-62',
+    title: "See what's being used, from the Console",
+    path: 'how-to/62-see-whats-being-used-from-the-console.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

@@ -14,7 +14,9 @@ SQLite, DuckDB and ClickHouse are tier 1: every feature, tested against a real s
 
 For anything not listed here - Oracle, SQL Server, Snowflake, DB2, or any other JDBC-compliant database -
 see [Connect to anything else via generic JDBC](03-connect-via-generic-jdbc.md)
-(experimental); the mechanics below (test, activate, query) are identical once a `jdbc` connection exists.
+(experimental); the mechanics below (test, activate, query) are identical once a `jdbc` connection exists. For
+**Trino** - one connection federating many catalogs - there's a native, governed type with `allowed_tables`, masking
+and a schema browser: [Connect to Trino](61-connect-to-trino.md) (experimental).
 
 ## Two ways to add a connection
 

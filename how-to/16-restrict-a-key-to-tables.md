@@ -56,9 +56,11 @@ tables.
 
 ## What else it covers, and where it stops
 
-- **Database types:** supported for PostgreSQL, MySQL, SQLite, DuckDB and ClickHouse - the dialects the parser
-  handles. On an `h2`, `jdbc` or `mongo` connection a table-restricted key is **refused on every query** (`403`
-  naming the connection type), never left unrestricted. See the
+- **Database types:** supported for PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and Trino - the dialects the parser
+  handles. On **Trino** the match is **fully qualified** (`catalog.schema.table`): a grant of `orders` means the
+  connection's default catalog and schema only, never `orders` in another catalog or schema - see
+  [Connect to Trino](61-connect-to-trino.md). On an `h2`, `jdbc` or `mongo` connection a table-restricted key is
+  **refused on every query** (`403` naming the connection type), never left unrestricted. See the
   [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
 - **Table names, not schemas:** entries are bare names matched case-insensitively. `orders` allows `orders` in any
   schema the connection can see. If two schemas both have an `orders` table, this can't tell them apart - use a
@@ -66,10 +68,11 @@ tables.
 - **The schema shows only the listed tables.** The schema browser (`GET /connections/shop/schema`) and MCP's
   `list_tables` leave the others out, and a foreign key pointing at one shows as none. `table_ddl` for a forbidden
   table answers `404` - *'salaries' is not a table on 'shop'* - exactly as for a table that doesn't exist.
-- **Table functions that read data** - DuckDB's `read_parquet(...)` and `read_csv(...)`, ClickHouse's `url(...)` -
-  are refused for a table-restricted key (`table_not_allowed`): they name no table the list could check. Pure
-  generators (`range`, `numbers`, `generate_series`, `unnest`) are fine. On DuckDB, give files a name with a view and
-  list the view ([guide 41](41-publish-files-in-s3-as-an-api.md)).
+- **Table functions that read data** - DuckDB's `read_parquet(...)` and `read_csv(...)`, ClickHouse's `url(...)`,
+  Trino's `TABLE(system.query(...))` and `table_changes(...)` - are refused for a table-restricted key
+  (`table_not_allowed`): they name no table the list could check. Pure generators (`range`, `numbers`,
+  `generate_series`, `unnest`) are fine. On DuckDB, give files a name with a view and list the view
+  ([guide 41](41-publish-files-in-s3-as-an-api.md)).
 
 `allowed_tables` is defence in depth on top of a database user with only the rights it needs - not a replacement for
 one.
