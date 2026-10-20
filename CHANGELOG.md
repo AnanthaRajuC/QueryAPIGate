@@ -49,6 +49,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-20
+
+Trino joins the native connection types (experimental): one connection federates every catalog behind a Trino
+endpoint, fully governed through sqlglot's `trino` dialect. The Console's access screens gain a per-key details
+view and GitHub-style 30-day activity sparklines, so you can see at a glance what each key, connection, cached
+query and MCP tool is actually used for.
+
 ### Added
 - **Trino as a native connection type (experimental).** A `trino` connection turns the Trino distributed SQL engine
   - which federates many catalogs (Hive, Iceberg, Delta, Kafka, object stores, other databases) behind one endpoint
@@ -57,9 +64,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   limit (cancellation on the cluster) all work, through sqlglot's `trino` dialect. `allowed_tables` is matched
   **fully qualified** (`catalog.schema.table`), so a grant never reaches the same table name in another catalog or
   schema. Install with `pip install "queryapigate[trino]"`. **Experimental** (ADR 0026): a read-only, scoped Trino
-  user is still recommended as the outer boundary, and a security review of the federation boundary remains before
-  it graduates. Read-only rests on the SQL guard; agent writes are not supported on Trino yet. See
+  user is still recommended as the outer boundary; the federation boundary is security-reviewed
+  (`documentation/THREAT_MODEL.md`), and a release of stable shape and real-deployment use remains before it
+  graduates. Read-only rests on the SQL guard; agent writes are not supported on Trino yet. See
   `documentation/DATABASE_CONNECTION_CONFIGURATION.md` → Trino connections.
+- **Console: an API key details screen, and 30-day activity sparklines across the access screens.** Each API key
+  now has a **Details** view (from the API keys table) showing the saved queries (APIs) it can reach, the
+  connections and tables, its limits and masking, and its full run history - clicking a query opens its SQL. A
+  30-day run-activity sparkline is shown per key (API keys), per reachable API scoped to that key (a key's
+  details), per connection (Connections), per cached query (Caching), per tool scoped to its MCP calls (MCP
+  server), and per role as its keys' combined activity (Roles). Console only - it reads existing run history,
+  no API change.
 
 ## [0.40.0] - 2026-10-18
 
@@ -2790,7 +2805,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.37.0...v0.38.0
