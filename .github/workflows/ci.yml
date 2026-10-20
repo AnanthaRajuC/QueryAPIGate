@@ -83,6 +83,11 @@ jobs:
       trino:  # Trino (experimental, ADR 0026); its built-in HEALTHCHECK gates readiness, plus a wait step below
         image: trinodb/trino:484
         ports: ["8085:8080"]
+        # Cap the Trino JVM: unbounded it can starve the other four service containers on the 7 GB runner and a
+        # sibling (mongo) then fails to start. Trino 484 auto-sizes its heap from the container limit; 2 GB boots
+        # healthy and runs the IT queries using ~0.9 GB, leaving room for postgres/mysql/clickhouse/mongo.
+        options: >-
+          --memory 2g --memory-swap 2g
     env:
       QUERYAPIGATE_IT_POSTGRES: '{"host": "localhost", "port": 5432, "user": "postgres", "password": "pw", "database": "postgres"}'
       QUERYAPIGATE_IT_MYSQL: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
