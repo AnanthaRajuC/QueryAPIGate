@@ -96,7 +96,7 @@ import time
 from collections import namedtuple
 from datetime import datetime, timedelta
 
-from . import admins, config, db, masking, quotas, scope, store
+from . import admins, config, db, masking, metacache, quotas, scope, store
 from .errors import ApiError
 
 ALL_CONNECTIONS = '*'
@@ -929,10 +929,11 @@ def authenticate(supplied, client_ip=None):
     # useless for guessing a secret; compare_digest() below stays as a belt-and-braces final check.
     # An old secret still in its grace period after a rotation (ADR 0009) matches by previous_hash - indexed too -
     # and only until previous_expires_at; everything else (active, expiry, allowed_ips) applies to it the same.
-    rows = db.connection().execute(
+    # The rows may come from metacache.py: every check below still runs on them, on every request.
+    rows = metacache.rows('api_key', supplied_hash, lambda: db.connection().execute(
         'SELECT workspace, name, hash, active, expires_at, created_at, details_json, previous_hash, '
         'previous_expires_at FROM api_keys WHERE hash = ? OR previous_hash = ?',
-        (supplied_hash, supplied_hash)).fetchall()
+        (supplied_hash, supplied_hash)).fetchall())
     for row in rows:  # across every workspace: a key's secret is unique on the server, and says which it is in
         name, entry = row['name'], _row_to_entry(row)
         previous = row['hash'] != supplied_hash

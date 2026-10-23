@@ -107,7 +107,7 @@ cancelled and its resources released rather than merely abandoned:
 
 MySQL, PostgreSQL, ClickHouse, H2, generic `jdbc` and `duckdb` connections are kept open and reused between requests
 (SQLite is a local file and is opened per request). Tune it with `QUERYAPIGATE_POOL_SIZE` (idle connections kept per
-distinct connection setting, default 5, `0` disables pooling) and `QUERYAPIGATE_POOL_IDLE_TIMEOUT` (seconds, default 300).
+distinct connection setting, default 8, `0` disables pooling) and `QUERYAPIGATE_POOL_IDLE_TIMEOUT` (seconds, default 300).
 
 - **Clean hand-over.** A connection's transaction is ended before it is reused, so a request never sees a stale
   snapshot, and query limits are applied per request (or per transaction) so they never leak to the next user.

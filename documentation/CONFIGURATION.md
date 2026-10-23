@@ -20,8 +20,9 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_AUDIT_OTLP` | `false` | Stream every audit entry as OTLP log records to the OTLP logs endpoint. |
 | `QUERYAPIGATE_AUDIT_KEY` | *(unset)* | HMAC key (32+ characters) the audit log's hash chain is signed with, so an edit made with only the store can't be re-signed. Several, comma-separated, while rotating it. Unset: plain SHA-256. |
 | `QUERYAPIGATE_HSTS_MAX_AGE` | *(unset)* | Seconds browsers should use only HTTPS for this host (`Strict-Transport-Security`), sent only on requests that arrived over HTTPS. Unset: not sent - set it once every client reaches the server over HTTPS. |
-| `QUERYAPIGATE_POOL_SIZE` | `5` | Idle connections kept per distinct connection setting. `0` turns pooling off. |
+| `QUERYAPIGATE_POOL_SIZE` | `8` | Idle connections kept per distinct connection setting - one per thread of the Docker image. `0` turns pooling off. |
 | `QUERYAPIGATE_POOL_IDLE_TIMEOUT` | `300` | Seconds an idle pooled connection is kept before it is closed. |
+| `QUERYAPIGATE_METADATA_CACHE_TTL` | `0` | Seconds the API key, saved query and connection a request reads from the store are reused, instead of read again each time - see [Performance](PERFORMANCE.md#the-metadata-cache). A change made through this server is seen at once; one made through another instance up to this long later. `0` turns it off. |
 | `QUERYAPIGATE_QUERY_TIMEOUT` | `30` | Seconds a query may run before it is cancelled (HTTP 504). `0` disables the limit. A request can lower it with `?timeout=`, never raise it. |
 | `QUERYAPIGATE_HOST` / `QUERYAPIGATE_PORT` | `127.0.0.1` / `5000` | Bind address for `queryapigate serve`. |
 | `QUERYAPIGATE_DEBUG` | off | Flask debug mode. Never enable on a reachable host. |

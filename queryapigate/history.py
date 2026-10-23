@@ -275,23 +275,30 @@ def write(rows, target=None):
     query or version was deleted meanwhile has no history row, but keeps its event: it happened (ADR 0020 §2). Never
     raises: a history write must never fail the work it records."""
     from . import events
+    found, adhoc, saved = [], [], []
+    for name, version, executed_at, entry_json, status, key_name, keep, event, workspace in rows:
+        if event is not None:
+            found.append(event)
+        if not keep:
+            continue
+        if name is None:  # an ad-hoc run: no saved query to belong to
+            adhoc.append((workspace, executed_at, entry_json, status, key_name))
+        else:
+            saved.append((workspace, name, version, executed_at, entry_json, status, key_name,
+                          workspace, name, version))
     try:
+        # One executemany() per statement rather than a round trip per row: a busy server's batch is hundreds of rows.
         with db.transaction(append_only=True, target=target) as conn:
-            for name, version, executed_at, entry_json, status, key_name, keep, event, workspace in rows:
-                if event is not None:
-                    conn.execute(events.INSERT, event)
-                if not keep:
-                    continue
-                if name is None:  # an ad-hoc run: no saved query to belong to
-                    conn.execute('INSERT INTO execution_history (workspace, query_name, version, executed_at, '
-                                 'entry_json, status, key_name) VALUES (?, NULL, NULL, ?, ?, ?, ?)',
-                                 (workspace, executed_at, entry_json, status, key_name))
-                    continue
-                conn.execute(
+            if found:
+                conn.executemany(events.INSERT, found)
+            if adhoc:
+                conn.executemany('INSERT INTO execution_history (workspace, query_name, version, executed_at, '
+                                 'entry_json, status, key_name) VALUES (?, NULL, NULL, ?, ?, ?, ?)', adhoc)
+            if saved:
+                conn.executemany(
                     'INSERT INTO execution_history (workspace, query_name, version, executed_at, entry_json, status, '
                     'key_name) SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM saved_query_versions '
-                    'WHERE workspace = ? AND query_name = ? AND version = ?)',
-                    (workspace, name, version, executed_at, entry_json, status, key_name, workspace, name, version))
+                    'WHERE workspace = ? AND query_name = ? AND version = ?)', saved)
             if (target or db.current_target())[0] == 'postgres':
                 # Wakes `queryapigate events` (events.py) in every instance. Sent inside the transaction, so
                 # Postgres delivers it only once these rows are committed and visible to a listener's query.

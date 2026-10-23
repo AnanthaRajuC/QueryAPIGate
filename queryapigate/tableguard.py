@@ -21,6 +21,8 @@ names no table, so one that reads data -
 DuckDB's ``read_parquet(...)``, ``read_csv(...)``, ``glob(...)``, a ClickHouse ``url(...)`` - is refused outright
 for a table-restricted key; only pure generators (``range``, ``numbers``, ``generate_series``, ``unnest``) pass.
 """
+import functools
+
 from . import sqltools
 from .errors import ApiError
 
@@ -29,6 +31,15 @@ _DIALECT_MAP = {'mysql': 'mysql', 'postgres': 'postgres', 'clickhouse': 'clickho
 
 
 def extract_tables(sql, dialect, default_catalog=None, default_schema=None):
+    """The real base tables ``sql`` touches, lowercased - see _extract_tables(). Cached: the answer is a pure function
+    of these four arguments, and a saved query's SQL never changes between calls, so parsing it again on every call
+    of a table-restricted key was wasted work. A frozenset, so no caller can change the cached answer; a query that
+    is refused isn't cached and raises again each time."""
+    return _extract_tables(sql, dialect, default_catalog, default_schema)
+
+
+@functools.lru_cache(maxsize=1024)  # bounded: varied ad-hoc SQL from a table-restricted key can't grow it
+def _extract_tables(sql, dialect, default_catalog, default_schema):
     """The real base tables ``sql`` touches, lowercased - or raises ApiError if that can't be determined for
     this dialect or this specific query. A failure here must reject the query, never degrade quietly the
     way sqlflow.py's own extraction does for its visualization - see the module docstring.
@@ -69,7 +80,7 @@ def extract_tables(sql, dialect, default_catalog=None, default_schema=None):
         def qualify(node):
             return node.name.lower()
     try:
-        return _real_tables(parsed, frozenset(), qualify)
+        return frozenset(_real_tables(parsed, frozenset(), qualify))
     except RecursionError:  # nested deeper than can be walked: refused, never let through
         raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
                        code='table_check_failed') from None

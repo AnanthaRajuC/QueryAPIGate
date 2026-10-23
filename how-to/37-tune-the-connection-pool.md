@@ -11,7 +11,7 @@ request - there's nothing to pool.)
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `QUERYAPIGATE_POOL_SIZE` | `5` | idle connections kept **per connection** (per distinct set of connection details); `0` turns pooling off |
+| `QUERYAPIGATE_POOL_SIZE` | `8` | idle connections kept **per connection** (per distinct set of connection details); `0` turns pooling off |
 | `QUERYAPIGATE_POOL_IDLE_TIMEOUT` | `300` | seconds an idle connection may wait for reuse before it's closed |
 
 The important detail: **the pool limits idle connections, not concurrent ones.** Each request in progress uses its own
@@ -24,11 +24,12 @@ queries of `SELECT pg_sleep(0.5)` sent at once; connections counted in PostgreSQ
 
 | | During the burst | Afterwards (idle) | `SELECT 1`, median |
 |---|---|---|---|
-| `QUERYAPIGATE_POOL_SIZE=5` (default) | 8 | 5 | 1.8 ms |
+| `QUERYAPIGATE_POOL_SIZE=5` | 8 | 5 | 1.8 ms |
 | `QUERYAPIGATE_POOL_SIZE=0` | 8 | 0 | 6.6 ms |
 
 - During the burst, **8** connections - one per thread; the other 12 requests waited for a thread, not a connection.
-- Afterwards, the pool kept **5** and closed the other 3.
+- Afterwards, the pool kept **5** and closed the other 3. With the default of 8 - one per thread - it keeps all 8, so
+  a busy server never closes a connection only to open another for the next request.
 - Without the pool, every request paid for a new connection: about 5 ms more here, on the same machine. Over a network,
   with TLS and authentication, it's typically tens of milliseconds.
 

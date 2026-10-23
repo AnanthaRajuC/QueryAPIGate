@@ -622,7 +622,8 @@ class MongoTests(unittest.TestCase):
         path = os.path.join(self.tmp.name, 'many.parquet')
         with open(path, 'wb') as f:
             f.write(res.get_data())
-        self.assertEqual(duckdb.sql(f"SELECT count(*), count(late), max(n) FROM '{path}'").fetchone(), (2500, 1, 2499))
+        found = duckdb.sql(f"SELECT count(*), count(late), max(n) FROM '{path}'").fetchall()  # 2.0: no fetchone()
+        self.assertEqual(found, [(2500, 1, 2499)])
 
     def test_a_streamed_find_keeps_to_the_time_limit(self):
         self.mongo.queryapigate_it_slow.insert_many([{'s': 'x' * 40 + str(i)} for i in range(100_000)])

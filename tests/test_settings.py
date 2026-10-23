@@ -35,7 +35,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 92)  # two rows have no variable of their own
+        self.assertEqual(len(rows), 93)  # two rows have no variable of their own
         if not TEST_DATABASE_URL:  # a suite run against Postgres (tests/__init__.py) reports that backend here
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['value'], 'SQLite (queryapigate.db)')
             self.assertEqual(rows['QUERYAPIGATE_DATABASE_URL']['source'], 'default')
@@ -52,6 +52,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['source'], 'default')
         self.assertEqual(rows['QUERYAPIGATE_MCP_PORT']['value'], '5001')
         self.assertEqual(rows['QUERYAPIGATE_MCP_MAX_ROWS']['value'], '200 rows')
+        self.assertEqual(rows['QUERYAPIGATE_POOL_SIZE']['value'], '8')
+        self.assertEqual(rows['QUERYAPIGATE_METADATA_CACHE_TTL']['value'], 'off')
 
     def test_mcp_section_reflects_the_environment(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '6100', 'QUERYAPIGATE_MCP_MAX_ROWS': '50'}):
