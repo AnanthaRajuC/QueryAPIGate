@@ -1,6 +1,6 @@
 # QueryAPIGate
 
-### Turn SQL queries into secure, governed REST APIs.
+### Turn SQL into secure, governed REST APIs - and MCP tools for AI agents.
 
 <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;margin-bottom:1.2em">
 <iframe src="https://www.youtube-nocookie.com/embed/WWImFj4m95o" title="QueryAPIGate: demo" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>
@@ -14,7 +14,11 @@ or Parquet. Save a query once and it becomes a versioned endpoint
 with typed, injection-safe parameters and run history - without writing a controller, a repository layer,
 pagination, auth or serialization boilerplate for it.
 
-Write SQL. Configure the query. Apply access controls. Get an API.
+The same saved query is also a tool an AI agent can call over MCP - so an agent reaches your data through the exact
+same governance as any app: read-only by default, column-masked, rate-limited and audited, enforced in the gateway
+where no prompt can override it.
+
+Write SQL. Configure the query. Apply access controls. Get an API - and an MCP tool.
 
 ## See it in one request
 
@@ -51,6 +55,9 @@ guide](documentation/INSTALLATION_AND_SETUP.md); with Docker, `docker compose up
   allow-lists, rate limiting, IP allowlisting, key expiry, and named administrators with roles, so the audit log
   says who changed what - see [Authentication and permissions](documentation/API.md#authentication-and-permissions)
   and [Administrators](documentation/API.md#administrators-and-admin-roles).
+- **A governed MCP server for AI agents.** The same saved queries become MCP tools, and ad-hoc SQL over MCP is always
+  read-only - so an AI agent gets the same identity, grants, column masking and audit as any app, enforced in the
+  gateway and not asked of the model; writes wait for a person's approval. See [the MCP server](documentation/MCP.md).
 - **Read-only by default.** A single-statement SQL guard blocks writes and multi-statement injection unless
   a connection or key explicitly opts in, narrowed further to specific write operations if needed.
 - **Handles small and huge results the same way.** Paginated JSON/CSV/XML/YAML/XLSX/Parquet for typical results,

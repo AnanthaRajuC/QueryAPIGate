@@ -67,6 +67,30 @@ API Consumer
 This lets an organization hand an external client a key that can only ever reach one named query - never
 arbitrary SQL and never a whole connection - while internal callers keep broader, connection-level access.
 
+## MCP server for AI agents
+
+The same saved queries are also tools an AI agent can call over MCP (the Model Context Protocol), served by a
+dedicated process (`queryapigate mcp`). It is the same governed core as REST, so an agent gets the same identity,
+grants, column masking, limits and audit as any app - enforced in the gateway, never asked of the model. It is how
+you let an agent query production data without handing it a database connection.
+
+- **Saved queries as self-describing tools.** Each published query is an MCP tool carrying its parameters, their
+  types, descriptions and an example, and the tables it reads - so an agent sees what each argument means, not just a
+  name. A query can be hidden from MCP (`mcp: false`) while it keeps serving over REST.
+- **Read-only by default; writes with approval.** The ad-hoc `execute_sql`, `list_tables` and `describe_table` tools
+  are forced read-only regardless of the key's own write grant. Agent writes are held as requests and run only once a
+  person approves them, with exactly the arguments shown (ADR 0008).
+- **Masking-aware metadata.** `describe_table` and schema discovery honour column masking - a masked or dropped
+  column is flagged, never shown as readable - so an agent can't even learn that hidden data exists.
+- **Standard OAuth.** The MCP server is an OAuth 2.0 protected resource (RFC 9728): an agent signs in through your
+  identity provider, and the token's audience is bound to the MCP server's own URL, so a token issued for it can't be
+  replayed against REST or the database.
+- **Every call recorded.** MCP runs land in the same run history, per-key metrics and tamper-evident audit log as
+  every other caller.
+
+The MCP server's own reference - tools, transport, configuration - is [MCP server](MCP.md); to connect a client, see
+[Let an AI agent call your saved queries via MCP](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/24-let-an-agent-call-your-queries-via-mcp.md).
+
 ## Saved, versioned queries
 
 A saved query bundles SQL, name, description, parameters, author, version, permissions and (optionally) cache

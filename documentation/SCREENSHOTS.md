@@ -31,6 +31,15 @@ SQL editor, the demo video and the architecture.
 </table>
 
 <p align="center">
+  <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/mcp.png">
+    <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/mcp.png"
+         alt="The MCP server screen: your saved queries listed as tools an AI agent can call over MCP, each marked read-only with its parameters and description and a 30-day MCP-activity column; above the list, the connect-a-client config snippet with the MCP server URL and X-API-Key header, and a reachability check" width="820">
+  </a>
+  <br>
+  <sub>MCP server: your saved queries as governed tools for AI agents - read-only by default, with the connect snippet and a reachability check, the same identity, masking and audit as every other caller.</sub>
+</p>
+
+<p align="center">
   <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png">
     <img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png"
          alt="The Workspaces screen (experimental): three workspaces - catalogue, default (this tab's) and payments - with their descriptions, member counts and Work here, edit and remove actions; below, the members of payments, bea as owner and dmitri as developer, each role changeable, and a form to add a member. The sidebar's workspace switcher sits under the wordmark" width="820">
@@ -43,7 +52,7 @@ SQL editor, the demo video and the architecture.
 <tr>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with All/Active/Inactive/Deleted tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with their status, each connection's live usage (queries run, failures, average latency), and Query, edit and delete actions">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png" alt="Connections screen with All/Active/Inactive/Deleted tabs, listing ClickHouse, MySQL, PostgreSQL and SQLite connections with their status, each connection's live usage (queries run, failures, average latency), a 30-day activity sparkline per connection, and Query, edit and delete actions">
 </a>
 <br><sub>Manage connections across every supported database, with live usage per connection</sub>
 </td>
@@ -55,13 +64,13 @@ SQL editor, the demo video and the architecture.
 </td>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/api-keys.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/api-keys.png" alt="API keys screen showing keys created from roles and scoped to a collection (shown as a dashed name/ tag), an expiring partner key, per-key rate limits, and each key's last-used time and live usage">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/api-keys.png" alt="API keys screen showing keys created from roles and scoped to a collection (shown as a dashed name/ tag), an expiring partner key, per-key rate limits, each key's last-used time and live usage, and a 30-day activity sparkline per key">
 </a>
 <br><sub>Per-key permissions: connections, specific saved queries, expiry, rate limits - and what each key has actually done</sub>
 </td>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png" alt="Roles screen listing reusable permission templates - connections, read/write access, rate limit and IP allowlisting - with a New key from this shortcut">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png" alt="Roles screen listing reusable permission templates - connections, read/write access, rate limit and IP allowlisting - with a 30-day activity sparkline for the keys created from each role and a New key from this shortcut">
 </a>
 <br><sub>Named roles: a reusable grant template, copied onto a key once at creation</sub>
 </td>
@@ -101,7 +110,7 @@ SQL editor, the demo video and the architecture.
 </td>
 <td width="50%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png" alt="Caching screen: response cache backend, entry count, hit rate, hits and misses, and the list of saved queries with a cache_ttl set">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png" alt="Caching screen: response cache backend, entry count, hit rate, hits and misses, and the list of saved queries with a cache_ttl set, each with a 30-day activity sparkline">
 </a>
 <br><sub>Caching: live hit rate for the response cache backing every saved query's <code>cache_ttl</code></sub>
 </td>

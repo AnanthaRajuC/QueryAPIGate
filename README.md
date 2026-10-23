@@ -9,7 +9,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AnanthaRajuC/QueryAPIGate/badge)](https://scorecard.dev/viewer/?uri=github.com/AnanthaRajuC/QueryAPIGate)
 [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md#slsa-level)
 
-### Turn SQL queries into secure, governed REST APIs.
+### Turn SQL into secure, governed REST APIs - and MCP tools for AI agents.
 
 [**Full documentation**](https://AnanthaRajuC.github.io/QueryAPIGate/)
 
@@ -88,6 +88,11 @@ backend service written around each query. QueryAPIGate makes the query itself t
 a versioned endpoint with typed parameters, governed by who may call it, how often and what they may see - and the same
 query is an MCP tool for AI agents, a live event stream and a scheduled export.
 
+That MCP surface is a reason in itself: it's how you let an AI agent query production data without handing it a
+database connection. The agent sees only governed tools, ad-hoc SQL over MCP is always read-only, writes wait for a
+person's approval, and the same masking, limits and audit apply - the limits live in the gateway, where no prompt can
+talk its way around them. One governed core, two front doors that matter most: REST for your apps, MCP for your agents.
+
 It doesn't replace an application backend; it removes the boilerplate when the requirement is "expose this query
 safely". Use cases, how it compares to PostgREST, Hasura and others, and the thinking behind it:
 [why QueryAPIGate](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/WHY.md).
@@ -98,14 +103,15 @@ safely". Use cases, how it compares to PostgREST, Hasura and others, and the thi
   injection-safe parameters, drafts and publishing, run history.
 - **[Scoped API keys, roles and collections](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#authentication-and-permissions)** - per
   connection, per query or per collection; expiry, IP allow-lists, rate limits, quotas, table allow-lists.
+- **[A governed MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as self-describing tools,
+  read-only ad-hoc SQL, masking-aware schema discovery, OAuth sign-in, and write tools that wait for a person's
+  approval - the same grants, masking and audit as every other caller.
 - **[Named administrators and SSO](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#administrators-and-admin-roles)** - admin roles and
   tokens, Console sign-in through your identity provider, signed-in users' JWTs.
 - **[Workspaces](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#workspaces)** (experimental) - several teams on one server,
   each running its own connections, queries and keys, and administering nothing of another's.
 - **[Column masking](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#column-masking)** - hash, mask or drop what a caller mustn't see, traced
   through the SQL to the source column.
-- **[An MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as tools, OAuth sign-in, write tools that
-  wait for a person's approval.
 - **[Eight database types, and files](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix)** -
   PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and MongoDB; H2 and JDBC; Parquet, CSV and JSON on S3, GCS, R2 or disk.
 - **[Eight output formats, and streaming](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#streaming-exports)** - JSON, NDJSON, XML, YAML, CSV,

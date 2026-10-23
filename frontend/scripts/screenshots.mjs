@@ -192,6 +192,8 @@ await go('/access-map', 'table');
 await shot('access-map', 900, 1820); // a column per key
 await go('/caching', 'h1');
 await shot('caching', 760);
+await go('/mcp', '#mcp-tools table tbody tr');
+await shot('mcp', 1240);
 await go('/metrics', '.stat-tiles');
 await shot('metrics');
 await go('/audit-log', 'table.grid tbody tr');
