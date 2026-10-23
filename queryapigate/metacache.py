@@ -21,7 +21,7 @@ from . import config, db
 _MAX_ENTRIES = 4096  # past this the cache starts over, so many distinct keys or queries can't grow it without bound
 
 _lock = threading.Lock()
-_entries = {}  # (kind, store target, key) -> (expires at, rows)
+_entries: dict[tuple, tuple] = {}  # (kind, store target, key) -> (expires at, rows)
 _generation = 0  # bumped by clear(): a read that started before a clear never stores what it read
 
 

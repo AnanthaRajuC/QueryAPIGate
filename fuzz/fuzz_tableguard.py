@@ -1,5 +1,5 @@
-"""extract_tables gives a set of names or refuses with an ApiError (see fuzz/README.md) - a query whose tables can't
-be worked out must be refused, never let through."""
+"""extract_tables gives a frozenset of names or refuses with an ApiError (see fuzz/README.md) - a query whose tables
+can't be worked out must be refused, never let through."""
 import sys
 
 import atheris
@@ -19,7 +19,7 @@ def TestOneInput(data):
         tables = tableguard.extract_tables(sql, dialect)
     except ApiError:
         return
-    assert isinstance(tables, set) and all(isinstance(t, str) and t == t.lower() for t in tables), tables
+    assert isinstance(tables, frozenset) and all(isinstance(t, str) and t == t.lower() for t in tables), tables
 
 
 if __name__ == '__main__':
