@@ -28,6 +28,7 @@ itself: `*.email` (or `customer_view.email`) with an action, or `keep` to say it
 
 What masking doesn't stop - filtering or grouping on a masked column (`WHERE email = '...'`) - is in ADR 0005.
 """
+import collections
 import fnmatch
 import hashlib
 import hmac
@@ -406,22 +407,48 @@ class _Masked:
 # --------------------------------------------------------------------------------------
 
 SCHEMA_TTL = 60  # seconds a connection's schema is reused for tracing before it is read again
+TRACE_CACHE_SIZE = 256  # statements kept traced per connection schema - bounds what varied ad-hoc SQL can hold
 _schemas: dict = {}
 _schemas_lock = threading.Lock()
 
 
-def _tables(connection_name, database=None):
+def _schema(connection_name, database=None):
+    """(tables, traces) for a connection: its schema, reused for SCHEMA_TTL, and the statements already traced against
+    exactly that schema. The traces live in the schema's own cache entry, so they are dropped with it - when it
+    expires, or forget_schema() runs after the connection changes - and a trace never outlives the schema it was
+    computed from."""
     from . import schema
     key = (connection_name, database)
     now = time.monotonic()
     with _schemas_lock:
         cached = _schemas.get(key)
         if cached is not None and now - cached[0] < SCHEMA_TTL:
-            return cached[1]
+            return cached[1], cached[2]
     tables = schema.fetch_schema(connection_name, database)['tables']
+    traces = collections.OrderedDict()
     with _schemas_lock:
-        _schemas[key] = (now, tables)
-    return tables
+        _schemas[key] = (now, tables, traces)
+    return tables, traces
+
+
+def _cached_trace(traces, sql, dialect, tables):
+    """trace() of `sql` - after returning_as_select() - computed once per schema and reused. Tracing is a pure function
+    of the statement, the dialect and the schema, and costs milliseconds of sqlglot lineage work, while a saved
+    query's SQL never changes between calls: repeating it on every call was most of a masked call's time. Cached
+    frozen (a tuple of (column, frozenset of Sources)) so nothing can change it for the next caller. A statement that
+    can't be traced isn't cached: it raises again, every time."""
+    key = (dialect, sql)
+    with _schemas_lock:
+        if key in traces:
+            traces.move_to_end(key)
+            return traces[key]
+    traced = trace(returning_as_select(sql, dialect), dialect, tables)
+    frozen = None if traced is None else tuple((name, frozenset(sources)) for name, sources in traced)
+    with _schemas_lock:
+        traces[key] = frozen
+        while len(traces) > TRACE_CACHE_SIZE:
+            traces.popitem(last=False)
+    return frozen
 
 
 def forget_schema(connection_name=None):
@@ -492,8 +519,11 @@ def prepare(rules, sql, connection_name, dialect, database=None):
     if dialect == 'mongo':
         raise _refuse("Column masking isn't supported for MongoDB connections yet, so a caller with mask rules is "
                       'refused on them')
-    sql = returning_as_select(sql, dialect)
-    traced = trace(sql, dialect, _tables(connection_name, database) if dialect in _DIALECT_MAP else [])
+    if dialect in _DIALECT_MAP:
+        tables, traces = _schema(connection_name, database)
+        traced = _cached_trace(traces, sql, dialect, tables)
+    else:
+        traced = trace(returning_as_select(sql, dialect), dialect, [])  # refused for this dialect
     if traced is None:
         return None
     actions, fired = plan(rules, traced)

@@ -49,6 +49,37 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **`QUERYAPIGATE_METADATA_CACHE_TTL`: reuse the key, saved query and connection a call reads, for that many
+  seconds.** Off by default. Every call reads three rows from the store before it runs; with this set, a server keeps
+  them in memory instead. It caches the rows, never a decision: whether a key is active, expired, used from an
+  allowed address or inside a rotation's grace period is still checked on every call. A change made through the same
+  server clears its cache at once; one made through another instance, another worker or the CLI is seen up to one
+  TTL later - so a key revoked there keeps working here for that long. Measured on PostgreSQL with
+  `QUERYAPIGATE_METADATA_CACHE_TTL=5`: 10-20% more requests a second from one container, a single call 1.8 ms to
+  1.2 ms, and 30% more with eight workers (2,093 to 2,732 lookups a second). See
+  [Performance](documentation/PERFORMANCE.md#the-metadata-cache).
+
+### Changed
+- **`QUERYAPIGATE_POOL_SIZE` defaults to 8, up from 5** - one idle connection per thread of the Docker image. With 5,
+  a server busy on all eight threads closed three connections as each batch of calls finished, then opened new ones
+  for the next. A database now sees up to 8 idle connections per connection and process, not 5; set
+  `QUERYAPIGATE_POOL_SIZE=5` to keep the old number.
+- **A saved query's run reads the store less.** It read the query three times - a check that it exists, its header,
+  its versions - and now reads it once. History and event rows are written in one statement per batch, not one per
+  row. On PostgreSQL, a call's transactions on the store went from about 5.5 to about 2.6, and one container served
+  13% more lookups a second (326 to 368, 32 callers).
+- **Masked and table-restricted calls are several times faster.** Column masking traced each statement's result
+  columns to their sources (sqlglot lineage) on every call, and `allowed_tables` parsed the statement on every call -
+  milliseconds of work for SQL that, for a saved query, never changes. Both are now worked out once and reused: a
+  statement's trace is kept with the connection's schema it was traced against (and dropped with it, when the schema
+  is read again or the connection changes), and the tables a statement reads are kept per statement, dialect and
+  connection defaults. Measured on the example APIs (one worker, eight threads): a key with masking and
+  `allowed_tables` went from 27 to 210 requests a second on a join query (p50 35 ms to 4.6 ms; p99 at 32 concurrent
+  callers 2.0 s to 0.2 s), and from 84 to 309 on a primary-key lookup - the same as a key without them. What is
+  masked, and what is refused, is unchanged; a statement that can't be traced or checked is refused every time, as
+  before. Both caches are bounded, so varied ad-hoc SQL can't grow them.
+
 ## [0.41.0] - 2026-10-20
 
 Trino joins the native connection types (experimental): one connection federates every catalog behind a Trino

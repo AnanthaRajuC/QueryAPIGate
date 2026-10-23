@@ -649,6 +649,13 @@ class _PgConnection:
         cursor.execute(_pg_sql(sql), _pg_params(params))
         return cursor
 
+    def executemany(self, sql, seq_of_params):
+        """Like sqlite3's: one statement, many parameter sets - sent to the server a page at a time, not one round trip
+        each (psycopg2's own executemany() still makes one per set)."""
+        import psycopg2.extras
+        with self.raw.cursor() as cursor:
+            psycopg2.extras.execute_batch(cursor, _pg_sql(sql), [_pg_params(p) for p in seq_of_params], page_size=100)
+
     def executescript(self, script):
         with self.raw.cursor() as cursor:
             cursor.execute(script)
@@ -1164,6 +1171,9 @@ def transaction(append_only=False, target=None):
             conn.execute('SELECT pg_advisory_xact_lock(?)', (_PG_LOCK_ID,))
         yield conn
         conn.execute('COMMIT')
+        if not append_only:
+            from . import metacache
+            metacache.clear()  # a key, query or connection may just have changed: none is served stale from here
     except BaseException:
         _local.after_commit = []  # rolled back: what was to follow it never happened
         try:

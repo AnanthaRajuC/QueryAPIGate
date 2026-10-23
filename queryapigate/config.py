@@ -24,7 +24,7 @@ DEFAULT_EVENTS_MAX_STREAMS = 4  # concurrent GET /events streams the main server
 DEFAULT_EVENTS_RETENTION_HOURS = 24  # how long the event log keeps an event (ADR 0020)
 AUDIT_LOG_LIMIT = 500  # administrative-action entries remembered across the whole server
 DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
-DEFAULT_POOL_SIZE = 5  # idle connections kept per distinct connection
+DEFAULT_POOL_SIZE = 8  # idle connections kept per distinct connection - the Docker image's 8 threads
 DEFAULT_POOL_IDLE_TIMEOUT = 300.0  # seconds
 DEFAULT_SLOW_QUERY_THRESHOLD = 1.0  # seconds
 DEFAULT_ALERT_ERROR_RATE = 20  # percent of a saved query's recent runs failing before it is an alert (alerts.py)
@@ -238,6 +238,16 @@ def pool_size():
         return max(0, int(os.environ.get('QUERYAPIGATE_POOL_SIZE', DEFAULT_POOL_SIZE)))
     except ValueError:
         return DEFAULT_POOL_SIZE
+
+
+def metadata_cache_ttl():
+    """Seconds an API key, saved query or connection read from the store is reused (QUERYAPIGATE_METADATA_CACHE_TTL,
+    metacache.py). 0, the default, reads them on every request. A change made through this process is seen at once;
+    one made through another process (another instance, the CLI) up to this long later."""
+    try:
+        return max(0.0, float(os.environ.get('QUERYAPIGATE_METADATA_CACHE_TTL', 0)))
+    except ValueError:
+        return 0.0
 
 
 def pool_idle_timeout():
@@ -1402,7 +1412,10 @@ def describe_settings():
             row('Pool size', 'Idle connections kept per connection. 0 disables pooling.',
                 'QUERYAPIGATE_POOL_SIZE', str(pool_size())),
             row('Idle timeout', 'How long an idle pooled connection is kept before it is closed.',
-                'QUERYAPIGATE_POOL_IDLE_TIMEOUT', _seconds(pool_idle_timeout()))]},
+                'QUERYAPIGATE_POOL_IDLE_TIMEOUT', _seconds(pool_idle_timeout())),
+            row('Metadata cache', 'How long a key, saved query or connection read from the store is reused. '
+                '0 reads them on every request.', 'QUERYAPIGATE_METADATA_CACHE_TTL',
+                _seconds(metadata_cache_ttl() or None) or 'off')]},
         {'id': 'traffic', 'title': 'Rate limits & CORS',
          'description': 'Per-client throttling and browser origins allowed to call the API.', 'rows': [
             row('Rate limit', 'Requests allowed per client. API keys and roles can set their own.',

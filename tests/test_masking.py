@@ -276,6 +276,93 @@ class RealSchemaTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'mask_unresolvable')
 
 
+class TraceCacheTests(unittest.TestCase):
+    """prepare() traces a statement once per connection schema and reuses it: tracing is a pure function of the SQL,
+    the dialect and the schema, and was most of a masked call's time. Against a real SQLite schema."""
+
+    RULES = masking.validate_rules([{'column': 'customers.email', 'action': 'hash'}])
+    SQL = 'SELECT c.id, c.email, o.total FROM customers c JOIN orders o ON o.customer_id = c.id'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        lite = os.path.join(self.tmp.name, 'shop.db')
+        conn = sqlite3.connect(lite)
+        conn.execute('CREATE TABLE customers (id INTEGER, email TEXT, phone TEXT)')
+        conn.execute('CREATE TABLE orders (id INTEGER, customer_id INTEGER, total INTEGER)')
+        conn.commit()
+        conn.close()
+        write_connections({'lite': {'db': 'sqlite', 'database': lite, 'active': True}})
+        create_app()
+        masking.forget_schema()
+        self.addCleanup(masking.forget_schema)
+        traced = mock.patch.object(masking, 'trace', wraps=masking.trace)
+        self.trace = traced.start()
+        self.addCleanup(traced.stop)
+
+    def prepare(self, sql=None):
+        return masking.prepare(self.RULES, sql or self.SQL, 'lite', 'sqlite')
+
+    def test_a_statement_is_traced_once_and_reused(self):
+        first, second = self.prepare(), self.prepare()
+        self.assertEqual(self.trace.call_count, 1)
+        self.assertEqual(first.actions, [None, 'hash', None])
+        self.assertEqual((second.actions, second.fired), (first.actions, first.fired))
+
+    def test_cached_and_uncached_plans_agree(self):
+        tables = schema.fetch_schema('lite')['tables']
+        for sql in (self.SQL, 'SELECT email AS contact FROM customers',
+                    'WITH x AS (SELECT * FROM customers) SELECT * FROM x',
+                    'SELECT email FROM customers UNION SELECT phone FROM customers'):
+            with self.subTest(sql=sql):
+                direct = masking.plan(self.RULES, masking.trace(sql, 'sqlite', tables))
+                for _ in range(2):  # the first fills the cache, the second reads it
+                    plan_ = self.prepare(sql)
+                    self.assertEqual((plan_.actions, plan_.fired), direct)
+
+    def test_the_cached_trace_is_frozen(self):
+        traced = self.prepare().traced
+        self.assertIsInstance(traced, tuple)
+        self.assertTrue(all(isinstance(sources, frozenset) for _, sources in traced))
+
+    def test_forget_schema_drops_the_traces(self):
+        self.prepare()
+        masking.forget_schema('lite')
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 2)
+
+    def test_a_trace_expires_with_its_schema(self):
+        now = [1000.0]
+        with mock.patch.object(masking.time, 'monotonic', lambda: now[0]):
+            self.prepare()
+            now[0] += masking.SCHEMA_TTL - 1
+            self.prepare()
+            self.assertEqual(self.trace.call_count, 1)
+            now[0] += 2  # the schema is read again, and the statement traced against it
+            self.prepare()
+            self.assertEqual(self.trace.call_count, 2)
+
+    def test_a_statement_that_cant_be_traced_is_refused_every_time(self):
+        for _ in range(2):
+            with self.assertRaises(masking.ApiError) as caught:
+                self.prepare('SELECT * FROM nowhere')
+            self.assertEqual(caught.exception.code, 'mask_unresolvable')
+        self.assertEqual(self.trace.call_count, 2)
+
+    def test_the_cache_is_bounded(self):
+        with mock.patch.object(masking, 'TRACE_CACHE_SIZE', 2):
+            for sql in ('SELECT id FROM customers', 'SELECT email FROM customers', 'SELECT phone FROM customers'):
+                self.prepare(sql)
+            self.prepare('SELECT phone FROM customers')  # kept: the most recent
+            self.assertEqual(self.trace.call_count, 3)
+            self.prepare('SELECT id FROM customers')  # evicted: the oldest
+            self.assertEqual(self.trace.call_count, 4)
+            self.assertLessEqual(len(masking._schemas[('lite', None)][2]), 2)
+
+
 class ReturningTests(unittest.TestCase):
     """What an agent's write returns (ADR 0008) is masked like a read: its RETURNING clause traced as the SELECT that
     returns the same columns from the table written - and refused when the change joins other tables in."""

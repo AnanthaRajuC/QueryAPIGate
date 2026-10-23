@@ -15,7 +15,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, duckfiles, history, scope
+from . import config, db, duckfiles, history, metacache, scope
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -325,9 +325,11 @@ def get_connection(connection_name):
     """Return the usable (active, env-expanded, password-decrypted) details of a named connection."""
     if not isinstance(connection_name, str) or not connection_name:
         raise ApiError('Connection name is missing', code='connection_required')
-    row = db.connection().execute(
+    workspace = scope.current()
+    found = metacache.rows('connection', (workspace, connection_name), lambda: db.connection().execute(
         'SELECT db, active, created_at, updated_at, details_json FROM connections WHERE workspace = ? AND name = ?',
-        (scope.current(), connection_name)).fetchone()
+        (workspace, connection_name)).fetchall())
+    row = found[0] if found else None
     if not row:
         raise ApiError(f"Connection '{connection_name}' not found", 404, code='connection_not_found')
     if not row['active']:
@@ -467,7 +469,7 @@ def saved_query_exists(name):
                                    (scope.current(), name)).fetchone() is not None
 
 
-def resolve_saved_file(ref):
+def resolve_saved_file(ref, check_exists=True):
     """Resolve a client-supplied reference to an existing saved query, returning its canonical name.
 
     No real file path is involved once saved queries live in SQLite - but every caller already treats this
@@ -476,6 +478,8 @@ def resolve_saved_file(ref):
     ("cht" or "cht.json"), a path relative to the home folder ("saved_sql/cht.json") or an absolute path -
     for backward compatibility; anything that doesn't reduce to a single valid name (a path escaping
     saved_sql/, a name containing a separator) is rejected the same way an out-of-bounds path used to be.
+    ``check_exists=False`` skips the lookup for a caller that loads the query next anyway (load_versions() raises the
+    same 404), saving a round trip on every run.
     """
     if not isinstance(ref, str) or not ref.strip():
         raise ApiError('Filename is missing')
@@ -492,8 +496,8 @@ def resolve_saved_file(ref):
         candidate = candidate[:-len('.json')]
     if '/' in candidate or not _FILENAME_RE.match(candidate) or candidate.startswith('.'):
         raise ApiError('Only .json files inside the saved_sql folder can be accessed', 403)
-    if db.connection().execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?',
-                               (scope.current(), candidate)).fetchone() is None:
+    if check_exists and db.connection().execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?',
+                                                (scope.current(), candidate)).fetchone() is None:
         raise ApiError(f"Saved query '{candidate}' not found", 404, code='query_not_found')
     return candidate
 
@@ -519,11 +523,19 @@ def load_versions(name, with_history=True):
     if with_history:
         history.flush()
     workspace = scope.current()
-    row = db.connection().execute(
-        'SELECT collection, example, published_version FROM saved_queries WHERE workspace = ? AND name = ?',
-        (workspace, name)).fetchone()
-    if row is None:
+    # The query and its versions in one round trip: a run reads this on every call. A query with no versions yet
+    # still has its one row, with every v.* column NULL.
+    def load():
+        return db.connection().execute(
+            'SELECT q.collection, q.example, q.published_version, v.version, v.uuid, v.status, v.created_at, '
+            'v.last_modified_at, v.fields_json FROM saved_queries q LEFT JOIN saved_query_versions v '
+            'ON v.workspace = q.workspace AND v.query_name = q.name WHERE q.workspace = ? AND q.name = ? '
+            'ORDER BY v.version', (workspace, name)).fetchall()
+    # Only a run (no history) may be served from metacache.py: what the Console reads while editing is always fresh.
+    rows = metacache.rows('saved_query', (workspace, name), load) if not with_history else load()
+    if not rows:
         raise ApiError(f"Saved query '{name}' not found", 404, code='query_not_found')
+    row = rows[0]
     content = {}
     if row['collection'] is not None:
         content['collection'] = row['collection']
@@ -531,11 +543,9 @@ def load_versions(name, with_history=True):
         content['example'] = True
     if row['published_version'] is not None:
         content['published_version'] = row['published_version']
-    version_rows = db.connection().execute(
-        'SELECT version, uuid, status, created_at, last_modified_at, fields_json '
-        'FROM saved_query_versions WHERE workspace = ? AND query_name = ? ORDER BY version',
-        (workspace, name)).fetchall()
-    for v in version_rows:
+    for v in rows:
+        if v['version'] is None:
+            continue
         try:
             fields = json.loads(v['fields_json'])
         except json.JSONDecodeError:

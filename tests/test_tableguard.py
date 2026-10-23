@@ -113,6 +113,41 @@ class ExtractTablesTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 500)
 
 
+class ExtractTablesCacheTests(unittest.TestCase):
+    """extract_tables() is cached - a pure function of its arguments, and a saved query's SQL never changes - without
+    letting a cached answer be changed, mixing up connection defaults, or remembering a refusal."""
+
+    def setUp(self):
+        tableguard._extract_tables.cache_clear()
+        self.addCleanup(tableguard._extract_tables.cache_clear)
+
+    def test_a_query_is_parsed_once(self):
+        sql = 'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id'
+        self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'orders', 'customers'})
+        self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'orders', 'customers'})
+        info = tableguard._extract_tables.cache_info()
+        self.assertEqual((info.misses, info.hits), (1, 1))
+
+    def test_the_answer_cant_be_changed(self):
+        found = tableguard.extract_tables('SELECT * FROM orders', 'postgres')
+        self.assertIsInstance(found, frozenset)
+        with self.assertRaises(AttributeError):
+            found.add('secret')
+
+    def test_dialect_and_defaults_are_part_of_the_key(self):
+        sql = 'SELECT * FROM orders'
+        self.assertEqual(tableguard.extract_tables(sql, 'trino', 'hive', 'sales'), {'hive.sales.orders'})
+        self.assertEqual(tableguard.extract_tables(sql, 'trino', 'tpch', 'tiny'), {'tpch.tiny.orders'})
+        self.assertEqual(tableguard.extract_tables(sql, 'postgres'), {'orders'})
+
+    def test_a_refusal_is_not_cached(self):
+        for _ in range(2):
+            with self.assertRaises(ApiError) as caught:
+                tableguard.extract_tables("SELECT * FROM read_parquet('s3://bucket/x.parquet')", 'duckdb')
+            self.assertEqual(caught.exception.code, 'table_not_allowed')
+        self.assertEqual(tableguard._extract_tables.cache_info().currsize, 0)
+
+
 class ValidateSqlAllowedTablesTests(unittest.TestCase):
     """sqltools.validate_sql()'s own allowed_tables enforcement - unit-level, no HTTP/engine.py involved."""
 

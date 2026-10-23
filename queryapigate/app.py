@@ -961,7 +961,7 @@ def _run_saved(ref, body, url_params):
     A draft - a version newer than the published one, or any version of a query with none published - runs only
     for the admin key, and only when asked for by number (to test it before publishing). For anyone else it
     doesn't exist: the same 404 as a version number that was never used, so drafts can't be discovered."""
-    path = store.resolve_saved_file(ref)
+    path = store.resolve_saved_file(ref, check_exists=False)  # load_versions() 404s the same, one read fewer
     content = store.load_versions(path, with_history=False)
     requested = get_int(request.args.get('version') or body.get('version'), 'version')
     if requested is not None and store.is_draft(content, requested) and not g.permission.admin:

@@ -21,6 +21,7 @@ nav:
   - Installation: documentation/INSTALLATION_AND_SETUP.md
   - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
+  - Performance: documentation/PERFORMANCE.md
   - Example APIs: documentation/EXAMPLES.md
   - A tour of the Console: documentation/SCREENSHOTS.md
   - API reference: documentation/API.md
