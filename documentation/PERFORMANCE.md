@@ -1,8 +1,8 @@
 # Performance
 
-> **For PostgreSQL, read [Performance, v2](PERFORMANCE_V2.md) instead.** It's a more careful run: pinned cores,
-> interleaved rounds with their ranges, open-loop load, a simulated network, and a profile. It also corrects two
-> figures on this page. A call's statements on the store went from 7 to 3, not "about 5.5 to about 2.6". And the
+> **For PostgreSQL, read [Performance, v3](PERFORMANCE_V3.md) instead.** It's a more careful run: pinned cores,
+> 5 interleaved rounds per comparison with their ranges, open-loop load, a simulated network, a measured round-trip
+> count, and a profile. It also corrects two figures on this page. A call's statements on the store went from 7 to 3, not "about 5.5 to about 2.6". And the
 > PostgreSQL throughput here is about half what that machine gives in a steady state.
 
 **The short answer:** QueryAPIGate adds a millisecond or two to a request, and almost none of that is the governance.

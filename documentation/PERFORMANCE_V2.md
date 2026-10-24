@@ -1,5 +1,9 @@
 # Performance, v2: an OLTP benchmark on PostgreSQL
 
+> **Superseded by [Performance, v3](PERFORMANCE_V3.md).** v3 reruns this page's 3-round blocks with 5 rounds,
+> calibrates the round-trip count, adds sizing, and fixes the overstatements a review of this page found. The
+> numbers below aren't wrong, but v3's are the ones to use.
+
 **The short answer.** With one gunicorn worker (as in the Docker image) in front of PostgreSQL, a saved query by
 primary key at 32 concurrent callers:
 
