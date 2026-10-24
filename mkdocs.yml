@@ -22,6 +22,7 @@ nav:
   - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Performance: documentation/PERFORMANCE.md
+  - Performance on PostgreSQL (v2): documentation/PERFORMANCE_V2.md
   - Example APIs: documentation/EXAMPLES.md
   - A tour of the Console: documentation/SCREENSHOTS.md
   - API reference: documentation/API.md
