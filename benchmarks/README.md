@@ -12,6 +12,7 @@ occasionally).
 | `latency.py` | General API overhead: p50/p95/p99 for a small `GET /q/<name>`/`POST /execute_sql` call | No |
 | `pooling.py` | How throughput and latency change as concurrent callers increase relative to the pool | Yes |
 | `caching.py` | Cache hit vs. miss latency delta for a `cache_ttl`-carrying saved query | No |
+| `oltp.py` | Two git refs side by side on PostgreSQL OLTP: throughput, latency against load, scale-out, where the time goes | Yes |
 
 Shared plumbing (`common.py`): a real queryapigate subprocess hit over real HTTP - not the Flask test
 client, so there's an actual separate OS process whose RSS (`/proc/<pid>/status`) can be sampled, the same
@@ -152,3 +153,29 @@ python benchmarks/caching.py mysql
 | ClickHouse | 2026-09-30 | Hit 6.9ms vs. miss 12.5ms median (1.8x); baseline query cost with no caching at all: 5.2ms - same shape as MySQL - see [results/caching-clickhouse-2026-09-30.md](results/caching-clickhouse-2026-09-30.md) |
 
 See `results/` for the full reports.
+
+---
+
+## `oltp.py` - two builds side by side on PostgreSQL
+
+The method and the results are in
+[documentation/PERFORMANCE_V2.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/PERFORMANCE_V2.md).
+Unlike the scripts above, it starts its own database - a pinned `postgres:16` with pgbench's schema at scale 100 -
+and puts each part on its own cores: gunicorn with `taskset`, the database and the load generator (oha, in Docker)
+with `--cpuset-cpus`. It compares two git refs, exported with `git archive` (`--base`, default v0.41.0; `--head`,
+default `origin/main`; and the head with `QUERYAPIGATE_METADATA_CACHE_TTL=5`). Every comparison is interleaved, in an
+order rotated each round.
+
+~~~bash
+pip install -e ".[server,postgres,flow]" py-spy
+python benchmarks/oltp.py --out /tmp/qag-oltp setup all teardown   # about 2.5 hours; --smoke for a 10-minute check
+python benchmarks/oltp_report.py /tmp/qag-oltp/results.jsonl       # every table, median and min-max per cell
+~~~
+
+Blocks can be run on their own (`setup env b1 b2 teardown`). Each one is described by its docstring: `b1`
+throughput, `b2` single-call latency, `b3` open-loop latency against offered load, `b4` scale-out, `b5` the 60 s
+cold path, `b6` the access log, `b7` a simulated network, `b8` mixed and hot-row writes, `b9` a py-spy profile,
+`b10` threads. `teardown` removes the container together with its data volume. The 2026-10-23 run is in
+`results/oltp-postgres-2026-10-23/`, apart from the raw access logs, which are too big to commit; the report keeps a
+per-second summary of them instead.
+
