@@ -15,11 +15,13 @@ PostgreSQL at the container's own address (not through Docker's userland port pr
 machine that changed speed mid-run shows.
 """
 import argparse
+import collections
 import glob
 import json
 import os
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import tarfile
@@ -109,6 +111,19 @@ def tree_cpu_s(root):
         except (FileNotFoundError, ProcessLookupError):
             pass
     return total
+
+
+def cpus_busy_s(spec):
+    """CPU seconds the given CPUs spent busy (not idle or iowait), from /proc/stat - whoever ran there."""
+    wanted = {f'cpu{c}' for c in cpu_list(spec)}
+    total = 0
+    with open('/proc/stat') as f:
+        for line in f:
+            name, *vals = line.split()
+            if name in wanted:
+                v = [int(x) for x in vals]
+                total += sum(v) - v[3] - v[4]  # everything but idle and iowait
+    return total / TICK
 
 
 def store_tx():
@@ -347,17 +362,18 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
         while not done.wait(2):
             freqs.append(mhz())
     sampler = threading.Thread(target=sample, daemon=True)
-    tx0, g0, p0, t0 = store_tx(), tree_cpu_s(master), pg_cpu_s(), time.time()
+    tx0, g0, p0, l0, t0 = store_tx(), tree_cpu_s(master), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
     done.set()
     wall = time.time() - t0
-    g1, p1 = tree_cpu_s(master), pg_cpu_s()
+    g1, p1, l1 = tree_cpu_s(master), pg_cpu_s(), cpus_busy_s(args.load_cpus)
     time.sleep(1.5)
     tx1 = store_tx()
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': scenario, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
            **_server_meta, **r, 'gw_cores': (g1 - g0) / wall, 'pg_cores': (p1 - p0) / wall,
+           'load_cores': (l1 - l0) / wall, 'load_cpus': len(cpu_list(args.load_cpus)),
            'store_tx_per_req': (tx1['qagstore'] - tx0['qagstore']) / n,
            'data_tx_per_req': (tx1['bench'] - tx0['bench']) / n,
            'mhz_gw': round(sum(f for f in freqs if f) / len(freqs)) if any(freqs) else None,
@@ -441,24 +457,24 @@ def b2():
     floor('b2', 'end')
 
 
-def capacity(build):
-    rows = [json.loads(line) for line in open(OUT / 'results.jsonl')]
-    vals = sorted(x['rps'] for x in rows if x.get('block') == 'b1' and x.get('build') == build
-                  and x.get('scenario') == 'lookup_plain')
-    return vals[len(vals) // 2]
-
-
 def b3():
-    """Open loop: fixed offered rates from 25% to 110% of b1's capacity, latency corrected for coordinated omission."""
+    """Open loop: fixed offered rates from 25% to 110% of each build's capacity, latency corrected for coordinated
+    omission. Capacity is measured first, in the same block: the median of 5 closed-loop rounds at 32 callers."""
     floor('b3', 'start')
+    builds = [args.head_label, args.head_label + '+cache']
+    caps = collections.defaultdict(list)
+    for r, order in rotations(builds, 5):
+        for build in order:
+            start(build)
+            caps[build].append(measure('b3cap', 'lookup_plain', c=32, secs=30, rnd=r)['rps'])
+    caps = {b: statistics.median(v) for b, v in caps.items()}
     fracs = (0.25, 0.5, 0.75, 0.9, 1.0, 1.1)
-    for build in [args.head_label, args.head_label + '+cache']:
-        cap = capacity(build)
-        for r in range(rounds(3)):
+    for r, order in rotations(builds, 5):
+        for build in order:
             start(build)
             for frac in fracs:
-                measure('b3', 'lookup_plain', c=128, secs=20, q=int(cap * frac), correction=True, rnd=r,
-                        warm=(frac == fracs[0]), extra={'capacity': cap, 'offered_frac': frac})
+                measure('b3', 'lookup_plain', c=128, secs=20, q=int(caps[build] * frac), correction=True, rnd=r,
+                        warm=(frac == fracs[0]), extra={'capacity': caps[build], 'offered_frac': frac})
     floor('b3', 'end')
 
 
@@ -467,7 +483,7 @@ def b4():
     floor('b4', 'start')
     for workers in (1, 2, 4, 8):
         for scenario in ['lookup_plain', 'write_writer']:
-            for r, order in rotations([args.head_label, args.head_label + '+cache'], 3):
+            for r, order in rotations([args.head_label, args.head_label + '+cache'], 5):
                 for build in order:
                     start(build, workers=workers)
                     measure('b4', scenario, c=64, secs=30, rnd=r)
@@ -502,7 +518,7 @@ def b7(delay='0.5ms'):
     sh('docker', 'exec', PG, 'tc', 'qdisc', 'add', 'dev', 'eth0', 'root', 'netem', 'delay', delay)
     try:
         for c in (1, 32):
-            for r, order in rotations(list(BUILDS), 3):
+            for r, order in rotations(list(BUILDS), 5):
                 for build in order:
                     start(build)
                     measure('b7', 'lookup_plain', c=c, secs=30, rnd=r, extra={'netem': delay})
@@ -515,7 +531,7 @@ def b8():
     """Reads and writes at once; writes on 99 hot rows."""
     floor('b8', 'start')
     keys = json.loads((OUT / 'keys.json').read_text())
-    for r in range(rounds(3)):
+    for r in range(rounds(5)):
         start(args.head_label)
         oha(URLS['lookup'], keys['plain'], c=8, secs=5)
         result = {}
@@ -559,16 +575,72 @@ def b9():
 def b10():
     """What threads buy one worker."""
     floor('b10', 'start')
-    for r, order in rotations([1, 2, 4, 8], 3):
+    for r, order in rotations([1, 2, 4, 8], 5):
         for threads in order:
             start(args.head_label, threads=threads)
             measure('b10', 'lookup_plain', c=32, secs=30, rnd=r)
     floor('b10', 'end')
 
 
+PROBE = r"""
+import random, sys, time
+import psycopg2
+conn = psycopg2.connect(sys.argv[1])
+conn.autocommit = True
+cur = conn.cursor()
+mode, secs = sys.argv[2], float(sys.argv[3])
+n, start = 0, time.perf_counter()
+while time.perf_counter() < start + secs:
+    aid = random.randint(1, 9_999_999)
+    if mode == 'four':  # what a saved query sends: see PERFORMANCE_V2.md, Round trips per call
+        cur.execute('BEGIN READ ONLY')
+        cur.execute('SET LOCAL statement_timeout = 30000')
+    cur.execute('SELECT aid, bid, abalance FROM pgbench_accounts WHERE aid = %s', (aid,))
+    cur.fetchall()
+    if mode == 'four':
+        cur.execute('ROLLBACK')
+    n += 1
+print((time.perf_counter() - start) / n * 1000)
+"""
+
+
+def probe(mode):
+    """ms per iteration of psycopg2 alone, on the gateway's cores: one statement, or the four a saved query sends."""
+    out = sh('taskset', '-c', args.gateway_cpus, sys.executable, '-c', PROBE,
+             f'postgresql://postgres:pw@{pg_ip()}:5432/bench', mode, str(seconds(10)))
+    return float(out.stdout.strip())
+
+
+def netem(delay):
+    sh('docker', 'exec', PG, 'tc', 'qdisc', 'del', 'dev', 'eth0', 'root')
+    if delay != '0ms':
+        sh('docker', 'exec', PG, 'tc', 'qdisc', 'add', 'dev', 'eth0', 'root', 'netem', 'delay', delay)
+
+
+def b11():
+    """Round trips per call, measured: single-call latency at 0, 0.5, 1 and 2 ms of netem delay, every build. The slope
+    of latency against the delay is how many round trips a call waits for - next to psycopg2 alone sending one
+    statement and the four a saved query sends, whose round trips are known."""
+    floor('b11', 'start')
+    builds = list(BUILDS)
+    try:
+        for r, order in rotations(['0ms', '0.5ms', '1ms', '2ms'], 3):
+            for delay in order:
+                netem(delay)
+                for mode in ('one', 'four'):
+                    record({'block': 'b11', 'scenario': f'probe_{mode}', 'netem': delay, 'round': r,
+                            'ms_per_call': probe(mode), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+                for build in builds[r % 3:] + builds[:r % 3]:
+                    start(build)
+                    measure('b11', 'lookup_plain', c=1, secs=20, rnd=r, extra={'netem': delay})
+    finally:
+        netem('0ms')
+    floor('b11', 'end')
+
+
 BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_pgbench, 'b1': b1, 'b2': b2,
-          'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10}
-ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'env']
+          'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11}
+ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
 def main():

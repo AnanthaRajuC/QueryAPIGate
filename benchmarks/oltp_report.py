@@ -86,8 +86,8 @@ for label in ['pk_c1', 'pk_c32', 'tpcb_c32']:
 
 def build_table(block, scenarios, c):
     emit('', f'## {block}: c={c}', '')
-    table('| scenario | build | n | req/s | p50 ms | p99 ms | p99.9 ms | gateway cores | db cores | store tx/req | '
-          f'MHz | vs {BASE} | vs {HEAD} |')
+    table('| scenario | build | n | req/s | p50 ms | p99 ms | p99.9 ms | gateway cores | db cores | load cores | '
+          f'store tx/req | MHz | vs {BASE} | vs {HEAD} |')
     for sc in scenarios:
         stats = {}
         for b in BUILDS:
@@ -96,7 +96,7 @@ def build_table(block, scenarios, c):
                 continue
             st = stats[b] = stat([r['rps'] for r in rs])
             emit(f"| {sc} | {b} | {len(rs)} | {fmt(st)} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
-                 f"{col(rs, 'p99.9', 1)} | {med(rs, 'gw_cores')} | {med(rs, 'pg_cores')} | "
+                 f"{col(rs, 'p99.9', 1)} | {med(rs, 'gw_cores')} | {med(rs, 'pg_cores')} | {med(rs, 'load_cores')} | "
                  f"{med(rs, 'store_tx_per_req')} | {med(rs, 'mhz_gw', 0)} | "
                  f"{verdict(stats.get(BASE), st) if b != BASE else ''} | "
                  f"{verdict(stats.get(HEAD), st) if b == CACHED else ''} |")
@@ -105,7 +105,11 @@ def build_table(block, scenarios, c):
 build_table('b1', ['lookup_plain', 'lookup_gov', 'page_plain', 'write_writer'], 32)
 build_table('b2', ['lookup_plain', 'lookup_gov'], 1)
 
-emit('', '## b3: open loop, latency corrected', '')
+emit('', '## b3: capacity (closed loop, c=32), then open loop, latency corrected', '')
+for b in (HEAD, CACHED):
+    rs = sel(block='b3cap', build=b)
+    if rs:
+        emit(f"- capacity, {b}: {col(rs, 'rps')} req/s over {len(rs)} rounds", '')
 table('| build | offered (x capacity) | offered req/s | achieved req/s | p50 ms | p99 ms | p99.9 ms | ok | n |')
 for b in (HEAD, CACHED):
     by = collections.defaultdict(list)
@@ -117,7 +121,7 @@ for b in (HEAD, CACHED):
 
 emit('', '## b4: scale-out, c=64', '')
 table('| scenario | workers | build | n | req/s | p50 ms | p99 ms | gateway cores | req/s per gateway core | '
-      f'db cores | vs {HEAD} |')
+      f'db cores | load cores | vs {HEAD} |')
 for sc in ['lookup_plain', 'write_writer']:
     for w in (1, 2, 4, 8):
         base = None
@@ -129,7 +133,8 @@ for sc in ['lookup_plain', 'write_writer']:
             base = st if b == HEAD else base
             gw = statistics.median(r['gw_cores'] for r in rs)
             emit(f"| {sc} | {w} | {b} | {len(rs)} | {fmt(st)} | {col(rs, 'p50', 1)} | {col(rs, 'p99', 1)} | "
-                 f"{gw:.2f} | {st[0] / gw:,.0f} | {med(rs, 'pg_cores')} | {verdict(base, st) if b == CACHED else ''} |")
+                 f"{gw:.2f} | {st[0] / gw:,.0f} | {med(rs, 'pg_cores')} | {med(rs, 'load_cores')} | "
+                 f"{verdict(base, st) if b == CACHED else ''} |")
 
 
 def pct(vals, p):
@@ -205,6 +210,29 @@ for t in (1, 2, 4, 8):
     if rs:
         emit(f"| {t} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
              f"{med(rs, 'gw_cores')} |")
+
+def slope(points):
+    """Least-squares slope and intercept of [(x, y)]."""
+    n = len(points)
+    mx, my = sum(x for x, _ in points) / n, sum(y for _, y in points) / n
+    k = sum((x - mx) * (y - my) for x, y in points) / sum((x - mx) ** 2 for x, _ in points)
+    return k, my - k * mx
+
+
+b11 = [r for r in sel(block='b11') if 'netem' in r]
+if b11:
+    delays = sorted({r['netem'] for r in b11}, key=lambda d: float(d[:-2]))
+    emit('', '## b11: single-call latency against network delay (p50 ms; the slope is round trips per call)', '')
+    table('| | ' + ' | '.join(f'+{d}' for d in delays) + ' | round trips (slope) | at 0 delay (intercept) |')
+    series = [(f'psycopg2 alone, {m}', [r for r in b11 if r['scenario'] == f'probe_{m}'], 'ms_per_call')
+              for m in ('one', 'four')] + [(b, [r for r in b11 if r.get('build') == b], 'p50') for b in BUILDS]
+    for label, rs, key in series:
+        if not rs:
+            continue
+        cells = [stat([r[key] for r in rs if r['netem'] == d]) for d in delays]
+        k, c0 = slope([(float(r['netem'][:-2]), r[key]) for r in rs])
+        emit(f"| {label} | " + ' | '.join(fmt(c, 2) for c in cells) + f' | {k:.2f} | {c0:.2f} ms |')
+
 
 # py-spy: each sample goes to the category of the leaf-most frame that matches one
 RULES = [
