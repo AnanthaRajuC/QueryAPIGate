@@ -386,7 +386,7 @@ def create_app():
             metrics.inc_cache_hit()
         elif cache_status == 'MISS':
             metrics.inc_cache_miss()
-        if endpoint not in ACCESS_LOG_QUIET:
+        if endpoint not in ACCESS_LOG_QUIET and config.log_requests():
             extra = {'method': request.method, 'path': request.path, 'status': response.status_code,
                     'duration_ms': round(elapsed * 1000, 1)}
             if g.get('serialization_ms') is not None:  # only set for a paged response - see render()

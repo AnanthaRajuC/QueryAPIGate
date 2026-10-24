@@ -94,10 +94,11 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     masked = masking.prepare(mask, sql, connection_name, details['db'], database)
     # The caller's own limits (limits.py, ADR 0011), within the server's
     timeout, limit = limits.timeout(timeout), limits.rows(limit)
-    log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
-             connection_name, details['db'], limit, offset, timeout, logged_sql(sql),
-             extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
-                   'timeout': timeout, 'sql_hash': _sql_hash(sql)})
+    if config.log_requests():
+        log.info('Executing on %s (%s), limit=%s offset=%s timeout=%s: %s',
+                 connection_name, details['db'], limit, offset, timeout, logged_sql(sql),
+                 extra={'connection': connection_name, 'dialect': details['db'], 'limit': limit, 'offset': offset,
+                       'timeout': timeout, 'sql_hash': _sql_hash(sql)})
     started = time.monotonic()
     status = 'error'
     metrics.inc_active_query()
@@ -166,10 +167,11 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     timeout, limit = limits.timeout(timeout), limits.rows(limit)
     if params:
         filter_doc = mongotools.fill_placeholders(filter_doc, params)
-    log.info('Finding on %s (mongo), collection=%s limit=%s offset=%s timeout=%s',
-             connection_name, collection, limit, offset, timeout,
-             extra={'connection': connection_name, 'dialect': 'mongo', 'limit': limit, 'offset': offset,
-                   'timeout': timeout})
+    if config.log_requests():
+        log.info('Finding on %s (mongo), collection=%s limit=%s offset=%s timeout=%s',
+                 connection_name, collection, limit, offset, timeout,
+                 extra={'connection': connection_name, 'dialect': 'mongo', 'limit': limit, 'offset': offset,
+                       'timeout': timeout})
     started = time.monotonic()
     status = 'error'
     metrics.inc_active_query()
@@ -405,8 +407,9 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     timeout = limits.timeout(timeout)
     row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
     slot = limits.acquire(timeout)  # held until the last row is read - _drain() or _Rows.close() releases it
-    log.info('Streaming from %s (%s): %s', connection_name, details['db'], logged_sql(sql),
-             extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
+    if config.log_requests():
+        log.info('Streaming from %s (%s): %s', connection_name, details['db'], logged_sql(sql),
+                 extra={'connection': connection_name, 'dialect': details['db'], 'sql_hash': _sql_hash(sql)})
     status = 'error'
     metrics.inc_active_query()
     try:
@@ -464,8 +467,9 @@ def stream_mongo(collection, filter_doc, connection_name, params=None, timeout=N
     timeout = limits.timeout(timeout)
     row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
     slot = limits.acquire(timeout)  # held until the last document is read - _drain() or _Rows.close() releases it
-    log.info('Streaming a find from %s (mongo), collection=%s', connection_name, collection,
-             extra={'connection': connection_name, 'dialect': 'mongo', 'timeout': timeout})
+    if config.log_requests():
+        log.info('Streaming a find from %s (mongo), collection=%s', connection_name, collection,
+                 extra={'connection': connection_name, 'dialect': 'mongo', 'timeout': timeout})
     status = 'error'
     metrics.inc_active_query()
     try:

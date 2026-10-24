@@ -70,6 +70,9 @@ own lines don't repeat the ID.
 
 From the Console instead: open the query's **History** tab, find the red run, and take its `request_id` to the log.
 
+These lines need `QUERYAPIGATE_LOG_REQUESTS` left on, as it is by default. With it `off`, a request leaves only its
+warnings and errors in the log, still tagged with the ID - and the run history keeps the `request_id` either way.
+
 ## JSON logs, for a log system
 
 ```bash

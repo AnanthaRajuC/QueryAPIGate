@@ -51,3 +51,14 @@ def clear():
     with _lock:
         _entries.clear()
         _generation += 1
+    for hook in _hooks:
+        hook()
+
+
+_hooks: list = []  # other per-process copies of store rows, dropped whenever this cache is - see on_clear()
+
+
+def on_clear(hook):
+    """Call ``hook()`` whenever the cache is cleared, i.e. after every store change this process commits - for another
+    module's copy of store rows that must not outlive a change to them (masking.py's hash key)."""
+    _hooks.append(hook)
