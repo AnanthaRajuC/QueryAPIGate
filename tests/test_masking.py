@@ -10,7 +10,7 @@ from unittest import mock
 
 import duckdb
 
-from queryapigate import create_app, masking, schema
+from queryapigate import create_app, db, masking, schema
 from tests.helpers import write_connections
 
 TABLES = [
@@ -228,6 +228,20 @@ class KeyTests(unittest.TestCase):
             first = masking.hash_key()
             self.assertEqual(len(first), 64)
             self.assertEqual(masking.hash_key(), first)
+
+    def test_the_store_key_is_read_once_until_the_store_changes(self):
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):
+            os.environ.pop('QUERYAPIGATE_MASK_KEY', None)
+            create_app()
+            first = masking.hash_key()
+            with mock.patch.object(masking, '_store_hash_key', wraps=masking._store_hash_key) as read:
+                for _ in range(5):
+                    self.assertEqual(masking.hash_key(), first)
+                self.assertEqual(read.call_count, 0)  # every masked call used to read it
+                with db.transaction():
+                    pass  # any change this process commits to the store
+                self.assertEqual(masking.hash_key(), first)
+                self.assertEqual(read.call_count, 1)
 
 
 class RealSchemaTests(unittest.TestCase):

@@ -38,7 +38,7 @@ import secrets
 import threading
 import time
 
-from . import config, db, sqltools, store
+from . import config, db, metacache, sqltools, store
 from .errors import ApiError
 
 ACTIONS = ('drop', 'null', 'mask', 'hash', 'keep')  # strictest first
@@ -323,11 +323,27 @@ def plan(rules, traced):
 # Applying
 # --------------------------------------------------------------------------------------
 
+# store target -> the hash key it holds: made once and never changed, so read once per process
+_store_keys: dict[tuple, bytes] = {}
+metacache.on_clear(_store_keys.clear)  # and again after a change to the store - a restore, a test resetting it
+
+
 def hash_key():
-    """The key `hash` uses: QUERYAPIGATE_MASK_KEY, or one the store makes once and every instance shares."""
+    """The key `hash` uses: QUERYAPIGATE_MASK_KEY, or one the store makes once and every instance shares. A store's key
+    is never changed once made, so it's read from the store once per process (per store) and kept until this process
+    next changes the store, not read on every masked call."""
     configured = config.mask_key()
     if configured:
         return configured.encode()
+    target = db.current_target()
+    cached = _store_keys.get(target)
+    if cached is not None:
+        return cached
+    _store_keys[target] = key = _store_hash_key()
+    return key
+
+
+def _store_hash_key():
     conn = db.connection()
     row = conn.execute('SELECT value FROM server_secrets WHERE name = ?', (_KEY_NAME,)).fetchone()
     if row is None:

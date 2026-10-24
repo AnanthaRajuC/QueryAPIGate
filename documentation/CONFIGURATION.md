@@ -29,6 +29,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_H2_JAR` | bundled | Path to a different H2 JDBC jar. |
 | `QUERYAPIGATE_SECRET_KEY` | unset | A Fernet key encrypting connection passwords at rest. Off by default (stored as given); needs `queryapigate[encryption]`. A malformed value stops startup. |
 | `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |
+| `QUERYAPIGATE_LOG_REQUESTS` | on | A log line for every request, and one for each query it runs (`Executing on ...`). `off` leaves those INFO lines out - errors, warnings, slow queries and agent writes are still logged - for a server whose proxy already logs requests: the lines cost a share of the CPU, and every thread queues on the one handler that writes them. See [Performance, v3](PERFORMANCE_V3.md#the-cpu). |
 | `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` | `1` | Seconds a query may take before it is logged as a warning. `0` disables it. |
 | `QUERYAPIGATE_HISTORY_LIMIT` | `50` | Runs kept per saved-query version (and shown in lists). |
 | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` | unset | Keep every run for this many days instead of a per-version count - browse it with `GET /api/v1/history`. Best with `QUERYAPIGATE_DATABASE_URL`. |

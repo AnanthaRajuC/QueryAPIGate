@@ -27,6 +27,7 @@ _ENC_PREFIX = 'enc:'  # marks a connection password as Fernet-encrypted - see _e
 # can never both exist as two collections.
 _COLLECTION_RE = re.compile(r'^[a-z0-9][a-z0-9._-]{0,62}$')
 _UNSET = object()  # "argument not passed" - distinct from an explicit None, which clears a collection
+_SERVER_DB_TYPES = frozenset({'postgres', 'mysql', 'clickhouse', 'mongo', 'trino'})  # see refuse_store_access()
 
 
 def now():
@@ -223,8 +224,12 @@ def refuse_store_access(details):
     """Refuse a connection that would open this server's own store - a SQLite/DuckDB/H2 `database` that is
     queryapigate.db (or its -wal/-shm/-journal), or a DuckDB `allowed_paths` entry covering it. Through one, an
     administrator could read key and token hashes and secrets, or - with writes on - give themselves an owner's token.
-    A PostgreSQL store is kept apart by its own credentials: don't give administrators them."""
-    if not isinstance(details, dict):
+    A PostgreSQL store is kept apart by its own credentials: don't give administrators them.
+
+    A server database (PostgreSQL, MySQL, ClickHouse, MongoDB, Trino) opens no file, whatever its `database` says, so
+    it skips the path checks - they resolve paths on disk, several system calls, and this runs on every call. Any
+    other type, including one this list doesn't know, is checked."""
+    if not isinstance(details, dict) or details.get('db') in _SERVER_DB_TYPES:
         return
     store_file = os.path.realpath(str(config.db_file()))
     guarded = {store_file, *(store_file + suffix for suffix in ('-wal', '-shm', '-journal'))}

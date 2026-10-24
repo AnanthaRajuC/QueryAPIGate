@@ -823,6 +823,13 @@ def stream_max_rows():
     return int(raw) if raw else None
 
 
+def log_requests():
+    """QUERYAPIGATE_LOG_REQUESTS: log a line for every request, and one for each query it runs (on by default). Off
+    leaves those INFO lines out - errors, warnings, slow queries and agent writes are still logged - for a server whose
+    proxy already logs requests: the lines cost CPU, and eight threads queue on the one handler that writes them."""
+    return os.environ.get('QUERYAPIGATE_LOG_REQUESTS', '').strip().lower() not in ('0', 'false', 'no', 'off')
+
+
 def json_logs():
     """Emit structured (one JSON object per line) logs instead of plain text (QUERYAPIGATE_JSON_LOGS)."""
     return env_flag('QUERYAPIGATE_JSON_LOGS')
@@ -1462,7 +1469,9 @@ def describe_settings():
                 'plain SHA-256 - consistent, but anyone with the store can recompute it.', 'QUERYAPIGATE_AUDIT_KEY',
                 _audit_key_state(), secret=True),
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
-                on_off(json_logs()))]},
+                on_off(json_logs())),
+            row('Request log', 'A line for every request and each query it runs. Errors, warnings and slow queries '
+                'are logged either way.', 'QUERYAPIGATE_LOG_REQUESTS', on_off(log_requests()))]},
         {'id': 'history', 'title': 'Run history',
          'description': 'What each run - of a saved query, or ad-hoc SQL - leaves behind in its history, and for how '
              'long. GET /api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [

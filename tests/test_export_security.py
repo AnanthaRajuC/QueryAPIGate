@@ -98,6 +98,21 @@ class StoreAccessTests(unittest.TestCase):
                                      'allowed_paths': [self.tmp.name + '/']})
         self.assertEqual((res.status_code, res.get_json()['code']), (403, 'store_not_allowed'))
 
+    def test_a_server_database_skips_the_path_checks(self):
+        # PostgreSQL, MySQL, ClickHouse, MongoDB and Trino open no file: a `database` naming the store file is only a
+        # database name to them, so no path on disk is resolved - that ran on every call (PERFORMANCE_V3.md).
+        for db_type in ('postgres', 'mysql', 'clickhouse', 'mongo', 'trino'):
+            with self.subTest(db=db_type), mock.patch('queryapigate.store.os.path.realpath') as realpath:
+                store.refuse_store_access({'db': db_type, 'database': self.store_file()})
+                realpath.assert_not_called()
+
+    def test_a_file_database_or_an_unknown_type_is_still_checked(self):
+        for db_type in ('sqlite', 'duckdb', 'h2', 'jdbc', 'not-a-type', None):
+            with self.subTest(db=db_type):
+                with self.assertRaises(store.ApiError) as raised:
+                    store.refuse_store_access({'db': db_type, 'database': self.store_file()})
+                self.assertEqual(raised.exception.code, 'store_not_allowed')
+
     def test_a_connection_saved_before_the_check_is_refused_when_used(self):
         from queryapigate import db
         with db.transaction() as conn:

@@ -49,6 +49,22 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+- **`QUERYAPIGATE_LOG_REQUESTS=off` leaves out the per-request log lines** - the `METHOD /path -> status` line and the
+  `Executing on ...` / `Finding on ...` / `Streaming from ...` line for each query. Errors, warnings, slow queries and
+  agent writes are still logged, and the run history keeps each run's `request_id`. On by default, as before. For a
+  server whose proxy already logs requests: logging was a fifth of a worker's CPU in
+  [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
+
+### Changed
+- **The check that a connection can't open QueryAPIGate's own store now skips server databases.** PostgreSQL, MySQL,
+  ClickHouse, MongoDB and Trino open no file, so resolving their `database` as a path on disk (several system calls)
+  on every call protected nothing, and cost 7-10% of a worker's CPU. SQLite, DuckDB, H2, JDBC - and any type it
+  doesn't know - are checked as before.
+- **A masked call no longer reads the masking hash key from the store every time.** The key a store makes for
+  `hash` never changes, so each process reads it once and keeps it until it next changes the store. With
+  `QUERYAPIGATE_MASK_KEY` set, nothing is read, as before.
+
 ## [0.42.0] - 2026-10-24
 
 Performance. A key with masking and a table allow-list is now about as fast as one without, and every call reads

@@ -33,7 +33,7 @@ class AppTestCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         for name in ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_JSON_LOGS', 'QUERYAPIGATE_SLOW_QUERY_THRESHOLD',
-                     'QUERYAPIGATE_RATE_LIMIT'):
+                     'QUERYAPIGATE_RATE_LIMIT', 'QUERYAPIGATE_LOG_REQUESTS'):
             os.environ.pop(name, None)
         write_connections({'lite': {'db': 'sqlite', 'database': self.db_path, 'active': True}})
         self.client = create_app().test_client()
@@ -316,6 +316,35 @@ class JsonLogFieldsTests(unittest.TestCase):
         res.get_data()
         payload = self.find('/execute_sql ->')
         self.assertNotIn('serialization_ms', payload)
+
+
+class RequestLogSettingTests(AppTestCase):
+    """QUERYAPIGATE_LOG_REQUESTS: the per-request INFO lines, on by default; off leaves them out, not the warnings."""
+
+    def logged(self):
+        with self.assertLogs('queryapigate', level='INFO') as captured:
+            logging.getLogger('queryapigate').info('marker')  # assertLogs fails on no lines at all
+            self.run_sql()
+        return [r.getMessage() for r in captured.records]
+
+    def test_on_by_default(self):
+        os.environ.pop('QUERYAPIGATE_LOG_REQUESTS', None)
+        lines = self.logged()
+        self.assertTrue(any(line.startswith('Executing on lite') for line in lines), lines)
+        self.assertTrue(any(line.startswith('POST /execute_sql -> 200') for line in lines), lines)
+
+    def test_off_leaves_out_the_request_and_query_lines(self):
+        for value in ('off', '0', 'false', 'no'):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {'QUERYAPIGATE_LOG_REQUESTS': value}):
+                lines = self.logged()
+                self.assertFalse(any(line.startswith(('Executing on', 'POST /execute_sql')) for line in lines), lines)
+
+    def test_off_still_logs_a_slow_query(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_LOG_REQUESTS': 'off',
+                                          'QUERYAPIGATE_SLOW_QUERY_THRESHOLD': '0.000001'}), \
+                mock.patch('queryapigate.engine.log.warning') as warning:
+            self.run_sql()
+        self.assertTrue(any(c[0] and c[0][0].startswith('Slow query') for c in warning.call_args_list))
 
 
 class SlowQueryLogTests(AppTestCase):
