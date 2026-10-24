@@ -49,6 +49,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-24
+
+Performance. A key with masking and a table allow-list is now about as fast as one without, and every call reads
+QueryAPIGate's own store less: 3 statements instead of 7. The numbers come from a pinned, interleaved benchmark on
+PostgreSQL ([Performance, v3](documentation/PERFORMANCE_V3.md)), whose harness ships in `benchmarks/oltp.py`. One
+behaviour change: the connection pool now keeps up to 8 idle connections, not 5.
+
 ### Added
 - **`QUERYAPIGATE_METADATA_CACHE_TTL`: reuse the key, saved query and connection a call reads, for that many
   seconds.** Off by default. Every call reads three rows from the store before it runs; with this set, a server keeps
@@ -56,9 +63,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   allowed address or inside a rotation's grace period is still checked on every call. A change made through the same
   server clears its cache at once; one made through another instance, another worker or the CLI is seen up to one
   TTL later - so a key revoked there keeps working here for that long. Measured on PostgreSQL with
-  `QUERYAPIGATE_METADATA_CACHE_TTL=5`: 10-20% more requests a second from one container, a single call 1.8 ms to
-  1.2 ms, and 30% more with eight workers (2,093 to 2,732 lookups a second). See
-  [Performance](documentation/PERFORMANCE.md#the-metadata-cache).
+  `QUERYAPIGATE_METADATA_CACHE_TTL=5` (one worker, 32 callers): 16-19% more requests a second (743 to 875 lookups),
+  a single call 1.38 ms to 1.05 ms, 41% off a single call across a 0.5 ms network round trip, and 23% more with
+  eight workers (2,215 to 2,727 lookups a second). See [Performance](documentation/PERFORMANCE.md#the-metadata-cache).
+- **An OLTP benchmark on PostgreSQL, and its harness.** `documentation/PERFORMANCE_V3.md` measures v0.41.0 against
+  this release on pgbench's 10-million-row schema: throughput, latency against offered load, scale-out, threads, a
+  simulated network, the round trips per call, and a profile of where the time goes - and turns that into a sizing
+  rule. `benchmarks/oltp.py` reruns it on your own machine, with each part pinned to its own cores and every
+  comparison interleaved; `benchmarks/oltp_report.py` makes the tables.
+- **How-to guides for Trino (61) and for using the Console (62).**
 
 ### Changed
 - **`QUERYAPIGATE_POOL_SIZE` defaults to 8, up from 5** - one idle connection per thread of the Docker image. With 5,
@@ -67,18 +80,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `QUERYAPIGATE_POOL_SIZE=5` to keep the old number.
 - **A saved query's run reads the store less.** It read the query three times - a check that it exists, its header,
   its versions - and now reads it once. History and event rows are written in one statement per batch, not one per
-  row. On PostgreSQL, a call's transactions on the store went from about 5.5 to about 2.6, and one container served
-  13% more lookups a second (326 to 368, 32 callers).
+  row. On PostgreSQL, a call now sends 3 statements to the store instead of 7 (counted with `log_statement`), and one
+  worker serves 7-9% more (682 to 743 lookups a second, 32 callers).
 - **Masked and table-restricted calls are several times faster.** Column masking traced each statement's result
   columns to their sources (sqlglot lineage) on every call, and `allowed_tables` parsed the statement on every call -
   milliseconds of work for SQL that, for a saved query, never changes. Both are now worked out once and reused: a
   statement's trace is kept with the connection's schema it was traced against (and dropped with it, when the schema
   is read again or the connection changes), and the tables a statement reads are kept per statement, dialect and
-  connection defaults. Measured on the example APIs (one worker, eight threads): a key with masking and
-  `allowed_tables` went from 27 to 210 requests a second on a join query (p50 35 ms to 4.6 ms; p99 at 32 concurrent
-  callers 2.0 s to 0.2 s), and from 84 to 309 on a primary-key lookup - the same as a key without them. What is
-  masked, and what is refused, is unchanged; a statement that can't be traced or checked is refused every time, as
-  before. Both caches are bounded, so varied ad-hoc SQL can't grow them.
+  connection defaults. Measured on PostgreSQL: a key with masking and `allowed_tables` went from 171 to 693 lookups a
+  second (32 callers), and a single call from 6.0 ms to 1.5 ms - within 7% of a key without them. What is masked,
+  and what is refused, is unchanged; a statement that can't be traced or checked is refused every time, as before.
+  Both caches are bounded, so varied ad-hoc SQL can't grow them.
+- **The README, the landing page and the feature list present the MCP server as a pillar** beside the REST API -
+  one governed core, two surfaces - and the Console screenshots are retaken, with a new one of the MCP screen.
 
 ## [0.41.0] - 2026-10-20
 
@@ -2836,7 +2850,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.38.0...v0.39.0

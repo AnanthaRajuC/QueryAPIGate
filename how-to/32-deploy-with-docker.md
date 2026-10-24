@@ -22,7 +22,7 @@ queryapigate/
 ```yaml
 services:
   queryapigate:
-    image: ghcr.io/anantharajuc/queryapigate:0.41.0   # pin a version - upgrades should be deliberate
+    image: ghcr.io/anantharajuc/queryapigate:0.42.0   # pin a version - upgrades should be deliberate
     restart: unless-stopped
     env_file: .env
     environment:

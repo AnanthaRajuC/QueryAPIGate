@@ -124,9 +124,12 @@ documentation. #99 workspaces only if asked for.
 29. **0.41: Trino, and Console access insights** - Trino as a native connection type (experimental,
     [ADR 0026](documentation/adr/0026-trino-connections.md)); plus a per-key details screen and 30-day activity
     sparklines across the access screens (API keys, connections, cached queries, MCP tools, roles). (0.41.0, 2026-10-20.)
-30. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+30. **0.42: Performance** - masked and table-restricted calls as fast as plain ones, fewer store reads per call, an
+    opt-in metadata cache (`QUERYAPIGATE_METADATA_CACHE_TTL`), a pool sized to the threads; measured in
+    [Performance, v3](documentation/PERFORMANCE_V3.md) with a published benchmark harness. (0.42.0, 2026-10-24.)
+31. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-31. **1.0.0.**
+32. **1.0.0.**
 
 ## 1. Per-key API permissions
 
