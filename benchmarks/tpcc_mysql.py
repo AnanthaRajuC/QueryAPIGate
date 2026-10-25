@@ -182,9 +182,11 @@ def b_setup():
     mysql('CREATE DATABASE tpcc')
     t0 = time.time()
     load = sh('taskset', '-c', args.load_cpus, args.go_tpc, 'tpcc', '--warehouses', str(args.warehouses), '-H',
-              ip(MYSQL), '-P', '3306', '-U', 'root', '-p', 'pw', '-D', 'tpcc', '-T', '8', '--no-check',
-              'prepare')  # --no-check: its consistency queries run for hours on 20 warehouses; env records row counts
-    if load.returncode:
+              ip(MYSQL), '-P', '3306', '-U', 'root', '-p', 'pw', '-D', 'tpcc', '-T', '8', 'prepare',
+              '--no-check')  # a prepare flag: its consistency queries run for hours on 20 warehouses
+    loaded = mysql("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'tpcc' "
+                   "AND table_name = 'warehouse'") == '1' and mysql('SELECT COUNT(*) FROM tpcc.warehouse')
+    if load.returncode or loaded != str(args.warehouses):  # go-tpc exits 0 even on a usage error
         sys.exit(f'go-tpc prepare: {load.stdout[-2000:]}{load.stderr[-2000:]}')
     log(f'go-tpc loaded {args.warehouses} warehouses in {time.time() - t0:.0f} s')
     move_into_schemas()
@@ -359,14 +361,28 @@ def api(method, path, body=None, key='bench-admin'):
         return json.loads(raw) if raw[:1] in (b'{', b'[') else raw.decode()
 
 
-def key_path(store):
-    return OUT / f'keys-{store}.json'
+_keys = {}  # store -> this process's reader key: kept in memory only, never written to disk
 
 
 def seed(store):
-    """The connection, the saved queries and a reader key, once per store - through the Management API."""
-    if key_path(store).exists():
+    """The connection and the saved queries, once per store, and a reader key once per process - through the
+    Management API. The key's secret is held in memory only; a later run against the same store makes its own."""
+    if store in _keys:
         return
+    try:
+        api('GET', '/api/v1/connections/tpcc')
+        seeded = True
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        seeded = False
+    if not seeded:
+        _seed_estate()
+    _keys[store] = api('POST', '/api/v1/api-keys', {'name': f'reader-{os.getpid()}-{int(time.time())}',
+                                                    'connections': [], 'queries': [*QUERIES, CACHED]})['secret']
+
+
+def _seed_estate():
     api('POST', '/api/v1/connections', {'name': 'tpcc', 'db': 'mysql', 'host': ip(MYSQL), 'port': 3306,
                                         'database': 'crm', 'user': 'qag', 'password': 'pw', 'active': True})
     for name, (kind, desc, sql) in QUERIES.items():
@@ -380,13 +396,10 @@ def seed(store):
         if name == 'order_status':
             api('POST', '/api/v1/queries', {**body, 'name': CACHED, 'cache_ttl': 30,
                                             'description': desc + ', cached for 30 s'})
-    secret = api('POST', '/api/v1/api-keys', {'name': 'reader', 'connections': [],
-                                              'queries': [*QUERIES, CACHED]})['secret']
-    key_path(store).write_text(json.dumps({'reader': secret}))
 
 
 def reader_key():
-    return json.loads(key_path(_server_meta.get('store', 'sqlite')).read_text())['reader']
+    return _keys[_server_meta.get('store', 'sqlite')]
 
 
 # ---------------------------------------------------------------- load
@@ -672,7 +685,7 @@ def m8():
                     start(build)
                     measure('m8', 'order_status', c=c, rnd=r, extra={'netem': '0.5ms'})
         sh('docker', 'rm', '-fv', PG)
-        key_path('postgres').unlink(missing_ok=True)  # a new, empty store: seed it again
+        _keys.pop('postgres', None)  # a new, empty store: seed it again
         sh('docker', 'run', '-d', '--name', PG, '--cpuset-cpus', args.db_cpus, '-e', 'POSTGRES_PASSWORD=pw', PG_IMAGE)
         for _ in range(60):
             if sh('docker', 'exec', PG, 'pg_isready', '-U', 'postgres').returncode == 0:

@@ -471,7 +471,7 @@ python benchmarks/tpcc_mysql_report.py /tmp/qag-tpcc/results.jsonl
 ```
 
 - **`--out` must be an absolute path.**
-- **`setup`** starts MySQL 8.4, loads 20 warehouses (`--warehouses`) in about 10 minutes, moves the tables into the
+- **`setup`** starts MySQL 8.4, loads 20 warehouses (`--warehouses`) in under a minute, moves the tables into the
   six databases and creates the read-only user. **`A`** runs the direct baseline, throughput and single-call blocks;
   **`B`** runs the rest.
 - **`--refs`** chooses the builds (v0.41.0, v0.42.0 and `origin/main` by default; the last also runs with the
