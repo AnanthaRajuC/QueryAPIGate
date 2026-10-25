@@ -18,6 +18,9 @@ primary key to 32 concurrent callers:
   trips to PostgreSQL. A call on `main` makes 7: 3 to QueryAPIGate's own store and 4 to the data database. With the
   metadata cache, it makes 4. Over a real network, those round trips dominate.
 
+For MySQL - one server, a database per microservice, per-user queries joining across them - see
+[Performance on MySQL](PERFORMANCE_MYSQL_V1.md).
+
 **How to read the numbers.** Every comparison is the median of 5 interleaved rounds, with its min-max range. A
 difference counts as real only when the two ranges don't overlap. The cold-path test and the profile are single long
 runs, marked where they appear. This page replaces [Performance, v2](PERFORMANCE_V2.md): [What changed from

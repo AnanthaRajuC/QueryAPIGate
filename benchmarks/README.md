@@ -13,6 +13,7 @@ occasionally).
 | `pooling.py` | How throughput and latency change as concurrent callers increase relative to the pool | Yes |
 | `caching.py` | Cache hit vs. miss latency delta for a `cache_ttl`-carrying saved query | No |
 | `oltp.py` | Two git refs side by side on PostgreSQL OLTP: throughput, latency against load, scale-out, where the time goes | Yes |
+| `tpcc_mysql.py` | Several git refs on MySQL with TPC-C data split into six databases: per-user cross-database joins, direct against through the gateway | Yes |
 
 Shared plumbing (`common.py`): a real queryapigate subprocess hit over real HTTP - not the Flask test
 client, so there's an actual separate OS process whose RSS (`/proc/<pid>/status`) can be sampled, the same
@@ -182,4 +183,23 @@ together with its data volume.
 The runs behind PERFORMANCE_V3.md are in `results/oltp-postgres-2026-10-23/` (session A) and
 `results/oltp-postgres-2026-10-24/` (session B, which reran session A's 3-round blocks with 5). The raw access logs
 are too big to commit, so session A keeps a per-second summary of them instead.
+
+---
+
+## `tpcc_mysql.py` - per-user queries across six MySQL databases
+
+The method and the results are in
+[documentation/PERFORMANCE_MYSQL_V1.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/PERFORMANCE_MYSQL_V1.md).
+It shares `oltp.py`'s plumbing (pinning, rotated interleaving, CPU accounting, `/health` floors). Its `setup` starts a
+pinned MySQL 8.4, loads TPC-C with [go-tpc](https://github.com/pingcap/go-tpc) (`--go-tpc PATH`), and moves the tables
+into six databases, one per service. sysbench sends the same queries directly, as the baseline.
+
+~~~bash
+python benchmarks/tpcc_mysql.py --out /tmp/qag-tpcc --go-tpc ./go-tpc setup A B teardown   # about 5.5 hours
+python benchmarks/tpcc_mysql_report.py /tmp/qag-tpcc/results.jsonl
+~~~
+
+`A` is blocks m1-m3 (direct baseline, throughput, single-call latency) and `B` is m4-m11 (open loop, scale-out,
+threads, skew and the response cache, network and the store, round trips, a profile, the cross-database allow-list
+check). `--out` must be absolute. The 2026-10-24 run is in `results/tpcc-mysql-2026-10-24/`.
 
