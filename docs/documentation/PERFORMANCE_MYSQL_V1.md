@@ -1,0 +1,1 @@
+--8<-- "documentation/PERFORMANCE_MYSQL_V1.md"
