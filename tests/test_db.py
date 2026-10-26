@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 from contextlib import redirect_stderr
+from pathlib import Path
 from unittest import mock
 
 from queryapigate import config, db, events, history
@@ -134,6 +135,28 @@ class DbTests(unittest.TestCase):
         row = db.connection().execute("SELECT name FROM saved_queries WHERE name = 'q2'").fetchone()
         self.assertIsNone(row)
 
+
+
+@unittest.skipIf(TEST_DATABASE_URL, 'a PostgreSQL suite run replaces db._target() with its own (tests/__init__.py)')
+class TargetTests(unittest.TestCase):
+    """db._target() runs on every store access: an absolute home is mapped without touching the cwd."""
+
+    def test_an_absolute_home_needs_no_cwd_and_a_change_is_still_followed(self):
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            env = {k: v for k, v in os.environ.items() if k != 'QUERYAPIGATE_DATABASE_URL'}
+            with mock.patch.dict(os.environ, {**env, 'QUERYAPIGATE_HOME': a}, clear=True), \
+                    mock.patch('os.getcwd', side_effect=AssertionError('cwd read')):
+                self.assertEqual(db._target(), ('sqlite', str(Path(a).resolve() / 'queryapigate.db')))
+                os.environ['QUERYAPIGATE_HOME'] = b
+                self.assertEqual(db._target(), ('sqlite', str(Path(b).resolve() / 'queryapigate.db')))
+                os.environ['QUERYAPIGATE_DATABASE_URL'] = 'postgresql://u@h/d'
+                self.assertEqual(db._target(), ('postgres', 'postgresql://u@h/d'))
+
+    def test_a_relative_home_still_follows_the_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': 'store'}):
+            os.environ.pop('QUERYAPIGATE_DATABASE_URL', None)
+            with mock.patch('os.getcwd', return_value=tmp):
+                self.assertEqual(db._target(), ('sqlite', str((Path(tmp) / 'store').resolve() / 'queryapigate.db')))
 
 
 class PgSqlTranslationTests(unittest.TestCase):

@@ -680,9 +680,23 @@ def _connect(path):
 def _target():
     """What this thread's connection must point at: the Postgres URL when one is configured, else the SQLite
     file - re-read on every call so a changed QUERYAPIGATE_HOME/QUERYAPIGATE_DATABASE_URL (as every test makes
-    between cases) is followed rather than served by a stale connection."""
+    between cases) is followed rather than served by a stale connection.
+
+    Every store access calls this, so it reads the two variables and nothing more: an absolute home (the Docker
+    image's /data) maps to its file through a cache, without the os.getcwd() and path work config.db_file() does
+    - 3.6-3.8% of a worker's CPU in PERFORMANCE_MYSQL_V1.md. Only a relative or unset home needs the cwd."""
     url = config.database_url()
-    return ('postgres', url) if url else ('sqlite', str(config.db_file()))
+    if url:
+        return 'postgres', url
+    raw = os.environ.get('QUERYAPIGATE_HOME') or ''
+    if os.path.isabs(raw):
+        return _sqlite_target(raw)
+    return 'sqlite', str(config.db_file())
+
+
+@functools.lru_cache(maxsize=32)
+def _sqlite_target(home):
+    return 'sqlite', str(config._resolved_home(home, '') / 'queryapigate.db')
 
 
 def _open(target):

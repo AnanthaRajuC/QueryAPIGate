@@ -10,6 +10,7 @@ import atexit
 import logging
 import math
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -74,8 +75,12 @@ def _prepare(sql, params, style, limit, offset, dialect):
     return sql, args, sliced
 
 
-def _fetch_page(cursor, sql, params, style, limit, offset, dialect):
+def _fetch_page(cursor, sql, params, style, limit, offset, dialect, wrap=None):
+    """One page of rows. ``wrap`` rewrites the final statement - after paging, before it's sent - for a driver that
+    sends its own statements in the same message, or puts a hint on the query (ADR 0027)."""
     sql, args, sliced = _prepare(sql, params, style, limit, offset, dialect)
+    if wrap is not None:
+        sql = wrap(sql)
     if args is None:
         cursor.execute(sql)
     else:
@@ -164,6 +169,33 @@ class _Driver:
 
 # MySQL reports 3024 (ER_QUERY_TIMEOUT), MariaDB 1969 (ER_STATEMENT_TIMEOUT)
 _MYSQL_TIMEOUT_ERRNOS = (3024, 1969)
+# A statement that starts with SELECT, after any leading comments (but not a /*+ hint of its own)
+_LEADING_SELECT_RE = re.compile(r'^((?:\s|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|/\*(?!\+).*?\*/)*)(select)\b',
+                                re.IGNORECASE | re.DOTALL)
+
+
+def _mysql_timeout_wrap(cursor, session, timeout):
+    """The read-only path's time limit, on the statement itself rather than the session (ADR 0027): a stored
+    function a query calls could set the session's max_execution_time to 0 for every later caller, but not lift a
+    limit carried by the statement. MySQL takes a MAX_EXECUTION_TIME hint on a top-level SELECT; MariaDB, which
+    ignores MySQL's hints, takes SET STATEMENT ... FOR. A statement the hint can't go on (one starting WITH, say) gets
+    the session value set for this call - every call, not only when it changes. Returns the rewrite, or None."""
+    if not timeout:
+        return None
+    if session.state.get('mariadb') is None:
+        session.state['mariadb'] = 'mariadb' in (session.conn.get_server_info() or '').lower()
+    if session.state['mariadb']:
+        return lambda sql: f'SET STATEMENT max_statement_time = {timeout:g} FOR {sql}'
+    millis = _millis(timeout)
+
+    def hinted(sql):
+        match = _LEADING_SELECT_RE.match(sql)
+        if match:
+            return f'{match.group(1)}{match.group(2)} /*+ MAX_EXECUTION_TIME({millis}) */{sql[match.end():]}'
+        cursor.execute(f'SET SESSION max_execution_time = {millis}')
+        session.state['timeout'] = None  # no longer the value _set_mysql_timeout() last set
+        return sql
+    return hinted
 
 
 def _set_mysql_timeout(cursor, session, timeout):
@@ -190,6 +222,11 @@ class _MySQL(_Driver):
     PARAM_STYLE = 'format'
 
     def connect(self, details, read_only):
+        """A read-only connection is read-only per transaction, not only per session (ADR 0027): it opens one with
+        START TRANSACTION READ ONLY, and reset() ends each with ROLLBACK AND CHAIN, which starts the next with the
+        same access mode. A query can change the session's default - `SELECT f()`, for a stored function that runs
+        SET SESSION TRANSACTION READ WRITE - but not the transaction it is running in, so every later call on this
+        pooled connection still runs read-only. The session default is set too, as a second layer."""
         import mysql.connector
         conn = mysql.connector.connect(connection_timeout=config.CONNECT_TIMEOUT,
                                        **_connect_args(details, tls=MYSQL_TLS))
@@ -197,6 +234,7 @@ class _MySQL(_Driver):
             try:
                 cursor = conn.cursor()
                 cursor.execute('SET SESSION TRANSACTION READ ONLY')
+                cursor.execute('START TRANSACTION READ ONLY')
                 cursor.close()
             except Exception:
                 conn.close()
@@ -206,26 +244,46 @@ class _MySQL(_Driver):
     def is_alive(self, session):
         return session.conn.is_connected()
 
+    @staticmethod
+    def _cursor(session):
+        """This connection's one cursor, made once. mysql-connector pings the server on every cursor() - a round
+        trip, during which its C extension holds the GIL, freezing every thread in the worker (ADR 0027) - so a
+        query never asks for a new one."""
+        cursor = session.state.get('cursor')
+        if cursor is None:
+            cursor = session.state['cursor'] = session.conn.cursor()
+        return cursor
+
     def reset(self, session):
-        session.conn.rollback()
+        conn = session.conn
+        if conn.unread_result:  # a page that didn't read its whole result, or a stream closed early
+            conn.consume_results()
+        if session.state.get('read_only'):
+            self._cursor(session).execute('ROLLBACK AND CHAIN')  # ends it, and starts the next one read-only
+        elif conn.in_transaction:
+            conn.rollback()
 
     def query(self, session, sql, params, limit, offset, read_only, timeout):
         import mysql.connector
         conn = session.conn
-        cursor = conn.cursor()
-        try:
+        cursor = self._cursor(session)
+        session.state['read_only'] = read_only
+        if read_only:
+            wrap = _mysql_timeout_wrap(cursor, session, timeout)  # on the statement: a query can't lift it
+        else:
+            wrap = None
             _set_mysql_timeout(cursor, session, timeout)
-            try:
-                result = _fetch_page(cursor, sql, params, 'format', limit, offset, self.DIALECT)
-            except mysql.connector.Error as error:
-                if getattr(error, 'errno', None) in _MYSQL_TIMEOUT_ERRNOS:
-                    raise _timed_out(timeout) from None
-                raise
-            if not read_only:
-                conn.commit()
-            return result
-        finally:
-            cursor.close()
+        try:
+            result = _fetch_page(cursor, sql, params, 'format', limit, offset, self.DIALECT, wrap=wrap)
+        except mysql.connector.Error as error:
+            if getattr(error, 'errno', None) in _MYSQL_TIMEOUT_ERRNOS:
+                raise _timed_out(timeout) from None
+            raise
+        if conn.unread_result:
+            conn.consume_results()
+        if not read_only:
+            conn.commit()
+        return result
 
     def stream(self, session, sql, params, timeout):
         """Unlike query(), uses an *unbuffered* cursor (mysql-connector-python's default cursor fetches and
@@ -236,8 +294,10 @@ class _MySQL(_Driver):
         the ordinary (buffered) way."""
         import mysql.connector
         conn = session.conn
-        with conn.cursor() as setter:
-            _set_mysql_timeout(setter, session, timeout)
+        session.state['read_only'] = True
+        # Set for this export, every time: a session value left from before can't be trusted (ADR 0027)
+        session.state['timeout'] = object()
+        _set_mysql_timeout(self._cursor(session), session, timeout)
         try:
             yield from _stream_cursor(conn.cursor(buffered=False), sql, params, 'format', self.DIALECT)
         except mysql.connector.Error as error:
@@ -246,20 +306,28 @@ class _MySQL(_Driver):
             raise
 
 
+def _postgres_prefix(read_only, timeout):
+    """What a PostgreSQL message sends ahead of the query: the transaction's access mode and time limit."""
+    return (('SET TRANSACTION READ ONLY; ' if read_only else '')
+            + (f'SET LOCAL statement_timeout = {_millis(timeout)}; ' if timeout else ''))
+
+
 class _Postgres(_Driver):
     DIALECT = 'postgres'
     PARAM_STYLE = 'format'
 
     def connect(self, details, read_only):
+        """Autocommit, so each query is one message PostgreSQL runs as one implicit transaction, ending with it - one
+        round trip, and nothing left to roll back (ADR 0027). Read-only is set in that message, per transaction; the
+        session default set here is a second layer only, since `SELECT set_config(...)` can change it."""
         import psycopg2
         conn = psycopg2.connect(connect_timeout=config.CONNECT_TIMEOUT,
                                 **_connect_args(details, tls=POSTGRES_TLS, database='dbname'))
-        if read_only:
-            try:
-                conn.set_session(readonly=True)
-            except Exception:
-                conn.close()
-                raise
+        try:
+            conn.set_session(readonly=True, autocommit=True) if read_only else conn.set_session(autocommit=True)
+        except Exception:
+            conn.close()
+            raise
         return conn
 
     def is_alive(self, session):
@@ -270,22 +338,22 @@ class _Postgres(_Driver):
         return True
 
     def reset(self, session):
-        session.conn.rollback()
+        conn = session.conn
+        if not conn.autocommit:  # a stream or an agent write ran in an explicit transaction: end it
+            conn.rollback()
+            conn.autocommit = True
 
     def query(self, session, sql, params, limit, offset, read_only, timeout):
         import psycopg2.errors
-        conn = session.conn
-        with conn.cursor() as cursor:
-            if timeout:
-                # LOCAL scopes the limit to this transaction, so nothing leaks to the connection's next user
-                cursor.execute(f'SET LOCAL statement_timeout = {_millis(timeout)}')
+        # One message (ADR 0027): read-only and the time limit are set inside the transaction the query runs in -
+        # LOCAL, so nothing outlives it - and the message commits as it ends, a write included.
+        prefix = _postgres_prefix(read_only, timeout)
+        with session.conn.cursor() as cursor:
             try:
-                result = _fetch_page(cursor, sql, params, 'format', limit, offset, self.DIALECT)
+                return _fetch_page(cursor, sql, params, 'format', limit, offset, self.DIALECT,
+                                   wrap=(lambda statement: prefix + statement) if prefix else None)
             except psycopg2.errors.QueryCanceled:
                 raise _timed_out(timeout) from None
-        if not read_only:
-            conn.commit()
-        return result
 
     def stream(self, session, sql, params, timeout):
         """Unlike query(), uses a named (server-side) cursor - PostgreSQL's default cursor, like MySQL's,
@@ -304,9 +372,9 @@ class _Postgres(_Driver):
         MySQL above: 1M rows over real HTTP, RSS flat at ~55MB throughout, against ~564MB buffered."""
         import psycopg2.errors
         conn = session.conn
+        conn.autocommit = False  # a named cursor needs an explicit transaction; reset() ends it, restoring autocommit
         with conn.cursor() as setter:
-            if timeout:
-                setter.execute(f'SET LOCAL statement_timeout = {_millis(timeout)}')
+            setter.execute(_postgres_prefix(True, timeout).rstrip('; '))
         cursor = conn.cursor(name='queryapigate_stream')
         cursor.itersize = _STREAM_BATCH  # rows fetched from the server per underlying fetchmany() call
         sql, args = bind_parameters(sql, params or {}, 'format', self.DIALECT)
@@ -1080,6 +1148,8 @@ def _write_postgres(details, sql, params, ceiling, timeout=None, pool=None):
     driver = _Postgres()
 
     def run(session):
+        session.conn.autocommit = False  # rolled back past its ceiling: needs a real transaction; reset() restores
+
         def write():
             with session.conn.cursor() as cursor:
                 if timeout:

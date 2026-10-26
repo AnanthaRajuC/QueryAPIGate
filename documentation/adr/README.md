@@ -35,6 +35,7 @@ one it supersedes.
 | [0024](0024-fail-closed-auditing.md) | Fail-closed auditing: an action may require its audit entry | Proposed |
 | [0025](0025-semantic-retrieval.md) | Semantic retrieval: an `embed` parameter, not a vector store | Accepted |
 | [0026](0026-trino-connections.md) | Trino as a native connection type | Accepted |
+| [0027](0027-fewer-round-trips-per-query.md) | Fewer round trips per query, and a read-only mode a query can't undo | Accepted |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

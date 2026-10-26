@@ -49,6 +49,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+- **MySQL: a query could make a pooled read-only connection writable, or lift its time limit, for the calls after it.**
+  A read-only connection was made read-only once per session, and its time limit was set on the session only when
+  it changed. A stored function that sets the session's transaction mode (`SET SESSION TRANSACTION READ WRITE`) or
+  its `max_execution_time`, called as `SELECT f()` - which the SQL guard passes as a read - changed them for every
+  later call on that pooled connection: a later write through it was no longer refused by MySQL, and a query given
+  0.5 s ran for over ten minutes. It needs such a function in the database and `EXECUTE` on it for the connection's
+  user; the SQL guard still refused writes from read-only keys, so it disabled MySQL's own backstop rather than
+  allowing writes outright. Now a read-only connection is read-only per transaction (`START TRANSACTION READ ONLY`,
+  ended on release with `ROLLBACK AND CHAIN`, which starts the next one read-only), and a read's time limit travels
+  with the statement (a `MAX_EXECUTION_TIME` hint; `SET STATEMENT ... FOR` on MariaDB), so nothing a query sets
+  outlives it. [ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md). Affects every release to 0.42.
+
 ### Added
 - **`QUERYAPIGATE_LOG_REQUESTS=off` leaves out the per-request log lines** - the `METHOD /path -> status` line and the
   `Executing on ...` / `Finding on ...` / `Streaming from ...` line for each query. Errors, warnings, slow queries and
@@ -57,6 +70,23 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
 
 ### Changed
+- **Fewer round trips per query** ([ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md)). Across a
+  network every round trip costs a call in full, so:
+  - **PostgreSQL: 4 round trips down to 1.** Connections run in autocommit, and each query goes as one message
+    (`SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = ...; <query>`) that PostgreSQL runs as one transaction,
+    ending with the message - no `BEGIN`, and no `ROLLBACK` on release. A write commits with its message. Streaming
+    exports and agent writes still use an explicit transaction, which they need.
+  - **MySQL: 3 round trips down to 2, and no more stalls.** A pooled connection keeps one cursor instead of making one
+    per query: mysql-connector pings the server on every `cursor()`, and its C extension holds the GIL during the
+    ping, so across a network every call froze the whole worker for a round trip - the 22% drop at 32 callers in
+    [Performance on MySQL](documentation/PERFORMANCE_MYSQL_V1.md#a-database-across-a-network).
+  - PostgreSQL's statement log now shows one combined message per call.
+  - Measured at the driver, with a 0.5 ms network round trip: a PostgreSQL call 2.46 ms to 0.69 ms, and 8 threads
+    3,470 to 12,247 calls a second; a MySQL call 1.96 ms to 1.36 ms, and 8 threads 1,230 to 5,819 calls a second.
+    The gateway's own work per call comes on top, so whole-request gains are smaller.
+- **Reading the store's location no longer touches the filesystem on every call.** With an absolute
+  `QUERYAPIGATE_HOME` (the Docker image's `/data`), where the store lives is worked out once - 3.6-3.8% of a worker's
+  CPU in the MySQL benchmark.
 - **The check that a connection can't open QueryAPIGate's own store now skips server databases.** PostgreSQL, MySQL,
   ClickHouse, MongoDB and Trino open no file, so resolving their `database` as a path on disk (several system calls)
   on every call protected nothing, and cost 7-10% of a worker's CPU. SQLite, DuckDB, H2, JDBC - and any type it

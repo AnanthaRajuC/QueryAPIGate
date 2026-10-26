@@ -705,8 +705,10 @@ class DriverWiringTests(unittest.TestCase):
         self.assertEqual((kwargs['dbname'], kwargs['host']), ('d', 'h'))
         self.assertNotIn('active', kwargs)
         self.assertNotIn('db', kwargs)
-        conn.set_session.assert_called_once_with(readonly=True)
-        cursor.execute.assert_called_once_with("SELECT id FROM t WHERE n = %s AND s LIKE '%%x'\nLIMIT 6 OFFSET 10", [4])
+        conn.set_session.assert_called_once_with(readonly=True, autocommit=True)
+        # one message (ADR 0027): the transaction's access mode, then the query - nothing before it, nothing after
+        cursor.execute.assert_called_once_with(
+            "SET TRANSACTION READ ONLY; SELECT id FROM t WHERE n = %s AND s LIKE '%%x'\nLIMIT 6 OFFSET 10", [4])
         self.assertEqual((columns, rows), (['id'], [(1,)]))
         conn.close.assert_called_once()
 
@@ -737,13 +739,15 @@ class DriverWiringTests(unittest.TestCase):
         import psycopg2.errors
         cursor = mock.MagicMock()
         cursor.description = [('id',)]
-        cursor.execute.side_effect = [None, psycopg2.errors.QueryCanceled('canceled')]
+        cursor.execute.side_effect = psycopg2.errors.QueryCanceled('canceled')
         conn = mock.MagicMock()
         conn.cursor.return_value.__enter__.return_value = cursor
         with mock.patch('psycopg2.connect', return_value=conn):
             with self.assertRaises(ApiError) as caught:
                 runners._run_postgres({'host': 'h'}, 'SELECT pg_sleep(9)', None, 5, 0, True, 1.5)
-        self.assertEqual(cursor.execute.call_args_list[0].args, ('SET LOCAL statement_timeout = 1500',))
+        self.assertEqual(cursor.execute.call_count, 1)
+        self.assertEqual(cursor.execute.call_args.args[0], 'SET TRANSACTION READ ONLY; '
+                         'SET LOCAL statement_timeout = 1500; SELECT pg_sleep(9)\nLIMIT 6 OFFSET 0')
         self.assertEqual(caught.exception.status, 504)
         conn.close.assert_called_once()
 
@@ -769,28 +773,65 @@ class DriverWiringTests(unittest.TestCase):
             with self.assertRaises(ServerException):
                 runners._run_clickhouse({'host': 'h'}, 'SELECT 1', None, 5, 0, True, 1)
 
-    def test_mysql_limit_variable_fallback_and_error_mapping(self):
-        import mysql.connector
+    def mysql_conn(self, server='8.4.0', fail_on=None, error=None):
         cursor = mock.MagicMock()
         cursor.description = [('a',)]
-        timeout_error = mysql.connector.Error('Query execution was interrupted', errno=3024)
+        cursor.fetchall.return_value = [(1,)]
 
         def execute(sql, *args):
-            if sql.startswith('SET SESSION max_execution_time'):
-                raise mysql.connector.Error('Unknown system variable', errno=1193)  # e.g. MariaDB
-            if sql.startswith('SELECT'):
-                raise timeout_error
-
+            if fail_on and sql.startswith(fail_on):
+                raise error
         cursor.execute.side_effect = execute
         conn = mock.MagicMock()
         conn.cursor.return_value = cursor
+        conn.get_server_info.return_value = server
+        conn.unread_result = False
+        conn.in_transaction = False
+        return conn, cursor
+
+    def test_mysql_read_carries_its_time_limit_as_a_hint_and_maps_the_timeout(self):
+        import mysql.connector
+        conn, cursor = self.mysql_conn(fail_on='SELECT', error=mysql.connector.Error('interrupted', errno=3024))
         with mock.patch('mysql.connector.connect', return_value=conn):
             with self.assertRaises(ApiError) as caught:
                 runners._run_mysql({'host': 'h'}, 'SELECT SLEEP(9)', None, 5, 0, True, 2)
         statements = [c.args[0] for c in cursor.execute.call_args_list]
-        self.assertIn('SET SESSION max_statement_time = 2', statements)  # MariaDB variable, in seconds
+        # on the statement, where a query can't lift it - not the session (ADR 0027)
+        self.assertIn('SELECT /*+ MAX_EXECUTION_TIME(2000) */ SLEEP(9)\nLIMIT 6 OFFSET 0', statements)
+        self.assertFalse(any('max_execution_time' in s for s in statements))
         self.assertEqual(caught.exception.status, 504)
         conn.close.assert_called_once()
+
+    def test_mysql_hint_goes_after_leading_comments_and_with_falls_back_to_the_session(self):
+        conn, cursor = self.mysql_conn()
+        session = pool.Session(conn, runners._MySQL())
+        wrap = runners._mysql_timeout_wrap(cursor, session, 1.5)
+        self.assertEqual(wrap('-- top films\n/* note */ select a FROM t'),
+                         '-- top films\n/* note */ select /*+ MAX_EXECUTION_TIME(1500) */ a FROM t')
+        self.assertEqual(wrap('WITH x AS (SELECT 1) SELECT * FROM x'), 'WITH x AS (SELECT 1) SELECT * FROM x')
+        cursor.execute.assert_called_once_with('SET SESSION max_execution_time = 1500')  # every call, not cached
+        self.assertIsNone(runners._mysql_timeout_wrap(cursor, session, None))
+
+    def test_mariadb_read_carries_its_time_limit_in_set_statement(self):
+        import mysql.connector
+        conn, cursor = self.mysql_conn(server='10.11.6-MariaDB', fail_on='SET STATEMENT',
+                                       error=mysql.connector.Error('interrupted', errno=1969))
+        with mock.patch('mysql.connector.connect', return_value=conn):
+            with self.assertRaises(ApiError) as caught:
+                runners._run_mysql({'host': 'h'}, 'SELECT SLEEP(9)', None, 5, 0, True, 2)
+        statements = [c.args[0] for c in cursor.execute.call_args_list]
+        self.assertIn('SET STATEMENT max_statement_time = 2 FOR SELECT SLEEP(9)\nLIMIT 6 OFFSET 0', statements)
+        self.assertEqual(caught.exception.status, 504)
+
+    def test_mysql_write_limit_variable_fallback(self):
+        import mysql.connector
+        conn, cursor = self.mysql_conn(fail_on='SET SESSION max_execution_time',
+                                       error=mysql.connector.Error('Unknown system variable', errno=1193))
+        with mock.patch('mysql.connector.connect', return_value=conn):
+            runners._run_mysql({'host': 'h'}, 'UPDATE t SET a = 1', None, 5, 0, False, 2)
+        statements = [c.args[0] for c in cursor.execute.call_args_list]
+        self.assertIn('SET SESSION max_statement_time = 2', statements)  # MariaDB variable, in seconds
+        conn.commit.assert_called_once()
 
     def test_h2_sets_query_timeout_and_maps_cancellation(self):
         import jaydebeapi
@@ -972,37 +1013,97 @@ class PooledDriverTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_mysql_reuses_the_connection_ends_each_transaction_and_applies_changed_limits_only(self):
+    def test_mysql_reuses_its_cursor_and_chains_read_only_transactions(self):
         cursor = mock.MagicMock()
         cursor.description = [('a',)]
         cursor.fetchall.return_value = [(1,)]
         conn = mock.MagicMock()
         conn.cursor.return_value = cursor
+        conn.get_server_info.return_value = '8.4.0'
+        conn.unread_result = False
         with mock.patch('mysql.connector.connect', return_value=conn) as connect:
             for timeout in (2, 2, None):
                 runners._run_mysql({'host': 'h'}, 'SELECT 1', None, 5, 0, True, timeout, self.pool)
         self.assertEqual(connect.call_count, 1)
-        self.assertEqual(conn.rollback.call_count, 3)  # a pooled connection must not keep a stale snapshot
+        self.assertEqual(conn.cursor.call_count, 2)  # one at connect, one kept - none per query, so no ping per query
+        conn.rollback.assert_not_called()
         conn.close.assert_not_called()
-        limits = [c.args[0] for c in cursor.execute.call_args_list if 'max_execution_time' in c.args[0]]
-        self.assertEqual(limits, ['SET SESSION max_execution_time = 2000',   # first use
-                                  'SET SESSION max_execution_time = 0'])     # limit removed again, not left at 2s
+        self.assertEqual([c.args[0] for c in cursor.execute.call_args_list], [
+            'SET SESSION TRANSACTION READ ONLY', 'START TRANSACTION READ ONLY',
+            'SELECT /*+ MAX_EXECUTION_TIME(2000) */ 1\nLIMIT 6 OFFSET 0', 'ROLLBACK AND CHAIN',
+            'SELECT /*+ MAX_EXECUTION_TIME(2000) */ 1\nLIMIT 6 OFFSET 0', 'ROLLBACK AND CHAIN',
+            'SELECT 1\nLIMIT 6 OFFSET 0', 'ROLLBACK AND CHAIN'])
 
-    def test_postgres_sets_a_transaction_local_limit_on_every_use_and_rolls_back(self):
+    def test_mysql_reads_the_rest_of_a_result_before_releasing_the_connection(self):
+        cursor = mock.MagicMock()
+        cursor.description = [('a',)]
+        conn = mock.MagicMock()
+        conn.cursor.return_value = cursor
+        conn.get_server_info.return_value = '8.4.0'
+        conn.unread_result = True
+        with mock.patch('mysql.connector.connect', return_value=conn):
+            runners._run_mysql({'host': 'h'}, 'SHOW TABLES', None, 5, 0, True, None, self.pool)
+        conn.consume_results.assert_called()
+
+    def test_postgres_sends_one_message_per_use_and_has_nothing_to_roll_back(self):
         cursor = mock.MagicMock()
         cursor.description = [('a',)]
         cursor.fetchall.return_value = [(1,)]
         conn = mock.MagicMock()
         conn.closed = 0
+        conn.autocommit = True
         conn.cursor.return_value.__enter__.return_value = cursor
         with mock.patch('psycopg2.connect', return_value=conn) as connect:
             for _ in range(2):
                 runners._run_postgres({'host': 'h'}, 'SELECT 1', None, 5, 0, True, 3, self.pool)
         self.assertEqual(connect.call_count, 1)
-        conn.set_session.assert_called_once_with(readonly=True)
-        self.assertEqual(conn.rollback.call_count, 2)
-        local = [c.args[0] for c in cursor.execute.call_args_list if c.args[0].startswith('SET')]
-        self.assertEqual(local, ['SET LOCAL statement_timeout = 3000'] * 2)
+        conn.set_session.assert_called_once_with(readonly=True, autocommit=True)
+        conn.rollback.assert_not_called()  # the message's implicit transaction ended with it
+        message = 'SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 3000; SELECT 1\nLIMIT 6 OFFSET 0'
+        self.assertEqual([c.args[0] for c in cursor.execute.call_args_list], [message] * 2)
+
+    def test_postgres_write_commits_with_its_message(self):
+        cursor = mock.MagicMock()
+        cursor.description = None
+        conn = mock.MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with mock.patch('psycopg2.connect', return_value=conn):
+            runners._run_postgres({'host': 'h'}, 'UPDATE t SET a = 1', None, 5, 0, False, 3)
+        conn.set_session.assert_called_once_with(autocommit=True)
+        cursor.execute.assert_called_once_with('SET LOCAL statement_timeout = 3000; UPDATE t SET a = 1')
+        conn.commit.assert_not_called()
+
+    def test_postgres_stream_and_agent_write_take_an_explicit_transaction_and_give_it_back(self):
+        conn = mock.MagicMock()
+        conn.closed = 0
+        conn.autocommit = True
+        setter = mock.MagicMock()
+        conn.cursor.return_value.__enter__.return_value = setter
+        named = mock.MagicMock()
+        named.fetchmany.side_effect = [[(1,)], []]
+        named.description = [('a',)]
+        conn.cursor.side_effect = lambda *a, **kw: named if kw.get('name') else mock.DEFAULT
+        with mock.patch('psycopg2.connect', return_value=conn):
+            rows = list(runners._stream_postgres({'host': 'h'}, 'SELECT a FROM t', None, 2, self.pool))
+        self.assertEqual(rows, [('a',), (1,)])
+        setter.execute.assert_any_call('SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 2000')
+        conn.rollback.assert_called_once()   # reset() ended the stream's transaction...
+        self.assertIs(conn.autocommit, True)  # ...and handed the connection back in autocommit
+
+    def test_postgres_agent_write_runs_in_a_transaction_it_can_roll_back(self):
+        cursor = mock.MagicMock()
+        cursor.description = None
+        cursor.rowcount = 1
+        conn = mock.MagicMock()
+        conn.closed = 0
+        conn.autocommit = True
+        conn.cursor.return_value.__enter__.return_value = cursor
+        seen = []
+        conn.commit.side_effect = lambda: seen.append(conn.autocommit)
+        with mock.patch('psycopg2.connect', return_value=conn):
+            runners._write_postgres({'host': 'h'}, 'UPDATE t SET a = 1', None, 10, 2, self.pool)
+        self.assertEqual(seen, [False])       # committed inside an explicit transaction, not in autocommit
+        self.assertIs(conn.autocommit, True)  # and back to autocommit for the next user of the connection
 
     def test_connection_used_by_a_failed_query_is_not_pooled(self):
         client = mock.MagicMock()
