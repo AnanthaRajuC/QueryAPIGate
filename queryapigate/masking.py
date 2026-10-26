@@ -162,9 +162,12 @@ def _is_constant(expression):
                exp.CurrentTimestamp, exp.CurrentTime, exp.Tuple,
                # a ranking over no column - RANK() OVER (ORDER BY COUNT(*) DESC); a column inside is still refused
                exp.Window, exp.Order, exp.Ordered, exp.RowNumber)
+    # sqlglot 30 parses the ranking functions as their own types (exp.Rank); older ones, as anonymous functions
+    ranking = tuple(getattr(exp, name) for name in ('Rank', 'DenseRank', 'Ntile', 'PercentRank', 'CumeDist')
+                    if hasattr(exp, name))
     for node in expression.walk():
-        if isinstance(node, exp.Anonymous) and node.name.lower() in _RANKING:
-            continue
+        if isinstance(node, ranking) or (isinstance(node, exp.Anonymous) and node.name.lower() in _RANKING):
+            continue  # the function itself; a column among its arguments is still walked, and refused
         if isinstance(node, exp.Count) and isinstance(node.this, (exp.Star, exp.Literal)):
             continue
         if isinstance(node, exp.Star) and isinstance(node.parent, exp.Count):
@@ -174,11 +177,42 @@ def _is_constant(expression):
     return True
 
 
+def _from_sources(select):
+    """What a SELECT reads from, in the order its result columns come - the FROM item, then each join's, a nested
+    join's own in place."""
+    from sqlglot import exp
+    sources = []
+
+    def add(source):
+        sources.append(source)
+        for join in (source.args.get('joins') or ()) if isinstance(source, exp.Table) else ():
+            add(join.this)
+    from_ = sqltools.sqlglot_arg(select, 'from')
+    if from_ is not None:
+        add(from_.this)
+    for join in select.args.get('joins') or ():
+        add(join.this)
+    return sources + list(select.args.get('laterals') or ())
+
+
+def _is_derived(source):
+    """A FROM source that is not a table: a subquery, VALUES, LATERAL, UNNEST or a table function."""
+    from sqlglot import exp
+    return isinstance(source, (exp.Subquery, exp.Values, exp.Lateral, exp.Unnest)) or (
+        isinstance(source, exp.Table) and isinstance(source.this, exp.Func))
+
+
 def _refuse_shapes(parsed):
     """Query shapes whose columns tracing can't follow faithfully, refused before tracing: a real table given new
     column names in its alias (`customers AS c(a, e)` - e is then email, while the parser sees a column named e),
-    and SELECT * over a NATURAL or USING join (the database merges the join columns, so the result has fewer columns
-    than the parser counts)."""
+    SELECT * over a NATURAL or USING join (the database merges the join columns, so the result has fewer columns
+    than the parser counts), and SELECT * over several sources one of which isn't a table.
+
+    That last: masks are applied by position, and sqlglot before 30.x expands `*` with the tables first and a
+    subquery, VALUES or LATERAL after them, whatever order the query names them in - so in `SELECT * FROM (SELECT ...)
+    s JOIN customers c`, the database returns s's columns first while the trace put customers' there, and a mask
+    meant for customers.email landed on another column; the email came back unmasked. Refused on every sqlglot
+    version rather than trusted to one: `s.*, c.*`, or named columns, trace in the order written."""
     from sqlglot import exp
     for table in parsed.find_all(exp.Table):
         alias = table.args.get('alias')
@@ -192,6 +226,12 @@ def _refuse_shapes(parsed):
         for join in select.args.get('joins') or ():
             if join.args.get('using') or str(join.args.get('method') or '').upper() == 'NATURAL':
                 raise _refuse('SELECT * over a NATURAL or USING join can\'t be traced for masking - name the columns')
+        if not any(isinstance(p, exp.Star) for p in select.expressions):
+            continue  # each t.* expands one source, in the order written
+        sources = _from_sources(select)
+        if len(sources) > 1 and any(_is_derived(source) for source in sources):
+            raise _refuse("SELECT * over a subquery, VALUES or LATERAL joined with other tables can't be traced in "
+                          'order for masking - select s.*, c.* or name the columns')
 
 
 def check_columns(traced, result_columns):
@@ -202,7 +242,7 @@ def check_columns(traced, result_columns):
                       'name the columns in the select list')
 
 
-MIN_SQLGLOT = (25, 2)  # exp.SetOperation and the lineage the tracing below relies on; verified from here up to <26
+MIN_SQLGLOT = (25, 2)  # exp.SetOperation and the lineage the tracing below relies on; verified from here up to <31
 
 
 def require_supported_sqlglot(sqlglot):
@@ -211,7 +251,7 @@ def require_supported_sqlglot(sqlglot):
     found = tuple(int(part) for part in re.findall(r'\d+', sqlglot.__version__)[:2])
     if found < MIN_SQLGLOT:
         raise ApiError(f"Column masking needs sqlglot {'.'.join(map(str, MIN_SQLGLOT))} or later, and "
-                       f"{sqlglot.__version__} is installed - run `pip install -U 'sqlglot>=25.2,<26'`", 500,
+                       f"{sqlglot.__version__} is installed - run `pip install -U 'sqlglot>=25.2,<31'`", 500,
                        code='masking_unavailable')
 
 
@@ -588,7 +628,7 @@ def returning_as_select(sql, dialect):
     if returning is None:
         return sql
     target = parsed.this if not isinstance(parsed.this, exp.Schema) else parsed.this.this  # INSERT INTO t (cols)
-    if not isinstance(target, exp.Table) or parsed.args.get('from') or parsed.args.get('using') \
+    if not isinstance(target, exp.Table) or sqltools.sqlglot_arg(parsed, 'from') or parsed.args.get('using') \
             or parsed.args.get('joins'):
         raise _refuse('Masking can follow what a change to one table returns - not one that joins others in')
     select = exp.select(*returning.expressions).from_(target.copy())

@@ -118,20 +118,34 @@ def qualify_grant(name, default_catalog, default_schema, dialect='trino'):
     return '.'.join(parts[-3:])
 
 
+def _cte_key(identifier):
+    """What a name must match to be a CTE's: an unquoted name case-insensitively, a quoted one exactly - and never one
+    quoted the other way. In PostgreSQL `"Customer"` is not the CTE `customer` but a real table, which matching
+    case-insensitively let through: `WITH customer AS (SELECT 1) SELECT * FROM "Customer"` named no table (fixed in
+    0.43). Where quoting doesn't make a name case-sensitive, the mismatch counts the reference as a table - a
+    refusal at worst, never a table let through."""
+    from sqlglot import exp
+    if isinstance(identifier, exp.Identifier):
+        return (True, identifier.this) if identifier.quoted else (False, identifier.this.lower())
+    return (False, str(identifier or '').lower())
+
+
 def _real_tables(node, visible, qualify):
-    """The tables under ``node`` that aren't references to a CTE in ``visible`` (lower-case bare names) - see the
-    module docstring for the scoping rule. ``qualify`` turns a real table node into the name it is matched by
-    (see _extract_tables())."""
+    """The tables under ``node`` that aren't references to a CTE in ``visible`` (_cte_key()s) - see the module
+    docstring for the scoping rule. ``qualify`` turns a real table node into the name it is matched by (see
+    _extract_tables())."""
     from sqlglot import exp
     if isinstance(node, exp.Table):
-        name = node.name.lower()  # the CTE-shadowing rule is on the bare name; a CTE is never catalog/schema-qualified
-        if not name or (name in visible and not node.args.get('db') and not node.args.get('catalog')):
+        # the CTE-shadowing rule is on the bare name; a CTE is never catalog/schema-qualified
+        if not node.name or (_cte_key(node.this) in visible and not node.args.get('db')
+                             and not node.args.get('catalog')):
             return set()
         return {qualify(node)} | _children(node, visible, qualify)
     found = set()
-    with_ = node.args.get('with') if isinstance(node, exp.Expression) else None
+    with_ = sqltools.sqlglot_arg(node, 'with') if isinstance(node, exp.Expression) else None
     if isinstance(with_, exp.With):
-        ctes = [(cte.alias_or_name.lower(), cte.this) for cte in with_.expressions]
+        ctes = [(_cte_key(cte.args['alias'].this if cte.args.get('alias') else cte.alias_or_name), cte.this)
+                for cte in with_.expressions]
         if with_.args.get('recursive'):
             visible = visible | {name for name, _ in ctes}
             for _, body in ctes:

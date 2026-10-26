@@ -182,6 +182,14 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     return sql
 
 
+def sqlglot_arg(node, name):
+    """A parsed sqlglot node's `name` argument (`with`, `from`), under either spelling: sqlglot 30 renamed the ones
+    that are Python keywords to `with_`, `from_`. Reading the old name alone finds nothing there - a statement's CTEs
+    or FROM clause silently missing from what a check walks."""
+    value = node.args.get(name)
+    return value if value is not None else node.args.get(f'{name}_')
+
+
 def explained_statement(sql, dialect=None):
     """The statement an EXPLAIN plans: ``sql`` after its EXPLAIN and options (_EXPLAIN_RE), found on the comment- and
     literal-masked text, so the word in a comment or a string never counts - or ``sql`` as it is, if it isn't one."""

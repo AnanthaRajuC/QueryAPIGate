@@ -117,13 +117,23 @@ class TraceTests(unittest.TestCase):
                              ('SELECT row_to_json(c) AS j FROM customers c', 'postgres'),
                              ('SELECT to_json(c) AS j FROM customers c', 'duckdb'),
                              ('SELECT array_agg(c) AS a FROM customers c', 'postgres'),
-                             ('SELECT * FROM customers, LATERAL (SELECT email AS e2) l', 'postgres'),
                              ('WITH RECURSIVE r(n, e) AS (SELECT 1, email FROM customers UNION ALL '
                               'SELECT n + 1, e FROM r WHERE n < 3) SELECT e FROM r', 'postgres'),
                              ('SELECT version() AS v', 'postgres')):                 # a function it can't see into
             with self.subTest(sql=sql), self.assertRaises(masking.ApiError) as caught:
                 masking.trace(sql, dialect, TABLES)
             self.assertEqual(caught.exception.code, 'mask_unresolvable')
+        # A LATERAL subquery re-selecting a column: sqlglot before 30 can't follow it, and it is refused; from 30 it is
+        # traced, and must then be traced to the column it re-selects - never to nothing
+        for sql in ('SELECT * FROM customers, LATERAL (SELECT email AS e2) l',
+                    'SELECT l.e2 FROM customers c, LATERAL (SELECT c.email AS e2) l'):
+            with self.subTest(sql=sql):
+                try:
+                    traced = dict(sources(sql))
+                except masking.ApiError as error:
+                    self.assertEqual(error.code, 'mask_unresolvable')
+                else:
+                    self.assertEqual(traced['e2'], ['customers.email'])
         # ... while naming the columns of the same joins is fine
         self.assertEqual(sources('SELECT c.email FROM customers c JOIN orders USING (id)'),
                          [('email', ['customers.email'])])
@@ -290,6 +300,107 @@ class RealSchemaTests(unittest.TestCase):
         with self.assertRaises(masking.ApiError) as caught:
             masking.plan(RULES, masking.trace('SELECT email FROM contacts', 'sqlite', tables))
         self.assertEqual(caught.exception.code, 'mask_unresolvable')
+
+
+class MaskedResultTests(unittest.TestCase):
+    """End to end against a real engine (DuckDB, in process): every query is either refused, or comes back with no
+    masked value in clear - whatever sqlglot traced. Masks are applied by position, so a trace whose columns are in a
+    different order from the database's lands them on the wrong columns: before 0.43, `SELECT * FROM (SELECT ...) s
+    JOIN customers c` returned the email unmasked, on every sqlglot the pin allowed (sqlglot fixed its order late in
+    30.x)."""
+
+    SECRET = 'ann@example.com'
+    PHONE = '555-0100'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = duckdb.connect()
+        cls.db.execute('CREATE TABLE customers (id INTEGER, email TEXT, phone TEXT, name TEXT)')
+        cls.db.execute('CREATE TABLE orders (id INTEGER, customer_id INTEGER, total INTEGER)')
+        cls.db.execute(f"INSERT INTO customers VALUES (1, '{cls.SECRET}', '{cls.PHONE}', 'Ann')")
+        cls.db.execute('INSERT INTO orders VALUES (1, 1, 42)')
+        cls.tables = [t for t in TABLES if t['type'] == 'table']
+
+    def assert_never_in_clear(self, sql):
+        try:
+            traced = masking.trace(sql, 'duckdb', self.tables)
+        except masking.ApiError as error:
+            self.assertEqual(error.code, 'mask_unresolvable')
+            return
+        result = self.db.execute(sql)
+        columns, rows = [d[0] for d in result.description], result.fetchall()
+        try:
+            masking.check_columns(traced, columns)
+        except masking.ApiError:
+            return
+        _, masked = masking.apply(columns, rows, masking.plan(RULES, traced)[0])
+        values = {str(v) for row in masked for v in row}
+        self.assertNotIn(self.SECRET, values, (sql, traced))
+        self.assertNotIn(self.PHONE, values, (sql, traced))
+        self.assertNotIn('42', values, (sql, traced))  # orders.total: null
+
+    def test_star_over_a_subquery_and_a_table_is_refused_not_misplaced(self):
+        for sql in ('SELECT * FROM (SELECT customer_id, SUM(total) AS spent FROM orders GROUP BY customer_id) s '
+                    'JOIN customers c ON c.id = s.customer_id',
+                    'SELECT * FROM (SELECT * FROM orders) o JOIN customers c ON c.id = o.customer_id',
+                    'SELECT * FROM (VALUES (1, 2)) v(a, b), customers c',
+                    'SELECT * FROM (VALUES (1, 2)) v(a, b) JOIN orders o LEFT JOIN customers c '
+                    'ON c.id = o.customer_id ON 1 = 1',
+                    'SELECT * FROM (SELECT * FROM (VALUES (1, 2)) v(a, b), customers c) s'):
+            with self.subTest(sql=sql):
+                with self.assertRaises(masking.ApiError) as caught:
+                    masking.trace(sql, 'duckdb', self.tables)
+                self.assertEqual(caught.exception.code, 'mask_unresolvable')
+                self.assert_never_in_clear(sql)
+
+    def test_the_same_shapes_written_out_are_traced_and_masked(self):
+        for sql in ('SELECT o.*, c.* FROM (SELECT * FROM orders) o JOIN customers c ON c.id = o.customer_id',
+                    'SELECT s.*, c.email FROM (SELECT customer_id FROM orders) s '
+                    'JOIN customers c ON c.id = s.customer_id',
+                    'WITH s AS (SELECT customer_id FROM orders) SELECT * FROM s '
+                    'JOIN customers c ON c.id = s.customer_id',
+                    'SELECT * FROM orders o JOIN customers c ON c.id = o.customer_id',
+                    'SELECT * FROM (SELECT * FROM customers) c'):
+            with self.subTest(sql=sql):
+                masking.trace(sql, 'duckdb', self.tables)  # traced, not refused
+                self.assert_never_in_clear(sql)
+
+    def test_generated_queries_never_return_a_masked_value_in_clear(self):
+        import random
+        rng = random.Random(43)
+        cols = ['id', 'email', 'phone', 'total', 'customer_id', 'name', '*', 'COUNT(*)', '1']
+
+        def source(depth):
+            roll = rng.random()
+            if depth <= 0 or roll < 0.4:
+                return rng.choice(['customers', 'orders']) + f' t{rng.randint(0, 99)}'
+            if roll < 0.6:
+                return f'({query(depth - 1)}) s{rng.randint(0, 99)}'
+            if roll < 0.75:
+                return '(VALUES (7, 8)) v(a, b)'
+            return f'{source(depth - 1)} {rng.choice(["CROSS JOIN", ","])} {source(depth - 1)}'
+
+        def query(depth):
+            picked = ', '.join(rng.choice(cols) + (f' AS c{i}' if rng.random() < 0.3 else '')
+                               for i in range(rng.randint(1, 3)))
+            sql = f'SELECT {picked} FROM {source(depth)}'
+            if rng.random() < 0.2 and depth > 0:
+                sql = f'WITH w AS ({query(depth - 1)}) SELECT * FROM w, {source(0)}'
+            if rng.random() < 0.15:
+                sql = f'{sql} UNION ALL {sql}'
+            return sql
+
+        checked = 0
+        for _ in range(400):
+            sql = query(rng.randint(0, 3))
+            try:
+                self.db.execute(f'SELECT * FROM ({sql}) LIMIT 0')
+            except duckdb.Error:
+                continue  # not valid SQL to DuckDB (an ambiguous column, say): nothing it could return
+            with self.subTest(sql=sql):
+                self.assert_never_in_clear(sql)
+            checked += 1
+        self.assertGreater(checked, 100)
 
 
 class TraceCacheTests(unittest.TestCase):

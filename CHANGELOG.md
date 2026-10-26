@@ -62,6 +62,21 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   against the tables of the statement it explains.
 
 ### Security
+- **Column masking could put a mask on the wrong column, and return the masked one in clear.** Masks are applied by
+  position. Every sqlglot that 0.42 and earlier allowed (and sqlglot 30 until late in that series) expands `SELECT *`
+  with the tables first, and a subquery, `VALUES` or `LATERAL` after them, whatever order the query names them in.
+  So in `SELECT * FROM (SELECT ...) s JOIN customers c ON ...`, the database returned `s`'s columns first while the
+  trace had put `customers`' there, and a rule on `customers.email` masked another column. Only the number of
+  columns was checked, and that matched. Now a `SELECT *` over several sources, one of which isn't a table, is
+  refused (`mask_unresolvable`) on every sqlglot version; `s.*, c.*` or named columns trace in the order written. A
+  new test runs generated queries against a real engine (DuckDB) and checks that no masked value comes back in
+  clear. Found by a differential fuzz of sqlglot 25 against 30. Affects every release with masking (0.17 to 0.42).
+- **A CTE could hide a real table from `allowed_tables` by differing from it only in quoting.** CTE names were
+  matched case-insensitively, but in PostgreSQL `"Customer"` (an ORM's quoted table name) is a different name from
+  the CTE `customer`. So a key allowed only `orders` could read that table with `WITH customer AS (SELECT 1) SELECT *
+  FROM "Customer"`, confirmed against PostgreSQL 16. Now a reference matches a CTE only when named the same way:
+  unquoted and equal ignoring case, or quoted and exactly equal. Found by the same fuzz. Affects every release with
+  `allowed_tables`.
 - **Workspaces (experimental): masking could trace one workspace's query against another's schema.** Connection
   names are unique per workspace, but masking's cached copy of a connection's schema was keyed by name alone. So
   within a minute, a query on workspace B's `crm` could be traced against workspace A's `crm` tables. A column only
@@ -102,6 +117,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
 
 ### Changed
+- **sqlglot 26 to 30 are supported** (`queryapigate[flow]` now allows `sqlglot>=25.2,<31`; Dependabot #77). sqlglot
+  30 renamed the parsed `with` and `from` arguments to `with_` and `from_`. Read under the old names, a statement's
+  CTEs went missing from the table check (it refused CTE queries), and an `UPDATE ... FROM` went unrecognised by
+  masking's check for a change that joins other tables in (it traced what should have been refused). Both names are
+  read now. sqlglot 30 parses `RANK()` as its own type, which masking now accepts as a constant ranking, as before.
+  It is also faster: a statement's first table check 0.39 to 0.27 ms, its first masking trace 3.66 to 2.86 ms.
+  Tested on 25.2, 26, 27, 28, 29, 30.0 and 30.24.
 - **No more masked call that waits once a minute.** Masking traces a statement against the connection's schema, which
   it keeps for 60 seconds. When that copy expired, the next call read the schema again and traced its statement
   again: about 75 ms, once a minute, on every governed key
@@ -141,6 +163,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **A masked call no longer reads the masking hash key from the store every time.** The key a store makes for
   `hash` never changes, so each process reads it once and keeps it until it next changes the store. With
   `QUERYAPIGATE_MASK_KEY` set, nothing is read, as before.
+
+### Fixed
+- **Formatting a query no longer rewrites its bound parameters.** The Console's Format turned `:status` into
+  `$status` on DuckDB and `{status: }` on ClickHouse (and, with sqlglot 30, `%(status)s` on PostgreSQL), none of
+  which QueryAPIGate binds, so formatted SQL saved back broke its parameters. A bound parameter is now printed as
+  written.
 
 ## [0.42.0] - 2026-10-24
 

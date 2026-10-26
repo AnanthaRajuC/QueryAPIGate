@@ -26,9 +26,16 @@ def pretty_print(sql, dialect):
         import sqlglot
     except ImportError:
         return None
+    from sqlglot import exp
     sqlglot_dialect = _DIALECT_MAP[dialect]
+
+    def as_written(node):
+        # a bound :name, printed as written: each dialect's own form - PostgreSQL's %(name)s (sqlglot 30), DuckDB's
+        # $name, ClickHouse's {name: } - isn't what QueryAPIGate binds, so formatted SQL saved back would break
+        return exp.var(f':{node.name}') if isinstance(node, exp.Placeholder) and node.name else node
     try:
-        return sqlglot.parse_one(sql, read=sqlglot_dialect).sql(dialect=sqlglot_dialect, pretty=True)
+        parsed = sqlglot.parse_one(sql, read=sqlglot_dialect).transform(as_written)
+        return parsed.sql(dialect=sqlglot_dialect, pretty=True)
     except Exception:
         return None
 
@@ -70,7 +77,7 @@ def extract_flow(sql, dialect):
 
     joins = []
     for select in parsed.find_all(exp.Select):
-        from_ = select.args.get('from')
+        from_ = sqltools.sqlglot_arg(select, 'from')
         prev = table_name(from_.this) if from_ else None
         for join in select.args.get('joins') or []:
             right = table_name(join.this)

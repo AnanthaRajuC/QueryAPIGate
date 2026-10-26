@@ -58,6 +58,21 @@ class ExtractTablesTests(unittest.TestCase):
                                   allow_writes=False, allowed_tables={'orders'})
         self.assertEqual(caught.exception.code, 'table_not_allowed')
 
+    def test_a_cte_hides_only_a_table_named_the_same_way(self):
+        # Found by differential fuzzing, 2026-10-26: CTE names were matched case-insensitively, but PostgreSQL's
+        # "Customer" (an ORM's quoted table name) is not the CTE customer - so a key allowed only orders read it
+        # through `WITH customer AS (SELECT 1) SELECT * FROM "Customer"`. Confirmed against PostgreSQL 16.
+        for sql, tables in (('WITH customer AS (SELECT 1 AS n) SELECT * FROM "Customer"', {'customer'}),
+                            ('WITH "Customer" AS (SELECT 1 AS n) SELECT * FROM customer', {'customer'}),
+                            ('WITH customer AS (SELECT 1 AS n) SELECT * FROM CUSTOMER', set()),
+                            ('WITH "Customer" AS (SELECT 1 AS n) SELECT * FROM "Customer"', set())):
+            with self.subTest(sql=sql):
+                self.assertEqual(_names(sql, 'postgres'), tables)
+        with self.assertRaises(ApiError) as caught:
+            sqltools.validate_sql('WITH customer AS (SELECT 1 AS n) SELECT * FROM "Customer"', 'postgres',
+                                  allow_writes=False, allowed_tables={'orders'}, default_schema='public')
+        self.assertEqual(caught.exception.code, 'table_not_allowed')
+
     def test_a_statement_nested_too_deep_to_walk_is_refused_not_let_through(self):
         for depth in (50, 400, 3000):
             sql = 'SELECT * FROM ' + '(SELECT * FROM ' * depth + 'secret' + ') x' * depth
