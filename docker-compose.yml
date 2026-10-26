@@ -29,6 +29,10 @@ services:
       QUERYAPIGATE_API_KEY: demo-key                   # change it - or drop this line to run without authentication
       DEMO_DB_PASSWORD: demo                           # the demo connection's password is stored as ${DEMO_DB_PASSWORD}
       QUERYAPIGATE_RATE_LIMIT: 120/minute
+      # Reuse the key, saved query and connection a call reads for 5 s instead of reading the store every time
+      # (documentation/PERFORMANCE.md#the-metadata-cache). Safe with one instance: a change through the API or Console
+      # is seen at once; one made with the CLI inside the container, up to 5 s later. 0 turns it off.
+      QUERYAPIGATE_METADATA_CACHE_TTL: "5"
     volumes:
       - demo-data:/data
     healthcheck:                                       # the image's own check, run more often so the seed starts sooner

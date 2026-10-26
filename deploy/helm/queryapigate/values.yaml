@@ -45,6 +45,10 @@ secret:
 # Plain text in the Deployment, so the secret ones (keys, the database and Redis URLs, OTLP headers) are refused here.
 config: {}
   # QUERYAPIGATE_ALLOW_WRITES: "1"
+  # Reuse the key, saved query and connection a call reads for this many seconds, instead of reading the store each
+  # time - 10-20% more throughput. Off by default: each pod caches on its own, so with several replicas a key revoked
+  # through one keeps working on the others for up to that long. With one replica, a few seconds is safe.
+  # QUERYAPIGATE_METADATA_CACHE_TTL: "5"
   # QUERYAPIGATE_HSTS_MAX_AGE: "31536000"
   # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 

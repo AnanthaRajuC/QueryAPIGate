@@ -219,6 +219,17 @@ So it is a trade: a few seconds of delay for a revocation that reaches other ins
 Leave it off if a revoked key must stop working everywhere at once; with one instance, a TTL of a few seconds changes
 nothing anyone would notice.
 
+Where it is set:
+
+| Setup | `QUERYAPIGATE_METADATA_CACHE_TTL` | Why |
+|---|---|---|
+| The server and the Docker image | `0`, off | The image runs anywhere, often several instances at a time |
+| The one-command Compose demo (`docker-compose.yml`) | `5` | One instance: only a change made with the CLI waits, up to 5 s |
+| The scale-out Compose setup (`deploy/scale-out/`) | off | Three instances: a revocation would take up to a TTL to reach the other two |
+| The Helm chart | off; `config.QUERYAPIGATE_METADATA_CACHE_TTL` | Set it with one replica, or when the delay is acceptable |
+
+Change it for any setup with the variable; the Console's Settings screen shows the value in use.
+
 ## Scaling
 
 - **More containers, not more threads.** Each container is one Python process. Run several behind a load balancer

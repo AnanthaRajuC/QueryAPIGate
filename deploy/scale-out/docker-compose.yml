@@ -16,6 +16,9 @@ x-queryapigate: &queryapigate
     QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:${POSTGRES_PASSWORD}@postgres:5432/queryapigate
     QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
     QUERYAPIGATE_TRUST_PROXY: "1"                       # one proxy in front: Caddy
+    # QUERYAPIGATE_METADATA_CACHE_TTL is left off here: each instance caches on its own, so a key revoked through
+    # one would keep working on the others for up to that long. Set it if that delay is acceptable to you
+    # (documentation/PERFORMANCE.md#the-metadata-cache).
   depends_on:
     postgres:
       condition: service_healthy
