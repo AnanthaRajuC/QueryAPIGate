@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import config, create_app, history, pool, runners
+from queryapigate.errors import ApiError
 from tests.helpers import save_query, write_connections
 
 CREATE = {
@@ -367,6 +368,33 @@ class PostgresTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     finite_slow_sql = 'SELECT pg_sleep(2)'
     connection_id_sql = 'SELECT pg_backend_pid() AS id'
 
+    # ADR 0027: one message per query, read-only per transaction - a query can't carry anything into the next call
+
+    def run_ro(self, sql, the_pool, timeout=None):
+        return runners.RUNNERS['postgres'](self.details, sql, None, 10, 0, True, timeout, the_pool)
+
+    def test_a_query_cant_turn_a_pooled_connection_writable(self):
+        the_pool = pool.ConnectionPool()
+        self.run_ro("SELECT set_config('default_transaction_read_only', 'off', false)", the_pool)
+        with self.assertRaises(Exception):  # noqa: B017 - psycopg2's ReadOnlySqlTransaction
+            self.run_ro('DELETE FROM queryapigate_it', the_pool)
+        self.assertEqual(self.run_ro('SELECT COUNT(*) FROM queryapigate_it', the_pool)[1], [(7,)])
+        self.assertEqual(the_pool.idle_count(), 1)  # one connection served all three
+
+    def test_the_time_limit_holds_and_doesnt_outlive_its_query(self):
+        the_pool = pool.ConnectionPool()
+        with self.assertRaises(ApiError) as caught:
+            self.run_ro('SELECT pg_sleep(2)', the_pool, timeout=0.3)
+        self.assertEqual(caught.exception.status, 504)
+        self.run_ro('SELECT 1', the_pool)  # the connection that timed out was discarded; this one is fresh
+        self.assertEqual(self.run_ro('SHOW statement_timeout', the_pool)[1], [('0',)])
+
+    def test_a_write_commits_with_its_message(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ALLOW_WRITES': '1'}):
+            self.write('UPDATE queryapigate_it SET name = \'committed\' WHERE id = 1')
+        rows = self.query("SELECT name FROM queryapigate_it WHERE id = 1").get_json()
+        self.assertEqual(rows, [{'name': 'committed'}])
+
 
 class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     db, env_var = 'mysql', 'QUERYAPIGATE_IT_MYSQL'
@@ -374,6 +402,62 @@ class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     connection_id_sql = 'SELECT CONNECTION_ID() AS id'
     # (SLEEP() and BENCHMARK() are cut short by MySQL's limit but return normally instead of raising an error)
     slow_sql = 'SELECT COUNT(*) FROM ' + ', '.join(f'information_schema.columns c{i}' for i in range(4))
+
+    # ADR 0027: read-only per transaction (ROLLBACK AND CHAIN), the time limit on the statement - so a stored
+    # function a query calls can't turn a pooled connection writable, or lift the limit, for the calls after it
+
+    def admin(self):
+        import mysql.connector
+        fields = {k: v for k, v in self.details.items() if k in ('host', 'port', 'user', 'password', 'database')}
+        return mysql.connector.connect(autocommit=True, **fields)
+
+    def flip_function(self):
+        conn = self.admin()
+        cursor = conn.cursor()
+        cursor.execute('DROP FUNCTION IF EXISTS queryapigate_it_flip')
+        cursor.execute('CREATE FUNCTION queryapigate_it_flip() RETURNS INT DETERMINISTIC SQL SECURITY INVOKER '
+                       'BEGIN SET SESSION TRANSACTION READ WRITE; SET SESSION transaction_read_only = 0; '
+                       'SET SESSION max_execution_time = 0; RETURN 1; END')
+        conn.close()
+
+        def drop():
+            conn = self.admin()
+            conn.cursor().execute('DROP FUNCTION IF EXISTS queryapigate_it_flip')
+            conn.close()
+        self.addCleanup(drop)
+
+    def run_ro(self, sql, the_pool, timeout=None):
+        return runners.RUNNERS['mysql'](self.details, sql, None, 10, 0, True, timeout, the_pool)
+
+    def test_a_stored_function_cant_turn_a_pooled_connection_writable(self):
+        self.flip_function()
+        the_pool = pool.ConnectionPool()
+        self.assertEqual(self.run_ro('SELECT queryapigate_it_flip() AS f', the_pool)[1], [(1,)])
+        with self.assertRaises(Exception):  # noqa: B017 - mysql-connector's error 1792, read-only transaction
+            self.run_ro('DELETE FROM queryapigate_it', the_pool)
+        self.assertEqual(self.run_ro('SELECT COUNT(*) FROM queryapigate_it', the_pool)[1], [(7,)])
+
+    def test_a_stored_function_cant_lift_the_time_limit(self):
+        self.flip_function()
+        the_pool = pool.ConnectionPool()
+        # The same limit both times: a driver that only sets the session's limit when it changes would leave the 0
+        # the function set in place for the second call
+        self.run_ro('SELECT queryapigate_it_flip() AS f', the_pool, timeout=0.5)
+        with self.assertRaises(ApiError) as caught:
+            self.run_ro(self.slow_sql, the_pool, timeout=0.5)
+        self.assertEqual(caught.exception.status, 504)
+
+    def test_an_idle_pooled_connection_doesnt_block_ddl(self):
+        the_pool = pool.ConnectionPool()
+        self.run_ro('SELECT COUNT(*) FROM queryapigate_it', the_pool)  # now idle, inside its chained transaction
+        self.assertEqual(the_pool.idle_count(), 1)
+        conn = self.admin()
+        cursor = conn.cursor()
+        cursor.execute('SET SESSION lock_wait_timeout = 5')
+        started = time.monotonic()
+        cursor.execute('ALTER TABLE queryapigate_it ADD COLUMN queryapigate_extra INT')
+        self.assertLess(time.monotonic() - started, 3)
+        conn.close()
 
 
 class ClickHouseTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):

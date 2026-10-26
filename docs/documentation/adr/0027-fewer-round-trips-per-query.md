@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0027-fewer-round-trips-per-query.md"
