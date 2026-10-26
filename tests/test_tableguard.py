@@ -305,7 +305,8 @@ class StatementKindTests(unittest.TestCase):
                 self._check(sql, dialect, allow_writes=False)
         for dialect, sql in (('postgres', 'EXPLAIN SELECT * FROM secret'),
                              ('postgres', 'EXPLAIN SELECT * FROM billing.customer'),
-                             ('sqlite', 'EXPLAIN QUERY PLAN SELECT * FROM secret')):
+                             ('sqlite', 'EXPLAIN QUERY PLAN SELECT * FROM secret'), ('mysql', 'EXPLAIN secret'),
+                             ('mysql', 'EXPLAIN SELECT * FROM billing.customer')):
             with self.subTest(dialect=dialect, sql=sql):
                 with self.assertRaises(ApiError) as ctx:
                     self._check(sql, dialect, allow_writes=False)

@@ -74,7 +74,10 @@ def _extract_tables(sql, dialect, default_catalog, default_schema):
     text = sqltools.substitute_placeholders(sql, dialect)
     parsed = parse(text)
     if isinstance(parsed, exp.Command) and sqltools.first_keyword(text, dialect) == 'explain':
-        parsed = parse(sqltools.explained_statement(text, dialect))  # what it plans (sqlglot can't parse EXPLAIN here)
+        explained = sqltools.explained_statement(text, dialect)
+        parsed = parse(explained)  # what it plans (sqlglot can't parse EXPLAIN here)
+        if dialect == 'mysql' and not isinstance(parsed, _statements(exp)):
+            parsed = parse(f'DESCRIBE {explained}')  # MySQL's `EXPLAIN customer` (older sqlglot keeps it as text)
     if not isinstance(parsed, _statements(exp)) or parsed.find(*_opaque(exp)):
         raise ApiError("This API key may only query its allowed tables - this kind of statement doesn't name the "
                        "tables it reads in a way that can be checked, so it isn't allowed", 403,
