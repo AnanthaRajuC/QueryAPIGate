@@ -255,5 +255,90 @@ table('| SQL | status | code |')
 for r in sel(block='m11'):
     emit(f"| `{r['sql']}` | {r['status']} | {r['code'] or ''} |")
 
+
+
+# ---------------------------------------------------------------- v2 blocks (n1-n9)
+
+def grouped(block, key):
+    groups = collections.defaultdict(list)
+    for r in rows:
+        if r.get('block') == block and r.get('scenario') != 'health_floor':
+            groups[key(r)].append(r)
+    return groups
+
+
+def cores(rs, keys=('gw_cores', 'db_cores')):
+    return ' | '.join(med(rs, k) for k in keys)
+
+
+if sel(block='n1'):
+    emit('', '## n1: threads per worker, MySQL 0.5 ms away, order_status, c=32', '')
+    table('| build | threads | n | req/s | p50 ms | p99 ms | gateway cores | db cores | vs the base, same threads |')
+    g = grouped('n1', lambda r: (r['build'], r['threads']))
+    for (build, threads), rs in sorted(g.items(), key=lambda kv: (BUILDS.index(kv[0][0]), kv[0][1])):
+        base = g.get((BASE, threads))
+        vs = verdict(stat([r['rps'] for r in base]), stat([r['rps'] for r in rs])) if build != BASE and base else ''
+        emit(f"| {build} | {threads} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+             f"{cores(rs)} | {vs} |")
+
+if sel(block='n2'):
+    emit('', '## n2: scale-out on a PostgreSQL store (local), order_status, c=64', '')
+    table('| workers | build | n | req/s | p50 ms | p99 ms | gateway cores | req/s per gateway core | MySQL cores | '
+          'store cores | vs main |')
+    g = grouped('n2', lambda r: (r['workers'], r['build']))
+    for (workers, build), rs in sorted(g.items(), key=lambda kv: (kv[0][0], BUILDS.index(kv[0][1]))):
+        per_core = statistics.median(r['rps'] / r['gw_cores'] for r in rs)
+        main = g.get((workers, HEAD))
+        vs = verdict(stat([r['rps'] for r in main]), stat([r['rps'] for r in rs])) if build == CACHED and main else ''
+        emit(f"| {workers} | {build} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+             f"{med(rs, 'gw_cores')} | {per_core:,.0f} | {cores(rs, ('db_cores', 'store_cores'))} | {vs} |")
+
+if sel(block='n3'):
+    emit('', '## n3: 4 workers on four cores, on two (both hyperthreads), and on four with both, order_status, '
+         'c=64', '')
+    table('| CPUs | n | req/s | p50 ms | p99 ms | gateway cores |')
+    for name, rs in grouped('n3', lambda r: (r['cpu_set'], r['gateway_cpus'])).items():
+        emit(f"| {name[0]} (`{name[1]}`) | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+             f"{med(rs, 'gw_cores')} |")
+
+if sel(block='n4'):
+    emit('', '## n4: what logging costs, main + cache, order_status, c=32', '')
+    table('| logging | n | req/s | p50 ms | p99 ms | gateway cores | vs the image |')
+    g = grouped('n4', lambda r: r['logging'])
+    first = stat([r['rps'] for r in next(iter(g.values()))])
+    for name, rs in g.items():
+        emit(f"| {name} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+             f"{med(rs, 'gw_cores')} | {verdict(first, stat([r['rps'] for r in rs]))} |")
+
+if sel(block='n5'):
+    emit('', '## n5: every call at 150 a second for 60 s, latency from when each was due', '')
+    table('| history flush | round | p50 ms | p99 ms | p99.9 ms | max ms | calls over 10 ms | in seconds | '
+          'first slow calls (s into the run) |')
+    for r in sel(block='n5', scenario='order_status'):
+        first = ', '.join(f'{t:.1f}' for t in r['slow_at'][:12])
+        emit(f"| {r['flush']} | {r['round']} | {r['p50']:.2f} | {r['p99']:.2f} | {r['p99.9']:.1f} | {r['max']:.1f} | "
+             f"{r['slow_over_10ms']} | {r['seconds_with_a_slow_call']} | {first} |")
+
+if sel(block='n6'):
+    emit('', '## n6: one caller, order_status, against delay on the PostgreSQL store only (main, no cache)', '')
+    table('| store delay | n | req/s | p50 ms | p99 ms |')
+    g = grouped('n6', lambda r: r['store_netem'])
+    for delay in sorted(g, key=lambda d: float(d[:-2])):
+        rs = g[delay]
+        emit(f"| {delay} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} |")
+    points = [(float(d[:-2]), statistics.median(r['p50'] for r in g[d])) for d in g]
+    emit('', f'Slope: {slope(points)[0]:.2f} ms of p50 per ms of delay.')
+
+if sel(block='n9'):
+    emit('', "## n9: the laptop's ceiling against v1's setting, main + cache, c=64", '')
+    table('| setup | query | n | req/s | p50 ms | p99 ms | gateway cores | MySQL cores | load cores | gateway MHz | '
+          'vs v1 setting |')
+    g = grouped('n9', lambda r: (r['setup'], r['scenario']))
+    for (setup, query), rs in g.items():
+        v1 = g.get(('v1 setting', query))
+        vs = verdict(stat([r['rps'] for r in v1]), stat([r['rps'] for r in rs])) if setup != 'v1 setting' else ''
+        emit(f"| {setup} | {query} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+             f"{cores(rs, ('gw_cores', 'db_cores', 'load_cores'))} | {med(rs, 'mhz_gw', 0)} | {vs} |")
+
 SRC.with_suffix('.md').write_text('\n'.join(out) + '\n')
 print('\n'.join(out))

@@ -253,7 +253,9 @@ def start(build, workers=1, access_log=True, access_format=None, profile_to=None
     bindir = Path(sys.executable).parent
     env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]), 'QUERYAPIGATE_HOME': str(home),
            'QUERYAPIGATE_API_KEY': 'bench-admin', 'QUERYAPIGATE_ALLOW_WRITES': '1',
-           'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore', **extra}
+           'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore', **extra,
+           # from 0.43 gunicorn_conf.py writes an access log to stdout unless told not to: say so either way
+           'QUERYAPIGATE_ACCESS_LOG': 'on' if access_log else 'off'}
     cmd = [str(bindir / 'gunicorn'), '--bind', f'127.0.0.1:{PORT}', '--workers', str(workers), '--worker-class',
            'gthread', '--threads', str(threads), '--timeout', '120', '--no-control-socket',
            '-c', 'python:queryapigate.gunicorn_conf']
@@ -299,8 +301,10 @@ def api(method, path, body):
 
 
 def seed():
-    """The connection, the three saved queries and the three keys - once per store."""
-    keys_file = OUT / 'keys.json'
+    """The connection, the three saved queries and the three keys - once per store. The keys are kept with the store
+    they belong to: a --smoke run writes its results under <out>/smoke but seeds the same store, so both read
+    <out>/keys.json (seeding a seeded store again would fail on the existing connection)."""
+    keys_file = Path(args.out) / 'keys.json'
     if keys_file.exists():
         return
     start(args.head_label)

@@ -1,5 +1,8 @@
 # Performance
 
+> **For 0.43's figures, read [Performance, v4](PERFORMANCE_V4.md) (PostgreSQL) and
+> [Performance on MySQL, v2](PERFORMANCE_MYSQL_V2.md).** For the method, [Performance, v3](PERFORMANCE_V3.md).
+>
 > **For PostgreSQL, read [Performance, v3](PERFORMANCE_V3.md) instead.** It's a more careful run: pinned cores,
 > 5 interleaved rounds per comparison with their ranges, open-loop load, a simulated network, a measured round-trip
 > count, and a profile. It also corrects two figures on this page. A call's statements on the store went from 7 to 3, not "about 5.5 to about 2.6". And the

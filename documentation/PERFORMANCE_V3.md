@@ -1,5 +1,8 @@
 # Performance, v3: an OLTP benchmark on PostgreSQL
 
+> **0.43's figures are in [Performance, v4](PERFORMANCE_V4.md),** which reruns this benchmark against 0.42. This page
+> stays the full description of the method, and the reference for the blocks v4 didn't rerun.
+
 **The short answer.** One gunicorn worker (as in the Docker image) in front of PostgreSQL, serving a saved query by
 primary key to 32 concurrent callers:
 

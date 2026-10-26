@@ -1,5 +1,8 @@
 # Performance on MySQL, v1: microservice databases, per-user queries
 
+> **0.43's figures are in [Performance on MySQL, v2](PERFORMANCE_MYSQL_V2.md),** which reruns this benchmark against
+> 0.42 and answers this page's open questions. This page stays the description of the case and the method.
+
 **The case.** One MySQL server holding six databases, one per microservice. Read-only queries look up one user at a
 time and join across those databases. No column masking. QueryAPIGate sits in front, with one connection and one
 read-only MySQL user.

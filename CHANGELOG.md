@@ -110,6 +110,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   outlives it. [ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md). Affects every release to 0.42.
 
 ### Added
+- **Benchmarks of 0.43 against 0.42:** [Performance, v4](documentation/PERFORMANCE_V4.md) on PostgreSQL and
+  [Performance on MySQL, v2](documentation/PERFORMANCE_MYSQL_V2.md), with the results in `benchmarks/results/`. v2
+  also answers v1's open questions: threads across a network, scale-out on a PostgreSQL store, what a hyperthread is
+  worth, what logging costs (both request logs off: +21%), the store's round trips, and the laptop's ceiling.
+  `benchmarks/tpcc_mysql.py` gains session `C` for them.
 - **`QUERYAPIGATE_THREADS` and `QUERYAPIGATE_ACCESS_LOG` tune the Docker image without replacing its command.** The
   image's gunicorn took its threads (`--threads 8`) and its access log (`--access-logfile -`) from flags in its
   command, which beat any other setting, so tuning either meant overriding the whole command. Both now come from
@@ -168,9 +173,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
     ping, so across a network every call froze the whole worker for a round trip - the 22% drop at 32 callers in
     [Performance on MySQL](documentation/PERFORMANCE_MYSQL_V1.md#a-database-across-a-network).
   - PostgreSQL's statement log now shows one combined message per call.
-  - Measured at the driver, with a 0.5 ms network round trip: a PostgreSQL call 2.46 ms to 0.69 ms, and 8 threads
-    3,470 to 12,247 calls a second; a MySQL call 1.96 ms to 1.36 ms, and 8 threads 1,230 to 5,819 calls a second.
-    The gateway's own work per call comes on top, so whole-request gains are smaller.
+  - Measured through whole requests, with the database 0.5 ms away
+    ([Performance, v4](documentation/PERFORMANCE_V4.md), [on MySQL, v2](documentation/PERFORMANCE_MYSQL_V2.md)): a
+    PostgreSQL call 6.58 ms to 4.39 ms, and 1.60 ms with the metadata cache; a MySQL call 3.71 ms to 2.89 ms, and one
+    worker with 32 callers 446 to 680 calls a second (+52%). With the database on the same host, 0.43 is 6-10% faster
+    on PostgreSQL and 15-19% on MySQL.
 - **Reading the store's location no longer touches the filesystem on every call.** With an absolute
   `QUERYAPIGATE_HOME` (the Docker image's `/data`), where the store lives is worked out once - 3.6-3.8% of a worker's
   CPU in the MySQL benchmark.

@@ -22,8 +22,10 @@ nav:
   - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Performance: documentation/PERFORMANCE.md
+  - Performance on PostgreSQL (v4, 0.43): documentation/PERFORMANCE_V4.md
   - Performance on PostgreSQL (v3): documentation/PERFORMANCE_V3.md
-  - Performance on MySQL: documentation/PERFORMANCE_MYSQL_V1.md
+  - Performance on MySQL (v2, 0.43): documentation/PERFORMANCE_MYSQL_V2.md
+  - Performance on MySQL (v1): documentation/PERFORMANCE_MYSQL_V1.md
   - Performance on PostgreSQL (v2, superseded): documentation/PERFORMANCE_V2.md
   - Example APIs: documentation/EXAMPLES.md
   - A tour of the Console: documentation/SCREENSHOTS.md
