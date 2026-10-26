@@ -62,6 +62,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   against the tables of the statement it explains.
 
 ### Security
+- **Workspaces (experimental): masking could trace one workspace's query against another's schema.** Connection
+  names are unique per workspace, but masking's cached copy of a connection's schema was keyed by name alone. So
+  within a minute, a query on workspace B's `crm` could be traced against workspace A's `crm` tables. A column only
+  reached through a view in B, which masking refuses to follow, could then be traced as a plain table column in A's
+  schema. Masking rules written for B's base table wouldn't apply, and the column came back unmasked. The cache is
+  now keyed by workspace and store as well. Affects 0.38 to 0.42, with workspaces in use.
 - **Table allow-lists (`allowed_tables`) matched table names, not schemas or databases.** A key allowed `customer`
   could read every table called `customer` that the connection's database user could see: `billing.customer` and
   `hr.customer` as well as its own. Affected MySQL, MariaDB, PostgreSQL, ClickHouse, DuckDB and SQLite connections
@@ -96,6 +102,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
 
 ### Changed
+- **No more masked call that waits once a minute.** Masking traces a statement against the connection's schema, which
+  it keeps for 60 seconds. When that copy expired, the next call read the schema again and traced its statement
+  again: about 75 ms, once a minute, on every governed key
+  ([Performance, v3](documentation/PERFORMANCE_V3.md#the-cold-path-every-60-seconds)). Now the first call after 45
+  seconds has the schema read again in the background, and is served from the cache meanwhile. When the schema hasn't
+  changed, its traces are kept. A schema is still never used for longer than 60 seconds, so a connection with no
+  masked call for a minute is read in its next call, as before.
 - **The one-command Compose demo turns on the metadata cache** (`QUERYAPIGATE_METADATA_CACHE_TTL: "5"` in
   `docker-compose.yml`): one instance, so only a change made with the CLI inside the container waits, up to 5 s. The
   server's own default stays off, as do the scale-out Compose setup and the Helm chart, whose `values.yaml` now shows

@@ -5,12 +5,14 @@ import os
 import re
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
 import duckdb
 
-from queryapigate import create_app, db, masking, schema
+from queryapigate import create_app, db, masking, schema, scope, store
 from tests.helpers import write_connections
 
 TABLES = [
@@ -348,16 +350,100 @@ class TraceCacheTests(unittest.TestCase):
         self.prepare()
         self.assertEqual(self.trace.call_count, 2)
 
-    def test_a_trace_expires_with_its_schema(self):
+    def clock(self):
         now = [1000.0]
-        with mock.patch.object(masking.time, 'monotonic', lambda: now[0]):
+        patcher = mock.patch.object(masking.time, 'monotonic', lambda: now[0])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return now
+
+    def wait_for_read_ahead(self):
+        deadline = time.monotonic() + 10
+        while masking._refreshing and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(masking._refreshing, 'the background read never finished')
+
+    def entry(self):
+        return next(value for key, value in masking._schemas.items() if key[2] == 'lite')
+
+    def test_a_trace_expires_with_its_schema(self):
+        now = self.clock()
+        self.prepare()
+        now[0] += masking.SCHEMA_REFRESH_AFTER - 1
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 1)
+        now[0] += masking.SCHEMA_TTL  # quiet past the TTL: read again in the call, and the statement traced again
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 2)
+        self.assertFalse(masking._refreshing)
+
+    def test_a_busy_connection_is_read_ahead_and_keeps_its_traces(self):
+        # Past SCHEMA_REFRESH_AFTER a call is served from the cache while the schema is read again in the background;
+        # unchanged, the traces carry over - so no call re-reads the schema or re-traces its statement (the 75 ms spike)
+        now = self.clock()
+        self.prepare()
+        now[0] += masking.SCHEMA_REFRESH_AFTER + 1
+        with mock.patch.object(schema, 'fetch_schema', wraps=schema.fetch_schema) as fetched:
             self.prepare()
-            now[0] += masking.SCHEMA_TTL - 1
+            self.wait_for_read_ahead()
+        self.assertEqual(fetched.call_count, 1)
+        self.assertEqual(self.entry()[0], now[0])  # read again, as of now
+        now[0] += masking.SCHEMA_REFRESH_AFTER - 1  # past the first read's TTL, within the new one's
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 1)
+
+    def test_a_schema_that_changed_starts_its_traces_afresh(self):
+        now = self.clock()
+        self.prepare()
+        conn = sqlite3.connect(os.path.join(self.tmp.name, 'shop.db'))
+        conn.execute('ALTER TABLE customers ADD COLUMN ssn TEXT')
+        conn.commit()
+        conn.close()
+        now[0] += masking.SCHEMA_REFRESH_AFTER + 1
+        self.prepare()  # still the old schema, and its trace
+        self.wait_for_read_ahead()
+        self.assertIn('ssn', [c['name'] for t in self.entry()[1] if t['name'] == 'customers' for c in t['columns']])
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 2)  # traced again, against the new schema
+
+    def test_a_schema_forgotten_during_a_read_ahead_isnt_put_back(self):
+        now = self.clock()
+        self.prepare()
+        reading, release = threading.Event(), threading.Event()
+        real = schema.fetch_schema
+
+        def slow(*args, **kwargs):
+            reading.set()
+            release.wait(10)
+            return real(*args, **kwargs)
+        now[0] += masking.SCHEMA_REFRESH_AFTER + 1
+        with mock.patch.object(schema, 'fetch_schema', slow):
             self.prepare()
-            self.assertEqual(self.trace.call_count, 1)
-            now[0] += 2  # the schema is read again, and the statement traced against it
+            self.assertTrue(reading.wait(10))
+            masking.forget_schema('lite')  # the connection changed while the old one was being read
+            release.set()
+            self.wait_for_read_ahead()
+        self.assertFalse([key for key in masking._schemas if key[2] == 'lite'])
+
+    def test_a_failed_read_ahead_leaves_the_cached_schema_until_its_ttl(self):
+        now = self.clock()
+        self.prepare()
+        now[0] += masking.SCHEMA_REFRESH_AFTER + 1
+        with mock.patch.object(schema, 'fetch_schema', side_effect=RuntimeError('database down')), \
+                self.assertLogs('queryapigate', 'WARNING') as logged:
             self.prepare()
-            self.assertEqual(self.trace.call_count, 2)
+            self.wait_for_read_ahead()
+        self.assertIn('lite', logged.output[0])
+        self.assertEqual(self.entry()[0], 1000.0)  # the first read, still serving
+        self.prepare()
+        self.assertEqual(self.trace.call_count, 1)
+
+    def test_a_workspace_never_gets_another_workspaces_schema(self):
+        # Keyed by workspace: another workspace's 'lite' - here, none - is never served this one's cached schema
+        self.prepare()
+        with scope.using('elsewhere'), self.assertRaises(masking.ApiError) as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.code, 'connection_not_found')
 
     def test_a_statement_that_cant_be_traced_is_refused_every_time(self):
         for _ in range(2):
@@ -374,7 +460,42 @@ class TraceCacheTests(unittest.TestCase):
             self.assertEqual(self.trace.call_count, 3)
             self.prepare('SELECT id FROM customers')  # evicted: the oldest
             self.assertEqual(self.trace.call_count, 4)
-            self.assertLessEqual(len(masking._schemas[('lite', None)][2]), 2)
+            self.assertLessEqual(len(self.entry()[2]), 2)
+
+
+class WorkspaceSchemaTests(unittest.TestCase):
+    """Two workspaces' connections can share a name (ADR 0023), and masking's cached schema is each one's own. Before
+    0.43 it was keyed by name alone: B's `customers`, a view masking won't trace through, was traced as A's plain table,
+    and B's rule on the base table didn't fire - the email came back unmasked."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        a, b = os.path.join(self.tmp.name, 'a.db'), os.path.join(self.tmp.name, 'b.db')
+        for path, statements in ((a, ['CREATE TABLE customers (id INTEGER, email TEXT)']),
+                                 (b, ['CREATE TABLE people (id INTEGER, email TEXT)',
+                                      'CREATE VIEW customers AS SELECT id, email FROM people'])):
+            conn = sqlite3.connect(path)
+            for statement in statements:
+                conn.execute(statement)
+            conn.commit()
+            conn.close()
+        create_app()
+        write_connections({'crm': {'db': 'sqlite', 'database': a, 'active': True}})
+        with scope.using('teamb'):
+            store.update_connections({'crm': {'db': 'sqlite', 'database': b, 'active': True}})
+        masking.forget_schema()
+        self.addCleanup(masking.forget_schema)
+
+    def test_each_workspace_is_traced_against_its_own_schema(self):
+        rules = masking.validate_rules([{'column': 'people.email', 'action': 'hash'}])
+        masking.prepare(rules, 'SELECT email FROM customers', 'crm', 'sqlite')  # A's schema, now cached
+        with scope.using('teamb'), self.assertRaises(masking.ApiError) as caught:
+            masking.prepare(rules, 'SELECT email FROM customers', 'crm', 'sqlite')
+        self.assertEqual(caught.exception.code, 'mask_unresolvable')  # B's view: refused, not traced as A's table
 
 
 class ReturningTests(unittest.TestCase):
