@@ -15,17 +15,24 @@ read-only MySQL user.
 | `profile` - the user with district and warehouse (crm, org) | 50,026/s | 609 | 677 | 772 |
 | `stock_level` - TPC-C Stock-Level (org, orders, inventory) | 5,343/s | 583 | 642 | 725 |
 
-- **A call adds about 1.2-1.5 ms** to a query MySQL answers in 0.03-0.42 ms. That's the gateway's Python plus 3 round
+- **A call adds about 1.1-1.4 ms** to a query MySQL answers in 0.03-0.42 ms. That's the gateway's Python plus 3 round
   trips to MySQL. Every one of the 9.65 million requests returned 200.
 - **One worker serves 580-780 of these a second.** The gateway, not MySQL, is the limit: MySQL could serve 8-110
   times more, and at 8 workers it used at most 2.5 cores.
 - **`main` is 9-11% faster than v0.41.0, and the metadata cache adds 12-15% more,** on every query. That's
-  +22-27% in all.
-- **Fewer threads are faster.** For a fast lookup, one thread per worker beat the Docker image's eight by 28%.
+  +22-28% in all.
+- **Fewer threads are faster, with MySQL on the same host.** For a fast lookup, one thread per worker beat the Docker
+  image's eight by 28%. Across a network, eight threads hid little of the extra waiting, for a reason found after
+  this run: see [A database across a network](#a-database-across-a-network).
 - **Skewed traffic plus a 30 s response cache:** when a few users are much busier than the rest (Zipf), 59% of calls
   came from the cache, throughput rose 23%, and MySQL got 58% fewer statements.
-- **One security gap:** on MySQL, a key's table allow-list can't tell `crm.customer` from `billing.customer`. Keep
-  services apart with MySQL's own grants until that's fixed. See [Isolating services](#isolating-services).
+- **One security gap:** on MySQL, a key's table allow-list couldn't tell `crm.customer` from `billing.customer`.
+  Fixed in 0.43. See [Isolating services](#isolating-services).
+
+**Since this run.** 0.43 acts on what it found: a MySQL call makes 2 round trips instead of 3, and none of them
+stalls the worker ([ADR 0027](adr/0027-fewer-round-trips-per-query.md)); table allow-lists are schema-qualified;
+`db._target()` is cached; the image's threads are a setting (`QUERYAPIGATE_THREADS`). These figures are 0.42's and
+`main`'s at the time. A v2 of this report measures 0.43.
 
 **How to read the numbers.** Each cell is the median of 5 interleaved rounds, with its min-max range in the detailed
 tables. A difference counts as real only when two ranges don't overlap. The method is the one in
@@ -73,8 +80,15 @@ than 0.63 of its 8 cores.
 | **main** | `3a92e5d`: 0.42.0 plus #95 (the store-file check skipped for server databases, the masking key cached, `QUERYAPIGATE_LOG_REQUESTS`) |
 | **main + cache** | the same, with `QUERYAPIGATE_METADATA_CACHE_TTL=5` |
 
-Each runs as the Docker image does: gunicorn's `gthread` worker, 8 threads, the access log on. QueryAPIGate's own
+Each runs as the Docker image does: gunicorn's `gthread` worker, 8 threads (the threads block below varies them, on
+`main`), the access log on. QueryAPIGate's own
 store is SQLite in its home directory - the single-instance default - except in the store comparison below.
+
+### Software
+
+Python 3.12.3, gunicorn 26.2.0, mysql-connector-python 9.3.0 (with its C extension), MySQL 8.4.13 (`mysql:8.4`), oha
+pinned by digest (`ghcr.io/hatoo/oha@sha256:3ec3dbf549ea…`), go-tpc (the `latest` snapshot, commit `a9ca481`), and
+sysbench 1.1.0 (`perconalab/sysbench`). Linux 6.8.0. The full environment is the first line of `results.jsonl`.
 
 ### The data: TPC-C, split into six databases
 
@@ -165,7 +179,7 @@ All the ranges are clear of each other:
   reading the store less.
 - **main over v0.42.0: +4-6%,** from #95: the store-file check is skipped for a server database like MySQL, and
   the masking key read is gone. Over v0.41.0, main is +9-11%.
-- **The metadata cache adds +12-15% on top of main,** for +22-27% over v0.41.0 in all.
+- **The metadata cache adds +12-15% on top of main,** for +22-28% over v0.41.0 in all.
 - **The gateway used 1.1-1.3 cores, and MySQL 0.08-0.47.** At p99, main is at 57-67 ms and the cache at 48-57 ms:
   that's 32 callers queueing for one worker, not slow queries.
 
@@ -182,10 +196,10 @@ The p50 of a single call, with what the gateway adds to the same query sent dire
 | `order_status` | 0.081 ms | 1.54 ms | 1.46 ms | 1.40 ms | +1.32 ms |
 | `stock_level` | 0.417 ms | 1.76 ms | 1.70 ms | 1.64 ms | +1.22 ms |
 
-- **A call costs about 1.1-1.5 ms more through the gateway,** whatever the query: a fixed cost, not a percentage.
+- **A call costs about 1.1-1.4 ms more through the gateway,** whatever the query: a fixed cost, not a percentage.
 - **p99 stays under 2.4 ms** in every build, and p99.9 under 3.3.
-- **For one caller, v0.42.0 and v0.41.0 overlap** on two of the three queries. main is 4-5% faster than v0.41.0, and
-  the cache another 4-5%.
+- **For one caller, v0.42.0 and v0.41.0 overlap** on two of the three queries. main is 3-5% faster than v0.41.0, and
+  the cache another 3-5%.
 
 ### Latency under load
 
@@ -225,7 +239,7 @@ The p50 of a single call, with what the gateway adds to the same query sent dire
 
 ### Threads per worker
 
-One worker, 32 callers:
+One worker of `main`, 32 callers, MySQL on the same machine:
 
 | Threads | `customer` (0.03 ms) | `stock_level` (0.42 ms) |
 |---|---|---|
@@ -239,7 +253,9 @@ All the ranges are clear. **The faster the query, the fewer threads it wants:**
 - `stock_level`, at 0.42 ms, is fastest with two: 20% faster than eight. One thread is too few for it, because it
   then waits on MySQL with nothing else to do.
 
-That fits the sizing rule below. Threads only help while calls spend real time waiting.
+That fits the sizing rule below. Threads only help while calls spend real time waiting. This is with MySQL on the same
+host; a database across a network makes calls wait longer, which ought to favour more threads, but before 0.43 it
+didn't (next but one section).
 
 ### Skewed users and the response cache
 
@@ -258,6 +274,8 @@ process, so the cache starts empty:
 - **Uniform traffic doesn't benefit.** With 600,000 equally likely users, only 5% of calls repeat within 30 s, and
   storing the 95% that never get reused costs 8%.
 - **Skew alone changes nothing without the cache:** 581 against 582. MySQL's buffer pool already holds everything.
+- **The response cache here is per process,** with no Redis: one worker, one cache. Several workers or instances
+  without Redis each fill their own, so the hit rate falls; with `QUERYAPIGATE_REDIS_URL` they share one.
 
 ### A database across a network
 
@@ -272,8 +290,23 @@ netem delays everything MySQL sends by 0.5 ms (about a same-zone cloud round tri
 - **A 0.5 ms hop adds about 2.1 ms to a call:** 3 round trips (see below), at 0.6 ms each under netem.
 - **The builds barely differ for one caller.** All four make the same 3 round trips to MySQL, and the store, on local
   SQLite here, is off the network.
-- **With 32 callers, throughput falls 22% (main),** from 579 to 450. Waiting on the network holds a thread for
-  longer, and 8 threads cover less of it.
+- **With 32 callers, throughput falls 22% (main),** from 579 to 450. Eight threads should have overlapped that
+  waiting, and didn't.
+
+**Why, found after this run** (2026-10-25): **mysql-connector's C extension holds Python's interpreter lock (GIL)
+while it waits for a ping,** and its `cursor()` pings on every call (see [Round trips](#round-trips)). So for one
+round trip in every call, the whole worker stops, not just the thread. A probe at the same 0.5 ms delay, calling
+mysql-connector directly from 1 and then 8 threads:
+
+| Each thread, in a loop | 1 thread | 8 threads | 8 threads ÷ 1 |
+|---|---|---|---|
+| `SELECT 1` | 1,594/s | 12,733/s | 8.0× |
+| `ROLLBACK` | 1,700/s | 13,342/s | 7.8× |
+| `ping()` | 1,703/s | 1,617/s | **0.9×** |
+| What the gateway did per call: `cursor()`, the query, `ROLLBACK` | 541/s | 1,391/s | **2.6×** |
+
+Statements overlap across threads, as they should; pings don't overlap at all. TLS wasn't the cause: `SELECT` scaled
+8.3× with it and 8.2× without. 0.43 keeps one cursor per pooled connection, so there's no ping per call (ADR 0027).
 
 ### The store across the network
 
@@ -304,6 +337,9 @@ Counted with MySQL's general log, 100 calls after a warm-up, in every build:
 
 That's half of PostgreSQL's 4. The MySQL driver makes a connection read-only once, when it opens it (`SET SESSION
 TRANSACTION READ ONLY`), and sets the time limit only when it changes. So no per-query `BEGIN` or `SET` is needed.
+(That turned out to be unsafe: a stored function called as `SELECT f()` could change both for later calls. 0.43 makes
+the connection read-only per transaction and puts the time limit on each statement - ADR 0027, and the CHANGELOG's
+Security entry.)
 
 **Measured, there are 3.** Single-call p50 at 0, 0.5, 1 and 2 ms of netem delay; the slope is round trips per call.
 mysql-connector on its own, sending a known 1 or 2 statements, calibrates it:
@@ -320,7 +356,8 @@ mysql-connector on its own, sending a known 1 or 2 statements, calibrates it:
 The third round trip isn't a statement, which is why the log doesn't show it. **mysql-connector's `cursor()` pings
 the server** (`is_connected()` → `COM_PING`) every time it's called, and QueryAPIGate's MySQL driver makes a new
 cursor for every query. Reusing one cursor per pooled connection would save one round trip in three: about 0.6 ms a
-call across a 0.5 ms network.
+call across a 0.5 ms network - and, as [A database across a network](#a-database-across-a-network) shows, a stall
+of the whole worker. 0.43 does this.
 
 No connections were opened mid-run. MySQL's `Connections` counter didn't move during 10 s of load at 1, 8 or 32
 callers, so this isn't reconnecting; the pool holds.
@@ -346,9 +383,11 @@ frame that falls in a category:
 
 What the busiest frames show:
 
-- **Even a local SQLite store costs a fifth of the CPU.** Reading the key, the saved query and the connection is
-  7.3% + 7.3% + 6.3% of the samples. That's Python's `sqlite3` and JSON decoding, not I/O. The metadata cache takes
-  it to 5.7% in all, which is most of its 12-15% gain.
+- **Even a local SQLite store shows as a fifth of the samples.** Reading the key, the saved query and the connection
+  is 7.3% + 7.3% + 6.3%: Python's `sqlite3` and JSON decoding, not I/O. The metadata cache takes it to 5.7%. That
+  overstates what the cache saves: py-spy counts a thread inside `sqlite3` even while it has released the GIL and
+  another thread is running Python, so these samples aren't all CPU the worker could have used. The measured gain
+  is 12-15%.
 - **`db._target()` takes 3.6-3.8%,** with or without the cache. It re-reads the store's settings from the
   environment on every call; caching it is a small, safe fix.
 - **mysql-connector's ping on every `cursor()`** shows as 2.6-3.8%, and its `ROLLBACK` as 3.1-3.6%.
@@ -382,8 +421,13 @@ by whoever publishes it.
 ## Disk: the event log
 
 Every call is recorded in the store's event log (ADR 0020), which keeps events for 24 hours by default. In this run,
-the single-instance SQLite store took in 10.6 million events in five hours: **6 GB, about 570 bytes a call.** Run
-history, by contrast, stays small, because it keeps only the newest 50 runs per saved query version.
+the single-instance SQLite store took in 10.6 million events in five hours: **6 GB, about 570 bytes a call.** That's
+more events than the 9.65 million requests in this report's totals, because the totals leave out the warm-ups before
+each run and the calls the round-trip block (m9) made to count statements. Run history, by contrast, stays small,
+because it keeps only the newest 50 runs per saved query version.
+
+This is the store's event log, in `queryapigate.db`. The server's own log on stdout is separate, and grew to 6.6 GB
+in the same run (see [What to do with this](#what-to-do-with-this)).
 
 So plan the store's disk for the traffic you serve:
 
@@ -428,24 +472,28 @@ could ask for them. Its limit shows only with many workers on the heavier querie
   instances on a shared PostgreSQL store, it removes 2.5 ms of store round trips from every call. Its trade-off -
   a change made on another instance takes up to the TTL to arrive - is explained in
   [PERFORMANCE.md](PERFORMANCE.md#the-metadata-cache).
-- **For per-user lookups, run 1-2 threads per worker,** not 8: up to 28% more throughput. Keep more for slow queries.
+- **For per-user lookups on a database on the same host, run 1-2 threads per worker,** not 8: up to 28% more
+  throughput. Keep more for slow queries, and - from 0.43 - for a database across a network. Set them with
+  `QUERYAPIGATE_THREADS` (from 0.43; see [Tune a deployment for throughput](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/63-tune-a-deployment-for-throughput.md)).
 - **Put `cache_ttl` on queries whose callers repeat themselves** - a dashboard a user keeps refreshing, popular
   accounts. Don't put it on queries every user calls once: there it costs 8%.
-- **Turn off the per-request log lines** if a proxy already logs requests: `QUERYAPIGATE_LOG_REQUESTS=off`. At these
-  rates the log grows by gigabytes an hour: 6.6 GB in this five-hour run.
+- **Turn off the per-request log lines** if a proxy already logs requests: `QUERYAPIGATE_LOG_REQUESTS=off`, and
+  from 0.43 `QUERYAPIGATE_ACCESS_LOG=off` for gunicorn's access log. At these rates the server's log on stdout grows
+  by gigabytes an hour: 6.6 GB in this five-hour run, apart from the store's event log below.
 - **Size the store's disk for the event log:** about 570 bytes a call, kept for 24 hours (see
   [Disk](#disk-the-event-log)).
 
 **For QueryAPIGate itself - new from this run:**
 
 1. **Reuse one cursor per pooled MySQL connection.** mysql-connector pings the server on every `cursor()`; that's 1
-   of the 3 round trips a call makes.
+   of the 3 round trips a call makes. *Done in 0.43 (ADR 0027).*
 2. **Match `schema.table` in MySQL table allow-lists,** as Trino already does. That's a security fix for the
-   multi-service case, not a performance one.
-3. **Cache `db._target()`:** 3.6-3.8% of the CPU, re-reading environment settings that don't change.
+   multi-service case, not a performance one. *Done in 0.43, on every dialect.*
+3. **Cache `db._target()`:** 3.6-3.8% of the CPU, re-reading environment settings that don't change. *Done in 0.43.*
 4. **Read-only MySQL connections could autocommit,** which would drop the `ROLLBACK` round trip too. The session
    is already read-only, so it's likely safe, but stored functions need checking first. This belongs in the same
-   design note as the PostgreSQL round trips (ADR 0027).
+   design note as the PostgreSQL round trips (ADR 0027). *Checked, and not safe: a stored function can make the
+   session read-write. 0.43 chains a read-only transaction instead (`ROLLBACK AND CHAIN`), still 2 round trips.*
 
 ## Limits
 
