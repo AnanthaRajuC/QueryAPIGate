@@ -304,7 +304,10 @@ def stop():
         time.sleep(0.2)
 
 
-def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_log=True):
+def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_log=True, cpus=None, settings=None):
+    """The gateway for ``build``. ``cpus`` overrides --gateway-cpus; ``settings`` adds QUERYAPIGATE_* variables, kept
+    in every row it measures. The access log is set both ways - the flag, and QUERYAPIGATE_ACCESS_LOG - because from
+    0.43 gunicorn_conf.py writes one to stdout unless told not to."""
     global _server, _server_meta
     stop()
     ref, extra = BUILDS[build]
@@ -312,7 +315,8 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     home = OUT / f'home-{store}'
     home.mkdir(exist_ok=True)
     env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]), 'QUERYAPIGATE_HOME': str(home),
-           'QUERYAPIGATE_API_KEY': 'bench-admin', **extra}
+           'QUERYAPIGATE_API_KEY': 'bench-admin', **extra, **(settings or {}),
+           'QUERYAPIGATE_ACCESS_LOG': 'on' if access_log else 'off'}
     env.pop('QUERYAPIGATE_DATABASE_URL', None)
     if store == 'postgres':
         env['QUERYAPIGATE_DATABASE_URL'] = f'postgresql://postgres:pw@{ip(PG)}:5432/postgres'
@@ -325,7 +329,7 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     if profile_to:
         cmd = [args.py_spy, 'record', '--subprocesses', '--rate', '200', '--format', 'raw', '-o', str(profile_to),
                '--'] + cmd
-    cmd = ['taskset', '-c', args.gateway_cpus] + cmd
+    cmd = ['taskset', '-c', cpus or args.gateway_cpus] + cmd
     out = open(OUT / 'server.log', 'a')
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
     for _ in range(150):
@@ -337,7 +341,7 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     else:
         raise RuntimeError(f'gateway {build} did not start - see {OUT / "server.log"}')
     _server_meta = {'build': build, 'workers': workers, 'threads': threads, 'store': store,
-                    'access_log': access_log}
+                    'access_log': access_log, 'gateway_cpus': cpus or args.gateway_cpus, 'settings': settings or {}}
     seed(store)
 
 
@@ -445,6 +449,8 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
             freqs.append(oltp.mhz())
     sampler = threading.Thread(target=sample, daemon=True)
     cache0 = cache_counts() if query == CACHED else None
+    pg_store = _server_meta.get('store') == 'postgres'
+    s0 = container_cpu_s(PG) if pg_store else 0
     q0, g0, m0, l0, t0 = (questions(), oltp.tree_cpu_s(master), container_cpu_s(MYSQL),
                           oltp.cpus_busy_s(args.load_cpus), time.time())
     sampler.start()
@@ -453,10 +459,12 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
     wall = time.time() - t0
     g1, m1, l1, q1 = (oltp.tree_cpu_s(master), container_cpu_s(MYSQL), oltp.cpus_busy_s(args.load_cpus),
                       questions())
+    s1 = container_cpu_s(PG) if pg_store else 0
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': query, 'dist': dist, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
            **_server_meta, **r, 'gw_cores': (g1 - g0) / wall, 'db_cores': (m1 - m0) / wall,
            'load_cores': (l1 - l0) / wall, 'mysql_statements_per_req': (q1 - q0 - 1) / n,
+           'store_cores': (s1 - s0) / wall if pg_store else None,
            'mhz_gw': round(sum(freqs) / len(freqs)) if freqs and all(freqs) else None, 'pkg_temp_c': oltp.pkg_temp(),
            **(extra or {})}
     if cache0 is not None:
@@ -598,9 +606,9 @@ def m1():
 
 
 def m2():
-    """One worker, 32 callers: every query on every build."""
+    """One worker, 32 callers: every query (or --m2-queries) on every build."""
     floor('m2', 'start')
-    for query in QUERIES:
+    for query in (args.m2_queries.split(',') if args.m2_queries else QUERIES):
         for r, order in rotations(list(BUILDS), 5):
             for build in order:
                 start(build)
@@ -684,15 +692,7 @@ def m8():
                 for build in order:
                     start(build)
                     measure('m8', 'order_status', c=c, rnd=r, extra={'netem': '0.5ms'})
-        sh('docker', 'rm', '-fv', PG)
-        _keys.pop('postgres', None)  # a new, empty store: seed it again
-        sh('docker', 'run', '-d', '--name', PG, '--cpuset-cpus', args.db_cpus, '-e', 'POSTGRES_PASSWORD=pw', PG_IMAGE)
-        for _ in range(60):
-            if sh('docker', 'exec', PG, 'pg_isready', '-U', 'postgres').returncode == 0:
-                break
-            time.sleep(1)
-        time.sleep(2)
-        netem(PG, '0.5ms')
+        pg_store_up('0.5ms')
         cells = [(store, build) for store in ('sqlite', 'postgres') for build in (args.head_label,
                                                                                     args.head_label + '+cache')]
         for r, order in rotations(cells, 5):
@@ -701,9 +701,27 @@ def m8():
                 measure('m8store', 'order_status', c=1, rnd=r, extra={'netem': '0.5ms'})
     finally:
         netem(MYSQL, '0ms')
-        stop()
-        sh('docker', 'rm', '-fv', PG)
+        pg_store_down()
     floor('m8', 'end')
+
+
+def pg_store_up(delay='0ms'):
+    """A new, empty PostgreSQL store on the database cores, ``delay`` away - what several instances share."""
+    sh('docker', 'rm', '-fv', PG)
+    _keys.pop('postgres', None)  # a new, empty store: seed it again
+    sh('docker', 'run', '-d', '--name', PG, '--cpuset-cpus', args.db_cpus, '-e', 'POSTGRES_PASSWORD=pw', PG_IMAGE)
+    for _ in range(60):
+        if sh('docker', 'exec', PG, 'pg_isready', '-U', 'postgres').returncode == 0:
+            break
+        time.sleep(1)
+    time.sleep(2)
+    if delay != '0ms':
+        netem(PG, delay)
+
+
+def pg_store_down():
+    stop()
+    sh('docker', 'rm', '-fv', PG)
 
 
 PROBE = r"""
@@ -810,9 +828,184 @@ def m11():
         mysql('DROP TABLE billing.customer')
 
 
+# ---------------------------------------------------------------- v2: what 0.43 changed, and the review's questions
+
+def n1():
+    """Threads per worker with MySQL 0.5 ms away, before and after 0.43's MySQL change (ADR 0027): v0.42.0 pings on
+    every cursor() with the GIL held, main keeps one cursor per connection. order_status, 32 callers."""
+    floor('n1', 'start')
+    netem(MYSQL, '0.5ms')
+    try:
+        cells = [(build, threads) for build in (args.base_label, args.head_label) for threads in (1, 2, 4, 8)]
+        for r, order in rotations(cells, 5):
+            for build, threads in order:
+                start(build, threads=threads)
+                measure('n1', 'order_status', c=32, rnd=r, extra={'netem': '0.5ms'})
+    finally:
+        netem(MYSQL, '0ms')
+    floor('n1', 'end')
+
+
+def n2():
+    """Scale-out on a PostgreSQL store, as several instances share one: 1-8 workers, with and without the metadata
+    cache. v1's scale-out used local SQLite, whose single writer was a suspect at 8 processes."""
+    floor('n2', 'start')
+    pg_store_up()
+    try:
+        for workers in (1, 2, 4, 8):
+            for r, order in rotations([args.head_label, args.head_label + '+cache'], 5):
+                for build in order:
+                    start(build, workers=workers, store='postgres')
+                    measure('n2', 'order_status', c=64, rnd=r)
+    finally:
+        pg_store_down()
+    floor('n2', 'end')
+
+
+# CPUs 0-11 are six performance cores, siblings in pairs (0-1, 2-3, ...): one hyperthread of four cores, both of two
+# cores, and both of four (v1's gateway set)
+HT_SETS = {'4 cores, 1 thread each': '0,2,4,6', '2 cores, 2 threads each': '0-3', '4 cores, 2 threads each': '0-7'}
+
+
+def n3():
+    """Is a hyperthread worth far less than a core (v1's explanation of flattening scale-out)? 4 workers on 4 CPUs
+    that are four cores, against 4 that are two, and the 8 of v1. order_status, cache on, 64 callers."""
+    floor('n3', 'start')
+    for r, order in rotations(list(HT_SETS), 5):
+        for name in order:
+            start(args.head_label + '+cache', workers=4, cpus=HT_SETS[name])
+            measure('n3', 'order_status', c=64, rnd=r, extra={'cpu_set': name})
+    floor('n3', 'end')
+
+
+LOG_CONFIGS = {'access log + request log (the image)': (True, {}),
+               'request log only': (False, {}),
+               'neither': (False, {'QUERYAPIGATE_LOG_REQUESTS': 'off'})}
+
+
+def n4():
+    """What logging costs: gunicorn's access log (QUERYAPIGATE_ACCESS_LOG) and QueryAPIGate's own request lines
+    (QUERYAPIGATE_LOG_REQUESTS), on main with the cache, 32 callers."""
+    floor('n4', 'start')
+    for r, order in rotations(list(LOG_CONFIGS), 5):
+        for name in order:
+            access_log, settings = LOG_CONFIGS[name]
+            start(args.head_label + '+cache', access_log=access_log, settings=settings)
+            measure('n4', 'order_status', c=32, rnd=r, extra={'logging': name})
+    floor('n4', 'end')
+
+
+TRACE_CLIENT = r"""
+import http.client, json, queue, sys, threading, time
+urls, key, rate, secs = open(sys.argv[1]).read().split(), sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
+host = urls[0].split('/')[2]
+n = int(rate * secs)
+t0 = time.perf_counter() + 0.5
+due = queue.Queue()
+for i in range(n):
+    due.put((i, t0 + i / rate))
+out = [None] * n
+
+def worker():
+    conn = http.client.HTTPConnection(host, timeout=30)
+    while True:
+        try:
+            i, at = due.get_nowait()
+        except queue.Empty:
+            return
+        wait = at - time.perf_counter()
+        if wait > 0:
+            time.sleep(wait)
+        path = '/' + urls[i % len(urls)].split('/', 3)[3]
+        try:
+            conn.request('GET', path, headers={'X-API-Key': key})
+            r = conn.getresponse(); r.read(); status = r.status
+        except Exception:
+            conn.close(); conn = http.client.HTTPConnection(host, timeout=30); status = 0
+        out[i] = (at - t0, (time.perf_counter() - at) * 1000, status)  # from when it was due: latency-corrected
+
+threads = [threading.Thread(target=worker) for _ in range(32)]
+[t.start() for t in threads]
+[t.join() for t in threads]
+print(json.dumps(out))
+"""
+
+
+def n5():
+    """The light-load tail: every call's latency, by when it was due, at about a quarter of capacity for 60 s - to see
+    whether v1's 10-30 ms p99.9 at light load comes in step with the history writer's 1 s flush. The same with the
+    flush every 5 s: if the slow calls follow the flush, they become a fifth as frequent."""
+    floor('n5', 'start')
+    flushes = {'1 s (default)': {}, '5 s': {'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '5'}}
+    for r, order in rotations(list(flushes), 3):
+        for name in order:
+            start(args.head_label, settings=flushes[name])
+            urls, key = url_file('order_status', 'uniform'), reader_key()
+            oha(urls, key, c=8, secs=5)
+            out = sh('taskset', '-c', args.load_cpus, sys.executable, '-c', TRACE_CLIENT, str(urls), key, '150',
+                     str(seconds(60)))
+            calls = [c for c in json.loads(out.stdout) if c]
+            lat = sorted(c[1] for c in calls)
+            slow = [c[0] for c in calls if c[1] > 10]
+            per_second = collections.Counter(int(t) for t in slow)
+            pct = {p: lat[min(len(lat) - 1, int(p * len(lat)))] for p in (0.5, 0.99, 0.999)}
+            row = {'block': 'n5', 'scenario': 'order_status', 'rate': 150, 'round': r, **_server_meta,
+                   'flush': name, 'calls': len(calls), 'errors': sum(1 for c in calls if c[2] != 200),
+                   'p50': pct[0.5], 'p99': pct[0.99], 'p99.9': pct[0.999], 'max': lat[-1],
+                   'slow_over_10ms': len(slow), 'seconds_with_a_slow_call': len(per_second),
+                   'slow_at': [round(t, 3) for t in slow][:500]}
+            record(row)
+            log(f"n5 flush {name} r{r}: p50 {row['p50']:.2f} p99 {row['p99']:.2f} p99.9 {row['p99.9']:.2f} "
+                f"max {row['max']:.1f} ms; {len(slow)} calls over 10 ms in {len(per_second)} seconds")
+    floor('n5', 'end')
+
+
+def n6():
+    """Round trips to a PostgreSQL store: one caller's p50 against 0-2 ms of delay on the store alone (MySQL local),
+    without the metadata cache. v1's 2.54 ms at 0.5 ms looked like 4 trips, not the 3 reads counted."""
+    floor('n6', 'start')
+    pg_store_up()
+    try:
+        for r, order in rotations(['0ms', '0.5ms', '1ms', '2ms'], 3):
+            for delay in order:
+                netem(PG, delay)
+                start(args.head_label, store='postgres')
+                measure('n6', 'order_status', c=1, secs=20, rnd=r, extra={'store_netem': delay})
+    finally:
+        pg_store_down()
+    floor('n6', 'end')
+
+
+def n9():
+    """The laptop's ceiling, against v1's setting: 12 workers x 2 threads on all six performance cores (0-11), the
+    cache on, both request logs off, MySQL moved to six efficiency cores (12-17) and the load to two (18-19) - and
+    v1's 8 workers x 8 threads on 0-7, MySQL on 8-11, the load on 12-19. 64 callers."""
+    floor('n9', 'start')
+    setups = {'v1 setting': ('0-7', '8-11', '12-19', 8, 8, True, {}),
+              'ceiling': ('0-11', '12-17', '18-19', 12, 2, False, {'QUERYAPIGATE_LOG_REQUESTS': 'off'})}
+    saved = (args.gateway_cpus, args.db_cpus, args.load_cpus)
+    cells = [(name, query) for name in setups for query in ('customer', 'order_status', 'stock_level')]
+    try:
+        for r, order in rotations(cells, 5):
+            for name, query in order:
+                gw, db, load, workers, threads, access_log, settings = setups[name]
+                args.gateway_cpus, args.db_cpus, args.load_cpus = gw, db, load
+                sh('docker', 'update', '--cpuset-cpus', db, MYSQL)
+                start(args.head_label + '+cache', workers=workers, threads=threads, access_log=access_log,
+                      settings=settings)
+                measure('n9', query, c=64, rnd=r, extra={'setup': name})
+    finally:
+        args.gateway_cpus, args.db_cpus, args.load_cpus = saved
+        sh('docker', 'update', '--cpuset-cpus', args.db_cpus, MYSQL)
+    floor('n9', 'end')
+
+
 BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'm1': m1, 'm2': m2, 'm3': m3, 'm4': m4, 'm5': m5,
-          'm6': m6, 'm7': m7, 'm8': m8, 'm9': m9, 'm10': m10, 'm11': m11}
-SESSIONS = {'A': ['env', 'm1', 'm2', 'm3'], 'B': ['env', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'env']}
+          'm6': m6, 'm7': m7, 'm8': m8, 'm9': m9, 'm10': m10, 'm11': m11,
+          'n1': n1, 'n2': n2, 'n3': n3, 'n4': n4, 'n5': n5, 'n6': n6, 'n9': n9}
+SESSIONS = {'A': ['env', 'm1', 'm2', 'm3'], 'B': ['env', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'env'],
+            # v2 (0.43): the 0.42 -> 0.43 comparison, then the review's questions
+            'C': ['env', 'm2', 'm3', 'm8', 'm9', 'm10', 'm11', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n9', 'env']}
 
 
 def main():
@@ -830,6 +1023,7 @@ def main():
     parser.add_argument('--db-cpus', default='8-11')
     parser.add_argument('--load-cpus', default='12-19')
     parser.add_argument('--py-spy', default=shutil.which('py-spy'))
+    parser.add_argument('--m2-queries', default='', help='comma-separated queries for m2 (default: all six)')
     parser.add_argument('--smoke', action='store_true', help='2 s runs, one round: checks the mechanics only')
     args = parser.parse_args()
     OUT = Path(args.out)
@@ -838,7 +1032,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     refs = args.refs.split(',')
     labels = [r.split('/')[-1] for r in refs]
-    args.head_label = labels[-1]
+    args.head_label, args.base_label = labels[-1], labels[0]
     BUILDS = {label: (ref, {}) for label, ref in zip(labels, refs, strict=True)}
     BUILDS[args.head_label + '+cache'] = (refs[-1], {'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})
     oltp.args = args  # oltp's helpers read the CPU lists and --smoke from here
