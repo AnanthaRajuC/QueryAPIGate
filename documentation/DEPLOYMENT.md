@@ -372,14 +372,19 @@ succeeded - Caddy retried them on the others. Walkthrough:
 
 **One worker per container, more containers for more capacity.** The image runs gunicorn with one worker and eight
 threads, and that stays right when scaling out: each process keeps its own `/metrics`, and Prometheus scraping a
-container with several workers would reach one of them at random. For more headroom inside one container, raise
-`--threads` - `gthread` keeps a slow request from blocking the others - with a `command:` override:
+container with several workers would reach one of them at random. For more headroom inside one container, raise the
+threads - `gthread` keeps a slow request from blocking the others - with `QUERYAPIGATE_THREADS` (from 0.43; the pool
+follows it). Before 0.43 this took a `command:` override with `--threads`, which still works: a flag, or
+`GUNICORN_CMD_ARGS`, beats the setting.
 
 ~~~yaml
-    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread",
-              "--threads", "16", "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-",
-              "--no-control-socket", "-c", "python:queryapigate.gunicorn_conf", "queryapigate.app:create_app()"]
+    environment:
+      QUERYAPIGATE_THREADS: "16"
+      QUERYAPIGATE_ACCESS_LOG: "off"   # when the proxy in front logs requests already
 ~~~
+
+How many threads, and how much CPU to give each container:
+[Tune a deployment for throughput](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/63-tune-a-deployment-for-throughput.md).
 
 **What stays per instance:** `/metrics` (scrape each instance; the bundled dashboard sums them), the Console's Metrics
 screen, and the main server's own `GET /events` (use `queryapigate events`). `GET /api/v1/instances` lists the

@@ -405,6 +405,12 @@ const DOCS = [
     path: 'how-to/62-see-whats-being-used-from-the-console.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-63',
+    title: 'Tune a deployment for throughput',
+    path: 'how-to/63-tune-a-deployment-for-throughput.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

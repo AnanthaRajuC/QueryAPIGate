@@ -20,11 +20,12 @@ DEFAULT_HISTORY_FLUSH_INTERVAL = 1.0  # seconds between batched history writes
 DEFAULT_EVENTS_PORT = 5002  # `queryapigate events`
 DEFAULT_EVENTS_MAX_CONNECTIONS = 10_000
 DEFAULT_EVENTS_POLL_INTERVAL = 1.0  # seconds between `queryapigate events` checks for new runs
-DEFAULT_EVENTS_MAX_STREAMS = 4  # concurrent GET /events streams the main server itself will hold open
+DEFAULT_EVENTS_MAX_STREAMS = 4  # concurrent GET /events streams the main server itself will hold open, at most
 DEFAULT_EVENTS_RETENTION_HOURS = 24  # how long the event log keeps an event (ADR 0020)
 AUDIT_LOG_LIMIT = 500  # administrative-action entries remembered across the whole server
 DEFAULT_QUERY_TIMEOUT = 30.0  # seconds
-DEFAULT_POOL_SIZE = 8  # idle connections kept per distinct connection - the Docker image's 8 threads
+DEFAULT_THREADS = 8  # request threads in the Docker image's one gunicorn worker (QUERYAPIGATE_THREADS)
+MAX_THREADS = 256
 DEFAULT_POOL_IDLE_TIMEOUT = 300.0  # seconds
 DEFAULT_SLOW_QUERY_THRESHOLD = 1.0  # seconds
 DEFAULT_ALERT_ERROR_RATE = 20  # percent of a saved query's recent runs failing before it is an alert (alerts.py)
@@ -232,12 +233,27 @@ def effective_timeout(requested=None):
     return requested if limit is None else min(requested, limit)
 
 
+def threads():
+    """Request threads per server process (QUERYAPIGATE_THREADS, default 8): what the Docker image's gunicorn runs
+    (gunicorn_conf.py), and what the pool size and the cap on /events streams default from. A value check_settings()
+    refuses falls back to the default here, so gunicorn can read it before the app says what's wrong."""
+    raw = os.environ.get('QUERYAPIGATE_THREADS', '').strip()
+    return int(raw) if raw.isdigit() and 1 <= int(raw) <= MAX_THREADS else DEFAULT_THREADS
+
+
+def access_log():
+    """QUERYAPIGATE_ACCESS_LOG: the image's gunicorn writes an access line per request to stdout (on by default). Off
+    for a server whose proxy or load balancer already logs requests - what a line costs, with no one reading it."""
+    return os.environ.get('QUERYAPIGATE_ACCESS_LOG', '').strip().lower() not in ('0', 'false', 'no', 'off')
+
+
 def pool_size():
-    """Idle connections kept per distinct connection (QUERYAPIGATE_POOL_SIZE); 0 disables pooling."""
+    """Idle connections kept per distinct connection (QUERYAPIGATE_POOL_SIZE); 0 disables pooling. Unset, one per
+    request thread (threads()): fewer would make threads beyond it open a connection per call, more would sit idle."""
     try:
-        return max(0, int(os.environ.get('QUERYAPIGATE_POOL_SIZE', DEFAULT_POOL_SIZE)))
+        return max(0, int(os.environ.get('QUERYAPIGATE_POOL_SIZE', threads())))
     except ValueError:
-        return DEFAULT_POOL_SIZE
+        return threads()
 
 
 def metadata_cache_ttl():
@@ -444,6 +460,12 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS', '').strip()
     if raw and (not raw.isdigit() or int(raw) < 1):
         raise ValueError('QUERYAPIGATE_EVENTS_MAX_CONNECTIONS must be a positive integer')
+    raw = os.environ.get('QUERYAPIGATE_THREADS', '').strip()
+    if raw and (not raw.isdigit() or not 1 <= int(raw) <= MAX_THREADS):
+        raise ValueError(f'QUERYAPIGATE_THREADS must be a whole number from 1 to {MAX_THREADS}')
+    raw = os.environ.get('QUERYAPIGATE_ACCESS_LOG', '').strip().lower()
+    if raw not in _FLAG_WORDS:
+        raise ValueError(f"QUERYAPIGATE_ACCESS_LOG must be on or off (or 1/0, true/false, yes/no), not '{raw}'")
     raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_STREAMS', '').strip()
     if raw and not raw.isdigit():
         raise ValueError('QUERYAPIGATE_EVENTS_MAX_STREAMS must be a whole number (0 turns GET /events off on this '
@@ -1163,10 +1185,11 @@ def events_retention_hours():
 
 def events_max_streams():
     """Concurrent GET /events streams the main (WSGI) server holds open (QUERYAPIGATE_EVENTS_MAX_STREAMS). Each
-    one occupies a request thread for as long as it is open, so the default leaves most of the Docker image's 8
-    threads for requests; beyond it /events answers 503. `queryapigate events` has no such limit to speak of."""
+    one occupies a request thread for as long as it is open, so the default - 4, and never more than half the
+    threads (threads()) - leaves most of them for requests; beyond it /events answers 503. `queryapigate events` has no
+    such limit to speak of."""
     raw = os.environ.get('QUERYAPIGATE_EVENTS_MAX_STREAMS', '').strip()
-    return int(raw) if raw else DEFAULT_EVENTS_MAX_STREAMS
+    return int(raw) if raw else min(DEFAULT_EVENTS_MAX_STREAMS, threads() // 2)
 
 
 def mcp_port():
@@ -1414,9 +1437,11 @@ def describe_settings():
                 'unbounded' if stream is None else f'{stream} rows'),
             row('Slow query threshold', 'Queries slower than this are logged as warnings. 0 disables it.',
                 'QUERYAPIGATE_SLOW_QUERY_THRESHOLD', _seconds(slow) or 'off')]},
-        {'id': 'pool', 'title': 'Connection pool',
-         'description': 'Idle connections kept open per distinct connection.', 'rows': [
-            row('Pool size', 'Idle connections kept per connection. 0 disables pooling.',
+        {'id': 'pool', 'title': 'Threads & connection pool',
+         'description': 'Requests served at once, and idle connections kept open per distinct connection.', 'rows': [
+            row('Threads', "Requests one server process serves at once - the Docker image's gunicorn. Read at "
+                'startup.', 'QUERYAPIGATE_THREADS', str(threads())),
+            row('Pool size', 'Idle connections kept per connection - by default, one per thread. 0 disables pooling.',
                 'QUERYAPIGATE_POOL_SIZE', str(pool_size())),
             row('Idle timeout', 'How long an idle pooled connection is kept before it is closed.',
                 'QUERYAPIGATE_POOL_IDLE_TIMEOUT', _seconds(pool_idle_timeout())),
@@ -1471,7 +1496,9 @@ def describe_settings():
             row('JSON logs', 'One JSON object per line instead of plain text.', 'QUERYAPIGATE_JSON_LOGS',
                 on_off(json_logs())),
             row('Request log', 'A line for every request and each query it runs. Errors, warnings and slow queries '
-                'are logged either way.', 'QUERYAPIGATE_LOG_REQUESTS', on_off(log_requests()))]},
+                'are logged either way.', 'QUERYAPIGATE_LOG_REQUESTS', on_off(log_requests())),
+            row('Access log', "The Docker image's gunicorn access line per request, on stdout. Read at startup.",
+                'QUERYAPIGATE_ACCESS_LOG', on_off(access_log()))]},
         {'id': 'history', 'title': 'Run history',
          'description': 'What each run - of a saved query, or ad-hoc SQL - leaves behind in its history, and for how '
              'long. GET /api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [
