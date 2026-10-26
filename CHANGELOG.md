@@ -49,7 +49,33 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Breaking
+- **`allowed_tables` grants are schema-qualified on every SQL connection** (they already were on Trino). A bare grant
+  such as `customer` now means the connection's own `customer` only: on MySQL and ClickHouse the connection's
+  database, on PostgreSQL the `public` schema (or the connection's new `options.schema`), on SQLite and DuckDB `main`.
+  A key that reads a table in another schema or database needs that grant written out, `billing.customer`. A key that
+  queries a table through a three-part name (`shop.public.orders`) needs the grant written the same way. See the
+  Security entry below.
+- **A table-restricted key can no longer run statements whose tables can't be checked:** `SHOW`, `SET`, `USE`,
+  `ATTACH`, `PRAGMA`, `CALL`, `PREPARE`/`EXECUTE`, `DECLARE`/`FETCH`, `LOAD`/`INSTALL`, `VACUUM`, and anything else
+  the SQL parser keeps only as text. They are refused with `403 table_check_failed`. `EXPLAIN` still works, checked
+  against the tables of the statement it explains.
+
 ### Security
+- **Table allow-lists (`allowed_tables`) matched table names, not schemas or databases.** A key allowed `customer`
+  could read every table called `customer` that the connection's database user could see: `billing.customer` and
+  `hr.customer` as well as its own. Affected MySQL, MariaDB, PostgreSQL, ClickHouse, DuckDB and SQLite connections
+  whose user can see more than one schema or database; Trino matched qualified names already (ADR 0026). Now names
+  are matched qualified everywhere, a grant's and a query's missing parts filled from the connection's defaults. The
+  schema browser and MCP `list_tables` apply the same grants. On PostgreSQL, a table-restricted call also pins
+  `search_path` to that schema, so that neither the role's own `search_path` nor a `"$user"` schema can send an
+  unqualified name somewhere other than the table the grant was checked against. Affects every release to 0.42.
+- **A table-restricted key could reach other tables through statements that name no table.** A read-only key could
+  read a forbidden table's columns and DDL, though not its rows: `SHOW CREATE TABLE` and `SHOW COLUMNS` on MySQL
+  and ClickHouse, `EXPLAIN` on PostgreSQL and SQLite, DuckDB's `SHOW`. A key that may also write could read its rows
+  through `PREPARE ... AS SELECT` then `EXECUTE`, a cursor (`DECLARE`, then `FETCH`), or `CALL`. It could also
+  redirect a pooled connection's later unqualified names with `SET search_path` or `ATTACH` on DuckDB. These are now
+  refused for a table-restricted key (see Breaking). Affects every release to 0.42.
 - **MySQL: a query could make a pooled read-only connection writable, or lift its time limit, for the calls after it.**
   A read-only connection was made read-only once per session, and its time limit was set on the session only when
   it changed. A stored function that sets the session's transaction mode (`SET SESSION TRANSACTION READ WRITE`) or
@@ -73,9 +99,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **Fewer round trips per query** ([ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md)). Across a
   network every round trip costs a call in full, so:
   - **PostgreSQL: 4 round trips down to 1.** Connections run in autocommit, and each query goes as one message
-    (`SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = ...; <query>`) that PostgreSQL runs as one transaction,
-    ending with the message - no `BEGIN`, and no `ROLLBACK` on release. A write commits with its message. Streaming
-    exports and agent writes still use an explicit transaction, which they need.
+    (`RESET ALL; ...; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = ...; <query>`) that PostgreSQL runs
+    as one transaction, ending with the message - no `BEGIN`, and no `ROLLBACK` on release. A write commits with its
+    message. Streaming exports and agent writes still use an explicit transaction, which they need.
+  - **On PostgreSQL, each message starts with `RESET ALL`,** which puts back any session setting a query left behind.
+    In autocommit, `SELECT set_config('TimeZone', 'Asia/Tokyo', false)` (or `search_path`, or `DateStyle`) is
+    committed with its query, and would apply to the next call on that pooled connection, from any key. Rolling back
+    each call's transaction undid it before. The reset added no measurable time.
   - **MySQL: 3 round trips down to 2, and no more stalls.** A pooled connection keeps one cursor instead of making one
     per query: mysql-connector pings the server on every `cursor()`, and its C extension holds the GIL during the
     ping, so across a network every call froze the whole worker for a round trip - the 22% drop at 32 callers in

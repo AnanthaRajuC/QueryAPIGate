@@ -68,8 +68,9 @@ that already didn't exist. See ``engine.execute_sql()``.
 A key can also be narrowed to specific ``allowed_tables`` - a list of table names it may query, checked
 against every table a statement actually touches (``sqltools.validate_sql()``/``tableguard.py``, which
 raises rather than lets a query through when its tables can't be verified for the connection's dialect -
-only mysql/postgres/clickhouse/sqlite/duckdb are supported; a table-restricted key used against an
-h2/jdbc/mongo connection is refused every query, not silently unrestricted). Unset (``None``, the default)
+supported on mysql/postgres/clickhouse/sqlite/duckdb/trino, matched schema-qualified; a table-restricted key used
+against an h2/jdbc connection is refused every query, not silently unrestricted, and on mongo the list is its
+collections). Unset (``None``, the default)
 keeps today's behaviour: no table restriction. Unlike ``allowed_write_ops``, this restricts *every*
 statement, read or write, since a table a caller shouldn't see is forbidden regardless of what's being done
 to it.

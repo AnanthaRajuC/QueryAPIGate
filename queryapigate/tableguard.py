@@ -11,15 +11,20 @@ only under WITH RECURSIVE. Anywhere else, and always when qualified (``public.se
 every table that merely shared a CTE's name let `WITH secret AS (SELECT * FROM secret) SELECT * FROM secret` past a
 key allowed only `orders` (fixed 2026-10-15).
 
-Known, accepted limitations: for most dialects a table name is extracted bare (``information_schema.tables`` ->
-``'tables'``), not schema-qualified - matches allowed_write_ops's own bare-keyword-list style, but can't
-disambiguate two identically-named tables in different schemas. **Trino is the exception** (ADR 0026): because one
-Trino connection federates many catalogs, its names are extracted **fully qualified** (``catalog.schema.table``),
-filling a reference's missing parts from the connection's defaults, and grants are qualified the same way
-(``qualify_grant``) - so a grant of ``orders`` does not match ``orders`` in every catalog. A table-valued function
-names no table, so one that reads data -
-DuckDB's ``read_parquet(...)``, ``read_csv(...)``, ``glob(...)``, a ClickHouse ``url(...)`` - is refused outright
-for a table-restricted key; only pure generators (``range``, ``numbers``, ``generate_series``, ``unnest``) pass.
+Names are matched **qualified** (ADR 0026 for Trino; 0.43 for the rest): a reference's missing parts are filled from
+the connection's defaults, and grants are qualified the same way (``qualify_grant``), so a grant of ``customer`` doesn't
+match ``billing.customer``. Trino's names are ``catalog.schema.table``, since one connection federates many catalogs.
+Every other dialect's are ``schema.table`` - the schema being MySQL's or ClickHouse's database, PostgreSQL's or
+DuckDB's schema, SQLite's attached database - with a reference's catalog, where the dialect has one, kept as a third
+part (``memory.main.orders``) so it only matches a grant naming it. What an unqualified name resolves to is the
+connection's default (``engine._table_defaults``); on PostgreSQL, where that depends on ``search_path``, a
+table-restricted call pins ``search_path`` to it (runners.py). Known, accepted limitation: names are compared
+lower-cased, so on a server that treats case as significant (MySQL's ``lower_case_table_names=0``, a quoted
+PostgreSQL ``"Customer"``) two tables differing only in case are one grant.
+
+A table-valued function names no table, so one that reads data - DuckDB's ``read_parquet(...)``, ``read_csv(...)``,
+``glob(...)``, a ClickHouse ``url(...)`` - is refused outright for a table-restricted key; only pure generators
+(``range``, ``numbers``, ``generate_series``, ``unnest``) pass.
 """
 import functools
 
@@ -44,12 +49,11 @@ def _extract_tables(sql, dialect, default_catalog, default_schema):
     this dialect or this specific query. A failure here must reject the query, never degrade quietly the
     way sqlflow.py's own extraction does for its visualization - see the module docstring.
 
-    For ``trino``, whose names are three-part, each table comes back **fully qualified** as
-    ``catalog.schema.table``: the catalog and schema a reference leaves out are filled from the connection's
-    defaults (``default_catalog``/``default_schema``), so `orders`, `sf1.orders` and `hive.sf1.orders` are
-    distinguished rather than all collapsed to `orders`. For every other dialect, names are bare as before
-    (``default_catalog``/``default_schema`` are ignored). Match the result against grants run through
-    ``qualify_grant()`` with the same defaults."""
+    Each table comes back **qualified**, the parts a reference leaves out filled from the connection's defaults
+    (``default_catalog``/``default_schema``): ``catalog.schema.table`` for ``trino``, so `orders`, `sf1.orders` and
+    `hive.sf1.orders` are distinguished; ``schema.table`` for every other dialect, so `customer` (the connection's
+    database or schema) and `billing.customer` are - with a reference's own catalog kept as a third part. Match the
+    result against grants run through ``qualify_grant()`` with the same defaults and dialect."""
     if dialect not in _DIALECT_MAP:
         raise ApiError(f"Table access restrictions aren't supported for '{dialect}' connections yet", 403,
                        code='table_check_unsupported')
@@ -60,11 +64,24 @@ def _extract_tables(sql, dialect, default_catalog, default_schema):
         raise ApiError('Table access restrictions need the "sqlglot" package - '
                        'run `pip install "queryapigate[flow]"`', 500, code='table_check_unavailable') from None
     sqlglot_dialect = _DIALECT_MAP[dialect]
-    try:
-        parsed = sqlglot.parse_one(sqltools.substitute_placeholders(sql, dialect), read=sqlglot_dialect)
-    except Exception:
-        raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
-                       code='table_check_failed') from None
+
+    def parse(text):
+        try:
+            return sqlglot.parse_one(text, read=sqlglot_dialect)
+        except Exception:
+            raise ApiError('This query could not be analyzed to enforce its table access restrictions', 403,
+                           code='table_check_failed') from None
+    text = sqltools.substitute_placeholders(sql, dialect)
+    parsed = parse(text)
+    if isinstance(parsed, exp.Command) and sqltools.first_keyword(text, dialect) == 'explain':
+        explained = sqltools.explained_statement(text, dialect)
+        parsed = parse(explained)  # what it plans (sqlglot can't parse EXPLAIN here)
+        if dialect == 'mysql' and not isinstance(parsed, _statements(exp)):
+            parsed = parse(f'DESCRIBE {explained}')  # MySQL's `EXPLAIN customer` (older sqlglot keeps it as text)
+    if not isinstance(parsed, _statements(exp)) or parsed.find(*_opaque(exp)):
+        raise ApiError("This API key may only query its allowed tables - this kind of statement doesn't name the "
+                       "tables it reads in a way that can be checked, so it isn't allowed", 403,
+                       code='table_check_failed')
     for source in [*parsed.find_all(exp.Table), *parsed.find_all(exp.Lateral)]:
         function = source.this
         if isinstance(function, exp.Func) and not _is_generator(function):
@@ -77,8 +94,9 @@ def _extract_tables(sql, dialect, default_catalog, default_schema):
             schema = (node.db or default_schema or '').lower()
             return f'{catalog}.{schema}.{node.name.lower()}'
     else:
-        def qualify(node):
-            return node.name.lower()
+        def qualify(node):  # schema.table, the default schema filling a bare name; a stated catalog stays a part
+            schema = f'{(node.db or default_schema or "").lower()}.{node.name.lower()}'
+            return f'{node.catalog.lower()}.{schema}' if node.catalog else schema
     try:
         return frozenset(_real_tables(parsed, frozenset(), qualify))
     except RecursionError:  # nested deeper than can be walked: refused, never let through
@@ -86,10 +104,13 @@ def _extract_tables(sql, dialect, default_catalog, default_schema):
                        code='table_check_failed') from None
 
 
-def qualify_grant(name, default_catalog, default_schema):
-    """A Trino ``allowed_tables`` grant - ``table``, ``schema.table`` or ``catalog.schema.table`` - filled to
-    ``catalog.schema.table`` with the connection's defaults, so it matches extract_tables()'s qualified names."""
+def qualify_grant(name, default_catalog, default_schema, dialect='trino'):
+    """An ``allowed_tables`` grant qualified as extract_tables() qualifies a reference, so the two match: on Trino,
+    ``table``, ``schema.table`` or ``catalog.schema.table`` filled to ``catalog.schema.table``; on every other dialect,
+    a bare ``table`` filled to ``schema.table`` with the connection's default schema, and a qualified one kept."""
     parts = [p.lower() for p in name.split('.')]
+    if dialect != 'trino':
+        return '.'.join(parts) if len(parts) > 1 else f'{(default_schema or "").lower()}.{parts[0]}'
     if len(parts) == 1:
         parts = [(default_catalog or '').lower(), (default_schema or '').lower(), parts[0]]
     elif len(parts) == 2:
@@ -100,7 +121,7 @@ def qualify_grant(name, default_catalog, default_schema):
 def _real_tables(node, visible, qualify):
     """The tables under ``node`` that aren't references to a CTE in ``visible`` (lower-case bare names) - see the
     module docstring for the scoping rule. ``qualify`` turns a real table node into the name it is matched by
-    (bare, or fully-qualified for trino)."""
+    (see _extract_tables())."""
     from sqlglot import exp
     if isinstance(node, exp.Table):
         name = node.name.lower()  # the CTE-shadowing rule is on the bare name; a CTE is never catalog/schema-qualified
@@ -128,6 +149,23 @@ def _children(node, visible, qualify, skip=None):
         if child is not skip:
             found |= _real_tables(child, visible, qualify)
     return found
+
+
+def _statements(exp):
+    """The statements whose tables can be read off their parse: queries and data changes, DDL naming its table, and
+    MySQL's EXPLAIN/DESCRIBE of one. Any other root - SHOW CREATE TABLE, SET, USE, ATTACH, PRAGMA, CALL, PREPARE and
+    EXECUTE, DECLARE and FETCH, or a statement sqlglot only keeps as text - can read or reroute tables the check can't
+    see, so a table-restricted key may not run it. Names looked up: they differ across the sqlglot versions supported
+    (AlterTable became Alter)."""
+    names = ('Query', 'Values', 'Insert', 'Update', 'Delete', 'Merge', 'Copy', 'Describe', 'Create', 'Drop', 'Alter',
+             'AlterTable', 'TruncateTable')
+    return tuple(getattr(exp, name) for name in names if hasattr(exp, name))
+
+
+def _opaque(exp):
+    """Nodes that, anywhere in a statement, stand for something the check can't see into."""
+    names = ('Command', 'Show', 'Set', 'Use', 'Pragma', 'Attach', 'Detach')
+    return tuple(getattr(exp, name) for name in names if hasattr(exp, name))
 
 
 # Table functions that only generate values - no data to restrict - and so stay usable with allowed_tables.

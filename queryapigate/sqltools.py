@@ -172,15 +172,21 @@ def validate_sql(sql, dialect=None, allow_writes=None, allowed_write_ops=None, a
     if allowed_tables is not None:
         from . import tableguard  # deferred: keeps this module's own import surface as light as today
         found = tableguard.extract_tables(sql, dialect, default_catalog, default_schema)  # unless this is used
-        # Trino names come back catalog.schema.table; qualify the grants the same way so a bare grant doesn't
-        # match the same table name in another catalog (ADR 0026). Every other dialect matches bare, as before.
-        allowed = ({tableguard.qualify_grant(g, default_catalog, default_schema) for g in allowed_tables}
-                   if dialect == 'trino' else allowed_tables)
+        # Names come back qualified (schema.table; Trino's catalog.schema.table); qualify the grants the same way so a
+        # bare grant doesn't match the same table name in another schema, database or catalog.
+        allowed = {tableguard.qualify_grant(g, default_catalog, default_schema, dialect) for g in allowed_tables}
         forbidden = found - allowed
         if forbidden:
             raise ApiError(f"This API key may only query these tables: {', '.join(sorted(allowed))}. "
                            f"Forbidden: {', '.join(sorted(forbidden))}.", 403, code='table_not_allowed')
     return sql
+
+
+def explained_statement(sql, dialect=None):
+    """The statement an EXPLAIN plans: ``sql`` after its EXPLAIN and options (_EXPLAIN_RE), found on the comment- and
+    literal-masked text, so the word in a comment or a string never counts - or ``sql`` as it is, if it isn't one."""
+    match = _EXPLAIN_RE.match(_window_mask(sql, dialect))
+    return sql[match.end():] if match else sql
 
 
 def _window_mask(sql, dialect):

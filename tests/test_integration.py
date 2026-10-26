@@ -15,7 +15,7 @@ import time
 import unittest
 from unittest import mock
 
-from queryapigate import config, create_app, history, pool, runners
+from queryapigate import config, create_app, history, pool, runners, tableguard
 from queryapigate.errors import ApiError
 from tests.helpers import save_query, write_connections
 
@@ -254,6 +254,28 @@ class IntegrationBase:
         columns = {c['name'].lower() for c in tables['queryapigate_it']['columns']}
         self.assertEqual(columns, {'id', 'name', 'price', 'added'})
 
+    def key(self, **grant):
+        return {'X-API-Key': self.client.post('/api/v1/api-keys', json={
+            'name': 'scoped', 'connections': ['it'], **grant}).get_json()['secret']}
+
+    def test_a_table_grant_is_this_connections_table_not_one_of_the_same_name_elsewhere(self):
+        """A key allowed queryapigate_it reads the connection's own queryapigate_it, never one of the same name in
+        another schema or database - which bare-name matching let through before 0.43 - and sees only its own in the
+        schema browser."""
+        if self.db not in tableguard._DIALECT_MAP:
+            self.skipTest(f"allowed_tables refuses every query on {self.db}")
+        headers = self.key(allowed_tables=['queryapigate_it'])
+        own = self.client.post('/execute_sql?page_size=100', headers=headers,
+                               json={'sql': 'SELECT id FROM queryapigate_it', 'connection_name': 'it'})
+        self.assertEqual(own.status_code, 200, own.get_data(as_text=True))
+        self.assertEqual(len(own.get_json()), 7)
+        elsewhere = self.client.post('/execute_sql', headers=headers, json={
+            'sql': 'SELECT id FROM queryapigate_it_other.queryapigate_it', 'connection_name': 'it'})
+        self.assertEqual((elsewhere.status_code, elsewhere.get_json()['code']), (403, 'table_not_allowed'))
+        browsed = self.client.get('/connections/it/schema', headers=headers)
+        self.assertEqual(browsed.status_code, 200, browsed.get_data(as_text=True))
+        self.assertEqual([t['name'].lower() for t in browsed.get_json()['tables']], ['queryapigate_it'])
+
 
     def test_comments_are_imported_as_descriptions(self):
         """The database's own comments become descriptions (BACKLOG #86) - where it has a way to read them."""
@@ -395,6 +417,52 @@ class PostgresTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
         rows = self.query("SELECT name FROM queryapigate_it WHERE id = 1").get_json()
         self.assertEqual(rows, [{'name': 'committed'}])
 
+    def admin(self, *statements):
+        import psycopg2
+        conn = psycopg2.connect(**{('dbname' if k == 'database' else k): v for k, v in self.details.items()
+                                   if k in ('host', 'port', 'user', 'password', 'database')})
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        conn.close()
+
+    def decoy_schema(self):
+        """queryapigate_it_billing.queryapigate_it: a table of the same name in another schema, holding ids 101-102."""
+        self.admin('DROP SCHEMA IF EXISTS queryapigate_it_billing CASCADE', 'CREATE SCHEMA queryapigate_it_billing',
+                   'CREATE TABLE queryapigate_it_billing.queryapigate_it (id INT)',
+                   'INSERT INTO queryapigate_it_billing.queryapigate_it VALUES (101), (102)')
+        self.addCleanup(self.admin, 'DROP SCHEMA IF EXISTS queryapigate_it_billing CASCADE')
+
+    def test_a_query_cant_change_the_session_for_the_next_call(self):
+        # In autocommit a session setting a query makes is committed with it; each message's RESET ALL puts back the
+        # defaults - for search_path, which would reroute the next call's unqualified names, and every other one
+        the_pool = pool.ConnectionPool()
+        settings = "SELECT current_setting('search_path'), current_setting('TimeZone'), current_setting('DateStyle')"
+        before = self.run_ro(settings, the_pool)[1]
+        self.run_ro("SELECT set_config('search_path', 'queryapigate_it_billing', false), "
+                    "set_config('TimeZone', 'Asia/Tokyo', false), set_config('DateStyle', 'SQL, DMY', false)", the_pool)
+        self.assertEqual(self.run_ro(settings, the_pool)[1], before)
+        self.assertEqual(the_pool.idle_count(), 1)  # the same connection, both times
+        self.assertEqual(self.run_ro("SELECT DATE '2024-01-31' AS d", the_pool)[1][0][0].isoformat(), '2024-01-31')
+
+    def test_a_table_restricted_call_reads_the_schema_its_grant_was_checked_against(self):
+        # The role's own search_path puts the decoy schema first: an unrestricted call honours it, as before; a
+        # table-restricted one is pinned to public, where tableguard resolved its unqualified queryapigate_it
+        self.decoy_schema()
+        self.admin('ALTER ROLE CURRENT_USER SET search_path = queryapigate_it_billing, public')
+        self.addCleanup(self.admin, 'ALTER ROLE CURRENT_USER RESET search_path')
+        the_pool = pool.ConnectionPool()
+        sql = 'SELECT min(id) FROM queryapigate_it'
+        self.assertEqual(self.run_ro(sql, the_pool)[1], [(101,)])
+        pinned = runners.RUNNERS['postgres'](self.details, sql, None, 10, 0, True, None, the_pool, search_path='public')
+        self.assertEqual(pinned[1], [(1,)])
+        self.assertEqual(self.run_ro(sql, the_pool)[1], [(101,)])  # the pin was LOCAL: gone with its message
+        headers = self.key(allowed_tables=['queryapigate_it'])
+        decoy = self.client.post('/execute_sql', headers=headers, json={
+            'sql': 'SELECT id FROM queryapigate_it_billing.queryapigate_it', 'connection_name': 'it'})
+        self.assertEqual(decoy.get_json()['code'], 'table_not_allowed')
+
 
 class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     db, env_var = 'mysql', 'QUERYAPIGATE_IT_MYSQL'
@@ -446,6 +514,46 @@ class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
         with self.assertRaises(ApiError) as caught:
             self.run_ro(self.slow_sql, the_pool, timeout=0.5)
         self.assertEqual(caught.exception.status, 504)
+
+    def test_a_table_grant_doesnt_reach_another_database_and_a_per_service_user_holds_without_one(self):
+        """PERFORMANCE_MYSQL_V1.md, Isolating services: one user for every service's database, and a decoy billing table
+        of the same name. The grant refuses it now; the workaround the 0.42 advisory gives - a user per service, as its
+        own connection - refuses it in MySQL itself, whatever the key."""
+        admin = self.admin()
+        cursor = admin.cursor()
+        for statement in ('DROP DATABASE IF EXISTS queryapigate_it_billing', 'CREATE DATABASE queryapigate_it_billing',
+                          'CREATE TABLE queryapigate_it_billing.queryapigate_it (id INT)',
+                          'INSERT INTO queryapigate_it_billing.queryapigate_it VALUES (101)',
+                          "DROP USER IF EXISTS 'queryapigate_it_crm'@'%'",
+                          "CREATE USER 'queryapigate_it_crm'@'%' IDENTIFIED BY 'crm-pw'",
+                          f"GRANT SELECT ON `{self.details['database']}`.* TO 'queryapigate_it_crm'@'%'"):
+            cursor.execute(statement)
+        admin.close()
+
+        def drop():
+            conn = self.admin()
+            for statement in ('DROP DATABASE IF EXISTS queryapigate_it_billing',
+                              "DROP USER IF EXISTS 'queryapigate_it_crm'@'%'"):
+                conn.cursor().execute(statement)
+            conn.close()
+        self.addCleanup(drop)
+        write_connections({'it': self.details,
+                           'crm': {**self.details, 'user': 'queryapigate_it_crm', 'password': 'crm-pw'}})
+        decoy = 'SELECT id FROM queryapigate_it_billing.queryapigate_it'
+        restricted, unrestricted = self.key(allowed_tables=['queryapigate_it']), {'X-API-Key': 'admin'}
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_API_KEY': 'admin'})  # the admin key: no restriction
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        refused = self.client.post('/execute_sql', headers=restricted, json={'sql': decoy, 'connection_name': 'it'})
+        self.assertEqual((refused.status_code, refused.get_json()['code']), (403, 'table_not_allowed'))
+        shared = self.client.post('/execute_sql', headers=unrestricted, json={'sql': decoy, 'connection_name': 'it'})
+        self.assertEqual(shared.status_code, 200)  # the shared user can read it: only the grant stopped it
+        own = self.client.post('/execute_sql', headers=unrestricted,
+                               json={'sql': 'SELECT id FROM queryapigate_it', 'connection_name': 'crm'})
+        self.assertEqual(own.status_code, 200, own.get_data(as_text=True))
+        denied = self.client.post('/execute_sql', headers=unrestricted, json={'sql': decoy, 'connection_name': 'crm'})
+        self.assertGreaterEqual(denied.status_code, 400)
+        self.assertIn('denied', denied.get_data(as_text=True).lower())
 
     def test_an_idle_pooled_connection_doesnt_block_ddl(self):
         the_pool = pool.ConnectionPool()

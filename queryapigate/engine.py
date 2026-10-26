@@ -43,12 +43,31 @@ def _sql_connection(connection_name):
     return details
 
 
-def _trino_defaults(details):
-    """The (catalog, schema) that fill a Trino reference's or grant's missing parts for qualified `allowed_tables`
-    matching (ADR 0026, tableguard.py); (None, None) for every other type, where the guard matches bare names."""
-    if details.get('db') != 'trino':
-        return None, None
-    return details.get('database'), (details.get('schema') or 'default')
+def _table_defaults(details):
+    """The (catalog, schema) that fill a reference's or grant's missing parts for qualified `allowed_tables` matching
+    (tableguard.py): what an unqualified table name resolves to on this connection. Trino's catalog is the
+    connection's `database` (ADR 0026); elsewhere the catalog is left to the reference, and the schema is MySQL's or
+    ClickHouse's database, PostgreSQL's `schema` option (`public` unless set - see _search_path()), SQLite's and
+    DuckDB's `main`."""
+    dialect = details.get('db')
+    if dialect == 'trino':
+        return details.get('database'), (details.get('schema') or 'default')
+    if dialect == 'mysql':
+        return None, details.get('database')
+    if dialect == 'clickhouse':
+        return None, details.get('database') or 'default'
+    if dialect == 'postgres':
+        return None, details.get('schema') or 'public'
+    return None, 'main'
+
+
+def _search_path(details, allowed_tables):
+    """The runner options pinning what a table-restricted PostgreSQL call's unqualified names resolve to: its
+    `search_path` set, inside the call, to the schema tableguard assumed - so neither a role's own search_path nor a
+    `"$user"` schema can send `customer` somewhere other than the `public.customer` the grant was checked against."""
+    if details['db'] != 'postgres' or allowed_tables is None:
+        return {}
+    return {'search_path': _table_defaults(details)[1]}
 
 
 def _db_span(details, sql, connection_name):
@@ -85,7 +104,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     if database:
         details = {**details, 'database': database}
     effective_allow_writes = config.allow_writes() and allow_writes
-    default_catalog, default_schema = _trino_defaults(details)
+    default_catalog, default_schema = _table_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,
                        allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables,
                        default_catalog=default_catalog, default_schema=default_schema)
@@ -105,7 +124,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     try:
         with limits.acquire(timeout), _db_span(details, sql, connection_name) as span:
             columns, rows = RUNNERS[details['db']](details, sql, params, limit, offset, not effective_allow_writes,
-                                                 timeout, get_pool())
+                                                 timeout, get_pool(), **_search_path(details, allowed_tables))
             tracing.set_attributes(span, db__response__returned_rows=min(len(rows), limit))
         status = 'success'
     except ApiError:
@@ -345,8 +364,10 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     details = _sql_connection(connection_name)
     if details['db'] not in WRITE_RUNNERS:
         raise ApiError(f"Agents can't write on '{details['db']}' connections", 403, code='read_only')
+    default_catalog, default_schema = _table_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=config.allow_writes(),
-                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables)
+                       allowed_write_ops=allowed_write_ops, allowed_tables=allowed_tables,
+                       default_catalog=default_catalog, default_schema=default_schema)
     # Only rows a RETURNING clause gives back can carry a masked value; a write without one returns none.
     returns_rows = re.search(r'\bRETURNING\b', sql, re.IGNORECASE) is not None
     masked = masking.prepare(mask, sql, connection_name, details['db'], None) if mask and returns_rows else None
@@ -360,7 +381,7 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     try:
         with limits.acquire(timeout), _db_span(details, sql, connection_name) as span:
             columns, rows, affected = WRITE_RUNNERS[details['db']](details, sql, params, max_affected_rows, timeout,
-                                                                   get_pool())
+                                                                   get_pool(), **_search_path(details, allowed_tables))
             tracing.set_attributes(span, db__response__affected_rows=affected)
         status = 'success'
     except TooManyRowsAffected as error:
@@ -400,7 +421,7 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     is exhausted, errors, or a client disconnect closes it early (see runners._make_stream_runner).
     """
     details = _sql_connection(connection_name)
-    default_catalog, default_schema = _trino_defaults(details)
+    default_catalog, default_schema = _table_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables,
                        default_catalog=default_catalog, default_schema=default_schema)
     masked = masking.prepare(mask, sql, connection_name, details['db'])  # before the query runs, as execute_sql's
@@ -415,7 +436,8 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     try:
         # the span covers opening the stream - up to its first row's columns - not the hours a large export may take
         with _db_span(details, sql, connection_name):
-            stream = STREAM_RUNNERS[details['db']](details, sql, params, timeout, get_pool())
+            stream = STREAM_RUNNERS[details['db']](details, sql, params, timeout, get_pool(),
+                                                   **_search_path(details, allowed_tables))
             columns = next(stream)
         status = 'success'
     except ApiError:

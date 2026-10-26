@@ -63,8 +63,8 @@ error body has:
 
 ```python
 res.isError            # True
-res.structuredContent  # {"error": "This API key may only query these tables: customers, orders, products.
-                       #  Forbidden: salaries.", "code": "table_not_allowed"}
+res.structuredContent  # {"error": "This API key may only query these tables: main.customers, main.orders,
+                       #  main.products. Forbidden: main.salaries.", "code": "table_not_allowed"}
 ```
 
 Branch on `code`; the `error` text is for people and may change between releases. Codes seen over MCP while writing

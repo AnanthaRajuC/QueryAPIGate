@@ -367,12 +367,14 @@ another's tables? This is the result of checking, not a performance number. A ke
 | `SELECT COUNT(*) FROM billing.customer` | **200: allowed, though it's another service's table** |
 | `SELECT COUNT(*) FROM billing.history` | 403 `table_not_allowed`, as intended |
 
-**On MySQL, the table allow-list matches bare table names,** so `customer` means `customer` in any database the
-connection's user can reach. Only Trino connections match `catalog.schema.table`.
+**On MySQL, the table allow-list matched bare table names** (0.42 and earlier), so `customer` meant `customer` in
+any database the connection's user could reach. Only Trino connections matched `catalog.schema.table`.
 
-**Until that changes,** keep services apart with MySQL's own grants: one MySQL user per service, granted only its
-databases, each as its own QueryAPIGate connection, with keys granted only their service's connection. Matching
-`schema.table` on MySQL, as Trino already does, is planned for 0.43.
+**Fixed in 0.43:** grants are schema-qualified on every SQL connection, so `customer` means the connection's own
+database's `customer`, and `billing.customer` is refused unless granted (the CHANGELOG's Security entry). Keeping
+services apart with MySQL's own grants is still the stronger boundary: one MySQL user per service, granted only its
+databases, each as its own QueryAPIGate connection, with keys granted only their service's connection. The
+integration tests check both.
 
 Saved queries aren't affected. A key granted named queries can only run those queries' SQL, and that SQL is written
 by whoever publishes it.

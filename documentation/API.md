@@ -1366,9 +1366,27 @@ connections, the dialects QueryAPIGate can actually parse for this - **a table-r
 `h2` or `jdbc` connection is refused on every query, with a `403` naming the unsupported connection type, never
 silently left unrestricted.** On a `mongo` connection the list is the collections the key may `find()` in - one
 outside it is refused with `403 table_not_allowed` before the server is asked anything (from 0.34.1; until then it
-wasn't checked on MongoDB at all). Table names are matched case-insensitively and bare (not
-schema-qualified), the same simplification `allowed_write_ops`'s keyword list already makes; a table-valued
-function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this can't meaningfully restrict one.
+wasn't checked on MongoDB at all).
+
+Table names are matched case-insensitively and **qualified** (from 0.43; Trino's always were, as
+`catalog.schema.table`). A grant or a query's table that leaves out its schema means the connection's default:
+
+| Connection | `customer` means |
+|---|---|
+| `mysql`, `clickhouse` | the connection's `database`: `crm.customer` |
+| `postgres` | `public.customer`, or the connection's `options.schema` instead of `public` |
+| `sqlite`, `duckdb` | `main.customer` |
+
+So `["customer"]` doesn't reach `billing.customer`: grant that as `billing.customer`. A query naming a catalog too
+(`shop.public.orders`) needs a grant written the same way. On PostgreSQL, a table-restricted call runs with
+`search_path` set to that default schema, so its unqualified names resolve where they were checked, whatever the
+role's own `search_path`. A table-valued function (e.g. ClickHouse's `numbers(10)`) touches no real table, so this
+can't meaningfully restrict one.
+
+**Statements whose tables can't be checked are refused** for a table-restricted key, with `403
+table_check_failed`: `SHOW`, `SET`, `USE`, `ATTACH`, `PRAGMA`, `CALL`, `PREPARE`/`EXECUTE`, `DECLARE`/`FETCH`,
+and any statement the parser keeps only as text. Each could read a table, or its columns, or reroute a later
+call's names, without naming it where the check looks. `EXPLAIN` is checked against the statement it explains.
 The key's view of the schema follows the same list: `GET /connections/<name>/schema` and MCP's `list_tables` leave
 other tables out (a foreign key pointing at one shows as `null`), and `table_ddl` answers a forbidden table with the
 same `404` as a table that doesn't exist.
@@ -2246,7 +2264,7 @@ Every error - from `/api/v1`, the runtime routes (`/q/<name>`, `/execute_sql`, `
 events` and MCP tool calls - has the same shape:
 
 ~~~json
-{"error": "This API key may only query these tables: film. ...", "code": "table_not_allowed",
+{"error": "This API key may only query these tables: public.film. ...", "code": "table_not_allowed",
  "request_id": "9f2c41d07a1b"}
 ~~~
 
