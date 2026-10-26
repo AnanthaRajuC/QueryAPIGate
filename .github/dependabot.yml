@@ -5,9 +5,9 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      # Column masking and table allow-lists read sqlglot's parse tree: a new major changes it, and sqlglot 30
-      # stopped masking `SELECT * FROM customers, LATERAL (SELECT email AS e2) l`. Moving past <26 is deliberate
-      # work, tested on its own - not a bump (Dependabot #35, 2026-10-15).
+      # Column masking and table allow-lists read sqlglot's parse tree: a new major changes it (sqlglot 30 renamed
+      # `with`/`from` to `with_`/`from_`, which the checks then missed). Moving past <31 is deliberate work, tested
+      # on its own with the differential fuzz - not a bump (Dependabot #35, 2026-10-15; 30 adopted in 0.43, #101).
       - dependency-name: sqlglot
         update-types: ["version-update:semver-major"]
       # mcp 2 removed streamablehttp_client, which the MCP server's own clients and tests use (#36).
@@ -17,6 +17,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # init, analyze and upload-sarif must all run the same CodeQL version, or analyze refuses: one PR for all three
+      # (#78-#80 came one each and all failed)
+      codeql-action:
+        patterns: ["github/codeql-action*"]
   - package-ecosystem: docker
     directory: /
     schedule:
