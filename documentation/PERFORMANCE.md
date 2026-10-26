@@ -169,8 +169,11 @@ On SQLite, each part of a call, measured on its own:
 
 The first call for a statement pays for the table check and the masking trace; after that, both are reused. The
 table check depends only on the query text, so it can't go stale. The masking trace depends on the connection's
-schema too, so it is kept only as long as QueryAPIGate keeps that schema - 60 seconds - and is worked out again after
-that, or straight away when the connection is changed.
+schema too, so it is kept only as long as QueryAPIGate keeps that schema - at most 60 seconds - and straight away
+when the connection is changed. From 0.43 a busy connection's schema is read again in the background after 45 seconds,
+while calls go on using the cached copy; when it hasn't changed, the traces are kept. So no call waits for the read or
+the trace again - before, one call a minute took about 75 ms longer ([Performance, v3](PERFORMANCE_V3.md#the-cold-path-every-60-seconds)).
+A connection with no masked call for a whole minute is read again in its next call, as before.
 
 The rest is the gateway itself, the same for every query: authentication, limits, the record of the run, the HTTP
 response. Against a database that takes 50 ms to answer, it hardly matters; against one that answers in 0.01 ms, it's

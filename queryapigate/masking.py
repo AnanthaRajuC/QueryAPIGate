@@ -33,6 +33,9 @@ import fnmatch
 import hashlib
 import hmac
 import json
+import logging
+import os
+import queue
 import re
 import secrets
 import threading
@@ -40,6 +43,8 @@ import time
 
 from . import config, db, metacache, sqltools, store
 from .errors import ApiError
+
+log = logging.getLogger('queryapigate')
 
 ACTIONS = ('drop', 'null', 'mask', 'hash', 'keep')  # strictest first
 _STRICTNESS = {action: rank for rank, action in enumerate(ACTIONS)}
@@ -422,29 +427,89 @@ class _Masked:
 # For a query: trace before it runs, apply to what comes back
 # --------------------------------------------------------------------------------------
 
-SCHEMA_TTL = 60  # seconds a connection's schema is reused for tracing before it is read again
+SCHEMA_TTL = 60  # seconds a connection's schema is reused for tracing, at most
+SCHEMA_REFRESH_AFTER = 45  # past this, a call starts reading it again in the background and goes on with this one
 TRACE_CACHE_SIZE = 256  # statements kept traced per connection schema - bounds what varied ad-hoc SQL can hold
-_schemas: dict = {}
+_schemas: dict = {}  # (store target, workspace, connection, database) -> (read at, tables, traces)
 _schemas_lock = threading.Lock()
+_generation = 0  # bumped by forget_schema(): a read that started before it never stores what it read
+_refreshing: set = set()  # keys a background read is already under way for
+_refresher = None  # (pid, queue) of this process's background reader - started on first use, after any fork
 
 
 def _schema(connection_name, database=None):
     """(tables, traces) for a connection: its schema, reused for SCHEMA_TTL, and the statements already traced against
     exactly that schema. The traces live in the schema's own cache entry, so they are dropped with it - when it
     expires, or forget_schema() runs after the connection changes - and a trace never outlives the schema it was
-    computed from."""
-    from . import schema
-    key = (connection_name, database)
+    computed from.
+
+    Read ahead: the first call past SCHEMA_REFRESH_AFTER has the schema read again in the background (_refresh()) and
+    is served from the cache meanwhile, so a busy connection's calls never wait for it - re-reading it, and tracing
+    each statement again, put a 75 ms spike in one call a minute (PERFORMANCE_V3.md). A schema is still never used
+    past SCHEMA_TTL: a connection quiet for that long is read in the call, as before. Keyed by store and workspace as
+    well as by name: two workspaces' connections can share a name, and not their tables."""
+    from . import schema, scope
+    key = (db.current_target(), scope.current(), connection_name, database)
     now = time.monotonic()
     with _schemas_lock:
         cached = _schemas.get(key)
         if cached is not None and now - cached[0] < SCHEMA_TTL:
+            if now - cached[0] >= SCHEMA_REFRESH_AFTER and key not in _refreshing:
+                _refreshing.add(key)
+                _refresh_soon(key)
             return cached[1], cached[2]
+        generation = _generation
     tables = schema.fetch_schema(connection_name, database)['tables']
     traces = collections.OrderedDict()
     with _schemas_lock:
-        _schemas[key] = (now, tables, traces)
+        if generation == _generation:
+            _schemas[key] = (now, tables, traces)
     return tables, traces
+
+
+def _refresh_soon(key):
+    """Queue `key` for this process's background reader, starting it if this process has none yet. Called holding
+    _schemas_lock."""
+    global _refresher
+    if _refresher is None or _refresher[0] != os.getpid():
+        jobs: queue.SimpleQueue = queue.SimpleQueue()
+        threading.Thread(target=_read_ahead, args=(jobs,), name='queryapigate-schema-refresh', daemon=True).start()
+        _refresher = (os.getpid(), jobs)
+    _refresher[1].put(key)
+
+
+def _read_ahead(jobs):
+    """The background reader: one thread, so its store connection is opened once, not per read."""
+    while True:
+        key = jobs.get()
+        try:
+            _refresh(key)
+        except Exception:
+            # the cached schema serves until SCHEMA_TTL; then a call reads it itself, and sees whatever is wrong
+            log.warning('Reading the schema of %s again for masking failed', key[2], exc_info=True)
+        finally:
+            with _schemas_lock:
+                _refreshing.discard(key)
+
+
+def _refresh(key):
+    """Read `key`'s schema again, in its own store and workspace. With no request behind it, the read runs under no
+    caller's limits and takes none of their concurrent slots. The traces carry over when the schema is unchanged -
+    they are a function of it - and start empty when it isn't."""
+    from . import schema, scope
+    target, workspace, connection_name, database = key
+    with _schemas_lock:
+        generation = _generation
+    started = time.monotonic()
+    with scope.using(workspace):
+        if db.current_target() != target:
+            return  # the store this was cached from is no longer this server's
+        tables = schema.fetch_schema(connection_name, database)['tables']
+    with _schemas_lock:
+        cached = _schemas.get(key)
+        if cached is None or generation != _generation:
+            return  # forgotten meanwhile: the next call reads it afresh
+        _schemas[key] = (started, tables, cached[2] if cached[1] == tables else collections.OrderedDict())
 
 
 def _cached_trace(traces, sql, dialect, tables):
@@ -468,9 +533,12 @@ def _cached_trace(traces, sql, dialect, tables):
 
 
 def forget_schema(connection_name=None):
-    """Drop cached schemas - one connection's, after it changes, or all."""
+    """Drop cached schemas - one connection's (in every workspace), after it changes, or all - and whatever a
+    background read of one is about to store."""
+    global _generation
     with _schemas_lock:
-        for key in [k for k in _schemas if connection_name is None or k[0] == connection_name]:
+        _generation += 1
+        for key in [k for k in _schemas if connection_name is None or k[2] == connection_name]:
             del _schemas[key]
 
 
