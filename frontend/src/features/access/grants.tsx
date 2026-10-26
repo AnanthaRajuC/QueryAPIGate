@@ -170,7 +170,7 @@ export function grantsPayload(state: GrantState, connectionNames: string[], quer
 }
 
 const TABLES_HINT =
-  'Optional, comma-separated table names — e.g. "orders, customers". Restricts every statement (read or write) to only these tables, on mysql/postgres/clickhouse/sqlite/duckdb connections — a query against an unsupported connection type (h2, jdbc, mongo) is always rejected while this is set, not silently unrestricted. Leave blank to allow any table.';
+  'Optional, comma-separated table names — e.g. "orders, customers, billing.invoices". Restricts every statement (read or write) to only these tables, on mysql/postgres/clickhouse/sqlite/duckdb/trino connections. A bare name is the table in the connection\'s own database or schema (public on PostgreSQL); write schema.table for one elsewhere. A query against an unsupported connection type (h2, jdbc) is always rejected while this is set, not silently unrestricted; on mongo these are collections. Leave blank to allow any table.';
 
 const HINTS = {
   k: {

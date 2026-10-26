@@ -31,7 +31,7 @@ object; `GET /api/v1/connections/{name}` returns them under `options`.
 | `db` | Driver | Notes |
 |------|--------|-------|
 | `mysql` | `mysql-connector-python` | Sessions are opened `READ ONLY` unless writes are enabled |
-| `postgres` | `psycopg2` | Sessions are opened read-only unless writes are enabled |
+| `postgres` | `psycopg2` | Each query runs in a read-only transaction unless writes are enabled |
 | `clickhouse` | `clickhouse-driver` (native protocol, port 9000) | `readonly=1` unless writes are enabled |
 | `sqlite` | `sqlite3` | Opened with `mode=ro` unless writes are enabled |
 | `h2` | `JayDeBeApi` + bundled JDBC jar | Connects to a running H2 TCP server: `jdbc:h2:tcp://<host>[:port]/~/<database>` |
@@ -147,6 +147,7 @@ distinct connection setting, default 8, `0` disables pooling) and `QUERYAPIGATE_
 | `port` | no | Overrides the driver's default port |
 | `user`, `password` | usually | Credentials |
 | `jar`, `driver_class`, `jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
+| `options.schema` | no | Trino: the default schema. PostgreSQL: the schema an unqualified `allowed_tables` name means, `public` by default (a table-restricted key's calls run with `search_path` set to it) |
 
 ## Experimental: h2, jdbc and trino
 

@@ -325,10 +325,18 @@ class _MySQL(_Driver):
             raise
 
 
-def _postgres_prefix(read_only, timeout):
-    """What a PostgreSQL message sends ahead of the query: the transaction's access mode and time limit."""
-    return (('SET TRANSACTION READ ONLY; ' if read_only else '')
-            + (f'SET LOCAL statement_timeout = {_millis(timeout)}; ' if timeout else ''))
+def _postgres_prefix(read_only, timeout, search_path=None):
+    """What a PostgreSQL message sends ahead of the query. First `RESET ALL`: in autocommit, a session setting a
+    query changes - `SELECT set_config('search_path', 'billing', false)`, or the TimeZone - is committed with it and
+    would carry into the next call on the pooled connection, another key's included; the reset puts back the server's,
+    role's and database's own defaults, as rolling back each call's transaction did before ADR 0027. psycopg2's own
+    `DateStyle` (it needs ISO, and sets it at connect if the server's default isn't) goes with them, so it is set again.
+    Then the transaction's access mode and time limit, and a table-restricted call's pinned `search_path`
+    (engine._search_path()) - all LOCAL, so none outlives the transaction."""
+    return ('RESET ALL; SET LOCAL DateStyle = ISO; '
+            + ('SET TRANSACTION READ ONLY; ' if read_only else '')
+            + (f'SET LOCAL statement_timeout = {_millis(timeout)}; ' if timeout else '')
+            + (f"""SET LOCAL search_path = "{search_path.replace('"', '""')}"; """ if search_path else ''))
 
 
 class _Postgres(_Driver):
@@ -337,13 +345,13 @@ class _Postgres(_Driver):
 
     def connect(self, details, read_only):
         """Autocommit, so each query is one message PostgreSQL runs as one implicit transaction, ending with it - one
-        round trip, and nothing left to roll back (ADR 0027). Read-only is set in that message, per transaction; the
-        session default set here is a second layer only, since `SELECT set_config(...)` can change it."""
+        round trip, and nothing left to roll back (ADR 0027). Read-only is set in that message, per transaction - not
+        as a session default, which `SELECT set_config(...)` could change and each message's `RESET ALL` clears."""
         import psycopg2
         conn = psycopg2.connect(connect_timeout=config.CONNECT_TIMEOUT,
                                 **_connect_args(details, tls=POSTGRES_TLS, database='dbname'))
         try:
-            conn.set_session(readonly=True, autocommit=True) if read_only else conn.set_session(autocommit=True)
+            conn.set_session(autocommit=True)
         except Exception:
             conn.close()
             raise
@@ -362,19 +370,20 @@ class _Postgres(_Driver):
             conn.rollback()
             conn.autocommit = True
 
-    def query(self, session, sql, params, limit, offset, read_only, timeout):
+    def query(self, session, sql, params, limit, offset, read_only, timeout, search_path=None):
         import psycopg2.errors
-        # One message (ADR 0027): read-only and the time limit are set inside the transaction the query runs in -
-        # LOCAL, so nothing outlives it - and the message commits as it ends, a write included.
-        prefix = _postgres_prefix(read_only, timeout)
+        # One message (ADR 0027): the session reset, then read-only, the time limit and any pinned search_path set
+        # inside the transaction the query runs in - LOCAL, so nothing outlives it - and the message commits as it
+        # ends, a write included.
+        prefix = _postgres_prefix(read_only, timeout, search_path)
         with session.conn.cursor() as cursor:
             try:
                 return _fetch_page(cursor, sql, params, 'format', limit, offset, self.DIALECT,
-                                   wrap=(lambda statement: prefix + statement) if prefix else None)
+                                   wrap=lambda statement: prefix + statement)
             except psycopg2.errors.QueryCanceled:
                 raise _timed_out(timeout) from None
 
-    def stream(self, session, sql, params, timeout):
+    def stream(self, session, sql, params, timeout, search_path=None):
         """Unlike query(), uses a named (server-side) cursor - PostgreSQL's default cursor, like MySQL's,
         fetches the whole result set into the client on execute() - see
         DATABASE_CONNECTION_CONFIGURATION.md#streaming-exports. A named cursor needs an open transaction,
@@ -393,7 +402,7 @@ class _Postgres(_Driver):
         conn = session.conn
         conn.autocommit = False  # a named cursor needs an explicit transaction; reset() ends it, restoring autocommit
         with conn.cursor() as setter:
-            setter.execute(_postgres_prefix(True, timeout).rstrip('; '))
+            setter.execute(_postgres_prefix(True, timeout, search_path).rstrip('; '))
         cursor = conn.cursor(name='queryapigate_stream')
         cursor.itersize = _STREAM_BATCH  # rows fetched from the server per underlying fetchmany() call
         sql, args = bind_parameters(sql, params or {}, 'format', self.DIALECT)
@@ -847,15 +856,17 @@ class _Trino(_Driver):
 
 
 def _make_runner(driver):
-    def run(details, sql, params, limit, offset, read_only, timeout=None, pool=None):
+    """A runner for `driver`. `options` go to its query() as they are - PostgreSQL's pinned `search_path`, the only
+    one (engine._search_path())."""
+    def run(details, sql, params, limit, offset, read_only, timeout=None, pool=None, **options):
         if pool is None:
             session = Session(driver.connect(details, read_only), driver)
             try:
-                return driver.query(session, sql, params, limit, offset, read_only, timeout)
+                return driver.query(session, sql, params, limit, offset, read_only, timeout, **options)
             finally:
                 session.close()
         with pool.checkout(driver, details, read_only) as session:
-            return driver.query(session, sql, params, limit, offset, read_only, timeout)
+            return driver.query(session, sql, params, limit, offset, read_only, timeout, **options)
 
     return run
 
@@ -867,16 +878,16 @@ def _make_stream_runner(driver):
     Whichever of the two branches below checks the connection out (from the pool, or a fresh one) does not
     release or close it until that generator is exhausted, raises, or is closed early - see the
     "Streaming" section atop this module."""
-    def run(details, sql, params, timeout=None, pool=None):
+    def run(details, sql, params, timeout=None, pool=None, **options):
         if pool is None:
             session = Session(driver.connect(details, True), driver)
             try:
-                yield from driver.stream(session, sql, params, timeout)
+                yield from driver.stream(session, sql, params, timeout, **options)
             finally:
                 session.close()
         else:
             with pool.checkout(driver, details, True) as session:
-                yield from driver.stream(session, sql, params, timeout)
+                yield from driver.stream(session, sql, params, timeout, **options)
 
     return run
 
@@ -1162,7 +1173,7 @@ def _write_with_ceiling(conn, write, ceiling):
     return columns, rows, affected
 
 
-def _write_postgres(details, sql, params, ceiling, timeout=None, pool=None):
+def _write_postgres(details, sql, params, ceiling, timeout=None, pool=None, search_path=None):
     import psycopg2.errors
     driver = _Postgres()
 
@@ -1171,8 +1182,7 @@ def _write_postgres(details, sql, params, ceiling, timeout=None, pool=None):
 
         def write():
             with session.conn.cursor() as cursor:
-                if timeout:
-                    cursor.execute(f'SET LOCAL statement_timeout = {_millis(timeout)}')
+                cursor.execute(_postgres_prefix(False, timeout, search_path).rstrip('; '))
                 try:
                     return _write(cursor, sql, params, 'format', 'postgres')
                 except psycopg2.errors.QueryCanceled:

@@ -705,10 +705,11 @@ class DriverWiringTests(unittest.TestCase):
         self.assertEqual((kwargs['dbname'], kwargs['host']), ('d', 'h'))
         self.assertNotIn('active', kwargs)
         self.assertNotIn('db', kwargs)
-        conn.set_session.assert_called_once_with(readonly=True, autocommit=True)
-        # one message (ADR 0027): the transaction's access mode, then the query - nothing before it, nothing after
+        conn.set_session.assert_called_once_with(autocommit=True)
+        # one message (ADR 0027): the session reset, the transaction's access mode, then the query - nothing after it
         cursor.execute.assert_called_once_with(
-            "SET TRANSACTION READ ONLY; SELECT id FROM t WHERE n = %s AND s LIKE '%%x'\nLIMIT 6 OFFSET 10", [4])
+            "RESET ALL; SET LOCAL DateStyle = ISO; SET TRANSACTION READ ONLY; "
+            "SELECT id FROM t WHERE n = %s AND s LIKE '%%x'\nLIMIT 6 OFFSET 10", [4])
         self.assertEqual((columns, rows), (['id'], [(1,)]))
         conn.close.assert_called_once()
 
@@ -746,8 +747,9 @@ class DriverWiringTests(unittest.TestCase):
             with self.assertRaises(ApiError) as caught:
                 runners._run_postgres({'host': 'h'}, 'SELECT pg_sleep(9)', None, 5, 0, True, 1.5)
         self.assertEqual(cursor.execute.call_count, 1)
-        self.assertEqual(cursor.execute.call_args.args[0], 'SET TRANSACTION READ ONLY; '
-                         'SET LOCAL statement_timeout = 1500; SELECT pg_sleep(9)\nLIMIT 6 OFFSET 0')
+        self.assertEqual(cursor.execute.call_args.args[0], 'RESET ALL; SET LOCAL DateStyle = ISO; '
+                         'SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 1500; SELECT pg_sleep(9)\n'
+                         'LIMIT 6 OFFSET 0')
         self.assertEqual(caught.exception.status, 504)
         conn.close.assert_called_once()
 
@@ -1069,10 +1071,23 @@ class PooledDriverTests(unittest.TestCase):
             for _ in range(2):
                 runners._run_postgres({'host': 'h'}, 'SELECT 1', None, 5, 0, True, 3, self.pool)
         self.assertEqual(connect.call_count, 1)
-        conn.set_session.assert_called_once_with(readonly=True, autocommit=True)
+        conn.set_session.assert_called_once_with(autocommit=True)
         conn.rollback.assert_not_called()  # the message's implicit transaction ended with it
-        message = 'SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 3000; SELECT 1\nLIMIT 6 OFFSET 0'
+        message = ('RESET ALL; SET LOCAL DateStyle = ISO; SET TRANSACTION READ ONLY; '
+                   'SET LOCAL statement_timeout = 3000; SELECT 1\nLIMIT 6 OFFSET 0')
         self.assertEqual([c.args[0] for c in cursor.execute.call_args_list], [message] * 2)
+
+    def test_postgres_pins_search_path_for_a_table_restricted_call(self):
+        cursor = mock.MagicMock()
+        cursor.description = [('a',)]
+        conn = mock.MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        with mock.patch('psycopg2.connect', return_value=conn):
+            runners._run_postgres({'host': 'h'}, 'SELECT * FROM customer', None, 5, 0, True, None,
+                                  search_path='crm "x"')
+        self.assertEqual(cursor.execute.call_args.args[0],
+                         'RESET ALL; SET LOCAL DateStyle = ISO; SET TRANSACTION READ ONLY; '
+                         'SET LOCAL search_path = "crm ""x"""; SELECT * FROM customer\nLIMIT 6 OFFSET 0')
 
     def test_postgres_write_commits_with_its_message(self):
         cursor = mock.MagicMock()
@@ -1082,7 +1097,8 @@ class PooledDriverTests(unittest.TestCase):
         with mock.patch('psycopg2.connect', return_value=conn):
             runners._run_postgres({'host': 'h'}, 'UPDATE t SET a = 1', None, 5, 0, False, 3)
         conn.set_session.assert_called_once_with(autocommit=True)
-        cursor.execute.assert_called_once_with('SET LOCAL statement_timeout = 3000; UPDATE t SET a = 1')
+        cursor.execute.assert_called_once_with(
+            'RESET ALL; SET LOCAL DateStyle = ISO; SET LOCAL statement_timeout = 3000; UPDATE t SET a = 1')
         conn.commit.assert_not_called()
 
     def test_postgres_stream_and_agent_write_take_an_explicit_transaction_and_give_it_back(self):
@@ -1098,7 +1114,8 @@ class PooledDriverTests(unittest.TestCase):
         with mock.patch('psycopg2.connect', return_value=conn):
             rows = list(runners._stream_postgres({'host': 'h'}, 'SELECT a FROM t', None, 2, self.pool))
         self.assertEqual(rows, [('a',), (1,)])
-        setter.execute.assert_any_call('SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 2000')
+        setter.execute.assert_any_call(
+            'RESET ALL; SET LOCAL DateStyle = ISO; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = 2000')
         conn.rollback.assert_called_once()   # reset() ended the stream's transaction...
         self.assertIs(conn.autocommit, True)  # ...and handed the connection back in autocommit
 

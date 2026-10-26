@@ -271,7 +271,8 @@ This is the part worth being the most precise about, because it's also the part 
   against an allow-list when writes aren't permitted - then looks behind a read-only one for writes it can hide: a
   writable CTE (`WITH d AS (DELETE ... RETURNING *) SELECT ...`), the statement `EXPLAIN ANALYZE` runs, and
   `SELECT ... INTO`. The same rule covers a key's `allowed_write_ops`. PostgreSQL, MySQL, ClickHouse and SQLite
-  connections also run read-only queries in read-only sessions, so the database refuses a write even if the guard
+  connections also run read-only queries read-only in the database (a read-only transaction on PostgreSQL and MySQL,
+  a read-only setting or file mode on ClickHouse and SQLite), so the database refuses a write even if the guard
   missed it; **DuckDB, H2 and JDBC connections are opened read-write, so there the guard is the only lock** - the
   case where 0.16 closed a real gap (`EXPLAIN ANALYZE DELETE` ran on DuckDB with writes off). **This is explicitly
   documented as defence in depth,
@@ -281,6 +282,21 @@ This is the part worth being the most precise about, because it's also the part 
 - **`allowed_tables` uses a real parser** (`sqlglot`) specifically because table extraction has to be
   correct, not just approximately right - a key restricted to certain tables is refused entirely rather
   than let through on a best-effort guess when the dialect can't be parsed reliably (H2/JDBC).
+- **`allowed_tables` is matched schema-qualified** (from 0.43). Before, every dialect but Trino matched bare names,
+  so a grant of `customer` read `billing.customer` too, on a connection whose user could see both. Now a reference's
+  and a grant's missing schema is the connection's default (`engine._table_defaults`): MySQL's or ClickHouse's
+  database, PostgreSQL's `public` or `options.schema`, SQLite's and DuckDB's `main`. A catalog a reference names
+  stays part of its name (fail closed). PostgreSQL resolves unqualified names through `search_path`, so a
+  table-restricted call pins it to that schema, inside the call's own transaction. Names are compared lower-cased, so
+  two tables differing only in case (MySQL with `lower_case_table_names=0`, quoted PostgreSQL names) share a grant.
+- **Statements the check can't see into are refused for a table-restricted key:** `SHOW`, `SET`, `USE`, `ATTACH`,
+  `PRAGMA`, `CALL`, `PREPARE`/`EXECUTE`, `DECLARE`/`FETCH`, and anything sqlglot only keeps as text
+  (`tableguard._statements`). Each names its tables somewhere the check doesn't look, or none at all: before 0.43,
+  `SHOW CREATE TABLE secret` showed a forbidden table's DDL, `PREPARE` then `EXECUTE` read its rows, and DuckDB's
+  `SET search_path` rerouted later calls on a pooled connection. `EXPLAIN` is checked by the statement it explains.
+- **Nothing a PostgreSQL query sets outlives it** (ADR 0027). Calls run in autocommit, where a session setting a
+  query changes (`SELECT set_config(...)`) is committed with it, so each message begins `RESET ALL`. Read-only, the
+  time limit and the pinned `search_path` are set `LOCAL`, inside the message's transaction.
 - **DuckDB file access is enforced by DuckDB itself.** A DuckDB connection reads only its `allowed_paths` - none by
   default - because each connection's configuration is locked as it opens (`enable_external_access = false`, the
   allowed paths, `lock_configuration`): no SQL can reach another file, URL or extension, or change the setting back.

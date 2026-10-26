@@ -37,6 +37,7 @@ Every way of reaching another table is refused with `403` and `"code": "table_no
 | `SELECT * FROM orders WHERE total > (SELECT AVG(amount) FROM salaries)` | refused - the subquery counts |
 | `WITH s AS (SELECT * FROM salaries) SELECT * FROM s` | refused - the CTE's source counts |
 | `SELECT * FROM main.salaries` | refused - a schema prefix doesn't hide it |
+| `SELECT * FROM archive.orders` | refused - the same name in another schema or attached database is another table |
 | `SELECT * FROM sqlite_master` | refused - system catalogues are tables too |
 | `WITH big AS (SELECT * FROM orders WHERE total > 40) SELECT * FROM big` | allowed - `big` is the CTE's name, not a table |
 | `SELECT * FROM ORDERS` | allowed - names match case-insensitively |
@@ -44,7 +45,7 @@ Every way of reaching another table is refused with `403` and `"code": "table_no
 The error names both lists:
 
 ```json
-{"error": "This API key may only query these tables: customers, orders. Forbidden: salaries.",
+{"error": "This API key may only query these tables: main.customers, main.orders. Forbidden: main.salaries.",
  "code": "table_not_allowed", "request_id": "ac0ec09aa1d6"}
 ```
 
@@ -59,12 +60,16 @@ tables.
 - **Database types:** supported for PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and Trino - the dialects the parser
   handles. On **Trino** the match is **fully qualified** (`catalog.schema.table`): a grant of `orders` means the
   connection's default catalog and schema only, never `orders` in another catalog or schema - see
-  [Connect to Trino](61-connect-to-trino.md). On an `h2`, `jdbc` or `mongo` connection a table-restricted key is
-  **refused on every query** (`403` naming the connection type), never left unrestricted. See the
+  [Connect to Trino](61-connect-to-trino.md). On an `h2` or `jdbc` connection a table-restricted key is **refused on
+  every query** (`403` naming the connection type), never left unrestricted; on `mongo` the list is the collections
+  the key may read. See the
   [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix).
-- **Table names, not schemas:** entries are bare names matched case-insensitively. `orders` allows `orders` in any
-  schema the connection can see. If two schemas both have an `orders` table, this can't tell them apart - use a
-  database user that sees only one.
+- **Schema-qualified** (from 0.43; 0.42 and earlier matched bare names): a bare entry means the table in the
+  connection's own database or schema - MySQL's and ClickHouse's `database`, PostgreSQL's `public` (or the
+  connection's `options.schema`), SQLite's and DuckDB's `main`. So `orders` doesn't reach `archive.orders`; list that
+  as `archive.orders`. Names are matched case-insensitively.
+- **Statements that hide their tables are refused** (`403 table_check_failed`): `SHOW`, `SET`, `USE`, `ATTACH`,
+  `PRAGMA`, `CALL`, `PREPARE`/`EXECUTE`, cursors. `EXPLAIN` works, checked against the statement it explains.
 - **The schema shows only the listed tables.** The schema browser (`GET /connections/shop/schema`) and MCP's
   `list_tables` leave the others out, and a foreign key pointing at one shows as none. `table_ddl` for a forbidden
   table answers `404` - *'salaries' is not a table on 'shop'* - exactly as for a table that doesn't exist.

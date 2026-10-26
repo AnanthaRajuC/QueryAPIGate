@@ -1,6 +1,7 @@
 # ADR 0027: Fewer round trips per query, and a read-only mode a query can't undo
 
-- **Status:** Accepted (2026-10-26)
+- **Status:** Accepted (2026-10-26). Amended 2026-10-26, before release: each PostgreSQL message begins `RESET ALL`
+  (see [1. PostgreSQL](#1-postgresql-one-message-per-query)).
 - **Backlog:** 0.43, item 2. Found by the benchmarks in [PERFORMANCE_V3.md](../PERFORMANCE_V3.md#round-trips-per-call)
   and [PERFORMANCE_MYSQL_V1.md](../PERFORMANCE_MYSQL_V1.md#round-trips).
 
@@ -65,8 +66,27 @@ Tested against PostgreSQL 16, with psycopg2 in autocommit:
 | `statement_timeout` after the message | back to the session's (`0`): `SET LOCAL` didn't leak |
 | Connection state between messages | idle: nothing to roll back |
 
-The connection is also made read-only as a session default (as today), as a second layer: the attack above can
-change that default, but not the per-message `SET TRANSACTION READ ONLY`.
+**Amendment, before release: each message begins `RESET ALL`.** The attack above can't change the per-message
+`SET TRANSACTION READ ONLY`, but it showed the wider problem with autocommit: a session setting a query changes is
+committed with it, and applies to every later call on that pooled connection, from any key. Tested against
+PostgreSQL 16: after `SELECT set_config('search_path', 'billing', false), set_config('TimeZone', 'Asia/Tokyo',
+false), set_config('DateStyle', 'SQL, DMY', false)`, the next call on the connection ran with all three. A rerouted
+`search_path` sends another key's unqualified table names to another schema; a changed `TimeZone` shifts the
+timestamps it gets back. Rolling back each call's transaction had undone all of it.
+
+So a message is `RESET ALL; SET LOCAL DateStyle = ISO; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout =
+<ms>; <the query>`. `RESET ALL` puts back the server's, database's and role's own defaults, and runs before the
+query, so whatever a query sets lasts only until the next message on that connection starts. Measured on
+loopback, 5,000 calls per variant, three interleaved rounds: no difference beyond noise (about 40 µs per call with
+it or without). It does two other things:
+
+- It clears psycopg2's `DateStyle`. psycopg2 needs ISO, and sets it at connect if the server's default differs, so
+  the message sets it again, `LOCAL`.
+- It clears a session-default read-only mode, so the connection no longer sets one. Read-only is the message's
+  `SET TRANSACTION READ ONLY`, as above, and a stream's or agent write's own transaction.
+
+A table-restricted PostgreSQL call also pins `SET LOCAL search_path` to the schema its `allowed_tables` were
+checked against (0.43's schema-qualified grants).
 
 **Streaming exports keep their explicit transaction** (`BEGIN` · `SET LOCAL` · a named cursor · `ROLLBACK`): a
 server-side cursor needs one, and the round trips are paid once per export, not per row.

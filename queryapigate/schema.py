@@ -160,35 +160,38 @@ def fetch_schema(connection_name, database=None, allowed_tables=None):
     if allowed_tables is None:
         return result
     details = store.get_connection(connection_name)
-    catalog = (database or details.get('database')) if details.get('db') == 'trino' else None
-    schema = (details.get('schema') or 'default') if details.get('db') == 'trino' else None
-    return _only_allowed(result, allowed_tables, details.get('db'), catalog, schema)
+    catalog, default_schema = engine._table_defaults({**details, 'database': database} if database else details)
+    return _only_allowed(result, allowed_tables, details.get('db'), catalog, default_schema)
 
 
 def _only_allowed(result, allowed_tables, dialect=None, default_catalog=None, default_schema=None):
     """A table-restricted key sees only its tables: the others aren't listed, and a foreign key pointing at one is
     shown as none - its name is the thing being kept from the key. Matched as tableguard matches a statement's
-    tables: the bare name, case-insensitively - except on Trino, where it is the fully-qualified
-    catalog.schema.table, so the same grants apply in the browser as in a query (ADR 0026)."""
-    if dialect == 'trino':
-        from . import tableguard
-        allowed = {tableguard.qualify_grant(g, default_catalog, default_schema) for g in allowed_tables}
-
-        def key(name, table_schema):
-            return f'{(default_catalog or "").lower()}.{(table_schema or "").lower()}.{name.lower()}'
-    else:
+    tables, case-insensitively and qualified - schema.table, or catalog.schema.table on Trino (ADR 0026) - so the same
+    grants apply in the browser as in a query. A foreign key names its table bare; it is taken to be in the schema of
+    the table that points at it. A MongoDB collection - and a table on a type tableguard can't check, whose queries
+    a table-restricted key can't run at all - is matched by its bare name, as engine.execute_mongo() matches it."""
+    from . import tableguard
+    if dialect not in tableguard._DIALECT_MAP:
         allowed = {name.lower() for name in allowed_tables}
 
         def key(name, table_schema):
             return name.lower()
+    else:
+        allowed = {tableguard.qualify_grant(g, default_catalog, default_schema, dialect) for g in allowed_tables}
+
+        def key(name, table_schema):
+            qualified = f'{(table_schema or "").lower()}.{name.lower()}'
+            return f'{(default_catalog or "").lower()}.{qualified}' if dialect == 'trino' else qualified
 
     tables = []
     for table in result['tables']:
         if key(table['name'], table.get('schema')) not in allowed:
             continue
         columns = [{**column, 'foreign_key': None}
-                   if (column.get('foreign_key') or {}).get('table', '').lower() not in allowed
-                   and column.get('foreign_key') else column for column in table['columns']]
+                   if column.get('foreign_key')
+                   and key(column['foreign_key'].get('table') or '', table.get('schema')) not in allowed
+                   else column for column in table['columns']]
         tables.append({**table, 'columns': columns})
     return {**result, 'tables': tables}
 
