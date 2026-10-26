@@ -1015,10 +1015,14 @@ class PoolTests(unittest.TestCase):
             self.assertEqual((gunicorn_conf.threads, gunicorn_conf.accesslog), (2, None))
         # gunicorn reads every public name in the file as a setting, and refuses to start on one it can't take - an
         # imported module named `config`, say: only the settings themselves may be public
-        import gunicorn.config
         public = {name for name in vars(gunicorn_conf) if not name.startswith('_')}
         self.assertEqual(public, {'threads', 'accesslog', 'access_log_format'})
-        self.assertLessEqual(public, {setting.name for setting in gunicorn.config.KNOWN_SETTINGS})
+        try:
+            import gunicorn.config  # the image's server, not a dependency of the package
+        except ImportError:
+            pass
+        else:
+            self.assertLessEqual(public, {setting.name for setting in gunicorn.config.KNOWN_SETTINGS})
         with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Dockerfile')) as f:
             command = f.read().split('CMD ["gunicorn"', 1)[1].split(']', 1)[0]
         # a flag on the command line would beat gunicorn_conf.py, and the settings would do nothing
