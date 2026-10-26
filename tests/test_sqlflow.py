@@ -60,6 +60,17 @@ class PrettyPrintTests(unittest.TestCase):
         self.assertIn(':status', result)
         self.assertIn('\n', result)
 
+    def test_a_bound_parameter_stays_as_written_in_every_dialect(self):
+        # each dialect prints a placeholder its own way ($status, {status: }, %(status)s) - none of which binds
+        for dialect in ('postgres', 'mysql', 'sqlite', 'duckdb', 'clickhouse', 'trino'):
+            with self.subTest(dialect=dialect):
+                result = sqlflow.pretty_print("SELECT id FROM t WHERE a = :status AND b = ':kept'", dialect)
+                if result is None:  # no formatting (ClickHouse on sqlglot 25.2 can't parse :status) - never a wrong one
+                    continue
+                self.assertIn('a = :status', result)
+                self.assertIn("':kept'", result)
+                self.assertNotIn('%(', result)
+
     def test_unsupported_dialect_returns_none(self):
         self.assertIsNone(sqlflow.pretty_print('SELECT * FROM t', 'h2'))
 
