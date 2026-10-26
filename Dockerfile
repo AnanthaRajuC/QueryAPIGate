@@ -9,7 +9,7 @@ COPY frontend/ ./
 # vite.config.ts writes to ../queryapigate/console_dist
 RUN npm run build
 
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 # Build with --build-arg WITH_H2=true to add Java and the H2 driver.
 ARG WITH_H2=false
