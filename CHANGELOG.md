@@ -96,6 +96,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
 
 ### Changed
+- **The one-command Compose demo turns on the metadata cache** (`QUERYAPIGATE_METADATA_CACHE_TTL: "5"` in
+  `docker-compose.yml`): one instance, so only a change made with the CLI inside the container waits, up to 5 s. The
+  server's own default stays off, as do the scale-out Compose setup and the Helm chart, whose `values.yaml` now shows
+  how to set it. See [Performance](documentation/PERFORMANCE.md#the-metadata-cache).
 - **Fewer round trips per query** ([ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md)). Across a
   network every round trip costs a call in full, so:
   - **PostgreSQL: 4 round trips down to 1.** Connections run in autocommit, and each query goes as one message
