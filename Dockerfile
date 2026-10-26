@@ -65,8 +65,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # The worker timeout must stay above QUERYAPIGATE_QUERY_TIMEOUT (30 s by default), or gunicorn would kill the worker
 # at the same moment the database cancels a slow query. --no-control-socket: gunicorn 26's control interface, unused
 # here, would otherwise write under the home folder - the only write outside /data and /tmp, so with it off the image
-# runs on a read-only root filesystem (the Helm chart's default, ADR 0013).
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", "--threads", "8", \
-     "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "--no-control-socket", \
+# runs on a read-only root filesystem (the Helm chart's default, ADR 0013). The threads (QUERYAPIGATE_THREADS, 8) and
+# the access log (QUERYAPIGATE_ACCESS_LOG, on, to stdout) come from queryapigate/gunicorn_conf.py, not flags here: a
+# flag would beat the setting, and tuning them would mean replacing this whole command.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", \
+     "--timeout", "120", "--graceful-timeout", "30", "--no-control-socket", \
      "-c", "python:queryapigate.gunicorn_conf", \
      "queryapigate.app:create_app()"]

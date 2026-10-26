@@ -977,12 +977,57 @@ class PoolTests(unittest.TestCase):
             self.assertIsNone(pool.get_pool())
 
     def test_settings_parsing(self):
-        for junk, expected in (('abc', config.DEFAULT_POOL_SIZE), ('-3', 0), ('7', 7)):
+        for junk, expected in (('abc', config.DEFAULT_THREADS), ('-3', 0), ('7', 7)):
             with mock.patch.dict(os.environ, {'QUERYAPIGATE_POOL_SIZE': junk}):
                 self.assertEqual(config.pool_size(), expected, junk)
         for junk in ('abc', '0', '-1'):
             with mock.patch.dict(os.environ, {'QUERYAPIGATE_POOL_IDLE_TIMEOUT': junk}):
                 self.assertEqual(config.pool_idle_timeout(), config.DEFAULT_POOL_IDLE_TIMEOUT, junk)
+
+    def test_the_pool_and_the_event_streams_follow_the_threads(self):
+        # one idle connection per thread, and at most half the threads held by /events, unless set themselves
+        del os.environ['QUERYAPIGATE_POOL_SIZE']  # setUp's; its patcher puts it back
+        for threads, pool_size, streams in (('', 8, 4), ('16', 16, 4), ('4', 4, 2), ('1', 1, 0), ('junk', 8, 4)):
+            with self.subTest(threads=threads), mock.patch.dict(os.environ, {'QUERYAPIGATE_THREADS': threads}):
+                self.assertEqual((config.pool_size(), config.events_max_streams()), (pool_size, streams))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_THREADS': '16', 'QUERYAPIGATE_POOL_SIZE': '3',
+                                          'QUERYAPIGATE_EVENTS_MAX_STREAMS': '10'}):
+            self.assertEqual((config.pool_size(), config.events_max_streams()), (3, 10))
+
+    def test_threads_and_access_log_are_checked_at_startup(self):
+        for name, junk in (('QUERYAPIGATE_THREADS', '0'), ('QUERYAPIGATE_THREADS', '257'),
+                           ('QUERYAPIGATE_THREADS', 'eight'), ('QUERYAPIGATE_ACCESS_LOG', 'maybe')):
+            with self.subTest(name=name, value=junk), mock.patch.dict(os.environ, {name: junk}):
+                with self.assertRaises(ValueError) as caught:
+                    config.check_settings()
+                self.assertIn(name, str(caught.exception))
+
+    def test_the_images_gunicorn_reads_them(self):
+        import importlib
+
+        from queryapigate import gunicorn_conf
+        self.addCleanup(importlib.reload, gunicorn_conf)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_THREADS': '', 'QUERYAPIGATE_ACCESS_LOG': ''}):
+            importlib.reload(gunicorn_conf)
+            self.assertEqual((gunicorn_conf.threads, gunicorn_conf.accesslog), (8, '-'))
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_THREADS': '2', 'QUERYAPIGATE_ACCESS_LOG': 'off'}):
+            importlib.reload(gunicorn_conf)
+            self.assertEqual((gunicorn_conf.threads, gunicorn_conf.accesslog), (2, None))
+        # gunicorn reads every public name in the file as a setting, and refuses to start on one it can't take - an
+        # imported module named `config`, say: only the settings themselves may be public
+        public = {name for name in vars(gunicorn_conf) if not name.startswith('_')}
+        self.assertEqual(public, {'threads', 'accesslog', 'access_log_format'})
+        try:
+            import gunicorn.config  # the image's server, not a dependency of the package
+        except ImportError:
+            pass
+        else:
+            self.assertLessEqual(public, {setting.name for setting in gunicorn.config.KNOWN_SETTINGS})
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Dockerfile')) as f:
+            command = f.read().split('CMD ["gunicorn"', 1)[1].split(']', 1)[0]
+        # a flag on the command line would beat gunicorn_conf.py, and the settings would do nothing
+        self.assertNotIn('--threads', command)
+        self.assertNotIn('--access-logfile', command)
 
     def test_many_threads_share_the_pool_safely(self):
         errors = []

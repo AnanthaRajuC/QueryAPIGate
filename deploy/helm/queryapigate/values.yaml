@@ -101,6 +101,9 @@ mcp:
     requests: {cpu: 100m, memory: 192Mi}
     limits: {memory: 1Gi}
 
+# 250m suits a small or shared cluster. For throughput, one API server pod uses about 1.1-1.3 cores at full load
+# (one for Python, the rest for its threads' I/O): request 1 CPU and limit 1.5 (or none), and add pods past that - a
+# limit below ~1.2 throttles it. how-to/63-tune-a-deployment-for-throughput.md has the measurements.
 resources:
   requests: {cpu: 250m, memory: 256Mi}
   limits: {memory: 1Gi}

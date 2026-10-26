@@ -57,6 +57,8 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+          # 250m suits a small cluster. For throughput, a pod uses about 1.1-1.3 cores at full load: request 1 CPU,
+          # limit 1.5 (or none), and add replicas past that (how-to/63-tune-a-deployment-for-throughput.md).
           resources:
             requests: {cpu: 250m, memory: 256Mi}
             limits: {memory: 1Gi}

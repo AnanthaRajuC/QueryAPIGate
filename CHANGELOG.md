@@ -110,6 +110,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   outlives it. [ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md). Affects every release to 0.42.
 
 ### Added
+- **`QUERYAPIGATE_THREADS` and `QUERYAPIGATE_ACCESS_LOG` tune the Docker image without replacing its command.** The
+  image's gunicorn took its threads (`--threads 8`) and its access log (`--access-logfile -`) from flags in its
+  command, which beat any other setting, so tuning either meant overriding the whole command. Both now come from
+  `queryapigate/gunicorn_conf.py`. `QUERYAPIGATE_THREADS` (default 8, 1 to 256) sets the threads, and
+  `QUERYAPIGATE_ACCESS_LOG=off` drops the access log - 7% of throughput in
+  [Performance, v3](documentation/PERFORMANCE_V3.md#the-access-log), for a deployment whose proxy logs requests
+  already. Unset, the image behaves exactly as before. A `--threads` flag or `GUNICORN_CMD_ARGS` still overrides
+  them. Both show on the Console's Settings screen.
+- **A how-to, [Tune a deployment for throughput](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/63-tune-a-deployment-for-throughput.md):** threads by query
+  time and database distance (the default eight were up to 28% slower than the best setting on fast lookups), CPU
+  per container (a worker uses 1.1-1.3 cores), the metadata cache, logging, the event log's disk, and how many
+  containers to start from, each from a measurement. The Helm chart and the Kubernetes manifests now say what CPU to
+  request for throughput (1 CPU, limit 1.5); their defaults are unchanged.
 - **`QUERYAPIGATE_LOG_REQUESTS=off` leaves out the per-request log lines** - the `METHOD /path -> status` line and the
   `Executing on ...` / `Finding on ...` / `Streaming from ...` line for each query. Errors, warnings, slow queries and
   agent writes are still logged, and the run history keeps each run's `request_id`. On by default, as before. For a
@@ -117,6 +130,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   [Performance, v3](documentation/PERFORMANCE_V3.md#the-cpu), much of it threads queueing on the one handler.
 
 ### Changed
+- **The connection pool and the `/events` stream cap follow the thread count.** `QUERYAPIGATE_POOL_SIZE` defaults to
+  `QUERYAPIGATE_THREADS` (8, as before), so a server given more threads doesn't open a fresh connection per call for
+  the ones beyond the pool. `QUERYAPIGATE_EVENTS_MAX_STREAMS` defaults to 4 as before, but never to more than half the
+  threads, so a few long-lived streams can't hold every thread of a server tuned down. Either set explicitly is used
+  as given.
 - **sqlglot 26 to 30 are supported** (`queryapigate[flow]` now allows `sqlglot>=25.2,<31`; Dependabot #77). sqlglot
   30 renamed the parsed `with` and `from` arguments to `with_` and `from_`. Read under the old names, a statement's
   CTEs went missing from the table check (it refused CTE queries), and an `UPDATE ... FROM` went unrecognised by

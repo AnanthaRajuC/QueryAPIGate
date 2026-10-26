@@ -126,6 +126,8 @@ guide covers one scenario end to end, and every command and response in it was r
 51. [**See QueryAPIGate in your traces**](51-see-queryapigate-in-your-traces.md) (experimental) - OpenTelemetry: one
     trace from your app through QueryAPIGate to the database, in Jaeger; what it costs.
 37. [**Diagnose and tune the connection pool**](37-tune-the-connection-pool.md) - measured, with symptoms and fixes.
+63. [**Tune a deployment for throughput**](63-tune-a-deployment-for-throughput.md) - threads, CPU per container,
+    logging, the metadata cache, the event log's disk, and how many containers - each from a measurement.
 38. [**Allow a browser-based frontend to call the API directly**](38-allow-a-browser-frontend-cors.md) - CORS, and
     why it isn't authentication.
 
