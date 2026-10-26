@@ -812,6 +812,18 @@ class DriverWiringTests(unittest.TestCase):
         cursor.execute.assert_called_once_with('SET SESSION max_execution_time = 1500')  # every call, not cached
         self.assertIsNone(runners._mysql_timeout_wrap(cursor, session, None))
 
+    def test_the_leading_select_is_found_in_one_pass(self):
+        find = runners._leading_select
+        self.assertEqual(find('SELECT 1'), 6)
+        self.assertEqual(find('  -- a\n# b\n/* c */ select\n1'), len('  -- a\n# b\n/* c */ select'))
+        for sql in ('selected FROM t', 'WITH x AS (SELECT 1) SELECT 1', '/* never closed SELECT 1',
+                    '/*+ BKA(t) */ SELECT 1', 'select_x', ''):
+            with self.subTest(sql=sql):
+                self.assertIsNone(find(sql))
+        started = time.monotonic()
+        self.assertIsNone(find('/*' + '*//*' * 50_000))  # the input CodeQL flagged for a backtracking regex
+        self.assertLess(time.monotonic() - started, 1)
+
     def test_mariadb_read_carries_its_time_limit_in_set_statement(self):
         import mysql.connector
         conn, cursor = self.mysql_conn(server='10.11.6-MariaDB', fail_on='SET STATEMENT',

@@ -10,7 +10,6 @@ import atexit
 import logging
 import math
 import os
-import re
 import sqlite3
 import threading
 import time
@@ -169,9 +168,29 @@ class _Driver:
 
 # MySQL reports 3024 (ER_QUERY_TIMEOUT), MariaDB 1969 (ER_STATEMENT_TIMEOUT)
 _MYSQL_TIMEOUT_ERRNOS = (3024, 1969)
-# A statement that starts with SELECT, after any leading comments (but not a /*+ hint of its own)
-_LEADING_SELECT_RE = re.compile(r'^((?:\s|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|/\*(?!\+).*?\*/)*)(select)\b',
-                                re.IGNORECASE | re.DOTALL)
+
+
+def _leading_select(sql):
+    """Where a statement's leading SELECT keyword ends, after any whitespace and comments (not a /*+ hint of its own),
+    or None if it doesn't start with SELECT. One pass, no backtracking: the SQL is the caller's own."""
+    i, n = 0, len(sql)
+    while i < n:
+        if sql[i].isspace():
+            i += 1
+        elif sql.startswith('--', i) or sql[i] == '#':
+            end = sql.find('\n', i)
+            i = n if end < 0 else end + 1
+        elif sql.startswith('/*', i) and not sql.startswith('/*+', i):
+            end = sql.find('*/', i + 2)
+            if end < 0:
+                return None
+            i = end + 2
+        else:
+            break
+    end = i + 6
+    if sql[i:end].lower() == 'select' and (end == n or not (sql[end].isalnum() or sql[end] == '_')):
+        return end
+    return None
 
 
 def _mysql_timeout_wrap(cursor, session, timeout):
@@ -189,9 +208,9 @@ def _mysql_timeout_wrap(cursor, session, timeout):
     millis = _millis(timeout)
 
     def hinted(sql):
-        match = _LEADING_SELECT_RE.match(sql)
-        if match:
-            return f'{match.group(1)}{match.group(2)} /*+ MAX_EXECUTION_TIME({millis}) */{sql[match.end():]}'
+        end = _leading_select(sql)
+        if end is not None:
+            return f'{sql[:end]} /*+ MAX_EXECUTION_TIME({millis}) */{sql[end:]}'
         cursor.execute(f'SET SESSION max_execution_time = {millis}')
         session.state['timeout'] = None  # no longer the value _set_mysql_timeout() last set
         return sql
