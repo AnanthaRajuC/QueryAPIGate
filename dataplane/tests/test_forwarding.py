@@ -83,19 +83,23 @@ class Pair:
         self.env = {**os.environ, 'QUERYAPIGATE_HOME': str(home), 'QUERYAPIGATE_DATAPLANE_SECRET': SECRET,
                     'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0', 'QUERYAPIGATE_ACCESS_LOG': 'off',
                     'PYTHONPATH': str(ROOT), **env}
-        self.env.pop('QUERYAPIGATE_DATABASE_URL', None)
-        self.log = log = open(Path(home) / 'servers.log', 'a')
+        if 'QUERYAPIGATE_DATABASE_URL' not in env:
+            self.env.pop('QUERYAPIGATE_DATABASE_URL', None)
+        self.home = Path(home)
+        self.log = log = open(self.home / 'python.log', 'a')
+        self.dataplane_log = open(self.home / 'dataplane.log', 'a')
         self.python = subprocess.Popen(
             [str(Path(sys.executable).parent / 'gunicorn'), '--bind', f'127.0.0.1:{self.python_port}', '--workers',
              '1', '--worker-class', 'gthread', '--threads', '4', '--no-control-socket', '-c',
              'python:queryapigate.gunicorn_conf', 'queryapigate.app:create_app()'],
             env=self.env, cwd=home, stdout=log, stderr=log, start_new_session=True)
+        # The data plane reads the store Python makes: Python first
+        wait_for(f'http://127.0.0.1:{self.python_port}/health', self.python, 'gunicorn')
         self.dataplane = subprocess.Popen(
             [str(binary())], env={**self.env, 'QUERYAPIGATE_DATAPLANE_LISTEN': f'{listen_host}:{self.port}',
                                   'QUERYAPIGATE_DATAPLANE_UPSTREAM': f'http://127.0.0.1:{self.python_port}',
                                   'QUERYAPIGATE_DATAPLANE_THREADS': '2'},
-            stdout=log, stderr=log, start_new_session=True)
-        wait_for(f'http://127.0.0.1:{self.python_port}/health', self.python, 'gunicorn')
+            stdout=self.dataplane_log, stderr=self.dataplane_log, start_new_session=True)
         wait_for(f'http://{listen_host}:{self.port}/health', self.dataplane, 'the data plane')
 
     def stop(self):
@@ -106,6 +110,7 @@ class Pair:
             except subprocess.TimeoutExpired:
                 process.kill()
         self.log.close()
+        self.dataplane_log.close()
 
 
 def request(host, port, method, path, headers=None, body=None):

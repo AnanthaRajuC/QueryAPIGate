@@ -1,7 +1,7 @@
 //! Forwarding a request to the Python server, and its answer back - bodies streamed both ways, never buffered, so
 //! `/events` and streamed exports pass through as they are produced.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -35,13 +35,15 @@ const HOP_BY_HOP: [HeaderName; 8] = [
     header::UPGRADE,
 ];
 
-pub struct State {
-    config: Config,
-    client: Client<HttpConnector, Incoming>,
+/// The Python server behind the data plane: requests forwarded to it, and the data plane's own reports.
+pub struct Forwarder {
+    upstream: hyper::http::uri::Authority,
+    secret: HeaderValue,
+    client: Client<HttpConnector, Body>,
 }
 
-impl State {
-    pub fn new(config: Config) -> State {
+impl Forwarder {
+    pub fn new(config: &Config) -> Forwarder {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
         connector.set_connect_timeout(Some(Duration::from_secs(5)));
@@ -50,56 +52,93 @@ impl State {
             .pool_idle_timeout(Duration::from_millis(1500))
             .pool_max_idle_per_host(1024)
             .build(connector);
-        State { config, client }
-    }
-
-    pub async fn handle(&self, request: Request<Incoming>, peer: SocketAddr) -> Response<Body> {
-        let Some(request) = self.to_upstream(request, peer.ip()) else {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "The request's path is not valid",
-                "invalid_request",
-            );
-        };
-        match self.client.request(request).await {
-            Ok(response) => from_upstream(response),
-            Err(error) => {
-                eprintln!("queryapigate-dataplane: forwarding failed: {error}");
-                error_response(
-                    StatusCode::BAD_GATEWAY,
-                    "The server behind the data plane did not answer",
-                    "upstream_unavailable",
-                )
-            }
+        Forwarder {
+            upstream: config
+                .upstream
+                .authority()
+                .expect("checked by Config")
+                .clone(),
+            secret: config.secret.clone(),
+            client,
         }
     }
 
-    fn to_upstream(&self, request: Request<Incoming>, peer: IpAddr) -> Option<Request<Incoming>> {
-        let (mut parts, body) = request.into_parts();
+    /// Send a request on to Python as the client sent it - its body streamed through, or already read - with the
+    /// secret and the client's address. Python's answer comes back as it is: `relay()` it to the client.
+    pub async fn send(
+        &self,
+        mut parts: hyper::http::request::Parts,
+        body: Body,
+        peer: IpAddr,
+    ) -> Result<Response<Incoming>, Box<Response<Body>>> {
         let path = parts
             .uri
             .path_and_query()
             .map(|p| p.as_str())
             .unwrap_or("/");
-        let mut uri = Uri::builder().scheme("http").authority(
-            self.config
-                .upstream
-                .authority()
-                .expect("checked by Config")
-                .clone(),
-        );
-        uri = uri.path_and_query(path);
-        parts.uri = uri.build().ok()?;
+        parts.uri = Uri::builder()
+            .scheme("http")
+            .authority(self.upstream.clone())
+            .path_and_query(path)
+            .build()
+            .map_err(|_| {
+                Box::new(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "The request's path is not valid",
+                    "invalid_request",
+                ))
+            })?;
         clean(&mut parts.headers);
-        parts
-            .headers
-            .insert(SECRET_HEADER, self.config.secret.clone());
-        let peer = peer_text(peer);
+        parts.headers.insert(SECRET_HEADER, self.secret.clone());
         parts.headers.insert(
             PEER_HEADER,
-            HeaderValue::from_str(&peer).expect("an IP address is ASCII"),
+            HeaderValue::from_str(&peer_text(peer)).expect("an IP address is ASCII"),
         );
-        Some(Request::from_parts(parts, body))
+        self.client
+            .request(Request::from_parts(parts, body))
+            .await
+            .map_err(|error| {
+                eprintln!("queryapigate-dataplane: forwarding failed: {error}");
+                Box::new(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "The server behind the data plane did not answer",
+                    "upstream_unavailable",
+                ))
+            })
+    }
+
+    /// POST a JSON body to one of Python's internal endpoints, as the data plane itself.
+    pub async fn post(&self, path: &str, json: String) -> Result<StatusCode, String> {
+        let request = Request::post(format!("http://{}{path}", self.upstream))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(SECRET_HEADER, self.secret.clone())
+            .header(PEER_HEADER, "127.0.0.1")
+            .body(
+                Full::new(Bytes::from(json))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
+            .map_err(|e| e.to_string())?;
+        let response = self
+            .client
+            .request(request)
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = response.status();
+        let _ = response.into_body().collect().await;
+        Ok(status)
+    }
+}
+
+/// Python's answer, on its way to the client: hop-by-hop headers and the data plane's own removed.
+pub fn relay(response: Result<Response<Incoming>, Box<Response<Body>>>) -> Response<Body> {
+    match response {
+        Ok(response) => {
+            let (mut parts, body) = response.into_parts();
+            clean(&mut parts.headers);
+            Response::from_parts(parts, body.boxed())
+        }
+        Err(response) => *response,
     }
 }
 
@@ -124,12 +163,6 @@ pub fn clean(headers: &mut HeaderMap) {
     for name in named.iter().chain(HOP_BY_HOP.iter()).chain(OURS.iter()) {
         headers.remove(name);
     }
-}
-
-fn from_upstream(response: Response<Incoming>) -> Response<Body> {
-    let (mut parts, body) = response.into_parts();
-    clean(&mut parts.headers);
-    Response::from_parts(parts, body.boxed())
 }
 
 /// A JSON error in the shape the Python server answers with, for what only the data plane can say.

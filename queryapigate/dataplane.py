@@ -138,7 +138,8 @@ def build(record, permission, query_name, number, saved, connection_name, result
             'dialect': dialect}, 'statement': sent, 'search_path': prepared['search_path'], 'mask': mask,
             'expires_in': expires_in,
             # the declared parameters params.resolve() enforces: those the SQL uses, found as app.run_saved() finds them
-            'used': sorted(sqltools.placeholder_names(saved['sql_query']))}
+            'used': sorted(sqltools.placeholder_names(saved['sql_query'])),
+            'sql': prepared['sql']}  # as validated: what engine.execute_sql() logs and hashes
 
 
 def encode(plan):

@@ -14,10 +14,12 @@ mod auth;
 mod config;
 mod db;
 mod forward;
+mod log;
 mod params;
 mod pyfmt;
 mod render;
 mod respond;
+mod serve;
 mod store;
 
 use std::net::SocketAddr;
@@ -82,11 +84,28 @@ async fn serve(config: config::Config) {
             std::process::exit(2);
         }
     };
+    let get = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    let settings = serve::Settings::from(get);
+    // Without the store every call is forwarded: the front still works, the data plane serves nothing
+    let store = match store::Store::open(get, config.threads as u32 * 2).await {
+        Ok(store) => Some(store),
+        Err(error) => {
+            eprintln!("queryapigate-dataplane: forwarding everything - {error}");
+            None
+        }
+    };
+    if let Some(reason) = settings.forward_everything {
+        eprintln!("queryapigate-dataplane: forwarding everything - {reason} is set");
+    }
     eprintln!(
-        "queryapigate-dataplane: listening on {}, forwarding to {} ({} threads)",
+        "queryapigate-dataplane: listening on {}, in front of {} ({} threads)",
         config.listen, config.upstream, config.threads
     );
-    let state = Arc::new(forward::State::new(config));
+    let app = serve::App::new(forward::Forwarder::new(&config), settings, store);
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {
@@ -101,15 +120,14 @@ async fn serve(config: config::Config) {
             () = &mut shutdown => break,
         };
         let _ = stream.set_nodelay(true);
-        let state = state.clone();
-        tokio::spawn(connection(state, stream, peer));
+        tokio::spawn(connection(app.clone(), stream, peer));
     }
 }
 
-async fn connection(state: Arc<forward::State>, stream: tokio::net::TcpStream, peer: SocketAddr) {
+async fn connection(app: Arc<serve::App>, stream: tokio::net::TcpStream, peer: SocketAddr) {
     let service = service_fn(move |request| {
-        let state = state.clone();
-        async move { Ok::<_, std::convert::Infallible>(state.handle(request, peer).await) }
+        let app = app.clone();
+        async move { Ok::<_, std::convert::Infallible>(app.handle(request, peer).await) }
     });
     let served = http1::Builder::new()
         .timer(TokioTimer::new())

@@ -139,10 +139,9 @@ mod tests {
         let body = futures_body(response);
         assert_eq!(body, python);
         let (thirty, _) = timed_out(30.0, "rid");
-        assert!(
-            futures_body(thirty)
-                .contains("limit of 30 seconds and was cancelled\",\"code\":\"query_timeout\",\"timeout\":30.0,")
-        );
+        assert!(futures_body(thirty).contains(
+            "limit of 30 seconds and was cancelled\",\"code\":\"query_timeout\",\"timeout\":30.0,"
+        ));
     }
 
     fn futures_body(response: Response<Body>) -> String {

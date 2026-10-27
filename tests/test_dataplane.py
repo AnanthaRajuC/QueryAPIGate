@@ -310,3 +310,48 @@ class ClientAddressTests(unittest.TestCase):
         key = apikeys.create_key('office', connections=[], allowed_ips=['10.0.0.0/8'])
         self.assertEqual(self.get('/catalog', peer='10.1.2.3', **{'X-API-Key': key}).status_code, 200)
         self.assertEqual(self.get('/catalog', peer='192.0.2.1', **{'X-API-Key': key}).status_code, 401)
+
+
+class RunReportTests(PlanTestCase):
+    """The data plane reports the runs it served (POST /internal/dataplane/runs): each recorded as run_saved() records
+    one, and counted in /metrics - and nothing without its secret."""
+
+    RUN = {'query': 'by_id', 'version': 1, 'entry': {
+        'executed_at': '2026-10-27 12:00:00', 'connection_name': 'pg', 'request_id': 'dp-run-1', 'key_name': 'plain',
+        'transport': 'rest', 'status': 'success', 'rows': 3, 'duration_ms': 1, 'serialization_ms': 0.1},
+        'metrics': {'dialect': 'postgres', 'query_seconds': 0.001, 'serialization_seconds': 0.0001, 'method': 'GET',
+                    'status': 200, 'seconds': 0.002}}
+
+    def report(self, secret=SECRET):
+        headers = {dataplane.SECRET_HEADER: secret} if secret else {}
+        return self.client.post('/internal/dataplane/runs', json={'runs': [self.RUN]}, headers=headers)
+
+    def history(self):
+        from queryapigate import store
+        return store.load_versions('by_id')['1']['execution_history']
+
+    def test_without_the_secret_it_isn_t_there(self):
+        for secret in (None, 'wrong'):
+            with self.subTest(secret=secret):
+                self.assertEqual(self.report(secret).status_code, 404)
+        self.assertEqual(self.history(), [])
+
+    def test_a_reported_run_is_recorded_as_python_records_one(self):
+        self.assertEqual(self.report().status_code, 204)
+        self.assertEqual(self.history(), [self.RUN['entry']])
+
+    def test_and_counted_in_metrics(self):
+        import re
+
+        def counts():  # /metrics counts for the whole process, so before and after
+            text = self.client.get('/metrics').get_data(as_text=True)
+            found = {}
+            for name in ('queryapigate_requests_total{method="GET",endpoint="api.run_named_query",status="200",'
+                         'key="plain"}', 'queryapigate_rows_returned_total{connection="pg",dialect="postgres",'
+                         'key="plain"}'):
+                match = re.search(re.escape(name) + r' (\d+)', text)
+                found[name] = int(match.group(1)) if match else 0
+            return list(found.values())
+        before = counts()
+        self.report()
+        self.assertEqual([after - was for after, was in zip(counts(), before, strict=True)], [1, 3])

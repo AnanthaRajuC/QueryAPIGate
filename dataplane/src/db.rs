@@ -48,8 +48,8 @@ pub enum Failure {
     Decline,
     /// The time limit cancelled it: Python's 504.
     Timeout,
-    /// The database refused or failed - forwarded, so Python answers it as it would.
-    Database(String),
+    /// The database refused or failed - forwarded, so Python answers it as it would. The text is for the probe.
+    Database(#[allow(dead_code)] String),
 }
 
 // --------------------------------------------------------------------------------------

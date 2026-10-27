@@ -551,7 +551,8 @@ class RouteDocumentationTests(AppTestCase):
     """A route with no OpenAPI entry is documentation drift. Every route and method must be described, except
     the handful of pages that are not part of the JSON API. The spec is also the Console's contract (ADR 0001):
     its TypeScript types are generated from the committed frontend/openapi.json, which must match it."""
-    NOT_API = {'/', '/docs', '/favicon.ico', '/openapi.json', '/ui', '/console', '/console/', '/console/<path:path>'}
+    NOT_API = {'/', '/docs', '/favicon.ico', '/openapi.json', '/ui', '/console', '/console/', '/console/<path:path>',
+               '/internal/dataplane/runs'}  # the data plane's reports: only it can reach them (ADR 0028)
 
     def test_every_route_and_method_is_in_the_openapi_spec(self):
         app = create_app()

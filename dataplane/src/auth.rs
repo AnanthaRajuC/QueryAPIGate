@@ -22,7 +22,6 @@ pub struct Caller {
     pub name: String,
     /// Matched by its old secret, still in a rotation's grace period (ADR 0009).
     pub previous: bool,
-    pub details: Map<String, Json>,
 }
 
 /// `apikeys._hash()`: the hex SHA-256 of the secret, what `api_keys.hash` holds.
@@ -98,7 +97,6 @@ pub fn authenticate(
         workspace: text("workspace")?.to_string(),
         name: text("name")?.to_string(),
         previous,
-        details,
     })
 }
 

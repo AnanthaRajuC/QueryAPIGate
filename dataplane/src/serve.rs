@@ -1,0 +1,1101 @@
+//! Serving `/q/<name>` from Python's plans (ADR 0028), and forwarding everything else.
+//!
+//! A call is served here only when every one of these holds; otherwise it is forwarded, unchanged, and Python
+//! answers it as it always has:
+//! - nothing about the server or the request is outside what the prototype does (a rate limit, tracing, trusted
+//!   proxies, an Origin, a bearer token, a stream, another format, a version or connection chosen per call);
+//! - the X-API-Key is a scoped key that authenticates (auth.rs), and its use was recorded within the last minute;
+//! - a plan is held for exactly the rows read for this call - the key, the saved query, the connection - by digest;
+//! - the parameters resolve as Python would resolve them (params.rs), the query runs (db.rs), and every value in the
+//!   page renders as Python would render it (render.rs).
+//!
+//! A plan arrives on the response to a forwarded call: Python makes one for a call the data plane could serve
+//! (dataplane.py) and this keeps it, by the digests of the rows it read, until it expires. Served runs are reported
+//! to Python in batches (POST /internal/dataplane/runs), which records them as its own.
+
+use std::collections::{BTreeSet, HashMap};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use base64::Engine;
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
+use hyper::header::{self, HeaderMap};
+use hyper::{Method, Request, Response};
+use serde::Deserialize;
+use serde_json::{Map, Value as Json, json};
+use tokio::sync::mpsc;
+
+use crate::auth::{self, Clock};
+use crate::db::{self, Dialect, Failure};
+use crate::forward::{self, Body, Forwarder, PLAN_HEADER};
+use crate::log::{self, Logger};
+use crate::params::{self, Supplied};
+use crate::render::{self, Action};
+use crate::respond;
+use crate::store::{Rows, Store, Value};
+
+/// apikeys._USE_RECORD_INTERVAL: a key's call is forwarded at least this often, so Python records its last use.
+const USE_RECORD_INTERVAL: Duration = Duration::from_secs(60);
+/// An unmasked plan depends on no schema; it is still let go of after this long.
+const UNMASKED_PLAN_TTL: Duration = Duration::from_secs(3600);
+/// How long a plan the data plane couldn't apply (a type it doesn't render, a connection it doesn't open) is left
+/// to Python before it is tried again.
+const PYTHON_ONLY_TTL: Duration = Duration::from_secs(300);
+const MAX_PLANS: usize = 50_000;
+const RESERVED: [&str; 7] = [
+    "format",
+    "page",
+    "page_size",
+    "connection_name",
+    "version",
+    "timeout",
+    "stream",
+];
+
+// --------------------------------------------------------------------------------------
+// Settings, read as the Python server reads them, from the same environment
+// --------------------------------------------------------------------------------------
+
+pub struct Settings {
+    /// Why every call is forwarded, if one is
+    pub forward_everything: Option<&'static str>,
+    pub admin_key: Option<String>,
+    pub secret_keys: Vec<String>,
+    pub mask_key: Option<Vec<u8>>,
+    pub query_timeout: Option<f64>,
+    pub max_page_size: i64,
+    pub log_requests: bool,
+    pub access_log: bool,
+    pub sql_text_logged: bool,
+    pub slow_query: Option<f64>,
+    pub pool_size: u32,
+    pub flush_every: Duration,
+    pub json_logs: bool,
+}
+
+fn off(value: Option<String>) -> bool {
+    value.is_some_and(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        )
+    })
+}
+
+/// A positive number of seconds as config.py reads one: `default` when unset, invalid or negative, None for 0.
+fn seconds(value: Option<String>, default: f64) -> Option<f64> {
+    match value.map(|v| v.trim().parse::<f64>()) {
+        Some(Ok(v)) if v > 0.0 => Some(v),
+        Some(Ok(v)) if v.abs() < f64::MIN_POSITIVE => None, // 0 turns it off
+        _ => Some(default),
+    }
+}
+
+impl Settings {
+    pub fn from(get: impl Fn(&str) -> Option<String>) -> Settings {
+        let forward_everything = if get("QUERYAPIGATE_RATE_LIMIT").is_some() {
+            Some("QUERYAPIGATE_RATE_LIMIT") // limits must hold across both processes: shared counters first
+        } else if get("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
+            Some("tracing")
+        } else if get("QUERYAPIGATE_TRUST_PROXY")
+            .is_some_and(|v| v.trim().parse::<i64>().is_ok_and(|n| n > 0))
+        {
+            Some("QUERYAPIGATE_TRUST_PROXY")
+        } else {
+            None
+        };
+        let flag = |name: &str| {
+            get(name).is_some_and(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+        };
+        Settings {
+            forward_everything,
+            admin_key: get("QUERYAPIGATE_API_KEY")
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty()),
+            secret_keys: get("QUERYAPIGATE_SECRET_KEY")
+                .unwrap_or_default()
+                .split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect(),
+            mask_key: get("QUERYAPIGATE_MASK_KEY")
+                .map(|k| k.trim().as_bytes().to_vec())
+                .filter(|k| !k.is_empty()),
+            query_timeout: seconds(get("QUERYAPIGATE_QUERY_TIMEOUT"), 30.0),
+            max_page_size: get("QUERYAPIGATE_MAX_PAGE_SIZE")
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .map(|v| v.max(1))
+                .unwrap_or(1000),
+            log_requests: !off(get("QUERYAPIGATE_LOG_REQUESTS")),
+            access_log: !off(get("QUERYAPIGATE_ACCESS_LOG")),
+            sql_text_logged: get("QUERYAPIGATE_HISTORY_ADHOC_SQL")
+                .is_none_or(|v| v.trim().to_lowercase() == "text"),
+            slow_query: seconds(get("QUERYAPIGATE_SLOW_QUERY_THRESHOLD"), 1.0),
+            pool_size: get("QUERYAPIGATE_DATAPLANE_POOL_SIZE")
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(16),
+            flush_every: Duration::from_secs_f64(
+                get("QUERYAPIGATE_HISTORY_FLUSH_INTERVAL")
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(1.0f64)
+                    .max(0.0),
+            ),
+            json_logs: flag("QUERYAPIGATE_JSON_LOGS"),
+        }
+    }
+}
+
+// --------------------------------------------------------------------------------------
+// Plans
+// --------------------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
+struct Digests {
+    api_key: String,
+    saved_query: String,
+    connection: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlanKeyName {
+    workspace: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlanQuery {
+    name: String,
+    version: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlanConnection {
+    name: String,
+    dialect: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MaskPlan {
+    columns: usize,
+    actions: Vec<Option<String>>,
+    fired: Json,
+}
+
+/// dataplane.build()'s plan.
+#[derive(Debug, Deserialize)]
+struct Plan {
+    v: u32,
+    rows: Digests,
+    key: PlanKeyName,
+    query: PlanQuery,
+    connection: PlanConnection,
+    statement: db::Statement,
+    search_path: Option<String>,
+    mask: Option<MaskPlan>,
+    expires_in: Option<f64>,
+    used: Vec<String>,
+    sql: String,
+}
+
+struct Ready {
+    plan: Plan,
+    dialect: Dialect,
+    actions: Option<Vec<Option<Action>>>,
+    used: BTreeSet<String>,
+}
+
+enum Held {
+    Plan(Arc<Ready>, Instant),
+    /// Python's to answer, until then
+    Python(Instant),
+}
+
+/// What a call read, for keeping the plan its forwarded response may carry.
+struct Capture {
+    digests: Digests,
+    key: String,
+    query: String,
+    version: i64,
+    connection: String,
+    dialect: String,
+}
+
+enum Outcome {
+    Served(Response<Body>),
+    Forward(Option<Capture>),
+}
+
+use Outcome::{Forward, Served};
+
+// --------------------------------------------------------------------------------------
+// The data plane
+// --------------------------------------------------------------------------------------
+
+pub struct App {
+    forward: Forwarder,
+    settings: Settings,
+    logger: Logger,
+    store: Option<Store>,
+    pools: db::Pools,
+    plans: Mutex<HashMap<Digests, Held>>,
+    used: Mutex<HashMap<(String, String, bool), Instant>>,
+    store_mask_key: Mutex<Option<Vec<u8>>>,
+    runs: mpsc::Sender<Json>,
+}
+
+impl App {
+    pub fn new(forward: Forwarder, settings: Settings, store: Option<Store>) -> Arc<App> {
+        let (runs, queue) = mpsc::channel(10_000);
+        let logger = Logger {
+            json: settings.json_logs,
+        };
+        let app = Arc::new(App {
+            forward,
+            settings,
+            logger,
+            store,
+            pools: db::Pools::default(),
+            plans: Mutex::new(HashMap::new()),
+            used: Mutex::new(HashMap::new()),
+            store_mask_key: Mutex::new(None),
+            runs,
+        });
+        tokio::spawn(report(app.clone(), queue));
+        app
+    }
+
+    pub async fn handle(&self, request: Request<Incoming>, peer: SocketAddr) -> Response<Body> {
+        let started = Instant::now();
+        if !candidate(&request) {
+            let (parts, body) = request.into_parts();
+            return forward::relay(self.forward.send(parts, body.boxed(), peer.ip()).await);
+        }
+        let (parts, body) = request.into_parts();
+        let body = match body.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => {
+                return forward::error_response(
+                    hyper::StatusCode::BAD_REQUEST,
+                    "The request body could not be read",
+                    "invalid_body",
+                );
+            }
+        };
+        let outcome = self.serve(&parts, &body, peer.ip(), started).await;
+        match outcome {
+            Served(response) => response,
+            Forward(capture) => {
+                let full = Full::new(body).map_err(|never| match never {}).boxed();
+                let response = self.forward.send(parts, full, peer.ip()).await;
+                if let (Some(capture), Ok(response)) = (capture, &response) {
+                    self.keep_plan(capture, response.headers());
+                }
+                forward::relay(response)
+            }
+        }
+    }
+
+    fn keep_plan(&self, capture: Capture, headers: &HeaderMap) {
+        let Some(value) = headers.get(PLAN_HEADER).and_then(|v| v.to_str().ok()) else {
+            return;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(value) else {
+            return;
+        };
+        let Ok(plan) = serde_json::from_slice::<Plan>(&bytes) else {
+            return;
+        };
+        // Only for exactly the rows this call read, and what they say
+        let matches = plan.v == 1
+            && plan.rows == capture.digests
+            && plan.key.workspace == "default"
+            && plan.key.name == capture.key
+            && plan.query.name == capture.query
+            && plan.query.version == capture.version
+            && plan.connection.name == capture.connection
+            && plan.connection.dialect == capture.dialect;
+        let Ok(dialect) = plan.connection.dialect.parse::<Dialect>() else {
+            return;
+        };
+        if !matches {
+            return;
+        }
+        let actions = match &plan.mask {
+            None => None,
+            Some(mask) => match mask
+                .actions
+                .iter()
+                .map(|a| Action::named(a.as_deref()))
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(actions) if actions.len() == mask.columns => Some(actions),
+                _ => return,
+            },
+        };
+        let ttl = match (&plan.mask, plan.expires_in) {
+            (Some(_), Some(seconds)) => Duration::from_secs_f64(seconds.max(0.0)),
+            (Some(_), None) => return,
+            (None, _) => UNMASKED_PLAN_TTL,
+        };
+        let used = plan.used.iter().cloned().collect();
+        let ready = Arc::new(Ready {
+            plan,
+            dialect,
+            actions,
+            used,
+        });
+        let mut plans = self.plans.lock().expect("plans");
+        if plans.len() >= MAX_PLANS {
+            plans.clear();
+        }
+        plans.insert(capture.digests, Held::Plan(ready, Instant::now() + ttl));
+    }
+
+    fn python_only(&self, digests: &Digests) {
+        self.plans.lock().expect("plans").insert(
+            digests.clone(),
+            Held::Python(Instant::now() + PYTHON_ONLY_TTL),
+        );
+    }
+
+    async fn mask_key(&self) -> Option<Vec<u8>> {
+        if let Some(key) = &self.settings.mask_key {
+            return Some(key.clone());
+        }
+        if let Some(key) = self.store_mask_key.lock().expect("key").clone() {
+            return Some(key);
+        }
+        // The store's key, made once by Python and never changed (masking.hash_key()); none yet: Python makes it
+        let key = self
+            .store
+            .as_ref()?
+            .server_secret("mask_hash_key")
+            .await
+            .ok()??
+            .into_bytes();
+        *self.store_mask_key.lock().expect("key") = Some(key.clone());
+        Some(key)
+    }
+
+    async fn serve(
+        &self,
+        parts: &hyper::http::request::Parts,
+        body: &Bytes,
+        peer: IpAddr,
+        started: Instant,
+    ) -> Outcome {
+        if self.settings.forward_everything.is_some() {
+            return Forward(None);
+        }
+        let Some(store) = &self.store else {
+            return Forward(None);
+        };
+        let Some(name) = query_name(parts.uri.path()) else {
+            return Forward(None);
+        };
+        let Some(request) = Call::read(parts, body, &self.settings) else {
+            return Forward(None);
+        };
+
+        // The key, and that Python has recorded its use lately
+        let Ok(key_rows) = store.key(&auth::hash(&request.key)).await else {
+            return Forward(None);
+        };
+        let clock = Clock::now();
+        let Some(caller) = auth::authenticate(
+            &request.key,
+            self.settings.admin_key.as_deref(),
+            &key_rows,
+            Some(peer),
+            &clock,
+        ) else {
+            return Forward(None);
+        };
+        if caller.workspace != "default" {
+            return Forward(None);
+        }
+        // The saved query's published version, and its connection
+        let Ok(query_rows) = store.query("default", &name).await else {
+            return Forward(None);
+        };
+        let Some((version, fields)) = published(&query_rows) else {
+            return Forward(None);
+        };
+        let Some(connection_name) = fields
+            .get("connection_name")
+            .and_then(Json::as_str)
+            .map(str::to_string)
+        else {
+            return Forward(None);
+        };
+        let Ok(connection_rows) = store.connection("default", &connection_name).await else {
+            return Forward(None);
+        };
+        if connection_rows.rows.len() != 1
+            || connection_rows.get(0, "active").and_then(Value::int) != Some(1)
+        {
+            return Forward(None);
+        }
+        let dialect_name = connection_rows
+            .get(0, "db")
+            .and_then(Value::text)
+            .unwrap_or("")
+            .to_string();
+        let digests = Digests {
+            api_key: key_rows.digest(),
+            saved_query: query_rows.digest(),
+            connection: connection_rows.digest(),
+        };
+        let capture = Capture {
+            digests: digests.clone(),
+            key: caller.name.clone(),
+            query: name.clone(),
+            version,
+            connection: connection_name.clone(),
+            dialect: dialect_name.clone(),
+        };
+        {
+            let use_key = (
+                caller.workspace.clone(),
+                caller.name.clone(),
+                caller.previous,
+            );
+            let mut used = self.used.lock().expect("used");
+            let now = Instant::now();
+            if used
+                .get(&use_key)
+                .is_none_or(|at| now.duration_since(*at) >= USE_RECORD_INTERVAL)
+            {
+                used.insert(use_key, now);
+                return Forward(Some(capture)); // Python records this key's use
+            }
+        }
+        let ready = {
+            let mut plans = self.plans.lock().expect("plans");
+            match plans.get(&digests) {
+                Some(Held::Plan(ready, until)) if *until > Instant::now() => ready.clone(),
+                Some(Held::Python(until)) if *until > Instant::now() => return Forward(None),
+                Some(_) => {
+                    plans.remove(&digests);
+                    return Forward(Some(capture));
+                }
+                None => return Forward(Some(capture)),
+            }
+        };
+        let plan = &ready.plan;
+        if plan.key.name != caller.name
+            || plan.query.name != name
+            || plan.query.version != version
+            || plan.connection.name != connection_name
+            || plan.connection.dialect != dialect_name
+        {
+            return Forward(Some(capture));
+        }
+
+        // Parameters, as Python would resolve them; a `from_claim` one is Python's (app.bind_claims())
+        let declared = fields.get("query_parameters");
+        if let Some(Json::Object(specs)) = declared
+            && specs.values().any(|spec| spec.get("from_claim").is_some())
+        {
+            return Forward(None);
+        }
+        let Ok(values) = params::resolve(declared, &request.params, &ready.used) else {
+            return Forward(None);
+        };
+
+        // The connection
+        let details = connection_rows
+            .get(0, "details_json")
+            .and_then(Value::text)
+            .unwrap_or("");
+        let Some(target) = db::target(&dialect_name, details, &self.settings.secret_keys) else {
+            self.python_only(&digests);
+            return Forward(None);
+        };
+        let pool = match self
+            .pools
+            .get(&connection_name, &target, self.settings.pool_size)
+            .await
+        {
+            Ok(pool) => pool,
+            Err(Failure::Decline) => {
+                self.python_only(&digests);
+                return Forward(None);
+            }
+            Err(_) => return Forward(None),
+        };
+        let mask_key = match &plan.mask {
+            Some(_) => match self.mask_key().await {
+                Some(key) => Some(key),
+                None => return Forward(None),
+            },
+            None => None,
+        };
+        let timeout = match (request.timeout, self.settings.query_timeout) {
+            (None, server) => server,
+            (Some(asked), None) => Some(asked),
+            (Some(asked), Some(server)) => Some(asked.min(server)),
+        };
+        let (limit, offset) = (request.page_size, (request.page - 1) * request.page_size);
+        let executed_at = clock.stored.clone();
+        let request_id = respond::request_id(request.request_id.as_deref());
+        if self.settings.log_requests {
+            self.executing(
+                &request_id,
+                &caller.name,
+                &connection_name,
+                &dialect_name,
+                limit,
+                offset,
+                timeout,
+                &plan.sql,
+            );
+        }
+
+        // The query
+        let query_started = Instant::now();
+        let output = db::run(
+            &pool,
+            &plan.statement,
+            &values,
+            limit,
+            offset,
+            timeout,
+            plan.search_path.as_deref(),
+        )
+        .await;
+        let query_seconds = query_started.elapsed().as_secs_f64();
+        self.slow(
+            &request_id,
+            &caller.name,
+            &connection_name,
+            &dialect_name,
+            query_seconds,
+            &plan.sql,
+        );
+        let entry = |fields: Json| {
+            let mut entry = Map::new();
+            entry.insert("executed_at".into(), json!(executed_at));
+            entry.insert("connection_name".into(), json!(connection_name));
+            entry.insert("request_id".into(), json!(request_id));
+            entry.insert("key_name".into(), json!(caller.name));
+            entry.insert("transport".into(), json!("rest"));
+            if let Json::Object(more) = fields {
+                entry.extend(more);
+            }
+            Json::Object(entry)
+        };
+        let output = match output {
+            Ok(output) => output,
+            Err(Failure::Timeout) => {
+                let limit_seconds = timeout.unwrap_or(0.0);
+                let (response, message) = respond::timed_out(limit_seconds, &request_id);
+                let entry =
+                    entry(json!({"status": "error", "error": message, "code": "query_timeout"}));
+                self.finish(
+                    parts,
+                    &request_id,
+                    &caller.name,
+                    plan,
+                    entry,
+                    &dialect_name,
+                    query_seconds,
+                    0.0,
+                    504,
+                    started,
+                    &response,
+                    peer,
+                );
+                return Served(response);
+            }
+            Err(Failure::Decline) => {
+                self.python_only(&digests);
+                return Forward(None);
+            }
+            Err(Failure::Database(_)) => return Forward(None), // Python runs it again, and answers as it does
+        };
+
+        // The page
+        let serialize_started = Instant::now();
+        let has_more = output.rows.len() as i64 > limit;
+        let rows = output.rows.len().min(limit as usize);
+        let actions = ready
+            .actions
+            .as_ref()
+            .zip(plan.mask.as_ref())
+            .map(|(a, m)| (a.as_slice(), m.columns));
+        let Ok(body) = render::body(ready.dialect, &output, rows, actions, mask_key.as_deref())
+        else {
+            self.python_only(&digests);
+            return Forward(None);
+        };
+        let serialization_seconds = serialize_started.elapsed().as_secs_f64();
+        let response = respond::page(
+            body,
+            request.page,
+            request.page_size,
+            rows,
+            has_more,
+            &request_id,
+        );
+        let mut fields = json!({
+            "status": "success", "rows": rows, "duration_ms": (query_seconds * 1000.0).round() as i64,
+            "serialization_ms": (serialization_seconds * 10000.0).round() / 10.0,
+        });
+        if let Some(mask) = &plan.mask
+            && mask.fired.as_array().is_some_and(|f| !f.is_empty())
+        {
+            fields["masked"] = mask.fired.clone();
+        }
+        let entry = entry(fields);
+        self.finish(
+            parts,
+            &request_id,
+            &caller.name,
+            plan,
+            entry,
+            &dialect_name,
+            query_seconds,
+            serialization_seconds,
+            200,
+            started,
+            &response,
+            peer,
+        );
+        Served(response)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn executing(
+        &self,
+        rid: &str,
+        key: &str,
+        connection: &str,
+        dialect: &str,
+        limit: i64,
+        offset: i64,
+        timeout: Option<f64>,
+        sql: &str,
+    ) {
+        let timeout_text = timeout
+            .map(crate::pyfmt::repr)
+            .unwrap_or_else(|| "None".into());
+        let logged = self.logged_sql(sql);
+        let mut extra = Map::new();
+        extra.insert("connection".into(), json!(connection));
+        extra.insert("dialect".into(), json!(dialect));
+        extra.insert("limit".into(), json!(limit));
+        extra.insert("offset".into(), json!(offset));
+        extra.insert(
+            "timeout".into(),
+            timeout.map(|t| json!(t)).unwrap_or(Json::Null),
+        );
+        extra.insert("sql_hash".into(), json!(sql_hash(sql)));
+        self.logger.line("INFO", rid, key, &format!(
+            "Executing on {connection} ({dialect}), limit={limit} offset={offset} timeout={timeout_text}: {logged}"
+        ), extra);
+    }
+
+    fn slow(&self, rid: &str, key: &str, connection: &str, dialect: &str, seconds: f64, sql: &str) {
+        let Some(threshold) = self.settings.slow_query else {
+            return;
+        };
+        if seconds < threshold {
+            return;
+        }
+        let mut extra = Map::new();
+        extra.insert("connection".into(), json!(connection));
+        extra.insert("dialect".into(), json!(dialect));
+        extra.insert(
+            "duration_ms".into(),
+            json!((seconds * 10000.0).round() / 10.0),
+        );
+        self.logger.line(
+            "WARNING",
+            rid,
+            key,
+            &format!(
+                "Slow query on {connection} ({dialect}): {:.1}ms - {}",
+                seconds * 1000.0,
+                self.logged_sql(sql)
+            ),
+            extra,
+        );
+    }
+
+    fn logged_sql(&self, sql: &str) -> String {
+        if self.settings.sql_text_logged {
+            sql.to_string()
+        } else {
+            format!("(text not logged; sha256 {})", sql_hash(sql))
+        }
+    }
+
+    /// The run's report to Python, and the request's own log lines.
+    #[allow(clippy::too_many_arguments)]
+    fn finish(
+        &self,
+        parts: &hyper::http::request::Parts,
+        rid: &str,
+        key: &str,
+        plan: &Plan,
+        entry: Json,
+        dialect: &str,
+        query_seconds: f64,
+        serialization_seconds: f64,
+        status: u16,
+        started: Instant,
+        response: &Response<Body>,
+        peer: IpAddr,
+    ) {
+        let seconds = started.elapsed().as_secs_f64();
+        let run = json!({
+            "query": plan.query.name, "version": plan.query.version, "entry": entry,
+            "metrics": {"dialect": dialect, "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
+                        "method": parts.method.as_str(), "status": status, "seconds": seconds},
+        });
+        let _ = self.runs.try_send(run); // full: dropped, as Python's own history queue drops when it can't keep up
+        let path = percent_encoding::percent_decode_str(parts.uri.path())
+            .decode_utf8_lossy()
+            .into_owned();
+        if self.settings.log_requests {
+            let mut extra = Map::new();
+            extra.insert("method".into(), json!(parts.method.as_str()));
+            extra.insert("path".into(), json!(path));
+            extra.insert("status".into(), json!(status));
+            extra.insert(
+                "duration_ms".into(),
+                json!((seconds * 10000.0).round() / 10.0),
+            );
+            if status == 200 {
+                extra.insert(
+                    "serialization_ms".into(),
+                    json!((serialization_seconds * 10000.0).round() / 10.0),
+                );
+            }
+            self.logger.line(
+                "INFO",
+                rid,
+                key,
+                &format!(
+                    "{} {path} -> {status} in {:.1}ms",
+                    parts.method,
+                    seconds * 1000.0
+                ),
+                extra,
+            );
+        }
+        if self.settings.access_log {
+            let bytes = response
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok()?.parse().ok());
+            let agent = parts
+                .headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("-");
+            log::access(
+                &forward::peer_text(peer),
+                parts.method.as_str(),
+                &path,
+                status,
+                bytes.unwrap_or(0),
+                seconds,
+                rid,
+                agent,
+            );
+        }
+    }
+}
+
+/// Sends served runs to Python in batches, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL (each at once for 0).
+async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
+    let every = app.settings.flush_every;
+    loop {
+        let Some(first) = queue.recv().await else {
+            return;
+        };
+        let mut batch = vec![first];
+        if !every.is_zero() {
+            let deadline = tokio::time::Instant::now() + every;
+            while batch.len() < 500 {
+                match tokio::time::timeout_at(deadline, queue.recv()).await {
+                    Ok(Some(run)) => batch.push(run),
+                    Ok(None) | Err(_) => break,
+                }
+            }
+        }
+        let body = json!({"runs": batch}).to_string();
+        match app.forward.post("/internal/dataplane/runs", body).await {
+            Ok(status) if status.as_u16() == 204 => {}
+            Ok(status) => eprintln!(
+                "queryapigate-dataplane: reporting {} runs got {status}",
+                batch.len()
+            ),
+            Err(error) => eprintln!(
+                "queryapigate-dataplane: reporting {} runs failed: {error}",
+                batch.len()
+            ),
+        }
+    }
+}
+
+fn sql_hash(sql: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(sql.as_bytes()))
+}
+
+/// Whether a request could be one this serves - worth reading its body for. Everything else streams straight through.
+fn candidate(request: &Request<Incoming>) -> bool {
+    (request.method() == Method::GET || request.method() == Method::POST)
+        && request.uri().path().starts_with("/q/")
+        && request.headers().contains_key("x-api-key")
+}
+
+/// `/q/<name>`: the one path segment, percent-decoded as Werkzeug decodes it - or None.
+fn query_name(path: &str) -> Option<String> {
+    let raw = path.strip_prefix("/q/")?;
+    if raw.is_empty() || raw.contains('/') {
+        return None;
+    }
+    let name = percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+    if name.is_empty() || name.contains('/') {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// The published version's number and fields (store.select_version()), from the rows store.query() read.
+fn published(rows: &Rows) -> Option<(i64, Map<String, Json>)> {
+    let published = rows.get(0, "published_version").and_then(Value::int)?;
+    let at = (0..rows.rows.len())
+        .find(|&i| rows.get(i, "version").and_then(Value::int) == Some(published))?;
+    let fields: Map<String, Json> =
+        serde_json::from_str(rows.get(at, "fields_json").and_then(Value::text)?).ok()?;
+    if !fields.get("sql_query").is_some_and(Json::is_string)
+        || fields.get("query_type").is_some_and(|t| t != "sql")
+    {
+        return None;
+    }
+    Some((published, fields))
+}
+
+/// What a request asks for, read as app.py reads it - or None for anything this leaves to Python.
+struct Call {
+    key: String,
+    request_id: Option<String>,
+    params: HashMap<String, Supplied>,
+    page: i64,
+    page_size: i64,
+    timeout: Option<f64>,
+}
+
+impl Call {
+    fn read(
+        parts: &hyper::http::request::Parts,
+        body: &Bytes,
+        settings: &Settings,
+    ) -> Option<Call> {
+        let headers = &parts.headers;
+        // CORS, a bearer token, a session: Python's
+        if headers.contains_key(header::ORIGIN) || headers.contains_key(header::AUTHORIZATION) {
+            return None;
+        }
+        let mut keys = headers.get_all("x-api-key").iter();
+        let key = keys.next()?.to_str().ok()?.to_string();
+        if keys.next().is_some() || key.is_empty() {
+            return None;
+        }
+        let request_id = headers
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+
+        // The query string: the first value of each name, as request.args.get() and .items() give
+        let mut args: Vec<(String, String)> = Vec::new();
+        if let Some(query) = parts.uri.query() {
+            for (name, value) in form_urlencoded::parse(query.as_bytes()) {
+                if !args.iter().any(|(n, _)| *n == name) {
+                    args.push((name.into_owned(), value.into_owned()));
+                }
+            }
+        }
+        let arg = |name: &str| {
+            args.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.as_str())
+        };
+        if arg("connection_name").is_some() || arg("version").is_some() || arg("stream").is_some() {
+            return None;
+        }
+
+        // The body: JSON when it says so (request.is_json), an object - else nothing Python reads either
+        let mut object = Map::new();
+        if parts.method == Method::POST {
+            let content_type = headers
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let mimetype = content_type
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            let is_json = mimetype == "application/json"
+                || (mimetype.starts_with("application/") && mimetype.ends_with("+json"));
+            if is_json && !body.iter().all(u8::is_ascii_whitespace) {
+                match serde_json::from_slice::<Json>(body).ok()? {
+                    Json::Object(map) => object = map,
+                    _ => return None,
+                }
+            } else if !is_json && !body.is_empty() {
+                return None; // what Python does with a body it doesn't read is its own to say
+            }
+        }
+        if object.contains_key("version") || object.contains_key("connection_name") {
+            return None;
+        }
+
+        // format: json only (get_output_format())
+        let format = match arg("format").filter(|f| !f.is_empty()) {
+            Some(f) => f.to_string(),
+            None => match object.get("format") {
+                None | Some(Json::Null) | Some(Json::Bool(false)) => "json".into(),
+                Some(Json::String(s)) if s.is_empty() => "json".into(),
+                Some(Json::String(s)) => s.clone(),
+                Some(_) => return None,
+            },
+        };
+        if !format.eq_ignore_ascii_case("json") {
+            return None;
+        }
+        // timeout (get_timeout()): may lower the server's limit, never raise it
+        let timeout = match arg("timeout") {
+            Some("") => None,
+            Some(text) => Some(plain_seconds(text)?),
+            None => match object.get("timeout") {
+                None | Some(Json::Null) => None,
+                Some(Json::String(s)) if s.is_empty() => None,
+                Some(Json::String(s)) => Some(plain_seconds(s)?),
+                Some(Json::Number(n)) => Some(
+                    n.to_string()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|t| t.is_finite() && *t > 0.0)?,
+                ),
+                Some(_) => return None,
+            },
+        };
+        // page and page_size (get_pagination())
+        let int_arg = |name: &str| -> Option<Option<i64>> {
+            match arg(name) {
+                None | Some("") => Some(None),
+                Some(text) => {
+                    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+                    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                        return None;
+                    }
+                    Some(Some(text.parse().ok()?))
+                }
+            }
+        };
+        let page = int_arg("page")?.unwrap_or(1);
+        let page_size = int_arg("page_size")?.unwrap_or(10);
+        if page < 1 || page_size < 1 || page_size > settings.max_page_size {
+            return None;
+        }
+        // The parameters: the URL's, then the body's params, then its placeholders, each overriding the last
+        let mut params: HashMap<String, Supplied> = HashMap::new();
+        for (name, value) in &args {
+            if !RESERVED.contains(&name.as_str()) {
+                params.insert(name.clone(), params::from_url(value));
+            }
+        }
+        for field in ["params", "placeholders"] {
+            match object.get(field) {
+                None | Some(Json::Null) => {}
+                Some(Json::Object(given)) => {
+                    for (name, value) in given {
+                        params.insert(name.clone(), params::from_json(value));
+                    }
+                }
+                Some(_) => return None,
+            }
+        }
+        Some(Call {
+            key,
+            request_id,
+            params,
+            page,
+            page_size,
+            timeout,
+        })
+    }
+}
+
+/// A timeout's seconds as float() reads plain decimals, and only positive finite ones (get_timeout()).
+fn plain_seconds(text: &str) -> Option<f64> {
+    if !text.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        || text.matches('.').count() > 1
+        || text == "."
+    {
+        return None;
+    }
+    text.parse::<f64>()
+        .ok()
+        .filter(|t| t.is_finite() && *t > 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_query_name_is_one_decoded_segment() {
+        assert_eq!(query_name("/q/by_id").as_deref(), Some("by_id"));
+        assert_eq!(query_name("/q/caf%C3%A9").as_deref(), Some("café"));
+        for path in ["/q/", "/q/a/b", "/q/a%2Fb", "/w/x/q/a", "/q/%FF"] {
+            assert!(query_name(path).is_none(), "{path}");
+        }
+    }
+
+    #[test]
+    fn settings_as_config_py_reads_them() {
+        let settings = Settings::from(|name| match name {
+            "QUERYAPIGATE_QUERY_TIMEOUT" => Some("0".into()),
+            "QUERYAPIGATE_LOG_REQUESTS" => Some("Off".into()),
+            "QUERYAPIGATE_MAX_PAGE_SIZE" => Some("-5".into()),
+            _ => None,
+        });
+        assert_eq!(settings.query_timeout, None);
+        assert!(!settings.log_requests && settings.access_log);
+        assert_eq!(settings.max_page_size, 1);
+        assert!(settings.forward_everything.is_none());
+        assert_eq!(Settings::from(|_| None).query_timeout, Some(30.0));
+        let limited =
+            Settings::from(|name| (name == "QUERYAPIGATE_RATE_LIMIT").then(|| "10/minute".into()));
+        assert!(limited.forward_everything.is_some());
+    }
+
+    #[test]
+    fn a_timeout_must_be_plain_and_positive() {
+        assert_eq!(plain_seconds("2.5"), Some(2.5));
+        for text in ["0", "-1", " 1", "inf", "1e3", "1_0", "."] {
+            assert!(plain_seconds(text).is_none(), "{text}");
+        }
+    }
+}

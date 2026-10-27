@@ -2,7 +2,9 @@
 
 - **Status:** Accepted (2026-10-27). Amended 2026-10-27, before any Rust code: plans travel back on the forwarded
   response and are kept in the data plane's memory, not in the store; they name the rows they were computed from by
-  digest; and the data plane sends SQL as Python's drivers do (sections 2 and 3).
+  digest; and the data plane sends SQL as Python's drivers do (sections 2 and 3). Amended again while building it: served
+  runs are reported to Python, which records them, and the cases the implementation forwards are listed (sections 3, 4
+  and Consequences).
 - **Backlog:** 0.44. Motivated by the CPU profiles in [PERFORMANCE_MYSQL_V2.md](../PERFORMANCE_MYSQL_V2.md#where-the-time-goes-now)
   and [PERFORMANCE_V4.md](../PERFORMANCE_V4.md). This is a prototype: it ends in a measured decision, not a commitment
   to ship a second runtime.
@@ -125,9 +127,14 @@ Each of these matches what Python does today, and the differential test checks e
    and `drop`.
 7. **The response:** byte-identical JSON for every column type both drivers return (numbers and decimals, dates and
    times, time zones, bytes, nulls). Also `X-Row-Count`, the security headers (`secheaders.py`) and CORS.
-8. **The run's record:** the same `record_execution` rows in the same tables, batched like Python's history writer;
-   the request log line in the same JSON format, under the same `QUERYAPIGATE_LOG_REQUESTS` and
-   `QUERYAPIGATE_ACCESS_LOG`.
+8. **The run's record, reported to Python.** The data plane writes nothing to the store. It sends each run's history
+   entry, in Python's shape, to `POST /internal/dataplane/runs` in batches (every
+   `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`). Python records each one through its own path, `_record_and_broadcast`, and
+   counts it in `/metrics`. Sampling, retention, the event log, NOTIFY on a PostgreSQL store, the Console's live feed
+   and the metrics stay in one place. The endpoint answers 404 to anything without the data plane's secret, is outside
+   rate limiting, and isn't counted as a request itself. A batch lost in a crash is lost as Python's own queue is.
+9. **The log lines**, in Python's plain or JSON format, under the same `QUERYAPIGATE_LOG_REQUESTS`,
+   `QUERYAPIGATE_JSON_LOGS`, `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` and `QUERYAPIGATE_ACCESS_LOG`.
 
 ### 4. What the prototype forwards
 
@@ -140,6 +147,12 @@ Each of these matches what Python does today, and the differential test checks e
 | MCP, agent writes, `embed` parameters, JWT claim binding | Not on the hot path being measured |
 | Writes (a key or query that may write) | Reads first; write limits and `allowed_write_ops` come after |
 | Workspace paths; tracing (`OTEL_EXPORTER_OTLP_ENDPOINT` set) | Default workspace and no tracing in the prototype |
+| Any server with `QUERYAPIGATE_TRUST_PROXY` above 0 | Reading `X-Forwarded-For` as ProxyFix does comes later |
+| Requests with `Origin` or `Authorization`, several `X-API-Key`s, `?version=`, `?connection_name=`, `?stream=` | Python's rules for each |
+| Connections with a `${...}` reference, a credential source or TLS settings; a PostgreSQL server that requires TLS | Encrypted passwords (Fernet) are served; the rest come later |
+| Types and values the renderer doesn't reproduce: PostgreSQL arrays, an interval with years or months, MySQL `BIT`, `hash` on `bytea` | Forwarded once the query has run, and that plan left to Python for five minutes |
+| A key's first call each minute | So Python records its `last_used_at` |
+| Any call whose query fails in the database | Python runs it again and answers as it does; a timeout is the exception, answered here with Python's 504 |
 
 Each row is a reason for Rust to forward, checked before it serves anything. Moving a row out of this table is a
 separate change, with its own differential tests.
@@ -216,9 +229,12 @@ reports the result.
 - **The first call to each query, key and schema goes through Python,** and so does every call using a feature in
   section 4. A deployment's speed-up therefore depends on its traffic. The benchmarks report it by call type, not as
   one number.
-- **Live events and `/metrics`:** runs served in Rust are in the history, but the prototype doesn't publish them to
-  Python's in-process broadcaster or counters. Without Redis, the Console's live Home feed and `/metrics` miss them. A
-  go needs both, through Redis or the store.
+- **Live events and `/metrics` include served runs.** They are reported to Python, which records and counts them
+  (section 3, item 8). That closes the gap this ADR first listed here. The access-log and request counts in `/metrics`
+  lag by up to one flush interval.
+- **A plan is learnt from a call that succeeds.** Python only sends one with a success, so a query that has only ever
+  failed is always forwarded. A call the data plane serves and then can't render runs twice once: here, then in Python.
+  After that its plan is left to Python for five minutes.
 - Python keeps every feature. Turning the data plane off means pointing traffic at gunicorn again.
 
 ## Alternatives considered

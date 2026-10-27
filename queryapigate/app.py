@@ -67,6 +67,7 @@ bp = Blueprint('api', __name__)
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
                     'api.console_page', 'api.metrics_endpoint',
+                    'api.dataplane_runs',  # the data plane's reports: gate() lets only its secret through (ADR 0028)
                     # Console sign-in (sso.py): each checks what it needs itself - state, the session and its CSRF token
                     'auth.login', 'auth.callback', 'auth.session', 'auth.logout'}
 # Monitoring keeps working while a client is throttled; the Console's static files are exempt so loading the page
@@ -323,6 +324,10 @@ def create_app():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
+        if request.endpoint == 'api.dataplane_runs':  # the data plane's own reports: nothing else applies to them
+            if request.environ.get('queryapigate.dataplane'):
+                return None
+            return jsonify(error_body('Not Found', 404)), 404
         if request.environ.get('queryapigate.dataplane'):  # before the key is read: a plan names its row (ADR 0028)
             g.dataplane_record, g.dataplane_token = metacache.capture()
         # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
@@ -364,6 +369,8 @@ def create_app():
 
     @app.after_request
     def decorate(response):
+        if request.endpoint == 'api.dataplane_runs':  # counted and logged as the runs it reports, not itself
+            return response
         if not request.path.startswith('/auth/'):  # Console sign-in is same-origin only (sso.py)
             cors.add_headers(response, request.headers.get('Origin'))
         if g.get('rate_limit'):
@@ -1214,6 +1221,23 @@ def run_named_query(name):
     body = get_json_body(required=False) if request.method == 'POST' else {}
     url_params = {k: v for k, v in request.args.items() if k not in RESERVED_ARGS}
     return run_saved(name, body, url_params)
+
+
+@bp.route('/internal/dataplane/runs', methods=['POST'])
+def dataplane_runs():
+    """The runs a data plane in front of this server served itself (dataplane.py, ADR 0028), batched: each recorded as
+    run_saved() records one - run history, the event log, the live feed - and counted in /metrics as it would have been.
+    Only the data plane reaches it: gate() answers 404 to anything without its secret."""
+    for run in (request.get_json(silent=True) or {}).get('runs') or []:
+        entry, seen = run['entry'], run['metrics']
+        _record_and_broadcast(run['query'], run['version'], entry)
+        key, connection, dialect = entry['key_name'], entry['connection_name'], seen['dialect']
+        metrics.observe_query(connection, dialect, entry['status'], seen['query_seconds'], key)
+        if entry['status'] == 'success':
+            metrics.observe_rows(connection, dialect, key, entry['rows'])
+            metrics.observe_serialization('json', seen['serialization_seconds'])
+        governance.observe(seen['method'], 'api.run_named_query', seen['status'], seen['seconds'], key)
+    return '', 204
 
 
 # --------------------------------------------------------------------------------------
