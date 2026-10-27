@@ -354,7 +354,7 @@ def clear_events(store):
         conn.close()
 
 
-def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_log=True, cpus=None, settings=None):
+def start(build, workers=None, threads=8, store='sqlite', profile_to=None, access_log=True, cpus=None, settings=None):
     """The gateway for ``build``. ``cpus`` overrides --gateway-cpus; ``settings`` adds QUERYAPIGATE_* variables, kept
     in every row it measures. The access log is set both ways - the flag, and QUERYAPIGATE_ACCESS_LOG - because from
     0.43 gunicorn_conf.py writes one to stdout unless told not to."""
@@ -363,6 +363,9 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
     extra = dict(extra)
     dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
+    # 17k runs/s - fewer than the data plane serves - so with one, most of what it served went unrecorded.
+    workers = workers or (oltp.DATAPLANE_PYTHON_WORKERS if dataplane else 1)
     port = INNER_PORT if dataplane else PORT
     if dataplane:
         extra['QUERYAPIGATE_DATAPLANE_SECRET'] = DATAPLANE_SECRET
@@ -1136,7 +1139,7 @@ def d4():
     behind it, 64 callers, both with the metadata cache."""
     floor('d4', 'start')
     workers = len(oltp.cpu_list(args.gateway_cpus))
-    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', 1)]
+    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', None)]
     for query, governed in [('customer', False), ('order_status', True)]:
         for r, order in rotations(builds, 3):
             for build, n in order:

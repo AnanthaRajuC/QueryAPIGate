@@ -50,6 +50,7 @@ SCENARIOS = {'lookup_plain': ('lookup', 'plain'), 'lookup_gov': ('lookup', 'gove
 
 args = None
 OUT = BUILDS = None
+DATAPLANE_PYTHON_WORKERS = 2  # Python workers behind the data plane, unless a block says (see start())
 DATAPLANE_BUILDS = {}  # the head with the Rust data plane in front: outside BUILDS, so the b-blocks are as they were
 _server = None
 _dataplane = None
@@ -272,13 +273,16 @@ def wait_healthy(url, what):
     raise RuntimeError(f'{what} did not start - see {OUT / "server.log"}')
 
 
-def start(build, workers=1, access_log=True, access_format=None, profile_to=None, threads=8):
+def start(build, workers=None, access_log=True, access_format=None, profile_to=None, threads=8):
     """gunicorn for ``build``, pinned to the gateway's cores, as the Docker image runs it (gthread)."""
     global _server, _server_meta
     stop()
     ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
     extra = dict(extra)
     dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
+    # 17k runs/s - fewer than the data plane serves - so with one, most of what it served went unrecorded.
+    workers = workers or (DATAPLANE_PYTHON_WORKERS if dataplane else 1)
     port = INNER_PORT if dataplane else PORT
     if dataplane:
         extra['QUERYAPIGATE_DATAPLANE_SECRET'] = DATAPLANE_SECRET
@@ -770,7 +774,7 @@ def d4():
     worker behind it, 64 callers - both with the metadata cache."""
     floor('d4', 'start')
     workers = len(cpu_list(args.gateway_cpus))
-    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', 1)]
+    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', None)]
     for scenario in ['lookup_plain', 'lookup_gov']:
         for r, order in rotations(builds, 3):
             for build, n in order:

@@ -88,6 +88,20 @@ class _Writer:
         if full:
             self.wake.set()
 
+    def add_many(self, target, rows):
+        """add() for each of ``rows``, under the lock once: those that don't fit in the queue dropped and counted."""
+        with self.cond:
+            room = max(_MAX_PENDING - len(self.pending), 0)
+            taken = rows[:room]
+            self.pending.extend((target, row) for row in taken)
+            self.queued += len(taken)
+            full = len(self.pending) >= _BATCH_SIZE
+        if len(rows) > len(taken):
+            metrics.inc_history('dropped', len(rows) - len(taken))
+        self._ensure_thread()
+        if full:
+            self.wake.set()
+
     def unwritten(self):
         """Runs queued but not yet handled - including a batch the writer thread is in the middle of writing."""
         with self.cond:
@@ -192,6 +206,29 @@ def record(name, version, entry, sample=True, live=True):
         write([row], target)
     else:
         _writer().add(target, row)
+
+
+def record_reported(runs):
+    """Queue the saved-query runs a data plane reports (ADR 0028), each with its entry already JSON (``entry``, as
+    json.dumps writes it): as record() queues each, sampled the same way, but in one go and without decoding or
+    encoding an entry - at its rates, record()'s own work per run is what Python can't keep up with."""
+    from . import events, scope
+    workspace, rate, rows, sampled_out = scope.current(), config.history_sample_rate(), [], 0
+    for run in runs:
+        name, version, executed_at, status = run['query'], run['version'], run['executed_at'], run['status']
+        keep = status == 'error' or rate >= 1 or random.random() < rate
+        sampled_out += not keep
+        event = (events.RUN, run['transport'], executed_at, run['key'], run['connection'], name, status,
+                 events.run_payload_json(name, version, run['entry'], run['transport'], executed_at,
+                                         run['connection']), workspace)
+        rows.append((name, version, executed_at, run['entry'], status, run['key'], keep, event, workspace))
+    if sampled_out:
+        metrics.inc_history('sampled_out', sampled_out)
+    target = db.current_target()
+    if config.history_flush_interval() == 0:
+        write(rows, target)
+    else:
+        _writer().add_many(target, rows)
 
 
 def record_adhoc(entry, sql, params=None, sample=True):

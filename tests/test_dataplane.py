@@ -1,13 +1,14 @@
 """The plans a Rust data plane applies (dataplane.py, ADR 0028): which `/q/` calls get one, what it holds, and - the
 spec the data plane is built to - that a plan, applied as the data plane applies it, sends exactly the SQL the runner
 sends. The PostgreSQL and MySQL runners are replaced by recording fakes, so no database is needed."""
+import json
 import os
 import sqlite3
 import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import apikeys, create_app, dataplane, runners, schema, sqltools
+from queryapigate import apikeys, create_app, dataplane, db, runners, schema, sqltools
 from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
@@ -340,11 +341,13 @@ class RunReportTests(PlanTestCase):
     """The data plane reports the runs it served (POST /internal/dataplane/runs): each recorded as run_saved() records
     one, and counted in /metrics - and nothing without its secret."""
 
-    RUN = {'query': 'by_id', 'version': 1, 'entry': {
-        'executed_at': '2026-10-27 12:00:00', 'connection_name': 'pg', 'request_id': 'dp-run-1', 'key_name': 'plain',
-        'transport': 'rest', 'status': 'success', 'rows': 3, 'duration_ms': 1, 'serialization_ms': 0.1},
-        'metrics': {'dialect': 'postgres', 'query_seconds': 0.001, 'serialization_seconds': 0.0001, 'method': 'GET',
-                    'status': 200, 'seconds': 0.002}}
+    ENTRY = {'executed_at': '2026-10-27 12:00:00', 'connection_name': 'pg', 'request_id': 'dp-run-1',
+             'key_name': 'plain', 'transport': 'rest', 'status': 'success', 'rows': 3, 'duration_ms': 1,
+             'serialization_ms': 0.1}
+    RUN = {'query': 'by_id', 'version': 1, 'entry': json.dumps(ENTRY), 'executed_at': '2026-10-27 12:00:00',
+           'status': 'success', 'key': 'plain', 'connection': 'pg', 'transport': 'rest', 'rows': 3,
+           'dialect': 'postgres', 'method': 'GET', 'http_status': 200, 'seconds': 0.002, 'query_seconds': 0.001,
+           'serialization_seconds': 0.0001}
 
     def report(self, secret=SECRET):
         headers = {dataplane.SECRET_HEADER: secret} if secret else {}
@@ -362,7 +365,7 @@ class RunReportTests(PlanTestCase):
 
     def test_a_reported_run_is_recorded_as_python_records_one(self):
         self.assertEqual(self.report().status_code, 204)
-        self.assertEqual(self.history(), [self.RUN['entry']])
+        self.assertEqual(self.history(), [self.ENTRY])
 
     def test_and_counted_in_metrics(self):
         import re
@@ -387,4 +390,11 @@ class RunReportTests(PlanTestCase):
                                headers={dataplane.SECRET_HEADER: SECRET})
         self.assertEqual(res.status_code, 204)
         self.assertEqual(metrics.history_counts().get('dropped', 0) - before, 7)
-        self.assertEqual(self.history(), [self.RUN['entry']])
+        self.assertEqual(self.history(), [self.ENTRY])
+
+    def test_its_event_is_the_one_python_writes(self):
+        from queryapigate import events
+        self.assertEqual(self.report().status_code, 204)
+        conn = db.connection()
+        payload = conn.execute('SELECT payload_json FROM events ORDER BY id DESC LIMIT 1').fetchone()[0]
+        self.assertEqual(payload, json.dumps(events.run_payload('by_id', 1, self.ENTRY), default=str))

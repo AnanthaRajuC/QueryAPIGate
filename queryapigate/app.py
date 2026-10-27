@@ -1229,19 +1229,35 @@ def dataplane_runs():
     """The runs a data plane in front of this server served itself (dataplane.py, ADR 0028), batched: each recorded as
     run_saved() records one - run history, the event log, the live feed - and counted in /metrics as it would have been.
     Only the data plane reaches it: gate() answers 404 to anything without its secret. `dropped`: runs it served but
-    couldn't queue for here, counted as history's own dropped runs are."""
+    couldn't queue for here, counted as history's own dropped runs are.
+
+    Each run comes with its history entry already JSON (`entry`), and the labels and timings /metrics counts it by: at
+    the data plane's rates Python's own work per run - encoding it, and its labels - is what it can't keep up with, so
+    a batch is queued at once (history.record_reported()) and counted once per set of labels."""
     report = request.get_json(silent=True) or {}
+    runs = report.get('runs') or []
     broadcaster = current_app.extensions['queryapigate_broadcaster']
     with scope.using(scope.current()):  # resolved once, not by each of a busy batch's few thousand label lookups
-        for run in report.get('runs') or []:
-            entry, seen = run['entry'], run['metrics']
-            _record_and_broadcast(run['query'], run['version'], entry, broadcaster)
-            key, connection, dialect = entry['key_name'], entry['connection_name'], seen['dialect']
-            metrics.observe_query(connection, dialect, entry['status'], seen['query_seconds'], key)
-            if entry['status'] == 'success':
-                metrics.observe_rows(connection, dialect, key, entry['rows'])
-                metrics.observe_serialization('json', seen['serialization_seconds'])
-            governance.observe(seen['method'], 'api.run_named_query', seen['status'], seen['seconds'], key)
+        history.record_reported(runs)
+        if broadcaster.subscriber_count():  # the live feed's events, only when anyone is listening
+            for run in runs:
+                broadcaster.publish(events.run_payload(run['query'], run['version'], json.loads(run['entry'])),
+                                    run['key'], scope.current())
+        labelled = {}
+        for run in runs:
+            seen = labelled.setdefault((run['connection'], run['dialect'], run['status'], run['key'], run['method'],
+                                        str(run['http_status'])), ([], [], [], [0]))
+            seen[0].append(run['query_seconds'])
+            seen[1].append(run['seconds'])
+            if run['status'] == 'success':
+                seen[2].append(run['serialization_seconds'])
+                seen[3][0] += run['rows']
+        for (connection, dialect, status, key, method, http_status), seen in labelled.items():
+            metrics.observe_queries(connection, dialect, status, seen[0], key)
+            if status == 'success':
+                metrics.observe_rows(connection, dialect, key, seen[3][0])
+                metrics.observe_serializations('json', seen[2])
+            metrics.observe_requests(method, 'api.run_named_query', http_status, seen[1], key or '-')
     if report.get('dropped'):
         metrics.inc_history('dropped', int(report['dropped']))
     return '', 204

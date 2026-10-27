@@ -828,10 +828,14 @@ impl App {
         peer: IpAddr,
     ) {
         let seconds = started.elapsed().as_secs_f64();
+        // The entry as Python stores it (json.dumps), and what /metrics counts the run by: Python only queues it
+        let field = |name: &str| entry.get(name).cloned().unwrap_or(Json::Null);
         let run = json!({
-            "query": plan.query.name, "version": plan.query.version, "entry": entry,
-            "metrics": {"dialect": dialect, "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
-                        "method": parts.method.as_str(), "status": status, "seconds": seconds},
+            "query": plan.query.name, "version": plan.query.version, "entry": crate::pyfmt::dumps(&entry),
+            "executed_at": field("executed_at"), "status": field("status"), "key": field("key_name"),
+            "connection": field("connection_name"), "transport": field("transport"), "rows": field("rows"),
+            "dialect": dialect, "method": parts.method.as_str(), "http_status": status, "seconds": seconds,
+            "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
         });
         if self.runs.try_send(run).is_err() {
             // full: dropped, as Python's own history queue drops when it can't keep up - and counted the same way

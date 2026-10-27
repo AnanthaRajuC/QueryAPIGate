@@ -128,6 +128,19 @@ class BatchingTests(HistoryTestCase):
         self.assertEqual(metrics._history_runs.get(('dropped',), 0) - before.get(('dropped',), 0), 3)
         self.assertEqual(self.stored(), 2)
 
+    def test_reported_runs_queue_as_far_as_the_queue_goes_and_the_rest_are_counted(self):
+        entry = {'executed_at': '2026-01-01 00:00:00', 'status': 'success', 'key_name': 'admin', 'transport': 'rest',
+                 'connection_name': 'lite'}
+        run = {'query': 'q', 'version': 1, 'entry': json.dumps(entry), 'executed_at': entry['executed_at'],
+               'status': 'success', 'key': 'admin', 'connection': 'lite', 'transport': 'rest'}
+        before = dict(metrics._history_runs)
+        with mock.patch.object(history, '_MAX_PENDING', 2), self.no_writer_thread():
+            history.record_reported([run] * 5)
+            self.assertEqual(history.pending_count(), 2)
+            history._writer().flush()
+        self.assertEqual(metrics._history_runs.get(('dropped',), 0) - before.get(('dropped',), 0), 3)
+        self.assertEqual(self.listed(), [entry, entry])
+
     def test_a_run_of_a_query_deleted_meanwhile_is_skipped_not_fatal(self):
         with self.no_writer_thread():
             self.run_query('q')

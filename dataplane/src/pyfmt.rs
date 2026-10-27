@@ -77,9 +77,65 @@ pub fn general(value: f64) -> String {
     }
 }
 
+/// `json.dumps(value)` as Python writes it - `", "` and `": "`, ASCII only, floats as `repr()` - for a run's history
+/// entry, which Python stores as this text (ADR 0028).
+pub fn dumps(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    dump(value, &mut out);
+    out
+}
+
+fn dump(value: &serde_json::Value, out: &mut String) {
+    use serde_json::Value;
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) if n.is_i64() || n.is_u64() => out.push_str(&n.to_string()),
+        Value::Number(n) => out.push_str(&repr(n.as_f64().unwrap_or(f64::NAN))),
+        Value::String(s) => crate::render::json_string(s, out),
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                dump(item, out);
+            }
+            out.push(']');
+        }
+        Value::Object(fields) => {
+            out.push('{');
+            for (i, (name, item)) in fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                crate::render::json_string(name, out);
+                out.push_str(": ");
+                dump(item, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dumps_as_python() {
+        // json.dumps() of each, in Python 3.12
+        let entry = serde_json::json!({
+            "executed_at": "2026-10-27 12:00:00", "key_name": "caf\u{e9} \u{1F600}", "rows": 3, "duration_ms": 1,
+            "serialization_ms": 0.1, "big": 1e16, "masked": [{"column": "c.email", "action": "hash"}], "none": null,
+            "ok": true, "quote": "a\"b\\c\nd",
+        });
+        // the escapes as Python writes them: \u00e9, a surrogate pair, \", \\ and \n
+        assert_eq!(
+            dumps(&entry),
+            "{\"executed_at\": \"2026-10-27 12:00:00\", \"key_name\": \"caf\\u00e9 \\ud83d\\ude00\", \"rows\": 3, \"duration_ms\": 1, \"serialization_ms\": 0.1, \"big\": 1e+16, \"masked\": [{\"column\": \"c.email\", \"action\": \"hash\"}], \"none\": null, \"ok\": true, \"quote\": \"a\\\"b\\\\c\\nd\"}"
+        );
+    }
 
     #[test]
     fn repr_as_python() {

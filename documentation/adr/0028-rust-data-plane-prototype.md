@@ -4,7 +4,9 @@
   response and are kept in the data plane's memory, not in the store; they name the rows they were computed from by
   digest; and the data plane sends SQL as Python's drivers do (sections 2 and 3). Amended again while building it: served
   runs are reported to Python, which records them, and the cases the implementation forwards are listed (sections 3, 4
-  and Consequences).
+  and Consequences). Amended a third time after the first benchmark: Python's work per reported run couldn't keep up
+  with what the data plane serves, so runs arrive already serialized and are queued a batch at a time (section 3, item
+  8, and Consequences).
 - **Backlog:** 0.44. Motivated by the CPU profiles in [PERFORMANCE_MYSQL_V2.md](../PERFORMANCE_MYSQL_V2.md#where-the-time-goes-now)
   and [PERFORMANCE_V4.md](../PERFORMANCE_V4.md). This is a prototype: it ends in a measured decision, not a commitment
   to ship a second runtime.
@@ -127,11 +129,15 @@ Each of these matches what Python does today, and the differential test checks e
    and `drop`.
 7. **The response:** byte-identical JSON for every column type both drivers return (numbers and decimals, dates and
    times, time zones, bytes, nulls). Also `X-Row-Count`, the security headers (`secheaders.py`) and CORS.
-8. **The run's record, reported to Python.** The data plane writes nothing to the store. It sends each run's history
-   entry, in Python's shape, to `POST /internal/dataplane/runs` in batches (every
-   `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`). Python records each one through its own path, `_record_and_broadcast`, and
-   counts it in `/metrics`. Sampling, retention, the event log, NOTIFY on a PostgreSQL store, the Console's live feed
-   and the metrics stay in one place. The endpoint answers 404 to anything without the data plane's secret, is outside
+8. **The run's record, reported to Python.** The data plane writes nothing to the store. It sends each run to
+   `POST /internal/dataplane/runs` in batches (every `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`, up to four at once): its
+   history entry already serialized as `json.dumps` writes it, and the labels and timings `/metrics` counts it by.
+   Python queues a batch's history rows and events at once (`history.record_reported`), sampled as its own runs are,
+   and counts each set of labels once. Recording a run this way costs Python about 7 µs, against 27 µs through
+   `_record_and_broadcast`: at the data plane's rates that difference decided whether runs were kept. Sampling,
+   retention, the event log, NOTIFY on a PostgreSQL store, the Console's live feed and the metrics stay in one place.
+   Runs the data plane can't queue are counted with the next batch, as `dropped` in
+   `queryapigate_history_runs_total`. The endpoint answers 404 to anything without the data plane's secret, is outside
    rate limiting, and isn't counted as a request itself. A batch lost in a crash is lost as Python's own queue is.
 9. **The log lines**, in Python's plain or JSON format, under the same `QUERYAPIGATE_LOG_REQUESTS`,
    `QUERYAPIGATE_JSON_LOGS`, `QUERYAPIGATE_SLOW_QUERY_THRESHOLD` and `QUERYAPIGATE_ACCESS_LOG`.
@@ -232,6 +238,12 @@ reports the result.
 - **Live events and `/metrics` include served runs.** They are reported to Python, which records and counts them
   (section 3, item 8). That closes the gap this ADR first listed here. The access-log and request counts in `/metrics`
   lag by up to one flush interval.
+- **The data plane needs at least two Python workers behind it.** One process's history writer keeps up with about
+  17,000 runs a second; the data plane serves more than that on the benchmark machine, and with one worker about half
+  of its runs went unrecorded (counted as dropped). With two, every run was kept at 28,800 calls a second.
+- **The run history and event log grow with the data plane's rate.** The event log keeps every run for at least an
+  hour, whatever its count. At tens of thousands of runs a second that is tens of millions of rows an hour, more than
+  SQLite or a PostgreSQL store should hold. A store built for that volume is ADR 0029's question.
 - **A plan is learnt from a call that succeeds.** Python only sends one with a success, so a query that has only ever
   failed is always forwarded. A call the data plane serves and then can't render runs twice once: here, then in Python.
   After that its plan is left to Python for five minutes.

@@ -77,6 +77,15 @@ def run_payload(query_name, version, entry):
             'connection_name': entry.get('connection_name'), 'entry': entry}
 
 
+def run_payload_json(query_name, version, entry_json, source, occurred_at, connection_name):
+    """json.dumps(run_payload(...)) for a saved query's run whose entry is already JSON - ``entry_json``, as
+    json.dumps(entry) writes it: the payload around it without decoding and encoding it again (a data plane's runs,
+    ADR 0028)."""
+    head = json.dumps({'type': RUN, 'source': source, 'occurred_at': occurred_at, 'kind': 'saved',
+                       'query': query_name, 'version': version, 'connection_name': connection_name})
+    return f'{head[:-1]}, "entry": {entry_json}}}'
+
+
 def run_columns(query_name, version, entry, workspace=None):
     """A run's row in the events table, for INSERT - every column after the id; `workspace` the run's (ADR 0023),
     the workspace this code acts in unless given."""
