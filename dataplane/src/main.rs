@@ -13,6 +13,7 @@
 mod auth;
 mod config;
 mod forward;
+mod params;
 mod store;
 
 use std::net::SocketAddr;

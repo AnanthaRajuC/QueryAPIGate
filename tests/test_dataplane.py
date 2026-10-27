@@ -83,6 +83,7 @@ class WhoGetsAPlanTests(PlanTestCase):
         self.assertEqual(set(plan['rows']), {'api_key', 'saved_query', 'connection'})
         self.assertIsNone(plan['mask'])
         self.assertIsNone(plan['search_path'])
+        self.assertEqual(plan['used'], ['id'])
 
     def test_and_on_mysql(self):
         _res, plan = self.call('/q/my_by_id?id=1', self.plain)
