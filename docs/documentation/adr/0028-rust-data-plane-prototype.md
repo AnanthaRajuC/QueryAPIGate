@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0028-rust-data-plane-prototype.md"

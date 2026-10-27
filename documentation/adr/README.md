@@ -36,6 +36,7 @@ one it supersedes.
 | [0025](0025-semantic-retrieval.md) | Semantic retrieval: an `embed` parameter, not a vector store | Accepted |
 | [0026](0026-trino-connections.md) | Trino as a native connection type | Accepted |
 | [0027](0027-fewer-round-trips-per-query.md) | Fewer round trips per query, and a read-only mode a query can't undo | Accepted |
+| [0028](0028-rust-data-plane-prototype.md) | A Rust data plane for `/q/`, as a prototype with a go/no-go decision | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
