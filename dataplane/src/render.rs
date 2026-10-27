@@ -45,8 +45,8 @@ enum Py {
     /// An int, as its digits (any size)
     Int(String),
     Float(f64),
-    /// A Decimal, as the float formats._cell() turns it into - str() of it isn't reproduced, so it can't be hashed
-    Decimal(f64),
+    /// A Decimal: the float formats._cell() turns it into, and str() of it (decimal_str()), what `hash` takes
+    Decimal(f64, String),
     Str(String),
     Bytes(Vec<u8>),
     /// PostgreSQL bytea, which psycopg2 hands over as a memoryview: JSON decodes it as bytes, `mask` nulls it, and
@@ -373,6 +373,42 @@ fn interval(t: &str) -> Out<i128> {
     Ok(days * 86_400_000_000 + clock)
 }
 
+/// str() of the Decimal the driver makes of a database's plain decimal text (`-12.50`, `0.0000001`, `NaN`): written as
+/// it is, unless its exponent puts it in scientific notation, as Python's to-sci-string does (`1E-7`, `1.2E-7`).
+fn decimal_str(text: &str) -> Out<String> {
+    if text == "NaN" {
+        return Ok(text.into());
+    }
+    let (sign, unsigned) = match text.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", text),
+    };
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(Decline);
+    }
+    let digits = format!("{whole}{fraction}");
+    let coefficient = match digits.trim_start_matches('0') {
+        "" => "0",
+        significant => significant,
+    };
+    let exponent = -(fraction.len() as i64);
+    let adjusted = exponent + coefficient.len() as i64 - 1;
+    if adjusted >= -6 {
+        return Ok(text.to_string()); // the plain form, which is how it was written
+    }
+    let (first, rest) = coefficient.split_at(1);
+    let mantissa = if rest.is_empty() {
+        first.to_string()
+    } else {
+        format!("{first}.{rest}")
+    };
+    Ok(format!("{sign}{mantissa}E{adjusted}"))
+}
+
 /// PostgreSQL bytea in its hex output.
 fn bytea(t: &str) -> Out<Vec<u8>> {
     hex::decode(t.strip_prefix("\\x").ok_or(Decline)?).map_err(|_| Decline)
@@ -392,7 +428,9 @@ fn value(dialect: Dialect, kind: &str, bytes: &[u8]) -> Out<Py> {
             integer(bytes)?
         }
         (Postgres, "FLOAT4" | "FLOAT8") | (Mysql, "FLOAT" | "DOUBLE") => Py::Float(float(bytes)?),
-        (Postgres, "NUMERIC") | (Mysql, "DECIMAL") => Py::Decimal(float(bytes)?),
+        (Postgres, "NUMERIC") | (Mysql, "DECIMAL") => {
+            Py::Decimal(float(bytes)?, decimal_str(text(bytes)?)?)
+        }
         (Postgres, "BOOL") => match bytes {
             b"t" => Py::Bool(true),
             b"f" => Py::Bool(false),
@@ -469,9 +507,8 @@ fn python_str(value: &Py) -> Out<String> {
             }
         }
         Py::Float(f) => pyfmt::repr(*f),
-        Py::None | Py::Decimal(_) | Py::DateTime(_) | Py::Dumped(_) | Py::View(_) => {
-            return Err(Decline);
-        }
+        Py::Decimal(_, text) => text.clone(),
+        Py::None | Py::DateTime(_) | Py::Dumped(_) | Py::View(_) => return Err(Decline),
     })
 }
 
@@ -515,7 +552,7 @@ fn write(value: &Py, out: &mut String) {
         Py::None => out.push_str("null"),
         Py::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Py::Int(digits) => out.push_str(digits),
-        Py::Float(f) | Py::Decimal(f) => json_float(*f, out),
+        Py::Float(f) | Py::Decimal(f, _) => json_float(*f, out),
         Py::Str(s) | Py::Iso(s) | Py::DateTime(s) | Py::Delta(s) | Py::Dumped(s) => {
             json_string(s, out)
         }
@@ -663,6 +700,29 @@ mod tests {
         eprintln!("same as Python: {same}; declined: {declined:?}");
         assert!(same >= 185, "only {same} rendered");
         assert!(declined.len() <= 3, "declined {declined:?}");
+    }
+
+    #[test]
+    fn decimals_as_python_s_str_writes_them() {
+        // str(Decimal(text)) in Python, for each
+        for (text, python) in [
+            ("123.45", "123.45"),
+            ("-10.00", "-10.00"),
+            ("0.00", "0.00"),
+            ("0", "0"),
+            ("0.0000001", "1E-7"),
+            ("0.000001", "0.000001"),
+            ("0.00000012", "1.2E-7"),
+            ("12345678901234567890.123", "12345678901234567890.123"),
+            ("-0.50", "-0.50"),
+            ("100", "100"),
+            ("1000000.000000", "1000000.000000"),
+            ("NaN", "NaN"),
+            ("0.0", "0.0"),
+            ("-0", "-0"),
+        ] {
+            assert_eq!(decimal_str(text).unwrap(), python, "{text}");
+        }
     }
 
     #[test]

@@ -54,8 +54,9 @@ MYSQL = [
 MASKED = {  # value -> each action applied to it
     'postgres': ["'jane@example.com'::text", "'@example.com'::text", "'x'::text", "''::text", "'abcd'::text",
                  "'é😀@x'::text", "5::int4", "true", "'\\x41'::bytea", "'2024-01-01'::date", "NULL::text",
-                 "'a@b@c'::text"],
-    'mysql': ["'jane@example.com'", "'x'", "''", "5", "BINARY 'ab'", "NULL"],
+                 "'a@b@c'::text", "-12.50::numeric", "0.0000001::numeric", "0.00000012::numeric"],
+    'mysql': ["'jane@example.com'", "'x'", "''", "5", "BINARY 'ab'", "NULL", "CAST(-12.50 AS DECIMAL(10,2))",
+              "CAST(0.0000001 AS DECIMAL(10,7))"],
 }
 SHAPES = {  # several columns: names repeated, as ResultSetDTO._unique() names them
     'postgres': ["1 AS a, 2 AS a, 3 AS a_2", "1 AS \"x y\", 'é' AS \"é\"", "1 AS a, 2 AS b"],

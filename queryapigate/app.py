@@ -184,8 +184,9 @@ class _CapturePeer:
     def __call__(self, environ, start_response):
         supplied = environ.pop(dataplane.SECRET_ENVIRON, None)
         peer = environ.pop(dataplane.PEER_ENVIRON, None)
+        wanted = environ.pop(dataplane.WANTED_ENVIRON, None)
         if supplied is not None and dataplane.matches(supplied):
-            environ['queryapigate.dataplane'] = True
+            environ['queryapigate.dataplane'] = 'plan' if wanted == '1' else True
             environ['REMOTE_ADDR'] = peer if dataplane.is_address(peer) else ''
         environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
         return self.app(environ, start_response)
@@ -328,7 +329,7 @@ def create_app():
             if request.environ.get('queryapigate.dataplane'):
                 return None
             return jsonify(error_body('Not Found', 404)), 404
-        if request.environ.get('queryapigate.dataplane'):  # before the key is read: a plan names its row (ADR 0028)
+        if request.environ.get('queryapigate.dataplane') == 'plan':  # before the key is read: a plan names its row
             g.dataplane_record, g.dataplane_token = metacache.capture()
         # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
         rule = request.url_rule.rule if request.url_rule is not None else None

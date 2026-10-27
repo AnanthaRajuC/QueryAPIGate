@@ -27,6 +27,7 @@ from . import config, runners, sqltools
 
 SECRET_HEADER = 'X-QAG-Dataplane'
 PEER_HEADER = 'X-QAG-Peer'
+WANTED_HEADER = 'X-QAG-Plan-Wanted'
 PLAN_HEADER = 'X-QAG-Plan'
 VERSION = 1
 DIALECTS = ('postgres', 'mysql')  # the two the prototype serves - every other connection is forwarded
@@ -35,6 +36,8 @@ _ROWS = ('api_key', 'saved_query', 'connection')  # what a plan names the digest
 
 SECRET_ENVIRON = 'HTTP_X_QAG_DATAPLANE'  # the two headers as WSGI names them - read, and removed, by app._CapturePeer
 PEER_ENVIRON = 'HTTP_X_QAG_PEER'
+# The data plane asks for a plan only when it would keep one: other calls it forwards keep the metadata cache
+WANTED_ENVIRON = 'HTTP_X_QAG_PLAN_WANTED'
 
 
 def matches(supplied):

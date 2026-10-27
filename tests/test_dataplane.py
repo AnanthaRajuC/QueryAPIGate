@@ -12,6 +12,7 @@ from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 SECRET = 'dp-secret'
+WANTED = 'X-QAG-Plan-Wanted'
 COLUMNS = ['id', 'email', 'name']
 TABLES = {'tables': [{'name': 'customers', 'columns': [{'name': c} for c in COLUMNS]}]}
 
@@ -66,7 +67,7 @@ class PlanTestCase(unittest.TestCase):
         return COLUMNS, [(1, 'a@example.com', 'A')]
 
     def call(self, path, key, secret=SECRET):
-        headers = {'X-API-Key': key, **({dataplane.SECRET_HEADER: secret} if secret else {})}
+        headers = {'X-API-Key': key, **({dataplane.SECRET_HEADER: secret, WANTED: '1'} if secret else {})}
         res = self.client.get(path, headers=headers)
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         value = res.headers.get(dataplane.PLAN_HEADER)
@@ -100,7 +101,7 @@ class WhoGetsAPlanTests(PlanTestCase):
             self.assertIsNone(self.call('/q/by_id?id=1', self.plain)[1])
 
     def test_never_for_an_administrator(self):
-        res = self.client.get('/q/by_id?id=1', headers={**ADMIN, dataplane.SECRET_HEADER: SECRET})
+        res = self.client.get('/q/by_id?id=1', headers={**ADMIN, dataplane.SECRET_HEADER: SECRET, WANTED: '1'})
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
 
     def test_never_for_a_key_with_a_rate_limit(self):
@@ -121,7 +122,8 @@ class WhoGetsAPlanTests(PlanTestCase):
                 self.assertIsNone(self.call(path, self.plain)[1])
 
     def test_a_refusal_gets_none(self):
-        res = self.client.get('/q/by_id?id=x', headers={'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET})
+        res = self.client.get('/q/by_id?id=x', headers={'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET,
+                                                         WANTED: '1'})
         self.assertEqual(res.status_code, 400)
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
 
@@ -132,12 +134,34 @@ class WhoGetsAPlanTests(PlanTestCase):
         self.assertNotEqual(before['api_key'], after['api_key'])
         self.assertEqual(before['saved_query'], after['saved_query'])
 
+    def test_never_unless_the_data_plane_asks_for_one(self):
+        res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET})
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
+
+    def test_a_call_that_wants_no_plan_keeps_the_metadata_cache(self):
+        import json
+
+        from queryapigate import db
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_METADATA_CACHE_TTL': '60'}):
+            forwarded = {'X-API-Key': self.restricted, dataplane.SECRET_HEADER: SECRET}
+            self.assertEqual(self.client.get('/q/by_id?id=1', headers=forwarded).status_code, 200)  # read and cached
+            # Changed behind this process's back, as another instance would: its cache can't know
+            details = json.loads(db.connection().execute(
+                "SELECT details_json FROM api_keys WHERE name = 'restricted'").fetchone()[0])
+            details['allowed_tables'] = ['orders']
+            db.connection().execute("UPDATE api_keys SET details_json = ? WHERE name = 'restricted'",
+                                    (json.dumps(details),))
+            self.assertEqual(self.client.get('/q/by_id?id=1', headers=forwarded).status_code, 200)  # cached
+            wanting = {**forwarded, WANTED: '1'}
+            self.assertEqual(self.client.get('/q/by_id?id=1', headers=wanting).status_code, 403)  # read fresh
+
     def test_the_metadata_cache_is_bypassed_for_the_data_plane(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_METADATA_CACHE_TTL': '60'}):
             self.call('/q/by_id?id=1', self.restricted)  # cached for ordinary calls, from here on
             apikeys.update_key('restricted', allowed_tables=['orders'])
             res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': self.restricted,
-                                                             dataplane.SECRET_HEADER: SECRET})
+                                                             dataplane.SECRET_HEADER: SECRET, WANTED: '1'})
         self.assertEqual(res.status_code, 403)  # the fresh grant, not the cached one
 
 

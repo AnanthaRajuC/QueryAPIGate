@@ -44,6 +44,13 @@ SYSBENCH_IMAGE = 'perconalab/sysbench:latest'
 NETSHOOT_IMAGE = 'nicolaka/netshoot:latest'  # runs `tc` inside a container's network namespace
 PORT = 5091
 U = f'http://127.0.0.1:{PORT}'
+INNER_PORT = PORT + 1  # gunicorn's, behind the data plane (a +dp build, ADR 0028)
+DATAPLANE_SECRET = 'bench-dataplane-secret-0123456789'
+# A governed reader, for the d-blocks: every table the queries read, by schema, and two of order_status's columns masked
+GOVERNED = {'allowed_tables': ['crm.customer', 'orders.orders', 'orders.order_line', 'catalog.item', 'billing.history',
+                               'org.district', 'org.warehouse', 'inventory.stock'],
+            'mask': [{'column': 'customer.c_balance', 'action': 'hash'},
+                     {'column': 'customer.c_last', 'action': 'mask'}]}
 DISTRICTS, CUSTOMERS = 10, 3000  # per warehouse, per district - TPC-C's own
 SCHEMAS = {  # one database per "microservice"
     'org': ['warehouse', 'district'], 'crm': ['customer'], 'orders': ['orders', 'new_order', 'order_line'],
@@ -96,7 +103,9 @@ CACHED = 'order_status_cached'  # order_status with a response cache_ttl, for m7
 
 args = None
 OUT = BUILDS = None
+DATAPLANE_BUILDS = {}  # the head with the Rust data plane in front: outside BUILDS, the other blocks as they were
 _server = None
+_dataplane = None
 _server_meta = {}
 
 
@@ -130,7 +139,7 @@ def seconds(n):
 
 
 def rounds(n):
-    return 1 if args.smoke else n
+    return 1 if args.smoke else min(n, args.rounds or n)
 
 
 def container_cpu_s(name):
@@ -286,22 +295,35 @@ def url_file(query, dist):
 # ---------------------------------------------------------------- the gateway
 
 def stop():
-    global _server, _server_meta
+    global _server, _dataplane, _server_meta
     _server_meta = {}
-    if _server is not None:
+    for process in (_dataplane, _server):
+        if process is None:
+            continue
         try:
-            os.killpg(_server.pid, signal.SIGTERM)
-            _server.wait(timeout=20)
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=20)
         except Exception:
             try:
-                os.killpg(_server.pid, signal.SIGKILL)
+                os.killpg(process.pid, signal.SIGKILL)
             except Exception:
                 pass
-        _server = None
-    for _ in range(50):
-        if sh('bash', '-c', f'ss -ltn | grep -q ":{PORT} "').returncode:
+    _server = _dataplane = None
+    for port in (PORT, INNER_PORT):
+        for _ in range(50):
+            if sh('bash', '-c', f'ss -ltn | grep -q ":{port} "').returncode:
+                break
+            time.sleep(0.2)
+
+
+def wait_healthy(url, what):
+    for _ in range(150):
+        try:
+            urllib.request.urlopen(url + '/health', timeout=1)
             return
-        time.sleep(0.2)
+        except Exception:
+            time.sleep(0.2)
+    raise RuntimeError(f'{what} did not start - see {OUT / "server.log"}')
 
 
 def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_log=True, cpus=None, settings=None):
@@ -310,7 +332,12 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     0.43 gunicorn_conf.py writes one to stdout unless told not to."""
     global _server, _server_meta
     stop()
-    ref, extra = BUILDS[build]
+    ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
+    extra = dict(extra)
+    dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    port = INNER_PORT if dataplane else PORT
+    if dataplane:
+        extra['QUERYAPIGATE_DATAPLANE_SECRET'] = DATAPLANE_SECRET
     export_builds()  # setup does this; a later --out reusing the same database does it here
     home = OUT / f'home-{store}'
     home.mkdir(exist_ok=True)
@@ -320,7 +347,7 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     env.pop('QUERYAPIGATE_DATABASE_URL', None)
     if store == 'postgres':
         env['QUERYAPIGATE_DATABASE_URL'] = f'postgresql://postgres:pw@{ip(PG)}:5432/postgres'
-    cmd = [str(Path(sys.executable).parent / 'gunicorn'), '--bind', f'127.0.0.1:{PORT}', '--workers', str(workers),
+    cmd = [str(Path(sys.executable).parent / 'gunicorn'), '--bind', f'127.0.0.1:{port}', '--workers', str(workers),
            '--worker-class', 'gthread', '--threads', str(threads), '--timeout', '120', '--no-control-socket',
            '-c', 'python:queryapigate.gunicorn_conf']
     if access_log:
@@ -332,21 +359,32 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
     cmd = ['taskset', '-c', cpus or args.gateway_cpus] + cmd
     out = open(OUT / 'server.log', 'a')
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
-    for _ in range(150):
-        try:
-            urllib.request.urlopen(U + '/health', timeout=1)
-            break
-        except Exception:
-            time.sleep(0.2)
-    else:
-        raise RuntimeError(f'gateway {build} did not start - see {OUT / "server.log"}')
+    wait_healthy(f'http://127.0.0.1:{port}', f'gateway {build}')
+    threads_dp = None
+    if dataplane:  # after gunicorn: it reads the store gunicorn's process makes
+        global _dataplane
+        threads_dp = args.dataplane_threads or len(oltp.cpu_list(cpus or args.gateway_cpus))
+        _dataplane = subprocess.Popen(
+            ['taskset', '-c', cpus or args.gateway_cpus, args.dataplane_bin],
+            env={**env, 'QUERYAPIGATE_DATAPLANE_LISTEN': f'127.0.0.1:{PORT}',
+                 'QUERYAPIGATE_DATAPLANE_UPSTREAM': f'http://127.0.0.1:{INNER_PORT}',
+                 'QUERYAPIGATE_DATAPLANE_THREADS': str(threads_dp)},
+            cwd=home, stdout=out, stderr=out, start_new_session=True)
+        wait_healthy(U, f'the data plane for {build}')
     _server_meta = {'build': build, 'workers': workers, 'threads': threads, 'store': store,
-                    'access_log': access_log, 'gateway_cpus': cpus or args.gateway_cpus, 'settings': settings or {}}
+                    'access_log': access_log, 'gateway_cpus': cpus or args.gateway_cpus, 'settings': settings or {},
+                    'dataplane_threads': threads_dp}
     seed(store)
 
 
+def gateway_cpu_s():
+    """CPU seconds the gateway has used: gunicorn's master and workers, and any data plane in front of them."""
+    return oltp.tree_cpu_s(gunicorn_master()) + (oltp.tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0)
+
+
 def gunicorn_master():
-    pids = [int(p) for p in sh('pgrep', '-f', f'gunicorn --bind 127.0.0.1:{PORT}').stdout.split()]
+    port = INNER_PORT if _dataplane is not None else PORT
+    pids = [int(p) for p in sh('pgrep', '-f', f'gunicorn --bind 127.0.0.1:{port}').stdout.split()]
     for p in pids:
         try:
             ppid = int(open(f'/proc/{p}/stat').read().rsplit(')', 1)[1].split()[1])
@@ -382,8 +420,11 @@ def seed(store):
         seeded = False
     if not seeded:
         _seed_estate()
-    _keys[store] = api('POST', '/api/v1/api-keys', {'name': f'reader-{os.getpid()}-{int(time.time())}',
-                                                    'connections': [], 'queries': [*QUERIES, CACHED]})['secret']
+    stamp = f'{os.getpid()}-{int(time.time())}'
+    _keys[store] = api('POST', '/api/v1/api-keys', {'name': f'reader-{stamp}', 'connections': [],
+                                                    'queries': [*QUERIES, CACHED]})['secret']
+    _keys[store + '-governed'] = api('POST', '/api/v1/api-keys', {'name': f'governed-{stamp}', 'connections': [],
+                                                                  'queries': [*QUERIES], **GOVERNED})['secret']
 
 
 def _seed_estate():
@@ -402,8 +443,8 @@ def _seed_estate():
                                             'description': desc + ', cached for 30 s'})
 
 
-def reader_key():
-    return _keys[_server_meta.get('store', 'sqlite')]
+def reader_key(governed=False):
+    return _keys[_server_meta.get('store', 'sqlite') + ('-governed' if governed else '')]
 
 
 # ---------------------------------------------------------------- load
@@ -437,11 +478,11 @@ def cache_counts():
     return found
 
 
-def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform', warm=True, rnd=None, extra=None):
-    urls, key = url_file(query, dist), reader_key()
+def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform', warm=True, rnd=None, extra=None,
+            governed=False):
+    urls, key = url_file(query, dist), reader_key(governed)
     if warm:
         oha(urls, key, c=8, secs=5)
-    master = gunicorn_master()
     freqs, done = [], threading.Event()
 
     def sample():
@@ -451,17 +492,18 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
     cache0 = cache_counts() if query == CACHED else None
     pg_store = _server_meta.get('store') == 'postgres'
     s0 = container_cpu_s(PG) if pg_store else 0
-    q0, g0, m0, l0, t0 = (questions(), oltp.tree_cpu_s(master), container_cpu_s(MYSQL),
+    q0, g0, m0, l0, t0 = (questions(), gateway_cpu_s(), container_cpu_s(MYSQL),
                           oltp.cpus_busy_s(args.load_cpus), time.time())
     sampler.start()
     r = oha(urls, key, c=c, secs=secs, q=q, correction=correction)
     done.set()
     wall = time.time() - t0
-    g1, m1, l1, q1 = (oltp.tree_cpu_s(master), container_cpu_s(MYSQL), oltp.cpus_busy_s(args.load_cpus),
+    g1, m1, l1, q1 = (gateway_cpu_s(), container_cpu_s(MYSQL), oltp.cpus_busy_s(args.load_cpus),
                       questions())
     s1 = container_cpu_s(PG) if pg_store else 0
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': query, 'dist': dist, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
+           'key': 'governed' if governed else 'reader',
            **_server_meta, **r, 'gw_cores': (g1 - g0) / wall, 'db_cores': (m1 - m0) / wall,
            'load_cores': (l1 - l0) / wall, 'mysql_statements_per_req': (q1 - q0 - 1) / n,
            'store_cores': (s1 - s0) / wall if pg_store else None,
@@ -1000,9 +1042,72 @@ def n9():
     floor('n9', 'end')
 
 
+# ---------------------------------------------------------------- the Rust data plane (ADR 0028)
+
+def dataplane_builds(base=True):
+    """The builds the d-blocks compare: the oldest ref (0.43 as it ships), the head with and without the metadata
+    cache, and the head with the data plane in front, on the same gateway cores, with and without it."""
+    head = args.head_label
+    return ([args.base_label] if base else []) + [head, head + '+cache', head + '+dp', head + '+dp+cache']
+
+
+def d1():
+    """One worker, 32 callers (as m2), plain and governed - and the data plane in front of one. Calls a second per
+    gateway core is the decision's measure."""
+    floor('d1', 'start')
+    for query, governed in [('customer', False), ('order_status', False), ('order_status', True),
+                            ('stock_level', False)]:
+        for r, order in rotations(dataplane_builds(), 5):
+            for build in order:
+                start(build)
+                measure('d1', query, c=32, rnd=r, governed=governed)
+    floor('d1', 'end')
+
+
+def d2():
+    """One caller at a time: the latency of a single call."""
+    floor('d2', 'start')
+    for query, governed in [('customer', False), ('order_status', False), ('order_status', True)]:
+        for r, order in rotations(dataplane_builds(base=False), 5):
+            for build in order:
+                start(build)
+                measure('d2', query, c=1, secs=20, rnd=r, governed=governed)
+    floor('d2', 'end')
+
+
+def d3():
+    """MySQL 0.5 ms away (netem; the SQLite store stays local): one caller, and 32."""
+    floor('d3', 'start')
+    netem(MYSQL, '0.5ms')
+    try:
+        for c in (1, 32):
+            for r, order in rotations(dataplane_builds(base=False), 5):
+                for build in order:
+                    start(build)
+                    measure('d3', 'order_status', c=c, secs=20, rnd=r, extra={'netem': '0.5ms'})
+    finally:
+        netem(MYSQL, '0ms')
+    floor('d3', 'end')
+
+
+def d4():
+    """Capacity on the whole gateway: Python's best (a worker per gateway CPU) against the data plane with one worker
+    behind it, 64 callers, both with the metadata cache."""
+    floor('d4', 'start')
+    workers = len(oltp.cpu_list(args.gateway_cpus))
+    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', 1)]
+    for query, governed in [('customer', False), ('order_status', True)]:
+        for r, order in rotations(builds, 3):
+            for build, n in order:
+                start(build, workers=n)
+                measure('d4', query, c=64, rnd=r, governed=governed)
+    floor('d4', 'end')
+
+
 BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'm1': m1, 'm2': m2, 'm3': m3, 'm4': m4, 'm5': m5,
           'm6': m6, 'm7': m7, 'm8': m8, 'm9': m9, 'm10': m10, 'm11': m11,
-          'n1': n1, 'n2': n2, 'n3': n3, 'n4': n4, 'n5': n5, 'n6': n6, 'n9': n9}
+          'n1': n1, 'n2': n2, 'n3': n3, 'n4': n4, 'n5': n5, 'n6': n6, 'n9': n9,
+          'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
 SESSIONS = {'A': ['env', 'm1', 'm2', 'm3'], 'B': ['env', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'env'],
             # v2 (0.43): the 0.42 -> 0.43 comparison, then the review's questions
             'C': ['env', 'm2', 'm3', 'm8', 'm9', 'm10', 'm11', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n9', 'env']}
@@ -1025,6 +1130,11 @@ def main():
     parser.add_argument('--py-spy', default=shutil.which('py-spy'))
     parser.add_argument('--m2-queries', default='', help='comma-separated queries for m2 (default: all six)')
     parser.add_argument('--smoke', action='store_true', help='2 s runs, one round: checks the mechanics only')
+    parser.add_argument('--rounds', type=int, help='at most this many rounds per comparison (default: each block\'s)')
+    parser.add_argument('--dataplane-bin', default=str(REPO / 'dataplane' / 'target' / 'release' /
+                                                         'queryapigate-dataplane'),
+                        help='the Rust data plane, for the d-blocks (default %(default)s)')
+    parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
     args = parser.parse_args()
     OUT = Path(args.out)
     if args.smoke:
@@ -1035,6 +1145,9 @@ def main():
     args.head_label, args.base_label = labels[-1], labels[0]
     BUILDS = {label: (ref, {}) for label, ref in zip(labels, refs, strict=True)}
     BUILDS[args.head_label + '+cache'] = (refs[-1], {'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})
+    DATAPLANE_BUILDS.update({args.head_label + '+dp': (refs[-1], {'dataplane': True}),
+                             args.head_label + '+dp+cache': (refs[-1], {'dataplane': True,
+                                                                        'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
     oltp.args = args  # oltp's helpers read the CPU lists and --smoke from here
     names = [n for b in args.blocks for n in SESSIONS.get(b, [b])]
     try:

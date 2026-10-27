@@ -21,6 +21,9 @@ pub type Body = BoxBody<Bytes, hyper::Error>;
 pub const SECRET_HEADER: HeaderName = HeaderName::from_static("x-qag-dataplane");
 pub const PEER_HEADER: HeaderName = HeaderName::from_static("x-qag-peer");
 pub const PLAN_HEADER: HeaderName = HeaderName::from_static("x-qag-plan");
+/// Sent only with a call whose plan the data plane would keep: Python reads that call's rows past its metadata cache
+/// to digest them, and every other forwarded call keeps the cache.
+pub const WANTED_HEADER: HeaderName = HeaderName::from_static("x-qag-plan-wanted");
 
 /// Headers that describe one connection, not the message: never passed on (RFC 9110, 7.6.1), nor any the
 /// `Connection` header names.
@@ -70,6 +73,7 @@ impl Forwarder {
         mut parts: hyper::http::request::Parts,
         body: Body,
         peer: IpAddr,
+        want_plan: bool,
     ) -> Result<Response<Incoming>, Box<Response<Body>>> {
         let path = parts
             .uri
@@ -90,6 +94,11 @@ impl Forwarder {
             })?;
         clean(&mut parts.headers);
         parts.headers.insert(SECRET_HEADER, self.secret.clone());
+        if want_plan {
+            parts
+                .headers
+                .insert(WANTED_HEADER, HeaderValue::from_static("1"));
+        }
         parts.headers.insert(
             PEER_HEADER,
             HeaderValue::from_str(&peer_text(peer)).expect("an IP address is ASCII"),
@@ -149,7 +158,7 @@ pub fn peer_text(peer: IpAddr) -> String {
 
 /// The headers only the data plane and Python say to each other: removed from what a client sends, so only this
 /// process can speak for itself, and from what Python answers. Python's own `X-QAG-CSRF` passes, as any other.
-const OURS: [HeaderName; 3] = [SECRET_HEADER, PEER_HEADER, PLAN_HEADER];
+const OURS: [HeaderName; 4] = [SECRET_HEADER, PEER_HEADER, PLAN_HEADER, WANTED_HEADER];
 
 /// Remove hop-by-hop headers, and the data plane's own (`OURS`).
 pub fn clean(headers: &mut HeaderMap) {

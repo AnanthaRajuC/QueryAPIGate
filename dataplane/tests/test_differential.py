@@ -21,6 +21,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 import unittest
 import urllib.parse
 from collections import Counter, defaultdict
@@ -175,6 +176,7 @@ KEYS = {  # name -> grants
     'masked': {'connections': ['shop'], 'mask': [{'column': 'customer.email', 'action': 'hash'},
                                                  {'column': 'customer.phone', 'action': 'mask'},
                                                  {'column': 'customer.secret', 'action': 'drop'},
+                                                 {'column': 'customer.balance', 'action': 'hash'},
                                                  {'column': '*.notes', 'action': 'null'}]},
     'restricted': {'connections': ['shop'], 'allowed_tables': ['customer', 'orders']},
     'both': {'connections': ['shop'], 'allowed_tables': ['customer', 'orders', 'order_line', 'item',
@@ -281,7 +283,13 @@ class DifferentialTests(unittest.TestCase):
         return 'GET', path, {'X-API-Key': secret}, None
 
     def mutate(self, step):
-        """Partway through: change what calls see - each must be seen by both at once."""
+        """Partway through: change what calls see - each seen by both at once, or, with the metadata cache on, once
+        its TTL has passed: the data plane is another instance, which metacache.py lets see a change that much later."""
+        if step in (CALLS // 4, CALLS // 2, 2 * CALLS // 3, 3 * CALLS // 4):
+            self.change(step)
+            time.sleep(float(os.environ.get('QUERYAPIGATE_METADATA_CACHE_TTL') or 0))
+
+    def change(self, step):
         if step == CALLS // 4:
             self.api('PATCH', '/api/v1/api-keys/masked', {'mask': [{'column': 'customer.email', 'action': 'null'},
                                                                    {'column': 'customer.last', 'action': 'mask'}]})

@@ -74,6 +74,9 @@ pub struct Settings {
     pub pool_size: u32,
     pub flush_every: Duration,
     pub json_logs: bool,
+    /// QUERYAPIGATE_METADATA_CACHE_TTL: how long the key, query and connection rows a call reads are reused, as
+    /// metacache.py reuses them - this process is one more instance, so a change is seen up to this much later
+    pub metadata_ttl: Duration,
 }
 
 fn off(value: Option<String>) -> bool {
@@ -149,6 +152,13 @@ impl Settings {
                     .max(0.0),
             ),
             json_logs: flag("QUERYAPIGATE_JSON_LOGS"),
+            metadata_ttl: Duration::from_secs_f64(
+                get("QUERYAPIGATE_METADATA_CACHE_TTL")
+                    .and_then(|v| v.trim().parse::<f64>().ok())
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(0.0)
+                    .max(0.0),
+            ),
         }
     }
 }
@@ -228,6 +238,9 @@ struct Capture {
     dialect: String,
 }
 
+/// Store rows held for the metadata cache: until when, and the rows.
+type Reused = (Instant, Arc<Rows>);
+
 enum Outcome {
     Served(Response<Body>),
     Forward(Option<Capture>),
@@ -249,6 +262,8 @@ pub struct App {
     used: Mutex<HashMap<(String, String, bool), Instant>>,
     store_mask_key: Mutex<Option<Vec<u8>>>,
     runs: mpsc::Sender<Json>,
+    /// (kind, key) -> (until, rows): the store rows metacache.py would reuse, for QUERYAPIGATE_METADATA_CACHE_TTL
+    rows: Mutex<HashMap<(char, String), Reused>>,
 }
 
 impl App {
@@ -267,6 +282,7 @@ impl App {
             used: Mutex::new(HashMap::new()),
             store_mask_key: Mutex::new(None),
             runs,
+            rows: Mutex::new(HashMap::new()),
         });
         tokio::spawn(report(app.clone(), queue));
         app
@@ -276,7 +292,11 @@ impl App {
         let started = Instant::now();
         if !candidate(&request) {
             let (parts, body) = request.into_parts();
-            return forward::relay(self.forward.send(parts, body.boxed(), peer.ip()).await);
+            return forward::relay(
+                self.forward
+                    .send(parts, body.boxed(), peer.ip(), false)
+                    .await,
+            );
         }
         let (parts, body) = request.into_parts();
         let body = match body.collect().await {
@@ -294,24 +314,35 @@ impl App {
             Served(response) => response,
             Forward(capture) => {
                 let full = Full::new(body).map_err(|never| match never {}).boxed();
-                let response = self.forward.send(parts, full, peer.ip()).await;
+                let response = self
+                    .forward
+                    .send(parts, full, peer.ip(), capture.is_some())
+                    .await;
                 if let (Some(capture), Ok(response)) = (capture, &response) {
+                    let digests = capture.digests.clone();
+                    let carried = response.headers().contains_key(PLAN_HEADER);
                     self.keep_plan(capture, response.headers());
+                    if !carried && response.status() == hyper::StatusCode::OK {
+                        // Answered, with no plan at all: a call Python keeps (a write, a cached query) - stop asking a
+                        // while. A plan that came but didn't fit (the rows changed in between) is just not kept.
+                        self.python_only(&digests);
+                    }
                 }
                 forward::relay(response)
             }
         }
     }
 
-    fn keep_plan(&self, capture: Capture, headers: &HeaderMap) {
+    /// Keep the plan Python's answer carries, if it is one for exactly this call - whether it did.
+    fn keep_plan(&self, capture: Capture, headers: &HeaderMap) -> bool {
         let Some(value) = headers.get(PLAN_HEADER).and_then(|v| v.to_str().ok()) else {
-            return;
+            return false;
         };
         let Ok(bytes) = base64::engine::general_purpose::URL_SAFE.decode(value) else {
-            return;
+            return false;
         };
         let Ok(plan) = serde_json::from_slice::<Plan>(&bytes) else {
-            return;
+            return false;
         };
         // Only for exactly the rows this call read, and what they say
         let matches = plan.v == 1
@@ -323,10 +354,10 @@ impl App {
             && plan.connection.name == capture.connection
             && plan.connection.dialect == capture.dialect;
         let Ok(dialect) = plan.connection.dialect.parse::<Dialect>() else {
-            return;
+            return false;
         };
         if !matches {
-            return;
+            return false;
         }
         let actions = match &plan.mask {
             None => None,
@@ -337,12 +368,12 @@ impl App {
                 .collect::<Result<Vec<_>, _>>()
             {
                 Ok(actions) if actions.len() == mask.columns => Some(actions),
-                _ => return,
+                _ => return false,
             },
         };
         let ttl = match (&plan.mask, plan.expires_in) {
             (Some(_), Some(seconds)) => Duration::from_secs_f64(seconds.max(0.0)),
-            (Some(_), None) => return,
+            (Some(_), None) => return false,
             (None, _) => UNMASKED_PLAN_TTL,
         };
         let used = plan.used.iter().cloned().collect();
@@ -357,6 +388,7 @@ impl App {
             plans.clear();
         }
         plans.insert(capture.digests, Held::Plan(ready, Instant::now() + ttl));
+        true
     }
 
     fn python_only(&self, digests: &Digests) {
@@ -385,6 +417,35 @@ impl App {
         Some(key)
     }
 
+    /// A store read, reused for QUERYAPIGATE_METADATA_CACHE_TTL when it is set - or None when it fails.
+    async fn cached<F, Fut>(&self, kind: char, key: &str, load: F) -> Option<Arc<Rows>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Rows, sqlx::Error>>,
+    {
+        let ttl = self.settings.metadata_ttl;
+        if ttl.is_zero() {
+            return load().await.ok().map(Arc::new);
+        }
+        let now = Instant::now();
+        if let Some((until, rows)) = self
+            .rows
+            .lock()
+            .expect("rows")
+            .get(&(kind, key.to_string()))
+            && *until > now
+        {
+            return Some(rows.clone());
+        }
+        let rows = Arc::new(load().await.ok()?);
+        let mut cache = self.rows.lock().expect("rows");
+        if cache.len() >= MAX_PLANS {
+            cache.clear();
+        }
+        cache.insert((kind, key.to_string()), (now + ttl, rows.clone()));
+        Some(rows)
+    }
+
     async fn serve(
         &self,
         parts: &hyper::http::request::Parts,
@@ -405,8 +466,13 @@ impl App {
             return Forward(None);
         };
 
-        // The key, and that Python has recorded its use lately
-        let Ok(key_rows) = store.key(&auth::hash(&request.key)).await else {
+        // The key and the saved query, read together; then the connection the query names
+        let hash = auth::hash(&request.key);
+        let (key_rows, query_rows) = tokio::join!(
+            self.cached('k', &hash, || store.key(&hash)),
+            self.cached('q', &name, || store.query("default", &name)),
+        );
+        let (Some(key_rows), Some(query_rows)) = (key_rows, query_rows) else {
             return Forward(None);
         };
         let clock = Clock::now();
@@ -422,10 +488,6 @@ impl App {
         if caller.workspace != "default" {
             return Forward(None);
         }
-        // The saved query's published version, and its connection
-        let Ok(query_rows) = store.query("default", &name).await else {
-            return Forward(None);
-        };
         let Some((version, fields)) = published(&query_rows) else {
             return Forward(None);
         };
@@ -436,7 +498,12 @@ impl App {
         else {
             return Forward(None);
         };
-        let Ok(connection_rows) = store.connection("default", &connection_name).await else {
+        let Some(connection_rows) = self
+            .cached('c', &connection_name, || {
+                store.connection("default", &connection_name)
+            })
+            .await
+        else {
             return Forward(None);
         };
         if connection_rows.rows.len() != 1
