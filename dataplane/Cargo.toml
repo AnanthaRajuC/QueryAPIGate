@@ -8,6 +8,7 @@ base64 = "0.23.1"
 bytes = "1.12.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 fernet = { version = "0.2.2", default-features = false, features = ["rustcrypto"] }
+getrandom = "0.4.3"
 hex = "0.4.3"
 hmac = "0.13.0"
 http-body-util = "0.1.5"

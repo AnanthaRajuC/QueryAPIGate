@@ -1,0 +1,192 @@
+{"dialect":"postgres","sql":"SELECT 5::int2 AS v","actions":null,"columns":[["v","INT2"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":5}]\n"}
+{"dialect":"postgres","sql":"SELECT -5::int4 AS v","actions":null,"columns":[["v","INT4"]],"hex":[["2d35"]],"rust_error":null,"expected":"[{\"v\":-5}]\n"}
+{"dialect":"postgres","sql":"SELECT 9223372036854775807::int8 AS v","actions":null,"columns":[["v","INT8"]],"hex":[["39323233333732303336383534373735383037"]],"rust_error":null,"expected":"[{\"v\":9223372036854775807}]\n"}
+{"dialect":"postgres","sql":"SELECT 42::oid AS v","actions":null,"columns":[["v","OID"]],"hex":[["3432"]],"rust_error":null,"expected":"[{\"v\":42}]\n"}
+{"dialect":"postgres","sql":"SELECT 0.1::float4 AS v","actions":null,"columns":[["v","FLOAT4"]],"hex":[["302e31"]],"rust_error":null,"expected":"[{\"v\":0.1}]\n"}
+{"dialect":"postgres","sql":"SELECT 0.1::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["302e31"]],"rust_error":null,"expected":"[{\"v\":0.1}]\n"}
+{"dialect":"postgres","sql":"SELECT 1e300::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["31652b333030"]],"rust_error":null,"expected":"[{\"v\":1e+300}]\n"}
+{"dialect":"postgres","sql":"SELECT '-0'::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["2d30"]],"rust_error":null,"expected":"[{\"v\":-0.0}]\n"}
+{"dialect":"postgres","sql":"SELECT 'NaN'::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["4e614e"]],"rust_error":null,"expected":"[{\"v\":NaN}]\n"}
+{"dialect":"postgres","sql":"SELECT 'Infinity'::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["496e66696e697479"]],"rust_error":null,"expected":"[{\"v\":Infinity}]\n"}
+{"dialect":"postgres","sql":"SELECT '-Infinity'::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["2d496e66696e697479"]],"rust_error":null,"expected":"[{\"v\":-Infinity}]\n"}
+{"dialect":"postgres","sql":"SELECT 1e16::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["31652b3136"]],"rust_error":null,"expected":"[{\"v\":1e+16}]\n"}
+{"dialect":"postgres","sql":"SELECT 123.456::float8 AS v","actions":null,"columns":[["v","FLOAT8"]],"hex":[["3132332e343536"]],"rust_error":null,"expected":"[{\"v\":123.456}]\n"}
+{"dialect":"postgres","sql":"SELECT 3.4028235e38::float4 AS v","actions":null,"columns":[["v","FLOAT4"]],"hex":[["332e34303238323335652b3338"]],"rust_error":null,"expected":"[{\"v\":3.4028235e+38}]\n"}
+{"dialect":"postgres","sql":"SELECT 5.0::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["352e30"]],"rust_error":null,"expected":"[{\"v\":5.0}]\n"}
+{"dialect":"postgres","sql":"SELECT 0.0000001::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["302e30303030303031"]],"rust_error":null,"expected":"[{\"v\":1e-07}]\n"}
+{"dialect":"postgres","sql":"SELECT 12345678901234567890.123::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["31323334353637383930313233343536373839302e313233"]],"rust_error":null,"expected":"[{\"v\":1.2345678901234567e+19}]\n"}
+{"dialect":"postgres","sql":"SELECT 'NaN'::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["4e614e"]],"rust_error":null,"expected":"[{\"v\":NaN}]\n"}
+{"dialect":"postgres","sql":"SELECT 1e20::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["313030303030303030303030303030303030303030"]],"rust_error":null,"expected":"[{\"v\":1e+20}]\n"}
+{"dialect":"postgres","sql":"SELECT -3.14::numeric AS v","actions":null,"columns":[["v","NUMERIC"]],"hex":[["2d332e3134"]],"rust_error":null,"expected":"[{\"v\":-3.14}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":null,"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{\"v\":true}]\n"}
+{"dialect":"postgres","sql":"SELECT false AS v","actions":null,"columns":[["v","BOOL"]],"hex":[["66"]],"rust_error":null,"expected":"[{\"v\":false}]\n"}
+{"dialect":"postgres","sql":"SELECT 'hello'::text AS v","actions":null,"columns":[["v","TEXT"]],"hex":[["68656c6c6f"]],"rust_error":null,"expected":"[{\"v\":\"hello\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀汉'::text AS v","actions":null,"columns":[["v","TEXT"]],"hex":[["c3a9f09f9880e6b189"]],"rust_error":null,"expected":"[{\"v\":\"\\u00e9\\ud83d\\ude00\\u6c49\"}]\n"}
+{"dialect":"postgres","sql":"SELECT E'q\"\\\\\\n\\t\\x01\\x7f'::text AS v","actions":null,"columns":[["v","TEXT"]],"hex":[["71225c0a09017f"]],"rust_error":null,"expected":"[{\"v\":\"q\\\"\\\\\\n\\t\\u0001\\u007f\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":null,"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a'::char(5) AS v","actions":null,"columns":[["v","CHAR"]],"hex":[["6120202020"]],"rust_error":null,"expected":"[{\"v\":\"a    \"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::varchar AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"x\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'pg_name'::name AS v","actions":null,"columns":[["v","NAME"]],"hex":[["70675f6e616d65"]],"rust_error":null,"expected":"[{\"v\":\"pg_name\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'c'::\"char\" AS v","actions":null,"columns":[["v","\"CHAR\""]],"hex":[["63"]],"rust_error":null,"expected":"[{\"v\":\"c\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x48656c6c6f'::bytea AS v","actions":null,"columns":[["v","BYTEA"]],"hex":[["5c7834383635366336633666"]],"rust_error":null,"expected":"[{\"v\":\"Hello\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\xff00fe80'::bytea AS v","actions":null,"columns":[["v","BYTEA"]],"hex":[["5c786666303066653830"]],"rust_error":null,"expected":"[{\"v\":\"\\ufffd\\u0000\\ufffd\\ufffd\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::bytea AS v","actions":null,"columns":[["v","BYTEA"]],"hex":[["5c78"]],"rust_error":null,"expected":"[{\"v\":\"\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-02-29'::date AS v","actions":null,"columns":[["v","DATE"]],"hex":[["323032342d30322d3239"]],"rust_error":null,"expected":"[{\"v\":\"2024-02-29\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '0001-01-01'::date AS v","actions":null,"columns":[["v","DATE"]],"hex":[["303030312d30312d3031"]],"rust_error":null,"expected":"[{\"v\":\"0001-01-01\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '9999-12-31'::date AS v","actions":null,"columns":[["v","DATE"]],"hex":[["393939392d31322d3331"]],"rust_error":null,"expected":"[{\"v\":\"9999-12-31\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'infinity'::date AS v","actions":null,"columns":[["v","DATE"]],"hex":[["696e66696e697479"]],"rust_error":null,"expected":"[{\"v\":\"9999-12-31\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '12:34:56'::time AS v","actions":null,"columns":[["v","TIME"]],"hex":[["31323a33343a3536"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '12:34:56.5'::time AS v","actions":null,"columns":[["v","TIME"]],"hex":[["31323a33343a35362e35"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56.500000\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '23:59:59.999999'::time AS v","actions":null,"columns":[["v","TIME"]],"hex":[["32333a35393a35392e393939393939"]],"rust_error":null,"expected":"[{\"v\":\"23:59:59.999999\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '12:34:56+05:30'::timetz AS v","actions":null,"columns":[["v","TIMETZ"]],"hex":[["31323a33343a35362b30353a3330"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56+05:30\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '12:34:56.25-08'::timetz AS v","actions":null,"columns":[["v","TIMETZ"]],"hex":[["31323a33343a35362e32352d3038"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56.250000-08:00\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-02 03:04:05'::timestamp AS v","actions":null,"columns":[["v","TIMESTAMP"]],"hex":[["323032342d30312d30322030333a30343a3035"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-02 03:04:05\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-02 03:04:05.678'::timestamp AS v","actions":null,"columns":[["v","TIMESTAMP"]],"hex":[["323032342d30312d30322030333a30343a30352e363738"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-02 03:04:05\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-02 03:04:05+00'::timestamptz AS v","actions":null,"columns":[["v","TIMESTAMPTZ"]],"hex":[["323032342d30312d30322030333a30343a30352b3030"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-02 03:04:05\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-07-02 03:04:05.5+00'::timestamptz AS v","actions":null,"columns":[["v","TIMESTAMPTZ"]],"hex":[["323032342d30372d30322030333a30343a30352e352b3030"]],"rust_error":null,"expected":"[{\"v\":\"2024-07-02 03:04:05\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '1 day 02:03:04'::interval AS v","actions":null,"columns":[["v","INTERVAL"]],"hex":[["31206461792030323a30333a3034"]],"rust_error":null,"expected":"[{\"v\":\"1 day, 2:03:04\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '-1 hour'::interval AS v","actions":null,"columns":[["v","INTERVAL"]],"hex":[["2d30313a30303a3030"]],"rust_error":null,"expected":"[{\"v\":\"-1 day, 23:00:00\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '{\"a\": 1, \"b\": [1.5, \"x\", null, true], \"c\": \"é\"}'::json AS v","actions":null,"columns":[["v","JSON"]],"hex":[["7b2261223a20312c202262223a205b312e352c202278222c206e756c6c2c20747275655d2c202263223a2022c3a9227d"]],"rust_error":null,"expected":"[{\"v\":\"{\\\"a\\\": 1, \\\"b\\\": [1.5, \\\"x\\\", null, true], \\\"c\\\": \\\"\\\\u00e9\\\"}\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '5'::jsonb AS v","actions":null,"columns":[["v","JSONB"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":5}]\n"}
+{"dialect":"postgres","sql":"SELECT '\"s\"'::jsonb AS v","actions":null,"columns":[["v","JSONB"]],"hex":[["227322"]],"rust_error":null,"expected":"[{\"v\":\"s\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'null'::jsonb AS v","actions":null,"columns":[["v","JSONB"]],"hex":[["6e756c6c"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '[1, 2.0, 1e2, -0, 0.1]'::jsonb AS v","actions":null,"columns":[["v","JSONB"]],"hex":[["5b312c20322e302c203130302c20302c20302e315d"]],"rust_error":null,"expected":"[{\"v\":\"[1, 2.0, 100, 0, 0.1]\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '{\"k\": 12345678901234567890, \"z\": 1, \"a\": 2}'::json AS v","actions":null,"columns":[["v","JSON"]],"hex":[["7b226b223a2031323334353637383930313233343536373839302c20227a223a20312c202261223a20327d"]],"rust_error":null,"expected":"[{\"v\":\"{\\\"k\\\": 12345678901234567890, \\\"z\\\": 1, \\\"a\\\": 2}\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '{\"z\": 1, \"a\": 2}'::jsonb AS v","actions":null,"columns":[["v","JSONB"]],"hex":[["7b2261223a20322c20227a223a20317d"]],"rust_error":null,"expected":"[{\"v\":\"{\\\"a\\\": 2, \\\"z\\\": 1}\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid AS v","actions":null,"columns":[["v","UUID"]],"hex":[["61306565626339392d396330622d346566382d626236642d366262396264333830613131"]],"rust_error":null,"expected":"[{\"v\":\"a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '10.0.0.1/24'::inet AS v","actions":null,"columns":[["v","INET"]],"hex":[["31302e302e302e312f3234"]],"rust_error":null,"expected":"[{\"v\":\"10.0.0.1/24\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '12.34'::money AS v","actions":null,"columns":[["v","MONEY"]],"hex":[["2431322e3334"]],"rust_error":null,"expected":"[{\"v\":\"$12.34\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ARRAY[1,2,3] AS v","actions":null,"columns":[["v","INT4[]"]],"hex":[["7b312c322c337d"]],"rust_error":null,"expected":"[{\"v\":\"[1, 2, 3]\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ARRAY['a','b'] AS v","actions":null,"columns":[["v","TEXT[]"]],"hex":[["7b612c627d"]],"rust_error":null,"expected":"[{\"v\":\"[\\\"a\\\", \\\"b\\\"]\"}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::int AS v","actions":null,"columns":[["v","INT4"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":null,"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '1.5'::real AS v","actions":null,"columns":[["v","FLOAT4"]],"hex":[["312e35"]],"rust_error":null,"expected":"[{\"v\":1.5}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"j***@example.com\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"e4688a19341c00d2\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"jane@example.com\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '@example.com'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT '@example.com'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '@example.com'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"***@example.com\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '@example.com'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"7dbdf3ef898615c9\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '@example.com'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"@example.com\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["78"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"x***\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"02e967991fafb6da\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'x'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"x\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"9bcd062a279d5c63\"}]\n"}
+{"dialect":"postgres","sql":"SELECT ''::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'abcd'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["61626364"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 'abcd'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["61626364"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'abcd'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["61626364"]],"rust_error":null,"expected":"[{\"v\":\"a***\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'abcd'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["61626364"]],"rust_error":null,"expected":"[{\"v\":\"a6cc1e60e463b376\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'abcd'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["61626364"]],"rust_error":null,"expected":"[{\"v\":\"abcd\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀@x'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["c3a9f09f98804078"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀@x'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["c3a9f09f98804078"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀@x'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["c3a9f09f98804078"]],"rust_error":null,"expected":"[{\"v\":\"\\u00e9***@x\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀@x'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["c3a9f09f98804078"]],"rust_error":null,"expected":"[{\"v\":\"f8c8ac59c850782d\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'é😀@x'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["c3a9f09f98804078"]],"rust_error":null,"expected":"[{\"v\":\"\\u00e9\\ud83d\\ude00@x\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 5::int4 AS v","actions":["drop"],"columns":[["v","INT4"]],"hex":[["35"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 5::int4 AS v","actions":["null"],"columns":[["v","INT4"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 5::int4 AS v","actions":["mask"],"columns":[["v","INT4"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 5::int4 AS v","actions":["hash"],"columns":[["v","INT4"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":\"9995da0f07f967ee\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 5::int4 AS v","actions":["keep"],"columns":[["v","INT4"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":5}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":["drop"],"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":["null"],"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":["mask"],"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":["hash"],"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{\"v\":\"6eea1f95a3409193\"}]\n"}
+{"dialect":"postgres","sql":"SELECT true AS v","actions":["keep"],"columns":[["v","BOOL"]],"hex":[["74"]],"rust_error":null,"expected":"[{\"v\":true}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x41'::bytea AS v","actions":["drop"],"columns":[["v","BYTEA"]],"hex":[["5c783431"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x41'::bytea AS v","actions":["null"],"columns":[["v","BYTEA"]],"hex":[["5c783431"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x41'::bytea AS v","actions":["mask"],"columns":[["v","BYTEA"]],"hex":[["5c783431"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x41'::bytea AS v","actions":["hash"],"columns":[["v","BYTEA"]],"hex":[["5c783431"]],"rust_error":null,"expected":"[{\"v\":\"bb159828853bcb9b\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '\\x41'::bytea AS v","actions":["keep"],"columns":[["v","BYTEA"]],"hex":[["5c783431"]],"rust_error":null,"expected":"[{\"v\":\"A\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-01'::date AS v","actions":["drop"],"columns":[["v","DATE"]],"hex":[["323032342d30312d3031"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-01'::date AS v","actions":["null"],"columns":[["v","DATE"]],"hex":[["323032342d30312d3031"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-01'::date AS v","actions":["mask"],"columns":[["v","DATE"]],"hex":[["323032342d30312d3031"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-01'::date AS v","actions":["hash"],"columns":[["v","DATE"]],"hex":[["323032342d30312d3031"]],"rust_error":null,"expected":"[{\"v\":\"731369c4ccd14698\"}]\n"}
+{"dialect":"postgres","sql":"SELECT '2024-01-01'::date AS v","actions":["keep"],"columns":[["v","DATE"]],"hex":[["323032342d30312d3031"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-01\"}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT NULL::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a@b@c'::text AS v","actions":["drop"],"columns":[["v","TEXT"]],"hex":[["6140624063"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a@b@c'::text AS v","actions":["null"],"columns":[["v","TEXT"]],"hex":[["6140624063"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a@b@c'::text AS v","actions":["mask"],"columns":[["v","TEXT"]],"hex":[["6140624063"]],"rust_error":null,"expected":"[{\"v\":\"a***@c\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a@b@c'::text AS v","actions":["hash"],"columns":[["v","TEXT"]],"hex":[["6140624063"]],"rust_error":null,"expected":"[{\"v\":\"d9a3b0a7bc68442e\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 'a@b@c'::text AS v","actions":["keep"],"columns":[["v","TEXT"]],"hex":[["6140624063"]],"rust_error":null,"expected":"[{\"v\":\"a@b@c\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 1 AS a, 2 AS a, 3 AS a_2","actions":null,"columns":[["a","INT4"],["a","INT4"],["a_2","INT4"]],"hex":[["31","32","33"]],"rust_error":null,"expected":"[{\"a\":1,\"a_2\":3}]\n"}
+{"dialect":"postgres","sql":"SELECT 1 AS \"x y\", 'é' AS \"é\"","actions":null,"columns":[["x y","INT4"],["é","TEXT"]],"hex":[["31","c3a9"]],"rust_error":null,"expected":"[{\"x y\":1,\"\\u00e9\":\"\\u00e9\"}]\n"}
+{"dialect":"postgres","sql":"SELECT 1 AS a, 2 AS b","actions":null,"columns":[["a","INT4"],["b","INT4"]],"hex":[["31","32"]],"rust_error":null,"expected":"[{\"a\":1,\"b\":2}]\n"}
+{"dialect":"postgres","sql":"SELECT 'jane@example.com'::text AS e, 7 AS n","actions":["drop",null],"columns":[["e","TEXT"],["n","INT4"]],"hex":[["6a616e65406578616d706c652e636f6d","37"]],"rust_error":null,"expected":"[{\"n\":7}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(5 AS SIGNED) AS v","actions":null,"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":5}]\n"}
+{"dialect":"mysql","sql":"SELECT -5 AS v","actions":null,"columns":[["v","BIGINT"]],"hex":[["2d35"]],"rust_error":null,"expected":"[{\"v\":-5}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(18446744073709551615 AS UNSIGNED) AS v","actions":null,"columns":[["v","BIGINT UNSIGNED"]],"hex":[["3138343436373434303733373039353531363135"]],"rust_error":null,"expected":"[{\"v\":18446744073709551615}]\n"}
+{"dialect":"mysql","sql":"SELECT TRUE AS v","actions":null,"columns":[["v","BIGINT"]],"hex":[["31"]],"rust_error":null,"expected":"[{\"v\":1}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(0.1 AS FLOAT) AS v","actions":null,"columns":[["v","FLOAT"]],"hex":[["302e31"]],"rust_error":null,"expected":"[{\"v\":0.1}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(0.1 AS DOUBLE) AS v","actions":null,"columns":[["v","DOUBLE"]],"hex":[["302e31"]],"rust_error":null,"expected":"[{\"v\":0.1}]\n"}
+{"dialect":"mysql","sql":"SELECT 1e300 AS v","actions":null,"columns":[["v","DOUBLE"]],"hex":[["3165333030"]],"rust_error":null,"expected":"[{\"v\":1e+300}]\n"}
+{"dialect":"mysql","sql":"SELECT -0.0e0 AS v","actions":null,"columns":[["v","DOUBLE"]],"hex":[["2d30"]],"rust_error":null,"expected":"[{\"v\":-0.0}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(5.0 AS DECIMAL(10,1)) AS v","actions":null,"columns":[["v","DECIMAL"]],"hex":[["352e30"]],"rust_error":null,"expected":"[{\"v\":5.0}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(0.0000001 AS DECIMAL(10,7)) AS v","actions":null,"columns":[["v","DECIMAL"]],"hex":[["302e30303030303031"]],"rust_error":null,"expected":"[{\"v\":1e-07}]\n"}
+{"dialect":"mysql","sql":"SELECT 12345678901234567890.123 AS v","actions":null,"columns":[["v","DECIMAL"]],"hex":[["31323334353637383930313233343536373839302e313233"]],"rust_error":null,"expected":"[{\"v\":1.2345678901234567e+19}]\n"}
+{"dialect":"mysql","sql":"SELECT 'hello' AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["68656c6c6f"]],"rust_error":null,"expected":"[{\"v\":\"hello\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'é😀汉' AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["c3a9f09f9880e6b189"]],"rust_error":null,"expected":"[{\"v\":\"\\u00e9\\ud83d\\ude00\\u6c49\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'q\"\\\\\\n\\t' AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["71225c0a09"]],"rust_error":null,"expected":"[{\"v\":\"q\\\"\\\\\\n\\t\"}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"\"}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST('a' AS CHAR(5)) AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["61"]],"rust_error":null,"expected":"[{\"v\":\"a\"}]\n"}
+{"dialect":"mysql","sql":"SELECT CONVERT('ß' USING latin1) AS v","actions":null,"columns":[["v","VARCHAR"]],"hex":[["c39f"]],"rust_error":null,"expected":"[{\"v\":\"\\u00df\"}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'abc' AS v","actions":null,"columns":[["v","VARBINARY"]],"hex":[["616263"]],"rust_error":null,"expected":"[{\"v\":\"abc\"}]\n"}
+{"dialect":"mysql","sql":"SELECT X'FF00FE80' AS v","actions":null,"columns":[["v","VARBINARY"]],"hex":[["ff00fe80"]],"rust_error":null,"expected":"[{\"v\":\"\\ufffd\\u0000\\ufffd\\ufffd\"}]\n"}
+{"dialect":"mysql","sql":"SELECT DATE '2024-02-29' AS v","actions":null,"columns":[["v","DATE"]],"hex":[["323032342d30322d3239"]],"rust_error":null,"expected":"[{\"v\":\"2024-02-29\"}]\n"}
+{"dialect":"mysql","sql":"SELECT TIMESTAMP '2024-01-02 03:04:05' AS v","actions":null,"columns":[["v","DATETIME"]],"hex":[["323032342d30312d30322030333a30343a3035"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-02 03:04:05\"}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST('2024-01-02 03:04:05.678' AS DATETIME(3)) AS v","actions":null,"columns":[["v","DATETIME"]],"hex":[["323032342d30312d30322030333a30343a30352e363738"]],"rust_error":null,"expected":"[{\"v\":\"2024-01-02 03:04:05\"}]\n"}
+{"dialect":"mysql","sql":"SELECT TIME '12:34:56' AS v","actions":null,"columns":[["v","TIME"]],"hex":[["31323a33343a3536"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56\"}]\n"}
+{"dialect":"mysql","sql":"SELECT TIME '-01:00:00' AS v","actions":null,"columns":[["v","TIME"]],"hex":[["2d30313a30303a3030"]],"rust_error":null,"expected":"[{\"v\":\"-1 day, 23:00:00\"}]\n"}
+{"dialect":"mysql","sql":"SELECT TIME '76:00:00' AS v","actions":null,"columns":[["v","TIME"]],"hex":[["37363a30303a3030"]],"rust_error":null,"expected":"[{\"v\":\"3 days, 4:00:00\"}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST('12:34:56.5' AS TIME(1)) AS v","actions":null,"columns":[["v","TIME"]],"hex":[["31323a33343a35362e35"]],"rust_error":null,"expected":"[{\"v\":\"12:34:56.500000\"}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST('{\"a\": 1, \"b\": [1.5]}' AS JSON) AS v","actions":null,"columns":[["v","JSON"]],"hex":[["7b2261223a20312c202262223a205b312e355d7d"]],"rust_error":null,"expected":"[{\"v\":\"{\\\"a\\\": 1, \\\"b\\\": [1.5]}\"}]\n"}
+{"dialect":"mysql","sql":"SELECT JSON_OBJECT('k', 'é') AS v","actions":null,"columns":[["v","JSON"]],"hex":[["7b226b223a2022c3a9227d"]],"rust_error":null,"expected":"[{\"v\":\"{\\\"k\\\": \\\"\\u00e9\\\"}\"}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":null,"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(NULL AS SIGNED) AS v","actions":null,"columns":[["v","BIGINT"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 1.5 AS v","actions":null,"columns":[["v","DECIMAL"]],"hex":[["312e35"]],"rust_error":null,"expected":"[{\"v\":1.5}]\n"}
+{"dialect":"mysql","sql":"SELECT CAST(2024 AS YEAR) AS v","actions":null,"columns":[["v","YEAR"]],"hex":[["32303234"]],"rust_error":null,"expected":"[{\"v\":2024}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS v","actions":["drop"],"columns":[["v","VARCHAR"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS v","actions":["null"],"columns":[["v","VARCHAR"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS v","actions":["mask"],"columns":[["v","VARCHAR"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"j***@example.com\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS v","actions":["hash"],"columns":[["v","VARCHAR"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"e4688a19341c00d2\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS v","actions":["keep"],"columns":[["v","VARCHAR"]],"hex":[["6a616e65406578616d706c652e636f6d"]],"rust_error":null,"expected":"[{\"v\":\"jane@example.com\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'x' AS v","actions":["drop"],"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT 'x' AS v","actions":["null"],"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 'x' AS v","actions":["mask"],"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"x***\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'x' AS v","actions":["hash"],"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"02e967991fafb6da\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 'x' AS v","actions":["keep"],"columns":[["v","VARCHAR"]],"hex":[["78"]],"rust_error":null,"expected":"[{\"v\":\"x\"}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":["drop"],"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":["null"],"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":["mask"],"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":["hash"],"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"9bcd062a279d5c63\"}]\n"}
+{"dialect":"mysql","sql":"SELECT '' AS v","actions":["keep"],"columns":[["v","VARCHAR"]],"hex":[[""]],"rust_error":null,"expected":"[{\"v\":\"\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 5 AS v","actions":["drop"],"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT 5 AS v","actions":["null"],"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 5 AS v","actions":["mask"],"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 5 AS v","actions":["hash"],"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":\"9995da0f07f967ee\"}]\n"}
+{"dialect":"mysql","sql":"SELECT 5 AS v","actions":["keep"],"columns":[["v","BIGINT"]],"hex":[["35"]],"rust_error":null,"expected":"[{\"v\":5}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'ab' AS v","actions":["drop"],"columns":[["v","VARBINARY"]],"hex":[["6162"]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'ab' AS v","actions":["null"],"columns":[["v","VARBINARY"]],"hex":[["6162"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'ab' AS v","actions":["mask"],"columns":[["v","VARBINARY"]],"hex":[["6162"]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'ab' AS v","actions":["hash"],"columns":[["v","VARBINARY"]],"hex":[["6162"]],"rust_error":null,"expected":"[{\"v\":\"91a526ce4d38240a\"}]\n"}
+{"dialect":"mysql","sql":"SELECT BINARY 'ab' AS v","actions":["keep"],"columns":[["v","VARBINARY"]],"hex":[["6162"]],"rust_error":null,"expected":"[{\"v\":\"ab\"}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":["drop"],"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":["null"],"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":["mask"],"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":["hash"],"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT NULL AS v","actions":["keep"],"columns":[["v","NULL"]],"hex":[[null]],"rust_error":null,"expected":"[{\"v\":null}]\n"}
+{"dialect":"mysql","sql":"SELECT 1 AS a, 2 AS a, 3 AS a_2","actions":null,"columns":[["a","BIGINT"],["a","BIGINT"],["a_2","BIGINT"]],"hex":[["31","32","33"]],"rust_error":null,"expected":"[{\"a\":1,\"a_2\":3}]\n"}
+{"dialect":"mysql","sql":"SELECT 1 AS `x y`","actions":null,"columns":[["x y","BIGINT"]],"hex":[["31"]],"rust_error":null,"expected":"[{\"x y\":1}]\n"}
+{"dialect":"mysql","sql":"SELECT 'jane@example.com' AS e, 7 AS n","actions":["drop",null],"columns":[["e","VARCHAR"],["n","BIGINT"]],"hex":[["6a616e65406578616d706c652e636f6d","37"]],"rust_error":null,"expected":"[{\"n\":7}]\n"}

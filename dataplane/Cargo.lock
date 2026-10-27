@@ -1146,6 +1146,7 @@ dependencies = [
  "bytes",
  "chrono",
  "fernet",
+ "getrandom 0.4.3",
  "hex",
  "hmac 0.13.0",
  "http-body-util",

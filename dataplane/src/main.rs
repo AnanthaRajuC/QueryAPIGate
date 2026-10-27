@@ -16,6 +16,8 @@ mod db;
 mod forward;
 mod params;
 mod pyfmt;
+mod render;
+mod respond;
 mod store;
 
 use std::net::SocketAddr;
@@ -219,6 +221,9 @@ async fn probe_query(input: &str) -> String {
                 "columns": output.columns,
                 "rows": output.rows.iter().map(|row| row.iter().map(|cell| cell.as_ref()
                     .map(|bytes| String::from_utf8_lossy(bytes).into_owned())).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                // the same, exactly as sent - invalid UTF-8 included
+                "hex": output.rows.iter().map(|row| row.iter().map(|cell| cell.as_ref().map(hex::encode))
+                    .collect::<Vec<_>>()).collect::<Vec<_>>(),
             }),
             Err(failure) => json!({"error": format!("{failure:?}")}),
         });
