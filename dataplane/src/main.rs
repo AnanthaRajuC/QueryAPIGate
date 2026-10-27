@@ -12,8 +12,10 @@
 
 mod auth;
 mod config;
+mod db;
 mod forward;
 mod params;
+mod pyfmt;
 mod store;
 
 use std::net::SocketAddr;
@@ -39,6 +41,17 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if args.get(1).map(String::as_str) == Some("--probe-query") {
+        // For the tests only: run the requests on stdin, in order, over one connection - see probe_query()
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let mut input = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).expect("stdin");
+        println!("{}", runtime.block_on(probe_query(&input)));
         return;
     }
     let config = match config::Config::from_env() {
@@ -150,4 +163,66 @@ async fn probe_digests(secret: &str, query: &str) -> Result<String, String> {
         "api_key": key.digest(), "saved_query": saved.digest(), "connection": connection.digest(),
     })
     .to_string())
+}
+
+/// `{"dialect", "details", "requests": [{"statement", "values", "limit", "offset", "timeout", "search_path"}]}` ->
+/// one result per request: `{"columns": [[name, type]], "rows": [[text|null]]}` or `{"error": ...}`. Values are
+/// tagged as in tests/params_vectors.jsonl.
+async fn probe_query(input: &str) -> String {
+    use serde_json::{Value, json};
+    let input: Value = serde_json::from_str(input).expect("a JSON request");
+    let keys: Vec<String> = std::env::var("QUERYAPIGATE_SECRET_KEY")
+        .unwrap_or_default()
+        .split(',')
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .collect();
+    let Some(target) = db::target(
+        input["dialect"].as_str().unwrap(),
+        input["details"].as_str().unwrap(),
+        &keys,
+    ) else {
+        return json!({"error": "declined"}).to_string();
+    };
+    let pool = match db::open(&target, 1).await {
+        Ok(pool) => pool,
+        Err(failure) => return json!({"error": format!("{failure:?}")}).to_string(),
+    };
+    let mut results = Vec::new();
+    for request in input["requests"].as_array().unwrap() {
+        let statement: db::Statement =
+            serde_json::from_value(request["statement"].clone()).unwrap();
+        let mut values = std::collections::HashMap::new();
+        for (name, tag) in request["values"].as_object().unwrap() {
+            let tag = tag.as_array().unwrap();
+            let value = match tag[0].as_str().unwrap() {
+                "null" => params::Param::Null,
+                "bool" => params::Param::Bool(tag[1].as_bool().unwrap()),
+                "int" => params::Param::Int(tag[1].as_str().unwrap().parse().unwrap()),
+                "float" => params::Param::Float(tag[1].as_str().unwrap().parse().unwrap()),
+                _ => params::Param::Text(tag[1].as_str().unwrap().to_string()),
+            };
+            values.insert(name.clone(), params::Supplied::Value(value));
+        }
+        let run = db::run(
+            &pool,
+            &statement,
+            &values,
+            request["limit"].as_i64().unwrap(),
+            request["offset"].as_i64().unwrap(),
+            request["timeout"].as_f64(),
+            request["search_path"].as_str(),
+        )
+        .await;
+        results.push(match run {
+            Ok(output) => json!({
+                "columns": output.columns,
+                "rows": output.rows.iter().map(|row| row.iter().map(|cell| cell.as_ref()
+                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            }),
+            Err(failure) => json!({"error": format!("{failure:?}")}),
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await; // MySQL's ROLLBACK AND CHAIN, spawned
+    }
+    Value::Array(results).to_string()
 }
