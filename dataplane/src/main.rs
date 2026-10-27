@@ -3,14 +3,17 @@
 //! `/q/<name>` itself from Python's plans comes next; until then this is the front alone.
 //!
 //! What it changes on the way through, and nothing else:
-//! - removes every `X-QAG-*` header a client sent, so only this process can speak for itself;
+//! - removes the data plane's own headers from what a client sends (`X-QAG-Dataplane`, `X-QAG-Peer`,
+//!   `X-QAG-Plan`), so only this process can speak for itself - the Console's `X-QAG-CSRF` passes;
 //! - adds `X-QAG-Dataplane` (the shared secret) and `X-QAG-Peer` (the client's socket address), which Python takes
 //!   together as the real client address - so its open-access loopback rule and a key's `allowed_ips` judge the client;
 //! - drops hop-by-hop headers in both directions, as any proxy must;
 //! - removes `X-QAG-Plan` from what Python answers.
 
+mod auth;
 mod config;
 mod forward;
+mod store;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,6 +24,22 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--probe-digests") && args.len() == 4 {
+        // For the tests only: the digests of the rows a call for this secret and query would read
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        match runtime.block_on(probe_digests(&args[2], &args[3])) {
+            Ok(found) => println!("{found}"),
+            Err(error) => {
+                eprintln!("queryapigate-dataplane: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let config = match config::Config::from_env() {
         Ok(config) => config,
         Err(message) => {
@@ -100,4 +119,34 @@ async fn shutdown_signal() {
         _ = tokio::signal::ctrl_c() => {},
         () = terminate => {},
     }
+}
+
+async fn probe_digests(secret: &str, query: &str) -> Result<String, String> {
+    let get = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    let store = store::Store::open(get, 1).await?;
+    let error = |e: sqlx::Error| e.to_string();
+    let key = store.key(&auth::hash(secret)).await.map_err(error)?;
+    let saved = store.query("default", query).await.map_err(error)?;
+    let published = saved
+        .get(0, "published_version")
+        .and_then(store::Value::int)
+        .ok_or("not published")?;
+    let fields = (0..saved.rows.len())
+        .find(|&i| saved.get(i, "version").and_then(store::Value::int) == Some(published))
+        .and_then(|i| saved.get(i, "fields_json").and_then(store::Value::text))
+        .ok_or("no published version")?;
+    let fields: serde_json::Value = serde_json::from_str(fields).map_err(|e| e.to_string())?;
+    let connection = fields["connection_name"].as_str().ok_or("no connection")?;
+    let connection = store
+        .connection("default", connection)
+        .await
+        .map_err(error)?;
+    Ok(serde_json::json!({
+        "api_key": key.digest(), "saved_query": saved.digest(), "connection": connection.digest(),
+    })
+    .to_string())
 }

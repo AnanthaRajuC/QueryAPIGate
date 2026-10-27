@@ -20,6 +20,7 @@ pub type Body = BoxBody<Bytes, hyper::Error>;
 
 pub const SECRET_HEADER: HeaderName = HeaderName::from_static("x-qag-dataplane");
 pub const PEER_HEADER: HeaderName = HeaderName::from_static("x-qag-peer");
+pub const PLAN_HEADER: HeaderName = HeaderName::from_static("x-qag-plan");
 
 /// Headers that describe one connection, not the message: never passed on (RFC 9110, 7.6.1), nor any the
 /// `Connection` header names.
@@ -107,8 +108,11 @@ pub fn peer_text(peer: IpAddr) -> String {
     peer.to_canonical().to_string()
 }
 
-/// Remove hop-by-hop headers, and every `X-QAG-*` one - in a request, what a client may not send; in a response,
-/// what Python says to this process only.
+/// The headers only the data plane and Python say to each other: removed from what a client sends, so only this
+/// process can speak for itself, and from what Python answers. Python's own `X-QAG-CSRF` passes, as any other.
+const OURS: [HeaderName; 3] = [SECRET_HEADER, PEER_HEADER, PLAN_HEADER];
+
+/// Remove hop-by-hop headers, and the data plane's own (`OURS`).
 pub fn clean(headers: &mut HeaderMap) {
     let named: Vec<HeaderName> = headers
         .get_all(header::CONNECTION)
@@ -117,15 +121,7 @@ pub fn clean(headers: &mut HeaderMap) {
         .flat_map(|value| value.split(','))
         .filter_map(|name| HeaderName::from_bytes(name.trim().as_bytes()).ok())
         .collect();
-    for name in named.iter().chain(HOP_BY_HOP.iter()) {
-        headers.remove(name);
-    }
-    let ours: Vec<HeaderName> = headers
-        .keys()
-        .filter(|name| name.as_str().starts_with("x-qag-"))
-        .cloned()
-        .collect();
-    for name in ours {
+    for name in named.iter().chain(HOP_BY_HOP.iter()).chain(OURS.iter()) {
         headers.remove(name);
     }
 }
@@ -176,14 +172,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_client_s_own_x_qag_headers_never_pass() {
+    fn a_client_never_sends_the_data_plane_s_own_headers() {
         let mut headers = HeaderMap::new();
-        for name in [
-            "x-qag-dataplane",
-            "x-qag-peer",
-            "x-qag-plan",
-            "X-QAG-Anything",
-        ] {
+        for name in ["x-qag-dataplane", "X-QAG-Peer", "x-qag-plan"] {
             headers.insert(
                 HeaderName::from_bytes(name.as_bytes()).unwrap(),
                 HeaderValue::from_static("spoofed"),
@@ -193,6 +184,14 @@ mod tests {
         clean(&mut headers);
         assert_eq!(headers.len(), 1);
         assert!(headers.contains_key(header::ACCEPT));
+    }
+
+    #[test]
+    fn the_console_s_csrf_header_passes() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-qag-csrf", HeaderValue::from_static("token"));
+        clean(&mut headers);
+        assert_eq!(headers.get("x-qag-csrf").unwrap(), "token");
     }
 
     #[test]
