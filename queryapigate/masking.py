@@ -507,6 +507,18 @@ def _schema(connection_name, database=None):
     return tables, traces
 
 
+def schema_expires_in(connection_name, database=None):
+    """Seconds until the schema copy masking traces this connection's statements against expires (SCHEMA_TTL), or None
+    when it holds none - how long a data plane may apply a trace made from it (dataplane.py, ADR 0028)."""
+    from . import scope
+    key = (db.current_target(), scope.current(), connection_name, database)
+    with _schemas_lock:
+        cached = _schemas.get(key)
+    if cached is None:
+        return None
+    return max(0.0, SCHEMA_TTL - (time.monotonic() - cached[0]))
+
+
 def _refresh_soon(key):
     """Queue `key` for this process's background reader, starting it if this process has none yet. Called holding
     _schemas_lock."""

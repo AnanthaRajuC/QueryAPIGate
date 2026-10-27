@@ -24,6 +24,7 @@ from . import (
     config,
     console,
     cors,
+    dataplane,
     db,
     definitions,
     deprecations,
@@ -40,6 +41,7 @@ from . import (
     limits,
     logging_setup,
     masking,
+    metacache,
     metrics,
     mongodocs,
     mongotools,
@@ -301,12 +303,17 @@ def create_app():
     @app.teardown_request
     def end_trace(_error):
         tracing.finish(g.pop('trace', None))
+        token = g.pop('dataplane_token', None)
+        if token is not None:
+            metacache.reset(token)
 
     @app.before_request
     def gate():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
+        if dataplane.trusted(request.headers):  # before the key is read: its row is one a plan names (ADR 0028)
+            g.dataplane_record, g.dataplane_token = metacache.capture()
         # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
         rule = request.url_rule.rule if request.url_rule is not None else None
         g.trace = tracing.start(f'{request.method} {rule}' if rule else request.method, 'server', {
@@ -1075,6 +1082,12 @@ def _run_saved(ref, body, url_params):
                                          **masked_entry(result.masked)})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl, cache_meta)
+    elif (g.get('dataplane_record') is not None and g.get('transport', 'rest') == 'rest' and not ttl
+          and output_format == 'json'):  # the one format the data plane renders
+        plan = dataplane.build(g.dataplane_record, g.permission, query_name, number, saved, connection_name, result,
+                               config.allow_writes() and effective_allow_writes)
+        if plan is not None:
+            response.headers[dataplane.PLAN_HEADER] = dataplane.encode(plan)
     return response
 
 

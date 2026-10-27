@@ -713,6 +713,13 @@ def mask_key():
     return os.environ.get('QUERYAPIGATE_MASK_KEY', '').strip() or None
 
 
+def dataplane_secret():
+    """QUERYAPIGATE_DATAPLANE_SECRET: what a Rust data plane in front of this server sends to have its forwarded `/q/`
+    calls answered with a plan (dataplane.py, ADR 0028), or None - then no request gets one. A prototype setting:
+    shared by the two processes only, never by a client."""
+    return os.environ.get('QUERYAPIGATE_DATAPLANE_SECRET', '').strip() or None
+
+
 def secret_keys():
     """The keys connection and destination passwords are encrypted with at rest (QUERYAPIGATE_SECRET_KEY), first
     to last - empty when unset: encryption at rest is opt-in, and without it a password is stored exactly as given.

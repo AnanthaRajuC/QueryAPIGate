@@ -1,6 +1,8 @@
 # ADR 0028: A Rust data plane for `/q/`, as a prototype with a go/no-go decision
 
-- **Status:** Proposed (2026-10-27)
+- **Status:** Accepted (2026-10-27). Amended 2026-10-27, before any Rust code: plans travel back on the forwarded
+  response and are kept in the data plane's memory, not in the store; they name the rows they were computed from by
+  digest; and the data plane sends SQL as Python's drivers do (sections 2 and 3).
 - **Backlog:** 0.44. Motivated by the CPU profiles in [PERFORMANCE_MYSQL_V2.md](../PERFORMANCE_MYSQL_V2.md#where-the-time-goes-now)
   and [PERFORMANCE_V4.md](../PERFORMANCE_V4.md). This is a prototype: it ends in a measured decision, not a commitment
   to ship a second runtime.
@@ -62,23 +64,33 @@ the calls the data plane serves, the table check and the masking trace depend on
 the query version's SQL, the connection's dialect, and the caller's grants. Masking also depends on the connection's
 schema.
 
-So when Python runs a `/q/` call that the data plane could serve, it also writes a **plan** to the store. A plan holds:
+So when Python serves a `/q/` call that the data plane forwarded and could serve, its successful response also
+carries a **plan** (`queryapigate/dataplane.py`), in an `X-QAG-Plan` header the data plane removes before the
+response leaves. Python sends one only to a request carrying `QUERYAPIGATE_DATAPLANE_SECRET`, a header the data plane
+removes from whatever a client sends. A plan holds:
 
-- the verdict: allowed, or refused with its status and error code;
-- the statement to send, already converted from `:name` to the driver's positional parameters, the parameters'
-  order, and the paged form Python's runner builds;
-- whether the call is read-only;
-- for each result column, the mask action and its argument, or none;
-- the expected column count, so a result of a different shape is refused (`mask_unresolvable`) exactly as Python
-  refuses it;
-- what it was computed from, and when it expires.
+- the statement to send, in segments around its bound `:name` parameters, with its own trailing row window apart,
+  each operand a number or a parameter, resolved per call as `sqltools.paginate` does;
+- on MySQL, where the time-limit hint goes;
+- the `search_path` a table-restricted PostgreSQL call pins;
+- for each result column, the mask action or none, and the column count the trace expects, so a result of a
+  different shape is refused (`mask_unresolvable`) exactly as Python refuses it;
+- the digests of the rows it was computed from, and when it expires.
 
-A plan is keyed by workspace, query, version, connection, a fingerprint of the caller's grants (`allowed_tables`,
-`allow_writes`, `allowed_write_ops`), and the fingerprint of the effective mask that `masking.fingerprint` already
-computes. A masked plan expires with the schema it was traced against: at most `masking.SCHEMA_TTL`, 60 s, the limit
-Python holds itself to. An unmasked plan depends on no schema, and changes only when its key does.
+A refusal gets no plan: the data plane forwards that call again, and Python refuses it again.
 
-**On a plan miss, Rust forwards the call.** Python serves it normally and writes the plan, and the next such call is
+**A plan names its rows by digest.** While serving a data plane's request, Python reads the key, the saved query and
+the connection fresh, bypassing the metadata cache, and records a SHA-256 digest of each row set exactly as it was
+read (`metacache.digest_rows`). The data plane runs the same three SELECTs for every call it serves, and uses a plan
+only when its own rows digest the same. So any change to a key's grants, a query's version, its mask rules or the
+connection, made anywhere, retires every plan built from the old rows. A row that changes while the call is in
+flight can't pair a plan with rows it wasn't computed from.
+
+A masked plan also expires with the schema it was traced against: at most `masking.SCHEMA_TTL`, 60 s, the limit
+Python holds itself to. An unmasked plan depends on no schema. Plans live in the data plane's memory, per process,
+so a restart starts empty and the store gains no table.
+
+**On a plan miss, Rust forwards the call.** Python serves it normally and returns the plan, and the next such call is
 served in Rust. The data plane never computes a verdict of its own. It applies one Python computed, or it forwards.
 
 This replaces the gate first planned for 0.44: fuzzing the same queries through sqlglot in Python and sqlparser-rs in
@@ -104,7 +116,9 @@ Each of these matches what Python does today, and the differential test checks e
    connection.
 4. **Parameters:** the same type rules, defaults, required checks and error codes as `params.py`, with the values
    bound, never put into the SQL text.
-5. **Running it on PostgreSQL or MySQL** with ADR 0027's prefix and read-only mode, the effective timeout (`?timeout`
+5. **Running it on PostgreSQL or MySQL** as Python's drivers do: one text-protocol message, each parameter's value
+   filled in as a quoted literal client-side, as psycopg2 and mysql-connector do for the runner's `%s` markers. Also
+   ADR 0027's prefix and read-only mode, the effective timeout (`?timeout`
    may lower the server's, never raise it), and paging: `page`, `page_size`, `QUERYAPIGATE_MAX_PAGE_SIZE` and the
    caller's `max_rows`.
 6. **Masking**, applied by column position from the plan: `hash` with the same key and output, plus `mask`, `null`
@@ -177,9 +191,13 @@ The decision:
   and refuses to start in front of a server with no credential configured unless it listens on loopback only.
 - **The trusted-proxy hop count** gains one when the data plane fronts Python. Python must trust `X-Forwarded-For`
   only from it: over a Unix socket, or from loopback with a hop count of exactly one.
-- **Plans are security decisions held in the store.** Only Python writes them, they are keyed by everything they
-  depend on, and the data plane refuses a plan whose fields don't match the call. A plan doesn't widen anything: the
+- **Plans are security decisions.** Only Python makes them, only for a request with the shared secret, and the data
+  plane uses one only for a call whose rows digest as the plan's did. A plan doesn't widen anything: the
   key, its grants and the query are still read and checked on every call.
+- **Filling in literals client-side is the injection boundary.** Python's drivers do it, so the data plane must too:
+  quoting for PostgreSQL that holds whatever `standard_conforming_strings` is, and for MySQL whether or not the
+  session's `sql_mode` has `NO_BACKSLASH_ESCAPES`, on a `utf8mb4` connection. The differential test includes hostile
+  strings for exactly this.
 - The data plane gets an entry in THREAT_MODEL.md before any benchmark is published.
 
 ### 8. Where it lives
@@ -223,6 +241,5 @@ reports the result.
 
 - Should the data plane read the store through the metadata cache's rules (`QUERYAPIGATE_METADATA_CACHE_TTL`), or
   always read key and query rows fresh? Matching Python's setting is the default.
-- Is the plan written on Python's normal path enough, or should Python precompute plans when a query is published or
+- Is a plan returned on Python's normal path enough, or should Python precompute plans when a query is published or
   a key is changed, so the first call is fast too?
-- On a PostgreSQL store, should plans live in their own table, or in Redis when it is configured?
