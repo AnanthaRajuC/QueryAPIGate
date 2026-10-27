@@ -49,6 +49,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-27
+
+Security and performance. Six fixes to the governance - column masking, table allow-lists and MySQL's read-only
+connections - and fewer round trips per query: PostgreSQL 4 to 1, MySQL 3 to 2. With the database 0.5 ms away, a
+PostgreSQL call takes 4.39 ms instead of 6.58 ms, and a MySQL worker with 32 callers serves 52% more calls
+([Performance, v4](documentation/PERFORMANCE_V4.md), [on MySQL, v2](documentation/PERFORMANCE_MYSQL_V2.md)). Two
+breaking changes, both for keys with `allowed_tables`: grants are schema-qualified, and statements whose tables
+can't be checked are refused. Read **Breaking** before upgrading a deployment that uses table allow-lists.
+
 ### Breaking
 - **`allowed_tables` grants are schema-qualified on every SQL connection** (they already were on Trino). A bare grant
   such as `customer` now means the connection's own `customer` only: on MySQL and ClickHouse the connection's
@@ -2996,7 +3005,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.39.0...v0.40.0
