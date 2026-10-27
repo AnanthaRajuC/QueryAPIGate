@@ -127,9 +127,14 @@ documentation. #99 workspaces only if asked for.
 30. **0.42: Performance** - masked and table-restricted calls as fast as plain ones, fewer store reads per call, an
     opt-in metadata cache (`QUERYAPIGATE_METADATA_CACHE_TTL`), a pool sized to the threads; measured in
     [Performance, v3](documentation/PERFORMANCE_V3.md) with a published benchmark harness. (0.42.0, 2026-10-24.)
-31. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+31. **0.43: Governance fixes, fewer round trips** - schema-qualified `allowed_tables`, unverifiable statements refused
+    for table-restricted keys, masking and allow-list fixes; PostgreSQL in one round trip per query, MySQL in two
+    without the GIL-holding ping ([ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md)); masking's schema
+    refreshed in the background; sqlglot 30; `QUERYAPIGATE_THREADS`. Measured in
+    [Performance, v4](documentation/PERFORMANCE_V4.md). (0.43.0, 2026-10-27.)
+32. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-32. **1.0.0.**
+33. **1.0.0.**
 
 ## 1. Per-key API permissions
 
