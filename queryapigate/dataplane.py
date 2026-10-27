@@ -20,23 +20,37 @@ can change from one call to the next.
 """
 import base64
 import hmac
+import ipaddress
 import json
 
 from . import config, runners, sqltools
 
 SECRET_HEADER = 'X-QAG-Dataplane'
+PEER_HEADER = 'X-QAG-Peer'
 PLAN_HEADER = 'X-QAG-Plan'
 VERSION = 1
 DIALECTS = ('postgres', 'mysql')  # the two the prototype serves - every other connection is forwarded
 _ROWS = ('api_key', 'saved_query', 'connection')  # what a plan names the digests of, one row set each
 
 
-def trusted(headers):
-    """Whether a request comes from the data plane: it carries QUERYAPIGATE_DATAPLANE_SECRET, compared in constant time.
-    The data plane drops the header from what a client sends, so only it can."""
+SECRET_ENVIRON = 'HTTP_X_QAG_DATAPLANE'  # the two headers as WSGI names them - read, and removed, by app._CapturePeer
+PEER_ENVIRON = 'HTTP_X_QAG_PEER'
+
+
+def matches(supplied):
+    """Whether a request's X-QAG-Dataplane is QUERYAPIGATE_DATAPLANE_SECRET, compared in constant time. The data plane
+    drops the header from whatever a client sends, so only it can send the right one."""
     secret = config.dataplane_secret()
-    supplied = headers.get(SECRET_HEADER)
     return bool(secret and supplied) and hmac.compare_digest(supplied.encode('utf-8', 'replace'), secret.encode())
+
+
+def is_address(peer):
+    """Whether X-QAG-Peer names an IP address - the client's socket address, as the data plane saw it."""
+    try:
+        ipaddress.ip_address(peer or '')
+    except ValueError:
+        return False
+    return True
 
 
 def eligible_caller(permission):

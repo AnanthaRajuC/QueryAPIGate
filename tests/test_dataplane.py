@@ -264,3 +264,48 @@ class AppliedAsTheDataPlaneDoesTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ClientAddressTests(unittest.TestCase):
+    """Behind the data plane every request comes over loopback: the client's own address travels in X-QAG-Peer, taken
+    only beside the secret - so open-access mode's loopback rule and a key's allowed_ips judge the client, not it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name,
+                                               'QUERYAPIGATE_DATAPLANE_SECRET': SECRET})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop('QUERYAPIGATE_API_KEY', None)
+        write_connections({})
+        self.client = create_app().test_client()
+
+    def get(self, path, peer=None, secret=SECRET, **headers):
+        if secret is not None:
+            headers[dataplane.SECRET_HEADER] = secret
+        if peer is not None:
+            headers[dataplane.PEER_HEADER] = peer
+        return self.client.get(path, headers=headers)  # the test client's own address is 127.0.0.1
+
+    def test_open_access_mode_refuses_a_remote_client_the_data_plane_forwards(self):
+        res = self.get('/catalog', peer='203.0.113.9')
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.get_json()['code'], 'open_access_remote')
+        self.assertEqual(self.get('/catalog', peer='127.0.0.1').status_code, 200)
+
+    def test_a_peer_that_is_not_an_address_counts_as_remote(self):
+        for peer in ('', 'localhost', '127.0.0.1, 10.0.0.1', None):
+            with self.subTest(peer=peer):
+                self.assertEqual(self.get('/catalog', peer=peer).status_code, 403)
+
+    def test_without_the_secret_a_client_s_x_qag_peer_is_ignored(self):
+        for secret in (None, 'wrong'):
+            with self.subTest(secret=secret):
+                # the real peer, loopback, decides - a client can't claim another address, nor lose its own
+                self.assertEqual(self.get('/catalog', peer='203.0.113.9', secret=secret).status_code, 200)
+
+    def test_a_key_s_allowed_ips_judge_the_client(self):
+        key = apikeys.create_key('office', connections=[], allowed_ips=['10.0.0.0/8'])
+        self.assertEqual(self.get('/catalog', peer='10.1.2.3', **{'X-API-Key': key}).status_code, 200)
+        self.assertEqual(self.get('/catalog', peer='192.0.2.1', **{'X-API-Key': key}).status_code, 401)

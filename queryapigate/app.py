@@ -169,12 +169,23 @@ def warn_env_references():
 
 class _CapturePeer:
     """Record the real socket address (`REMOTE_ADDR`) before ProxyFix can replace it with an X-Forwarded-For value,
-    so the open-access loopback check (gate()) judges the actual connection and never a header a client can forge."""
+    so the open-access loopback check (gate()) judges the actual connection and never a header a client can forge.
+
+    Behind a data plane (dataplane.py, ADR 0028) every request comes from it, over loopback: one that carries its
+    secret names the client's own socket address in X-QAG-Peer, and that address is taken as the real one - so this
+    server sees the request as if the client had connected directly, ProxyFix and QUERYAPIGATE_TRUST_PROXY included.
+    A peer that isn't an IP address counts as remote, as a Unix socket does. Both headers are removed here, so
+    nothing after this layer reads, logs or passes on the secret."""
 
     def __init__(self, app):
         self.app = app
 
     def __call__(self, environ, start_response):
+        supplied = environ.pop(dataplane.SECRET_ENVIRON, None)
+        peer = environ.pop(dataplane.PEER_ENVIRON, None)
+        if supplied is not None and dataplane.matches(supplied):
+            environ['queryapigate.dataplane'] = True
+            environ['REMOTE_ADDR'] = peer if dataplane.is_address(peer) else ''
         environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
         return self.app(environ, start_response)
 
@@ -312,7 +323,7 @@ def create_app():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
-        if dataplane.trusted(request.headers):  # before the key is read: its row is one a plan names (ADR 0028)
+        if request.environ.get('queryapigate.dataplane'):  # before the key is read: a plan names its row (ADR 0028)
             g.dataplane_record, g.dataplane_token = metacache.capture()
         # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
         rule = request.url_rule.rule if request.url_rule is not None else None
