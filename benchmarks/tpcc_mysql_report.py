@@ -340,5 +340,35 @@ if sel(block='n9'):
         emit(f"| {setup} | {query} | {len(rs)} | {col(rs, 'rps')} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
              f"{cores(rs, ('gw_cores', 'db_cores', 'load_cores'))} | {med(rs, 'mhz_gw', 0)} | {vs} |")
 
+# ---- d-blocks: the Rust data plane in front (ADR 0028) ----
+
+def dataplane_tables(db_cores, keyed):
+    """Each d-block's cells: per gateway core, and the share of runs recorded - a data-plane cell only counts when
+    every run was (runs_written_share)."""
+    blocks = sorted({r['block'] for r in rows if str(r.get('block', '')).startswith('d') and r.get('build')})
+    for block in blocks:
+        cells = collections.defaultdict(list)
+        for r in sel(block=block):
+            if r.get('build') and r.get('scenario') != 'health_floor':
+                cells[(r['scenario'], r.get('key', '') if keyed else '', r['c'], r['build'], r['workers'])].append(r)
+        emit('', f'## {block}: the data plane', '')
+        table('| scenario | c | build | Python workers | n | req/s | p50 ms | p99 ms | gateway cores | db cores | '
+              'req/s per gateway core | runs kept, lowest | per core vs Python, same cache setting |')
+        per_core = {k: stat([r['rps'] / r['gw_cores'] for r in v if r.get('gw_cores')]) for k, v in cells.items()}
+        for k in sorted(cells, key=lambda k: (k[0], k[1], k[2], '+dp' in k[3], k[3])):
+            sc, key, c, build, workers = k
+            rs = cells[k]
+            same = CACHED if build.endswith('+cache') else HEAD  # the Python build it fronts
+            python = next((per_core[p] for p in per_core if p[:3] == k[:3] and p[3] == same), None)
+            kept = [r['runs_written_share'] for r in rs if r.get('runs_written_share') is not None]
+            multiple = f'{per_core[k][0] / python[0]:.1f}x' if python and '+dp' in build else ''
+            emit(f"| {sc}{' ' + key if key else ''} | {c} | {build} | {workers} | {len(rs)} | "
+                 f"{fmt(stat([r['rps'] for r in rs]))} | {col(rs, 'p50', 2)} | {col(rs, 'p99', 1)} | "
+                 f"{med(rs, 'gw_cores')} | {med(rs, db_cores)} | {fmt(per_core[k])} | "
+                 f"{min(kept) * 100:.0f}% | {multiple} |" if kept else '| - |')
+
+
+dataplane_tables('db_cores', True)
+
 SRC.with_suffix('.md').write_text('\n'.join(out) + '\n')
 print('\n'.join(out))

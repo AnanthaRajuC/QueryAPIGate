@@ -22,6 +22,7 @@ nav:
   - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Performance: documentation/PERFORMANCE.md
+  - A Rust data plane (v5, 0.44): documentation/PERFORMANCE_V5.md
   - Performance on PostgreSQL (v4, 0.43): documentation/PERFORMANCE_V4.md
   - Performance on PostgreSQL (v3): documentation/PERFORMANCE_V3.md
   - Performance on MySQL (v2, 0.43): documentation/PERFORMANCE_MYSQL_V2.md
