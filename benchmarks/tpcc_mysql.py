@@ -24,6 +24,7 @@ import random
 import re
 import shutil
 import signal
+import sqlite3
 import statistics
 import subprocess
 import sys
@@ -326,6 +327,33 @@ def wait_healthy(url, what):
     raise RuntimeError(f'{what} did not start - see {OUT / "server.log"}')
 
 
+def runs_written():
+    """Event ids the gateway's store has handed out - one per run recorded (oltp.runs_written()), on SQLite or
+    PostgreSQL."""
+    store = _server_meta.get('store', 'sqlite')
+    if store == 'postgres':
+        out = sh('docker', 'exec', PG, 'psql', '-U', 'postgres', '-Atc', 'SELECT last_value FROM events_id_seq')
+        return int(out.stdout.strip() or 0)
+    with sqlite3.connect(OUT / f'home-{store}' / 'queryapigate.db') as conn:
+        found = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM sqlite_sequence WHERE name = 'events'").fetchone()[0]
+    conn.close()
+    return found
+
+
+def clear_events(store):
+    """Empty the store's event log (ADR 0020) before a cell. It keeps every run for at least an hour, whatever its
+    count: tens of millions of rows at the data plane's rates, which slowed each later cell and filled the disk."""
+    if store == 'postgres':
+        sh('docker', 'exec', PG, 'psql', '-U', 'postgres', '-Atc', 'TRUNCATE events')
+        return
+    path = OUT / f'home-{store}' / 'queryapigate.db'
+    if path.exists():
+        with sqlite3.connect(path) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'events'").fetchone():
+                conn.execute('DELETE FROM events')
+        conn.close()
+
+
 def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_log=True, cpus=None, settings=None):
     """The gateway for ``build``. ``cpus`` overrides --gateway-cpus; ``settings`` adds QUERYAPIGATE_* variables, kept
     in every row it measures. The access log is set both ways - the flag, and QUERYAPIGATE_ACCESS_LOG - because from
@@ -357,6 +385,13 @@ def start(build, workers=1, threads=8, store='sqlite', profile_to=None, access_l
         cmd = [args.py_spy, 'record', '--subprocesses', '--rate', '200', '--format', 'raw', '-o', str(profile_to),
                '--'] + cmd
     cmd = ['taskset', '-c', cpus or args.gateway_cpus] + cmd
+    # Each cell starts both logs afresh: the data plane writes ~27k lines/s, and a full run kept them all until the
+    # disk filled. They are still written, so what writing them costs is still measured.
+    if shutil.disk_usage(OUT).free < 3 << 30:
+        raise RuntimeError(f'under 3 GB free on {OUT}: stopping before the disk fills')
+    for log in ('server.log', 'access.log'):
+        (OUT / log).write_bytes(b'')
+    clear_events(store)
     out = open(OUT / 'server.log', 'a')
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
     wait_healthy(f'http://127.0.0.1:{port}', f'gateway {build}')
@@ -492,6 +527,9 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
     cache0 = cache_counts() if query == CACHED else None
     pg_store = _server_meta.get('store') == 'postgres'
     s0 = container_cpu_s(PG) if pg_store else 0
+    if warm:
+        time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
+    w0 = runs_written()
     q0, g0, m0, l0, t0 = (questions(), gateway_cpu_s(), container_cpu_s(MYSQL),
                           oltp.cpus_busy_s(args.load_cpus), time.time())
     sampler.start()
@@ -501,6 +539,8 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
     g1, m1, l1, q1 = (gateway_cpu_s(), container_cpu_s(MYSQL), oltp.cpus_busy_s(args.load_cpus),
                       questions())
     s1 = container_cpu_s(PG) if pg_store else 0
+    time.sleep(2.5)  # the cell's last runs: a report interval, then a write interval
+    kept = oltp.runs_kept(runs_written() - w0, r['requests'])
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': query, 'dist': dist, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
            'key': 'governed' if governed else 'reader',
@@ -508,7 +548,7 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
            'load_cores': (l1 - l0) / wall, 'mysql_statements_per_req': (q1 - q0 - 1) / n,
            'store_cores': (s1 - s0) / wall if pg_store else None,
            'mhz_gw': round(sum(freqs) / len(freqs)) if freqs and all(freqs) else None, 'pkg_temp_c': oltp.pkg_temp(),
-           **(extra or {})}
+           **kept, **(extra or {})}
     if cache0 is not None:
         cache1 = cache_counts()
         hits, misses = cache1['hits'] - cache0['hits'], cache1['misses'] - cache0['misses']
@@ -517,7 +557,8 @@ def measure(block, query, c=32, secs=30, q=None, correction=False, dist='uniform
     log(f"{block} {row['build']} w{row['workers']} t{row['threads']} {row['store']} {query}/{dist} c={c} q={q} "
         f"r{rnd}: {r['rps']:.0f} req/s p50 {r['p50']:.2f} p99 {r['p99']:.2f} ok {r['success']:.4f} "
         f"gw {row['gw_cores']:.2f} db {row['db_cores']:.2f} stmts {row['mysql_statements_per_req']:.2f}"
-        + (f" hits {row['cache_hit_rate']:.2f}" if row.get('cache_hit_rate') is not None else ''))
+        + (f" hits {row['cache_hit_rate']:.2f}" if row.get('cache_hit_rate') is not None else '')
+        + f" runs kept {kept['runs_written_share']:.0%}")
     return row
 
 

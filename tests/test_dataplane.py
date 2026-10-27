@@ -379,3 +379,12 @@ class RunReportTests(PlanTestCase):
         before = counts()
         self.report()
         self.assertEqual([after - was for after, was in zip(counts(), before, strict=True)], [1, 3])
+
+    def test_runs_it_dropped_are_counted_as_history_s_own(self):
+        from queryapigate import metrics
+        before = metrics.history_counts().get('dropped', 0)
+        res = self.client.post('/internal/dataplane/runs', json={'runs': [self.RUN], 'dropped': 7},
+                               headers={dataplane.SECRET_HEADER: SECRET})
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual(metrics.history_counts().get('dropped', 0) - before, 7)
+        self.assertEqual(self.history(), [self.RUN['entry']])

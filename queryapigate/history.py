@@ -286,6 +286,9 @@ def write(rows, target=None):
         else:
             saved.append((workspace, name, version, executed_at, entry_json, status, key_name,
                           workspace, name, version))
+    if config.history_retention_days() is None:  # only what the trims below would keep: a busy batch is mostly not
+        saved = _newest(saved, config.history_limit(), lambda row: row[:3], lambda row: row[3])
+        adhoc = _newest(adhoc, config.history_adhoc_limit(), lambda row: row[0], lambda row: row[1])
     try:
         # One executemany() per statement rather than a round trip per row: a busy server's batch is hundreds of rows.
         with db.transaction(append_only=True, target=target) as conn:
@@ -311,6 +314,21 @@ def write(rows, target=None):
     if config.history_retention_days() is None:
         for workspace, name, version in dict.fromkeys((row[8], row[0], row[1]) for row in rows if row[6]):
             _trim(workspace, name, version, target)
+
+
+def _newest(rows, limit, group, executed_at):
+    """The rows, in arrival order, that trimming each ``group`` to ``limit`` would keep: its newest by executed_at,
+    then by arrival - _trim()'s order (executed_at DESC, rowid DESC, rowids handed out in arrival order). The others
+    would be deleted the moment they were written: at data-plane rates (ADR 0028) that is most of a batch."""
+    found = {}
+    for i, row in enumerate(rows):
+        found.setdefault(group(row), []).append(i)
+    if all(len(indexes) <= limit for indexes in found.values()):
+        return rows
+    kept = set()
+    for indexes in found.values():
+        kept.update(sorted(indexes, key=lambda i: executed_at(rows[i]))[-limit:])  # a stable sort: ties by arrival
+    return [row for i, row in enumerate(rows) if i in kept]
 
 
 def _trim(workspace, name, version, target):

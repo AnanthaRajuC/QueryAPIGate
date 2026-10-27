@@ -592,6 +592,8 @@ _PG_LOCK_ID = 0x51A6  # "QAG": an arbitrary, fixed advisory-lock key this app ow
 _INSERT_OR_IGNORE_RE = re.compile(r'^\s*INSERT\s+OR\s+IGNORE\s+INTO\b', re.I)
 _LIMIT_ALL_RE = re.compile(r'\bLIMIT\s+-1\b', re.I)
 _PG_TOKEN_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|--[^\n]*|\?|%")
+# After _pg_sql(): an INSERT whose only placeholders are one VALUES row, with nothing after it - (prefix, row)
+_PLAIN_INSERT_RE = re.compile(r'^(INSERT INTO [^;%\'"]*? VALUES )(\((?:%s, )*%s\))$')
 
 
 def is_postgres():
@@ -651,10 +653,18 @@ class _PgConnection:
 
     def executemany(self, sql, seq_of_params):
         """Like sqlite3's: one statement, many parameter sets - sent to the server a page at a time, not one round trip
-        each (psycopg2's own executemany() still makes one per set)."""
+        each (psycopg2's own executemany() still makes one per set). A plain `INSERT INTO ... VALUES (?, ...)` goes as
+        one multi-row INSERT per 1000 sets - for a batch of runs' events, about half the time of statements sent a
+        page at a time; anything else (an upsert can't touch the same row twice in one statement) as before."""
         import psycopg2.extras
+        sql, params = _pg_sql(sql), [_pg_params(p) for p in seq_of_params]
         with self.raw.cursor() as cursor:
-            psycopg2.extras.execute_batch(cursor, _pg_sql(sql), [_pg_params(p) for p in seq_of_params], page_size=100)
+            plain = _PLAIN_INSERT_RE.match(sql)
+            if plain:
+                psycopg2.extras.execute_values(cursor, plain.group(1) + '%s', params, template=plain.group(2),
+                                               page_size=1000)
+            else:
+                psycopg2.extras.execute_batch(cursor, sql, params, page_size=100)
 
     def executescript(self, script):
         with self.raw.cursor() as cursor:

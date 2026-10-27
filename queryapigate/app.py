@@ -1228,16 +1228,22 @@ def run_named_query(name):
 def dataplane_runs():
     """The runs a data plane in front of this server served itself (dataplane.py, ADR 0028), batched: each recorded as
     run_saved() records one - run history, the event log, the live feed - and counted in /metrics as it would have been.
-    Only the data plane reaches it: gate() answers 404 to anything without its secret."""
-    for run in (request.get_json(silent=True) or {}).get('runs') or []:
-        entry, seen = run['entry'], run['metrics']
-        _record_and_broadcast(run['query'], run['version'], entry)
-        key, connection, dialect = entry['key_name'], entry['connection_name'], seen['dialect']
-        metrics.observe_query(connection, dialect, entry['status'], seen['query_seconds'], key)
-        if entry['status'] == 'success':
-            metrics.observe_rows(connection, dialect, key, entry['rows'])
-            metrics.observe_serialization('json', seen['serialization_seconds'])
-        governance.observe(seen['method'], 'api.run_named_query', seen['status'], seen['seconds'], key)
+    Only the data plane reaches it: gate() answers 404 to anything without its secret. `dropped`: runs it served but
+    couldn't queue for here, counted as history's own dropped runs are."""
+    report = request.get_json(silent=True) or {}
+    broadcaster = current_app.extensions['queryapigate_broadcaster']
+    with scope.using(scope.current()):  # resolved once, not by each of a busy batch's few thousand label lookups
+        for run in report.get('runs') or []:
+            entry, seen = run['entry'], run['metrics']
+            _record_and_broadcast(run['query'], run['version'], entry, broadcaster)
+            key, connection, dialect = entry['key_name'], entry['connection_name'], seen['dialect']
+            metrics.observe_query(connection, dialect, entry['status'], seen['query_seconds'], key)
+            if entry['status'] == 'success':
+                metrics.observe_rows(connection, dialect, key, entry['rows'])
+                metrics.observe_serialization('json', seen['serialization_seconds'])
+            governance.observe(seen['method'], 'api.run_named_query', seen['status'], seen['seconds'], key)
+    if report.get('dropped'):
+        metrics.inc_history('dropped', int(report['dropped']))
     return '', 204
 
 

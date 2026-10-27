@@ -138,6 +138,18 @@ def store_tx():
     return {d: int(n) for d, n in (r.split('|') for r in rows.splitlines())}
 
 
+def runs_written():
+    """Event ids the store has handed out: one per run recorded (ADR 0020), by whichever process recorded it - so,
+    unlike a process's own /metrics, whole with any number of workers."""
+    return int(psql('SELECT last_value FROM events_id_seq', 'qagstore') or 0)  # TRUNCATE keeps it counting
+
+
+def runs_kept(written, requests):
+    """The cell's runs written to the store, and the share of its calls that is: what the gateway kept of its audit
+    trail. Every call here is a run, served by Python or by the data plane."""
+    return {'runs_written': written, 'runs_written_share': written / requests if requests else None}
+
+
 def cpu_list(spec):
     out = []
     for part in spec.split(','):
@@ -290,6 +302,15 @@ def start(build, workers=1, access_log=True, access_format=None, profile_to=None
         cmd = [args.py_spy, 'record', '--subprocesses', '--rate', '200', '--format', 'raw', '-o', str(profile_to),
                '--'] + cmd
     cmd = ['taskset', '-c', args.gateway_cpus] + cmd
+    # Each cell starts both logs afresh: the data plane writes ~27k lines/s, and a full run kept them all until the
+    # disk filled. They are still written, so what writing them costs is still measured.
+    if shutil.disk_usage(OUT).free < 3 << 30:
+        raise RuntimeError(f'under 3 GB free on {OUT}: stopping before the disk fills')
+    for log in ('server.log', 'access.log'):
+        (OUT / log).write_bytes(b'')
+    # The event log (ADR 0020) keeps every run for at least an hour, whatever its count: tens of millions of rows
+    # at the data plane's rates, which slowed each later cell and filled the disk. Each cell starts it empty.
+    psql('TRUNCATE events', 'qagstore')
     out = open(OUT / 'server.log', 'a')
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
     wait_healthy(f'http://127.0.0.1:{port}', f'gateway {build}')
@@ -398,14 +419,18 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
         while not done.wait(2):
             freqs.append(mhz())
     sampler = threading.Thread(target=sample, daemon=True)
+    if warm:
+        time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
+    w0 = runs_written()
     tx0, g0, p0, l0, t0 = store_tx(), gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
     done.set()
     wall = time.time() - t0
     g1, p1, l1 = gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus)
-    time.sleep(1.5)
+    time.sleep(2.5)  # a flush interval for the data plane's report, another for Python's write
     tx1 = store_tx()
+    kept = runs_kept(runs_written() - w0, r['requests'])
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': scenario, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
            **_server_meta, **r, 'gw_cores': (g1 - g0) / wall, 'pg_cores': (p1 - p0) / wall,
@@ -413,11 +438,12 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
            'store_tx_per_req': (tx1['qagstore'] - tx0['qagstore']) / n,
            'data_tx_per_req': (tx1['bench'] - tx0['bench']) / n,
            'mhz_gw': round(sum(f for f in freqs if f) / len(freqs)) if any(freqs) else None,
-           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **(extra or {})}
+           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **kept, **(extra or {})}
     record(row)
     log(f'{block} {row["build"]} w{row["workers"]} t{row["threads"]} {scenario} c={c} q={q} r{rnd}: '
         f'{r["rps"]:.0f} req/s p50 {r["p50"]:.2f} p99 {r["p99"]:.2f} ok {r["success"]:.4f} '
-        f'gw {row["gw_cores"]:.2f} pg {row["pg_cores"]:.2f} store_tx {row["store_tx_per_req"]:.2f}')
+        f'gw {row["gw_cores"]:.2f} pg {row["pg_cores"]:.2f} store_tx {row["store_tx_per_req"]:.2f}'
+        + f' runs kept {kept["runs_written_share"]:.0%}')
     return row
 
 

@@ -166,6 +166,41 @@ class RetentionTests(HistoryTestCase):
             self.assertEqual(self.stored(), 5)
             self.assertEqual([run['i'] for run in self.listed()], [3, 4, 5, 6, 7])
 
+    def test_a_batch_leaves_out_only_the_runs_its_trim_would_delete(self):
+        """A batch with more of a version's runs than it keeps writes only those the trim keeps - the same ones, newest
+        by executed_at then by arrival, rows already stored included - and every run is still an event."""
+        start = datetime(2026, 1, 1)
+
+        def at(minutes):
+            return (start + timedelta(minutes=minutes)).strftime(history.TIME_FORMAT)
+        batch = []
+        for i in range(30):  # out of order, with ties
+            for name in ('q', 'other', None):
+                batch.append(history._row(name, None if name is None else 1,
+                                          {'executed_at': at((i * 7) % 11), 'status': 'success', 'key_name': 'admin',
+                                           'i': i}))
+        conn = db.connection()
+
+        def written():
+            history.write([history._row('q', 1, {'executed_at': at(5), 'status': 'success', 'i': 'stored'})],
+                          db.current_target())
+            history.write(batch, db.current_target())
+            kept = [tuple(row) for row in conn.execute(
+                'SELECT query_name, executed_at, entry_json FROM execution_history '
+                'ORDER BY query_name, executed_at, rowid')]
+            events = conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+            conn.execute('DELETE FROM execution_history')
+            conn.execute('DELETE FROM events')
+            return kept, events
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_LIMIT': '5',
+                                          'QUERYAPIGATE_HISTORY_ADHOC_LIMIT': '4'}):
+            with mock.patch.object(history, '_newest', lambda rows, *_: rows):
+                before = written()  # every run inserted, then trimmed
+            after = written()
+        self.assertEqual(after, before)
+        self.assertEqual(len(after[0]), 5 + 5 + 4)
+        self.assertEqual(after[1], 1 + 90)
+
     def test_with_retention_every_run_is_kept_and_lists_still_show_only_the_newest(self):
         env = {'QUERYAPIGATE_HISTORY_LIMIT': '5', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '30'}
         with mock.patch.dict(os.environ, env):

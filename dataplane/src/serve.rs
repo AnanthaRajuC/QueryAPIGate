@@ -15,6 +15,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -26,7 +27,7 @@ use hyper::header::{self, HeaderMap};
 use hyper::{Method, Request, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json, json};
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::auth::{self, Clock};
 use crate::db::{self, Dialect, Failure};
@@ -262,6 +263,8 @@ pub struct App {
     used: Mutex<HashMap<(String, String, bool), Instant>>,
     store_mask_key: Mutex<Option<Vec<u8>>>,
     runs: mpsc::Sender<Json>,
+    /// Runs served but not queued for Python (the queue was full): sent with the next report, for its /metrics
+    dropped: AtomicU64,
     /// (kind, key) -> (until, rows): the store rows metacache.py would reuse, for QUERYAPIGATE_METADATA_CACHE_TTL
     rows: Mutex<HashMap<(char, String), Reused>>,
 }
@@ -282,6 +285,7 @@ impl App {
             used: Mutex::new(HashMap::new()),
             store_mask_key: Mutex::new(None),
             runs,
+            dropped: AtomicU64::new(0),
             rows: Mutex::new(HashMap::new()),
         });
         tokio::spawn(report(app.clone(), queue));
@@ -829,7 +833,10 @@ impl App {
             "metrics": {"dialect": dialect, "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
                         "method": parts.method.as_str(), "status": status, "seconds": seconds},
         });
-        let _ = self.runs.try_send(run); // full: dropped, as Python's own history queue drops when it can't keep up
+        if self.runs.try_send(run).is_err() {
+            // full: dropped, as Python's own history queue drops when it can't keep up - and counted the same way
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
         let path = percent_encoding::percent_decode_str(parts.uri.path())
             .decode_utf8_lossy()
             .into_owned();
@@ -884,9 +891,14 @@ impl App {
     }
 }
 
-/// Sends served runs to Python in batches, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL (each at once for 0).
+/// Reports at once, at most: one at a time kept up with about 8,600 runs/s - well short of what this serves.
+const REPORTS_IN_FLIGHT: usize = 4;
+
+/// Sends served runs to Python in batches, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL (each at once for 0), up to
+/// REPORTS_IN_FLIGHT at once, each with how many runs were dropped since the one before.
 async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
     let every = app.settings.flush_every;
+    let in_flight = Arc::new(Semaphore::new(REPORTS_IN_FLIGHT));
     loop {
         let Some(first) = queue.recv().await else {
             return;
@@ -901,18 +913,24 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
                 }
             }
         }
-        let body = json!({"runs": batch}).to_string();
-        match app.forward.post("/internal/dataplane/runs", body).await {
-            Ok(status) if status.as_u16() == 204 => {}
-            Ok(status) => eprintln!(
-                "queryapigate-dataplane: reporting {} runs got {status}",
-                batch.len()
-            ),
-            Err(error) => eprintln!(
-                "queryapigate-dataplane: reporting {} runs failed: {error}",
-                batch.len()
-            ),
-        }
+        let Ok(permit) = in_flight.clone().acquire_owned().await else {
+            return;
+        };
+        let dropped = app.dropped.swap(0, Ordering::Relaxed);
+        let body = json!({"runs": batch, "dropped": dropped}).to_string();
+        let (app, count) = (app.clone(), batch.len());
+        tokio::spawn(async move {
+            match app.forward.post("/internal/dataplane/runs", body).await {
+                Ok(status) if status.as_u16() == 204 => {}
+                Ok(status) => {
+                    eprintln!("queryapigate-dataplane: reporting {count} runs got {status}")
+                }
+                Err(error) => {
+                    eprintln!("queryapigate-dataplane: reporting {count} runs failed: {error}")
+                }
+            }
+            drop(permit);
+        });
     }
 }
 
