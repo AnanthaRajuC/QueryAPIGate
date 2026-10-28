@@ -132,9 +132,15 @@ documentation. #99 workspaces only if asked for.
     without the GIL-holding ping ([ADR 0027](documentation/adr/0027-fewer-round-trips-per-query.md)); masking's schema
     refreshed in the background; sqlglot 30; `QUERYAPIGATE_THREADS`. Measured in
     [Performance, v4](documentation/PERFORMANCE_V4.md). (0.43.0, 2026-10-27.)
-32. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+32. **0.44: A Rust data plane for `/q/`** (#102, experimental) - a prototype in front of the Python server that serves
+    saved-query reads from Python's plans and forwards everything else, gated by a differential test against Python
+    and decided go: 3.2-9.4x the calls a second per gateway core on lookups, about 8x on the same 8 cores
+    ([ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md), [Performance, v5](documentation/PERFORMANCE_V5.md)).
+    Built from the repository, not yet in the image or the chart; run history writes only the rows it keeps.
+    (0.44.0, 2026-10-28.)
+33. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-33. **1.0.0.**
+34. **1.0.0.**
 
 ## 1. Per-key API permissions
 
