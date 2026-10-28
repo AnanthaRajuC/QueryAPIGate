@@ -364,7 +364,7 @@ operation exists. Reviewed for its graduation to tier 1 in 0.37 ([ADR
 - **Column masking is refused** on MongoDB (`mask_unresolvable`) rather than applied to fields it can't trace.
 - **The refusals are properties under fuzzing**: `fuzz/fuzz_mongo.py` (ClusterFuzzLite, from 0.35.1) checks that no
   server-side JavaScript survives into what MongoDB is sent and no parameter becomes an operator; the CI integration
-  job sends them to a real MongoDB 8.0.
+  job sends them to a real MongoDB (7.0 while the CI runners' kernel stops 8.0 starting; see ci.yml).
 
 ### Trino: a federation engine behind one grant (ADR 0026, experimental)
 
