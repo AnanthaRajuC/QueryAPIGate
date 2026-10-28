@@ -557,11 +557,7 @@ def last_run_times(name=None):
     from . import scope
     flush()
     if runstore.enabled():
-        runstore.ensure_schema()
-        where, params = ('AND query_name = {q:String}', {'q': name}) if name is not None else ('', {})
-        return {row['query_name']: row['last'] for row in runstore.query(
-            f'SELECT query_name, max(executed_at) AS last FROM history WHERE workspace = {{ws:String}} {where} '
-            'GROUP BY query_name', {'ws': scope.current(), **params})}
+        return runstore.last_run_times(scope.current(), name)
     where, params = ('AND query_name = ?', (name,)) if name is not None else ('', ())
     rows = db.connection().execute(
         f'SELECT query_name, MAX(executed_at) AS last FROM execution_history WHERE workspace = ? {where} '
@@ -574,10 +570,7 @@ def run_counts(name):
     from . import scope
     flush()
     if runstore.enabled():
-        runstore.ensure_schema()
-        return {row['version']: row['n'] for row in runstore.query(
-            'SELECT version, count() AS n FROM history WHERE workspace = {ws:String} AND query_name = {q:String} '
-            'GROUP BY version', {'ws': scope.current(), 'q': name})}
+        return runstore.run_counts(scope.current(), name)
     rows = db.connection().execute(
         'SELECT version, COUNT(*) AS n FROM execution_history WHERE workspace = ? AND query_name = ? '
         'GROUP BY version', (scope.current(), name)).fetchall()

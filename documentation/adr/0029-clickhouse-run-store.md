@@ -1,6 +1,10 @@
 # ADR 0029: An optional ClickHouse run store for history, the event log and usage
 
-- **Status:** Proposed
+- **Status:** Proposed. **Prototype built and measured (2026-10-28):** every criterion in section 9 met, at the
+  sizes this laptop's disk allowed - the [Result](#result-every-criterion-met-at-the-sizes-measured), with what
+  differs from plan. Amended while building it: three columns in `events`, a `history_counts` table, and the
+  rollups' code and statement dimensions, each found by measuring a read (sections 3 to 5, *as built*). The go is the
+  owner's to give.
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and
@@ -167,6 +171,13 @@ CREATE MATERIALIZED VIEW run_hours_mv TO run_hours AS SELECT ... FROM events WHE
   `ALTER TABLE ... MODIFY TTL`. The views use `SQL SECURITY DEFINER`, so a writer needs `INSERT` on `events` and nothing
   else.
 
+*As built:* `events` also has `code`, `masked` and `statement` - what usage reports count by, written with the run so
+no report parses an entry - and `written_at`, ClickHouse's own clock at the insert, which shows how late any writer's
+insert was. `history_counts` (an `AggregatingMergeTree` filled by a view on `history`, with history's TTL) keeps each
+day's runs and last run per query, version and key: the Console's counts. The rollups gained `code` and `statement`
+dimensions and `masked`, `first` and `last`. No projections anywhere: on 24.8 they refuse the lightweight `DELETE`
+`forget` needs.
+
 ### 4. Who writes
 
 - **The data plane writes its runs directly.** It batches up to 100,000 runs or 250 ms, with one insert in flight
@@ -180,6 +191,10 @@ CREATE MATERIALIZED VIEW run_hours_mv TO run_hours AS SELECT ... FROM events WHE
   `async_insert=1, wait_for_async_insert=1`. ClickHouse then merges small inserts from many writers into fewer parts.
   A flush still means a caller's own runs are readable once it returns.
 - **The audit log, definitions and quotas** are untouched.
+
+*As built:* the data plane sends a batch per flush interval, up to 100,000 runs - at 500 a batch ClickHouse spent 1.6
+cores merging parts, at this size 0.2. Python inserts synchronously, one insert per flush. The data plane's report
+still carries each run: Python counts it for /metrics and the Console's live feed, but no longer queues it.
 
 ### 5. Who reads, and how
 
@@ -199,6 +214,11 @@ CREATE MATERIALIZED VIEW run_hours_mv TO run_hours AS SELECT ... FROM events WHE
   store too.
 - **/metrics stays in memory.** Prometheus scrapes counters every 15 seconds, and serving them from queries would
   put a database on every scrape. The rollups give the history /metrics never kept.
+
+*As built:* a usage report takes the window's whole minutes from `run_minutes` and only its partial minutes at either
+end from `events`, found by id range, so it costs the same whatever the traffic and stays exact. Alerts still read
+history's newest runs, as with the metadata store. A replay page finds its ids first, then reads those rows.
+`queryapigate events` doesn't format an event no stream is listening for.
 
 ### 6. Switching it on and off
 
@@ -251,6 +271,32 @@ checks the space first, as the 0.44 benchmarks do.
 - **Not met:** the prototype and its results stay as a documented experiment. The SQL stores' bound (section 8)
   ships regardless.
 
+#### Result: every criterion met, at the sizes measured
+
+Measured on 2026-10-28 ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-2026-10-28/README.md)),
+the data plane in front in both builds: 0.44's, recording through Python on the PostgreSQL store with two workers,
+against the run store with one.
+
+| Criterion | Measured |
+|---|---|
+| 1. Every run recorded at 20,000/s and at the peak | 35,999,897 of 35,999,897 calls in 30 minutes, 0 late (insert lag p99 13 ms, max 37 ms). At the 64-caller peak: 100%, where 0.44's store kept 52-54% |
+| 2. Cheaper gateway | -11% gateway cores at 20,000/s; Python 0.49 to 0.13 cores; the data plane's own CPU per call unchanged (2.91 and 2.89 cores). One worker records everything |
+| 3. Storage ≤ 40 B a run | 13.0 B in `events`, 13.4 B in `history`, at 72.3 million runs |
+| 4. Delivery and resume | 35 million events to clients resuming at random over 7,515 reconnects: none missing, repeated or out of order. At 2,000/s, p99 1.35 s from id to arrival |
+| 5. Reads, p95 | At 107.6 million runs: history pages 8-13 ms, the Console's versions 6.7 ms, a 24-hour usage report 16.9 ms, a filtered replay of the whole log 8.8 s |
+| 6. Same answers | The run store differential, three seeds: the same history, Console lists and event payloads byte for byte |
+
+**What differs from the plan:**
+- **Size:** 72.3 million runs for storage and 107.6 million for reads - the latter real runs doubled through the same
+  views - not 250 million: the laptop had 13 GB free.
+- **The peak** is PostgreSQL at 64 callers, not MySQL's.
+- **Delivery speed** was measured at 2,000/s. At 20,000/s one `queryapigate events` process delivers about 10,000
+  events a second per stream, whichever store it reads: the soak's clients fell behind and resumed, which tested
+  resume, not speed. That ceiling is the events server's, and an open question below.
+- **Three reads missed at first,** each fixed from ClickHouse's query log, and are what *as built* in sections 3 and
+  5 describe: usage 4,991 ms (JSON parsed per run), the Console's version list 723 ms (the whole history scanned for
+  counts), the replay 41 s (`entry` read for nearly every granule).
+
 ## Alternatives considered
 
 - **Partitioned PostgreSQL** (hourly partitions dropped for retention, `COPY` ingestion, BRIN indexes). No new
@@ -285,7 +331,8 @@ checks the space first, as the 0.44 benchmarks do.
   SQLite, or one PostgreSQL.
 - **Live events arrive about a second later:** the flush interval plus the 1 s settle window, against the flush
   interval alone today. That's the cost of making ADR 0002's promise hold at 20,000 events a second.
-- **Usage reports and alerts become exact** with the run store, whatever history's sample rate. At these rates
+- **Usage reports become exact** with the run store, whatever history's sample rate (alerts, as built, still read
+  history's newest runs). At these rates
   history's sample rate is then only about keeping example runs, and can be set low.
 - The run store is two writers sharing one schema. The data plane's row format joins the differential test, as its
   history entries already have.
@@ -301,3 +348,7 @@ checks the space first, as the 0.44 benchmarks do.
 - **Time-ordered ids for the SQL stores**, replacing the 1,000-id look-back (section 8).
 - **The rollups' grains and defaults** (7 days by minute, 400 days by hour), once real traffic's combinations per
   minute are known.
+- **The events server's ceiling:** about 10,000 events a second per stream from one process, below what a data plane
+  serves. Several processes behind a load balancer each tail the store already; whether one process should serve
+  more is a separate measurement.
+- **250 million runs:** section 9's size, on a machine with the disk for it.

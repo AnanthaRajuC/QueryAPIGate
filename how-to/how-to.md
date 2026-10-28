@@ -130,6 +130,8 @@ guide covers one scenario end to end, and every command and response in it was r
     logging, the metadata cache, the event log's disk, and how many containers - each from a measurement.
 64. [**Try the Rust data plane in front of `/q/`**](64-try-the-rust-data-plane.md) (prototype) - build it, put it on
     the public port with Python behind it, and see which calls it serves.
+65. [**Keep run history and the event log in ClickHouse**](65-keep-runs-in-clickhouse.md) (prototype) - a run store
+    for the data plane's rates: the users, the setting, and what changes.
 38. [**Allow a browser-based frontend to call the API directly**](38-allow-a-browser-frontend-cors.md) - CORS, and
     why it isn't authentication.
 

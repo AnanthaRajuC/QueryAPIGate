@@ -853,6 +853,7 @@ impl App {
             "connection": field("connection_name"), "transport": field("transport"), "rows": field("rows"),
             "dialect": dialect, "method": parts.method.as_str(), "http_status": status, "seconds": seconds,
             "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
+            "code": field("code"), "masked": entry.get("masked").and_then(Json::as_array).is_some_and(|m| !m.is_empty()),
         });
         if self.runs.try_send(run).is_err() {
             // full: dropped, as Python's own history queue drops when it can't keep up - and counted the same way
@@ -918,6 +919,9 @@ impl App {
 /// Reports at once, at most: one at a time kept up with about 8,600 runs/s - well short of what this serves.
 const REPORTS_IN_FLIGHT: usize = 4;
 
+/// Runs in one insert into the run store at most (ADR 0029 §4): one interval's at 100,000 calls a second.
+const RUN_STORE_BATCH: usize = 100_000;
+
 /// How long a shutdown waits for the runs still queued to reach Python.
 const DRAIN_FOR: Duration = Duration::from_secs(10);
 
@@ -946,6 +950,12 @@ impl App {
 /// take included.
 async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
     let every = app.settings.flush_every;
+    // A run store wants few, large inserts: each is a part ClickHouse later merges, through three views
+    let most = if app.run_store.is_some() {
+        RUN_STORE_BATCH
+    } else {
+        500
+    };
     loop {
         let Some(first) = queue.recv().await else {
             return;
@@ -953,7 +963,7 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
         let mut batch = vec![first];
         if !every.is_zero() {
             let deadline = tokio::time::Instant::now() + every;
-            while batch.len() < 500 {
+            while batch.len() < most {
                 match tokio::time::timeout_at(deadline, queue.recv()).await {
                     Ok(Some(run)) => batch.push(run),
                     Ok(None) | Err(_) => break,

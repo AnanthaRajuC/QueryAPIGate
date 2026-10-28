@@ -382,12 +382,14 @@ class EventServer:
         return len(rows) == _BATCH
 
     def _deliver_row(self, row):
-        event_id = row['id']
+        event_id, workspace = row['id'], row['workspace']
         kind = 'saved' if row['query_name'] is not None else 'adhoc'
         self.by_second.setdefault(event_id // (runstore.PER_MS * 1000), set()).add(event_id)
+        # An event no stream is listening for isn't formatted: at a data plane's rates, that's most of the tail's work
+        listening = self.by_key.get((workspace, None)) or self.by_key.get((workspace, row['key_name']))
+        data = _format(event_id, runstore.event_payload(row)) if listening else None
         self._deliver(event_id, row['key_name'], (row['type'], kind, row['query_name'], row['connection_name'],
-                                                  row['status']),
-                      _format(event_id, runstore.event_payload(row)), row['occurred_at'], row['workspace'])
+                                                  row['status']), data, row['occurred_at'], workspace)
 
     async def _deliver_late(self):
         """Events below the cursor that weren't there when it passed them: each second of the last _LATE_WINDOW whose

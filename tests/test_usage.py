@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 from queryapigate import admins, alerts, history, mcp_server, usage
+from tests import TEST_RUN_STORE_URL
 from tests.test_api_v1 import ADMIN, V1TestCase
 
 URL = '/api/v1/usage/agents'
@@ -97,7 +98,8 @@ class SummaryTests(UsageTestCase):
 
     def test_a_sampled_history_says_so(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_SAMPLE_RATE': '0.5'}):
-            self.assertEqual(self.summary()[1]['sample_rate'], 0.5)
+            # a run store counts every run in the event log instead (ADR 0029): not a sample
+            self.assertEqual(self.summary()[1]['sample_rate'], 1.0 if TEST_RUN_STORE_URL else 0.5)
 
 
 class VolumeAlertTests(UsageTestCase):

@@ -14,7 +14,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, db, events, history, runstore, store
+from queryapigate import config, create_app, db, events, history, runstore, store, usage
 from tests import TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 from tests.test_events_server import Stream
@@ -282,7 +282,7 @@ class ReadTests(StoreTestCase):
         self.assertEqual(self.count('history', "key_name = 'alice'"), 3)
         done = self.client.delete('/api/v1/history', headers=self.admin, query_string={'caller': 'alice'}).get_json()
         self.assertEqual((done['runs'], done['events']), (3, 3))
-        for table in ('events', 'history', 'run_minutes', 'run_hours'):
+        for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
             self.assertEqual(self.count(table, "key_name = 'alice'"), 0, table)
         self.assertEqual(self.count('history', "key_name = 'bob'"), 2)
 
@@ -292,6 +292,50 @@ class ReadTests(StoreTestCase):
         self.assertEqual(self.client.delete('/api/v1/queries/q', headers=self.admin).status_code, 204)
         self.assertEqual((self.count('history', "query_name = 'q'"), self.count('history', "query_name = 'other'")),
                          (0, 2))
+
+
+class UsageTests(StoreTestCase):
+    def mcp_run(self, key, keep, **entry):
+        row = history._row(None, None, {'executed_at': store.now(), 'transport': 'mcp', 'key_name': key,
+                                        'status': 'success', 'rows': 2, 'connection_name': 'lite', **entry},
+                           keep=keep)
+        history.write([row])
+
+    def test_every_run_counts_whatever_history_kept(self):
+        for i in range(4):
+            self.mcp_run('agent', keep=i == 0, sql=f'SELECT  {i % 2}')  # three of the four sampled out of history
+        self.mcp_run('agent', keep=False, status='error', code='table_not_allowed', sql='SELECT secret')
+        self.mcp_run('agent', keep=False, masked=[{'column': 'email'}], sql_sha256='ab' * 32)
+        summary = usage.agents()
+        self.assertEqual((summary['sample_rate'], summary['truncated']), (1.0, False))
+        agent, = summary['items']
+        self.assertEqual((agent['calls'], agent['rows'], agent['errors'], agent['masked_calls'], agent['adhoc_calls']),
+                         (6, 12, 1, 1, 6))
+        self.assertEqual(agent['refusals'], {'table_not_allowed': 1})
+        self.assertEqual(agent['connections'], ['lite'])
+        self.assertEqual([(s['sql'], s['count']) for s in agent['top_statements']][:2],
+                         [('SELECT 0', 2), ('SELECT 1', 2)])  # whitespace normalised, as from history
+
+
+    def test_whole_minutes_from_the_rollups_and_the_edges_from_events_add_up_exactly(self):
+        base = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=10)
+        for minutes, second, extra in ((0, 5, {}), (0, 50, {}), (2, 13, {'status': 'error', 'code': 'query_timeout'}),
+                                       (3, 0, {'masked': [{'column': 'email'}]}), (5, 59, {}), (7, 31, {}),
+                                       (8, 2, {'sql': 'SELECT 9'})):
+            at = (base + timedelta(minutes=minutes, seconds=second)).strftime(history.TIME_FORMAT)
+            row = history._row('q' if 'sql' not in extra else None, 1 if 'sql' not in extra else None,
+                               {'executed_at': at, 'transport': 'mcp', 'key_name': 'agent', 'status': 'success',
+                                'rows': 3, 'connection_name': 'lite', **extra})
+            history.write([row])
+        since = (base + timedelta(seconds=40)).strftime(history.TIME_FORMAT)  # mid-minute at both ends
+        until = (base + timedelta(minutes=7, seconds=45)).strftime(history.TIME_FORMAT)
+        mixed = runstore.agent_usage('default', since, until)
+        with mock.patch.object(runstore, '_minute_bounds', lambda *_: None):
+            counted = runstore.agent_usage('default', since, until)
+        self.assertEqual(mixed, counted)
+        agent, = mixed
+        self.assertEqual((agent['calls'], agent['errors'], agent['masked_calls'], agent['refusals']),
+                         (5, 1, 1, {'query_timeout': 1}))
 
 
 class SwitchTests(StoreTestCase):

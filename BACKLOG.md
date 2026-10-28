@@ -3164,17 +3164,19 @@ traffic, and a p99 that stays in single milliseconds under load.
 
 ## 103. An optional ClickHouse run store
 
-**Status: proposed.** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md): with `QUERYAPIGATE_RUN_STORE_URL`
-set, run history, the event log and per-minute and per-hour usage rollups go to ClickHouse. The data plane and Python
-each insert batches into one `events` table, and materialized views fill `history` and the rollups. Event ids are
-time-ordered and stay below 2^53. Writers lease blocks of each millisecond's 4,096 ids, and delivery waits a 1 s
-settle window, so a resume still misses nothing (ADR 0002). Measured first on 5 million runs: about 24 bytes a run in
-`events` and in `history`, and every read the design needs in 2 to 30 ms. Built as a prototype that ends in a measured
-decision. Experimental.
+**Status: prototype, measured (2026-10-28); the go is the owner's.** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
+with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
+ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.
+The data plane writes its own runs, with ids from a block Python leases it. Event ids are time-ordered, below 2^53,
+and delivered after a 1 s settle window, so a resume misses nothing (ADR 0002). Guide 65. Experimental.
+[Measured](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-2026-10-28/README.md): every run recorded at 20,000/s for 30 minutes and at
+the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 bytes a run, history and usage reads in
+6-17 ms at 107.6 million runs, 35 million events resumed with none missing or repeated.
 
 **Impact:** the second condition of ADR 0028's go. Every run the data plane serves is recorded without Python in its
-path, and the event log can hold a day at 20,000 events a second, about 41 GB. Usage reports and alerts become exact
-whatever history's sample rate.
+path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
+history's sample rate.
 
-**Next:** the prototype on one branch, then section 9's six measurements. The event log's bound for the SQL stores
-(#102) is separate and ships either way.
+**Next:** the owner's go or no-go on section 9's result. Then 250 million runs on a machine with the disk for it, a
+security review (ADR 0017), and the events server's ceiling - about 10,000 events a second per stream from one
+process. The event log's bound for the SQL stores (#102) is separate and ships either way.

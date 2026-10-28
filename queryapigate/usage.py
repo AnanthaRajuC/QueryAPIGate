@@ -8,7 +8,8 @@ or by SHA-256 when QUERYAPIGATE_HISTORY_ADHOC_SQL is `hash`.
 
 What history doesn't hold isn't here either: calls refused before they ran (no credential, a rate limit) are only in
 /metrics; with QUERYAPIGATE_HISTORY_SAMPLE_RATE below 1, successful runs are a sample (`sample_rate` says so, and
-failures are always kept); and runs past QUERYAPIGATE_HISTORY_RETENTION_DAYS are gone.
+failures are always kept); and runs past QUERYAPIGATE_HISTORY_RETENTION_DAYS are gone. With a run store (runstore.py,
+ADR 0029), a window within the event log's retention is counted from every run instead - exact, `sample_rate` 1.
 """
 import json
 from datetime import datetime, timedelta
@@ -111,6 +112,11 @@ def agents(since=None, until=None, hours=None, now=None):
     if since >= until:
         raise ApiError('since must be before until', code='invalid_filter')
     history.flush()
+    kept_from = (now - timedelta(hours=config.events_retention_hours())).strftime(history.TIME_FORMAT)
+    if runstore.enabled() and since >= kept_from:  # every run is still in the event log: count them all there
+        items = _from_run_store(runstore.agent_usage(scope.current(), since, until))
+        _add_writes(items, since, until)
+        return {'since': since, 'until': until, 'sample_rate': 1.0, 'truncated': False, 'items': items}
     if runstore.enabled():
         runstore.ensure_schema()
         rows = [{'query_name': row['query_name'], 'executed_at': row['executed_at'], 'entry_json': row['entry']}
@@ -131,6 +137,28 @@ def agents(since=None, until=None, hours=None, now=None):
     _add_writes(items, since, until)
     return {'since': since, 'until': until, 'sample_rate': config.history_sample_rate(),
             'truncated': len(rows) > MAX_SCAN, 'items': items}
+
+
+def _from_run_store(found):
+    """runstore.agent_usage()'s items in summarise()'s shape: statements normalised and counted as _statement() does."""
+    items = []
+    for agent in found:
+        statements = {}
+        for row in agent.pop('statements'):
+            kind, _, text = row['statement'].partition(':')
+            statement = _statement({'sql': text} if kind == 'sql' else {'sql_sha256': text})
+            if statement is None:
+                continue
+            key, shown = statement
+            counted = statements.setdefault(key, {**shown, 'count': 0, 'rows': 0, 'errors': 0})
+            counted['count'] += row['n']
+            counted['rows'] += row['rows_read']
+            counted['errors'] += row['errors']
+        ranked = sorted(statements.values(), key=lambda s: (-s['count'], s['sql'] or s['sql_sha256']))
+        items.append({**agent, 'refusals': dict(sorted(agent['refusals'].items(), key=lambda kv: (-kv[1], kv[0]))),
+                      'queries': dict(sorted(agent['queries'].items(), key=lambda kv: (-kv[1], kv[0]))),
+                      'top_statements': ranked[:TOP_STATEMENTS]})
+    return sorted(items, key=lambda a: (-a['calls'], a['agent']))
 
 
 WRITE_OUTCOMES = ('pending', 'approved', 'done', 'failed', 'rejected', 'expired')

@@ -37,7 +37,7 @@ one it supersedes.
 | [0026](0026-trino-connections.md) | Trino as a native connection type | Accepted |
 | [0027](0027-fewer-round-trips-per-query.md) | Fewer round trips per query, and a read-only mode a query can't undo | Accepted |
 | [0028](0028-rust-data-plane-prototype.md) | A Rust data plane for `/q/`, as a prototype with a go/no-go decision | Accepted; decided: go |
-| [0029](0029-clickhouse-run-store.md) | An optional ClickHouse run store for history, the event log and usage | Proposed |
+| [0029](0029-clickhouse-run-store.md) | An optional ClickHouse run store for history, the event log and usage | Proposed; measured, every criterion met |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

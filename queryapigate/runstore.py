@@ -8,6 +8,8 @@ stay in the metadata store (db.py).
 **One insert per batch.** A batch goes into `events`. ClickHouse fills `history` (the runs history keeps -
 `in_history`, false when the sample rate sampled a run out) and the per-minute and per-hour rollups from it, through
 materialized views. Retention is each table's TTL: whole partitions are dropped, and history.py's sweeps don't run.
+`events.written_at` is ClickHouse's own time at the insert: against the time in an event's id, it shows how late any
+writer's insert was, the data plane's included.
 
 **Speaking to ClickHouse.** Its HTTP interface, with the standard library: inserts as JSONEachRow, and every value a
 read compares against as a typed query parameter (`{key:String}`), never as SQL text. The data plane (ADR 0028)
@@ -216,7 +218,7 @@ _RUN_COLUMNS = """
   key_name LowCardinality(Nullable(String)),
   connection_name LowCardinality(Nullable(String)),
   status LowCardinality(Nullable(String)),"""
-_ROLLUP_DIMENSIONS = 'key_name, query_name, version, connection_name, source, status'
+_ROLLUP_DIMENSIONS = 'key_name, query_name, version, connection_name, source, status, code, statement'
 _ROLLUP_KEY = 'workspace, ' + _ROLLUP_DIMENSIONS
 
 
@@ -231,14 +233,20 @@ def _tables(events_hours, history_days):
   connection_name LowCardinality(Nullable(String)),
   source LowCardinality(Nullable(String)),
   status LowCardinality(Nullable(String)),
+  code LowCardinality(String),
+  statement String CODEC(ZSTD(3)),
   runs SimpleAggregateFunction(sum, UInt64),
   rows SimpleAggregateFunction(sum, UInt64),
+  masked SimpleAggregateFunction(sum, UInt64),
+  first SimpleAggregateFunction(min, String),
+  last SimpleAggregateFunction(max, String),
   seconds AggregateFunction(quantilesTDigest(0.5, 0.95, 0.99), Float32)
 ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM({grain})
 ORDER BY (workspace, {grain}, {dimensions}) TTL {grain} + INTERVAL {days} DAY
 SETTINGS allow_nullable_key = 1"""
     rollup_view = """AS SELECT {fn}(parseDateTimeBestEffortOrZero(occurred_at, 'UTC')) AS {grain}, {key},
-  count() AS runs, sum(rows) AS rows, quantilesTDigestState(0.5, 0.95, 0.99)(seconds) AS seconds
+  count() AS runs, sum(rows) AS rows, sum(toUInt64(masked)) AS masked, min(occurred_at) AS first,
+  max(occurred_at) AS last, quantilesTDigestState(0.5, 0.95, 0.99)(seconds) AS seconds
 FROM events WHERE type = 'query.run' GROUP BY {grain}, {key}"""
     return [
         'CREATE TABLE IF NOT EXISTS run_store_schema (version UInt32) ENGINE = TinyLog',
@@ -250,9 +258,13 @@ FROM events WHERE type = 'query.run' GROUP BY {grain}, {key}"""
   in_history Bool,
   rows UInt64 CODEC(T64, ZSTD(1)),
   seconds Float32 CODEC(ZSTD(1)),
+  code LowCardinality(String) DEFAULT '',
+  masked Bool DEFAULT false,
+  statement String DEFAULT '' CODEC(ZSTD(3)),
   entry String CODEC(ZSTD(3)),
   payload_json String CODEC(ZSTD(3)),
-  stamped_at DateTime('UTC') DEFAULT {_STAMPED}
+  stamped_at DateTime('UTC') DEFAULT {_STAMPED},
+  written_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD(1))
 ) ENGINE = MergeTree PARTITION BY toStartOfHour(stamped_at) ORDER BY id
 TTL stamped_at + INTERVAL {events_hours} HOUR
 SETTINGS ttl_only_drop_parts = 1, non_replicated_deduplication_window = 1000""",
@@ -264,6 +276,20 @@ SETTINGS ttl_only_drop_parts = 1, non_replicated_deduplication_window = 1000""",
 ) ENGINE = MergeTree PARTITION BY toYYYYMMDD(stamped_at) ORDER BY (workspace, executed_at, id)
 TTL stamped_at + INTERVAL {history_days} DAY
 SETTINGS ttl_only_drop_parts = 1, non_replicated_deduplication_window = 1000""",
+        f"""CREATE TABLE IF NOT EXISTS history_counts (
+  workspace LowCardinality(String),
+  query_name LowCardinality(Nullable(String)),
+  version Nullable(UInt32),
+  key_name LowCardinality(Nullable(String)),
+  day Date,
+  runs SimpleAggregateFunction(sum, UInt64),
+  last SimpleAggregateFunction(max, String)
+) ENGINE = AggregatingMergeTree PARTITION BY day ORDER BY (workspace, query_name, version, key_name, day)
+TTL day + INTERVAL {history_days} DAY SETTINGS allow_nullable_key = 1""",
+        """CREATE MATERIALIZED VIEW IF NOT EXISTS history_counts_mv TO history_counts
+DEFINER = CURRENT_USER SQL SECURITY DEFINER
+AS SELECT workspace, query_name, version, key_name, toDate(stamped_at) AS day, count() AS runs, max(executed_at) AS last
+FROM history GROUP BY workspace, query_name, version, key_name, day""",
         'CREATE TABLE IF NOT EXISTS run_minutes ' + rollup.format(grain='minute', dimensions=_ROLLUP_DIMENSIONS,
                                                                   days=7),
         'CREATE TABLE IF NOT EXISTS run_hours ' + rollup.format(grain='hour', dimensions=_ROLLUP_DIMENSIONS, days=400),
@@ -291,12 +317,14 @@ def ensure_schema():
     with _ready_guard:
         if (os.getpid(), name) in _ready:
             return
-        execute(f'CREATE DATABASE IF NOT EXISTS {name}', db_name='default')
+        if not query('SELECT 1 FROM system.databases WHERE name = {n:String}', {'n': name}, db_name='default'):
+            execute(f'CREATE DATABASE IF NOT EXISTS {name}', db_name='default')  # a user who may create it, then
         hours, days = config.events_retention_hours(), config.history_retention_days()
         for statement in _tables(hours, days):
             execute(statement)
-        _retain('events', f'stamped_at + INTERVAL {hours} HOUR')
-        _retain('history', f'stamped_at + INTERVAL {days} DAY')
+        _retain('events', f'stamped_at + toIntervalHour({hours})')  # as ClickHouse writes them in engine_full
+        _retain('history', f'stamped_at + toIntervalDay({days})')
+        _retain('history_counts', f'day + toIntervalDay({days})')
         if not query('SELECT version FROM run_store_schema'):
             execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})')
         _ready.add((os.getpid(), name))
@@ -473,13 +501,20 @@ def _existing_versions(saved):
 
 
 def _numbers(entry_json):
+    """(rows, seconds, columns) of a run's entry: what the rollups and usage reports count by, as columns of their
+    own so a report over millions of runs never parses an entry."""
     try:
         entry = json.loads(entry_json)
     except ValueError:
-        return 0, 0.0
+        entry = {}
     rows, duration = entry.get('rows'), entry.get('duration_ms')
-    return (rows if isinstance(rows, int) and rows >= 0 else 0,
-            duration / 1000 if isinstance(duration, (int, float)) and duration >= 0 else 0.0)
+    sql = entry.get('sql')
+    statement = 'sql:' + sql if isinstance(sql, str) else (
+        'sha:' + entry['sql_sha256'] if isinstance(entry.get('sql_sha256'), str) else '')
+    code = entry.get('code')  # a run's error code, not one raised here (tests/test_errors.py reads dict literals)
+    columns = dict(code=code if isinstance(code, str) else '', masked=bool(entry.get('masked')), statement=statement)
+    return (rows if isinstance(rows, int) and not isinstance(rows, bool) and rows >= 0 else 0,
+            duration / 1000 if isinstance(duration, (int, float)) and duration >= 0 else 0.0, columns)
 
 
 def write(rows):
@@ -499,11 +534,11 @@ def write(rows):
                                          'version': version, 'key_name': key_name, 'status': status,
                                          'entry': entry_json})
                 continue
-            count, seconds = _numbers(entry_json)
+            count, seconds, columns = _numbers(entry_json)
             events_rows.append({'type': event[0], 'source': event[1], 'occurred_at': event[2], 'workspace': workspace,
                                 'query_name': name, 'version': version, 'key_name': event[3],
                                 'connection_name': event[4], 'status': event[6], 'in_history': keep, 'rows': count,
-                                'seconds': seconds, 'entry': entry_json, 'payload_json': ''})
+                                'seconds': seconds, **columns, 'entry': entry_json, 'payload_json': ''})
         _send('events', events_rows)
         _send('history', history_rows)
     except (RunStoreError, LeaseError, OSError, *db.Error):
@@ -635,7 +670,7 @@ def forget(caller, dry_run=False):
     runs = query('SELECT count() AS n FROM history WHERE key_name = {c:String}', params)[0]['n']
     found = query('SELECT count() AS n FROM events WHERE key_name = {c:String}', params)[0]['n']
     if not dry_run:
-        for table in ('events', 'history', 'run_minutes', 'run_hours'):
+        for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
             execute(f'DELETE FROM {table} WHERE key_name = {{c:String}}', params)
             execute(f'ALTER TABLE {table} APPLY DELETED MASK')
     return runs, found
@@ -653,12 +688,13 @@ def delete_runs(workspace, name=None, version=None):
     if version is not None:
         clauses.append('version = {v:UInt32}')
         params['v'] = version
-    statement = f'DELETE FROM history WHERE {" AND ".join(clauses)}'
+    statements = [f'DELETE FROM {table} WHERE {" AND ".join(clauses)}' for table in ('history', 'history_counts')]
     where = database()  # now: the repeat runs on a timer thread, after this request
 
     def run():
         try:
-            execute(statement, params, db_name=where)
+            for statement in statements:
+                execute(statement, params, db_name=where)
         except RunStoreError:
             log.warning('Run store: could not delete the runs of %s', name or workspace, exc_info=True)
 
@@ -668,6 +704,108 @@ def delete_runs(workspace, name=None, version=None):
     timer = threading.Timer(delay, run)
     timer.daemon = True
     timer.start()
+
+
+def _minute_bounds(since, until):
+    """The whole minutes within [since, until) - (first, end), or None - which run_minutes counts exactly."""
+    def parsed(value):  # a time, or a date (GET /api/v1/usage/agents takes either)
+        return datetime.strptime(value, TIME_FORMAT if len(value) > 10 else '%Y-%m-%d')
+    first = parsed(since)
+    if first.second:
+        first = first.replace(second=0) + timedelta(minutes=1)
+    end = parsed(until).replace(second=0)
+    return (first.strftime(TIME_FORMAT), end.strftime(TIME_FORMAT)) if first < end else None
+
+
+_LEGACY_IDS = 1 << 40  # ids below this came from the metadata store's event log (_copy_event_log()), not minted
+
+
+def _id_span(since, until):
+    """(low, high) ids that can hold a run that ran in [since, until): an id is stamped when its batch is sent, at or
+    after the run - a minute's slack below for clocks, ten minutes above for a queue a slow store left behind. A
+    bound for the primary key, to read only what's near the window; the occurred_at filter beside it decides."""
+    def ms(value):
+        return int(time.mktime(datetime.strptime(value, TIME_FORMAT if len(value) > 10 else '%Y-%m-%d').timetuple())
+                   * 1000) - EPOCH_MS
+    return id_floor(max(ms(since) - 60_000, 0)), id_floor(ms(until) + 600_000) + PER_MS - 1
+
+
+def agent_usage(workspace, since, until):
+    """usage.summarise()'s items for MCP runs in [since, until), from every run - not history's sample - aggregated
+    here rather than read and counted in Python: exact, and never truncated. The window's whole minutes come from
+    run_minutes, a few rows a minute whatever the traffic; its partial minutes at either end, and ad-hoc statements,
+    from events. The caller makes sure the window is within the event log's retention and normalises statements
+    (usage._statement())."""
+    ensure_schema()
+    params = {'ws': workspace, 'since': since, 'until': until}
+    agent = "ifNull(key_name, '-')"
+    columns = f"""{agent} AS agent, {{count}} AS calls, sum(rows) AS rows_read, {{errors}} AS errors,
+          {{masked}} AS masked_calls, min({{first}}) AS first_seen, max({{last}}) AS last_seen,
+          arraySort(groupUniqArray(assumeNotNull(connection_name))) AS connections,
+          {{adhoc}} AS adhoc_calls,
+          sumMapIf([assumeNotNull(query_name)], [toUInt64({{one}})], query_name IS NOT NULL) AS queries,
+          sumMapIf([if(code = '', 'internal_error', code)], [toUInt64({{one}})], status = 'error') AS refusals"""
+    from_events = columns.format(count='count()', errors="countIf(status = 'error')", masked='countIf(masked)',
+                                 first='occurred_at', last='occurred_at', adhoc='countIf(query_name IS NULL)', one='1')
+    from_minutes = columns.format(count='sum(runs)', errors="sumIf(runs, status = 'error')", masked='sum(masked)',
+                                  first='first', last='last', adhoc='sumIf(runs, query_name IS NULL)', one='runs')
+    run = "type = 'query.run' AND source = 'mcp' AND workspace = {ws:String}"
+    near = '((id >= {a{n}:UInt64} AND id <= {b{n}:UInt64}) OR id < {legacy:UInt64})'
+    params['legacy'] = _LEGACY_IDS
+
+    def ids(n, low, high):  # the primary-key bound for one span of the window (_id_span())
+        params[f'a{n}'], params[f'b{n}'] = _id_span(low, high)
+        return near.replace('{n}', str(n))
+    minutes = _minute_bounds(since, until)
+    events_where, minutes_where = [], None
+    if minutes is None:
+        events_where.append(f"{ids(0, since, until)} AND occurred_at >= {{since:String}} AND "
+                            "occurred_at < {until:String}")
+    else:
+        params.update(lo=minutes[0], hi=minutes[1])
+        events_where.append(f"{ids(0, since, minutes[0])} AND occurred_at >= {{since:String}} AND "
+                            "occurred_at < {lo:String}")
+        events_where.append(f"{ids(1, minutes[1], until)} AND occurred_at >= {{hi:String}} AND "
+                            "occurred_at < {until:String}")
+        minutes_where = ("source = 'mcp' AND workspace = {ws:String} AND minute >= toDateTime({lo:String}, 'UTC') "
+                         "AND minute < toDateTime({hi:String}, 'UTC')")
+    parts = [f"SELECT {from_events} FROM events WHERE {run} AND ({' OR '.join(f'({w})' for w in events_where)}) "
+             "GROUP BY agent"]
+    if minutes_where:
+        parts.append(f"SELECT {from_minutes} FROM run_minutes WHERE {minutes_where} GROUP BY agent")
+    found = {}
+    for sql in parts:
+        for row in query(sql, params):
+            item = found.setdefault(row['agent'], {
+                'agent': row['agent'], 'calls': 0, 'rows': 0, 'errors': 0, 'masked_calls': 0, 'first_seen': None,
+                'last_seen': None, 'connections': [], 'queries': {}, 'adhoc_calls': 0, 'refusals': {},
+                'statements': []})
+            for field, value in (('calls', 'calls'), ('rows', 'rows_read'), ('errors', 'errors'),
+                                 ('masked_calls', 'masked_calls'), ('adhoc_calls', 'adhoc_calls')):
+                item[field] += row[value]
+            item['first_seen'] = min(filter(None, (item['first_seen'], row['first_seen'])))
+            item['last_seen'] = max(filter(None, (item['last_seen'], row['last_seen'])))
+            item['connections'] = sorted({*item['connections'], *(c for c in row['connections'] if c)})
+            for name, counted in (('queries', row['queries']), ('refusals', row['refusals'])):
+                for key, n in zip(*counted, strict=True):
+                    item[name][key] = item[name].get(key, 0) + n
+    statements = [f"""SELECT {agent} AS agent, statement, count() AS n, sum(rows) AS rows_read,
+          countIf(status = 'error') AS errors FROM events
+        WHERE {run} AND ({' OR '.join(f'({w})' for w in events_where)}) AND query_name IS NULL AND statement != ''
+        GROUP BY agent, statement"""]
+    if minutes_where:
+        statements.append(f"""SELECT {agent} AS agent, statement, sum(runs) AS n, sum(rows) AS rows_read,
+          sumIf(runs, status = 'error') AS errors FROM run_minutes
+        WHERE {minutes_where} AND query_name IS NULL AND statement != '' GROUP BY agent, statement""")
+    counted = {}
+    for sql in statements:
+        for row in query(sql, params):
+            seen = counted.setdefault((row['agent'], row['statement']), {**row, 'n': 0, 'rows_read': 0, 'errors': 0})
+            for field in ('n', 'rows_read', 'errors'):
+                seen[field] += row[field]
+    for (name, _), row in counted.items():
+        found[name]['statements'].append(row)
+    return list(found.values())
 
 
 # ---- the event log ----
@@ -740,9 +878,11 @@ def replay_page(after, upto, workspace, key_name, filters, since, limit):
             column = {'type': 'type', 'query': 'query_name', 'connection': 'connection_name', 'status': 'status'}[name]
             clauses.append(f'{column} = {{f_{name}:String}}')
             params[f'f_{name}'] = value
-    rows = query(f'SELECT {EVENT_COLUMNS} FROM events WHERE {" AND ".join(clauses)} ORDER BY id LIMIT {int(limit)}',
-                 params)
-    return [(row['id'], event_payload(row)) for row in rows]
+    # The page's ids first, from the columns it filters on, then those rows: a rare match is in nearly every granule,
+    # and reading `entry` and `payload_json` for all of them is most of what one read would cost
+    found = [row['id'] for row in query(
+        f'SELECT id FROM events WHERE {" AND ".join(clauses)} ORDER BY id LIMIT {int(limit)}', params)]
+    return [(row['id'], event_payload(row)) for row in events_by_id(found)] if found else []
 
 
 # ---- which store holds runs ----
@@ -797,13 +937,13 @@ def _copy_event_log():
         except ValueError:
             continue
         is_run = row['type'] == 'query.run'
-        count, seconds = _numbers(json.dumps(payload.get('entry'), default=str)) if is_run else (0, 0.0)
+        count, seconds, columns = _numbers(json.dumps(payload.get('entry'), default=str)) if is_run else (0, 0.0, {})
         # Its old id stands for no time at all: retention counts from when it happened instead
         batch.append({'id': row['id'], 'stamped_at': row['occurred_at'], 'type': row['type'], 'source': row['source'],
                       'occurred_at': row['occurred_at'], 'workspace': row['workspace'],
                       'query_name': row['query_name'], 'version': payload.get('version') if is_run else None,
                       'key_name': row['key_name'], 'connection_name': row['connection_name'], 'status': row['status'],
-                      'in_history': False, 'rows': count, 'seconds': seconds, 'entry': '',
+                      'in_history': False, 'rows': count, 'seconds': seconds, **columns, 'entry': '',
                       'payload_json': row['payload_json']})
     for start in range(0, len(batch), 10_000):
         insert('events', batch[start:start + 10_000], token=f'copy:{batch[start]["id"]}')
@@ -851,4 +991,21 @@ def leave():
         tx.execute('DELETE FROM run_store')
         tx.execute('DELETE FROM run_writer_leases')
     return newest
+
+
+def run_counts(workspace, name):
+    """{version: runs history holds} for one query - from history_counts, which keeps them as rows arrive and expire."""
+    ensure_schema()
+    return {row['version']: row['n'] for row in query(
+        'SELECT version, sum(runs) AS n FROM history_counts WHERE workspace = {ws:String} AND query_name = {q:String} '
+        'GROUP BY version HAVING n > 0', {'ws': workspace, 'q': name})}
+
+
+def last_run_times(workspace, name=None):
+    """{query: when it last ran} over the runs history holds - for one query, or every one."""
+    ensure_schema()
+    where, params = ('AND query_name = {q:String}', {'q': name}) if name is not None else ('', {})
+    return {row['query_name']: row['last'] for row in query(
+        f'SELECT query_name, max(last) AS last FROM history_counts WHERE workspace = {{ws:String}} {where} '
+        'GROUP BY query_name HAVING sum(runs) > 0', {'ws': workspace, **params})}
 

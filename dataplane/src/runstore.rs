@@ -140,6 +140,10 @@ pub struct EventRow {
     pub in_history: bool,
     pub rows: u64,
     pub seconds: f32,
+    /// An error's code, whether masking applied, an ad-hoc statement: what usage reports count by (runstore.py)
+    pub code: String,
+    pub masked: bool,
+    pub statement: String,
     pub entry: String,
     pub payload_json: String,
 }
@@ -386,6 +390,9 @@ pub fn event_row(run: &Json, keep: bool) -> Option<EventRow> {
             .get("query_seconds")
             .and_then(Json::as_f64)
             .unwrap_or(0.0) as f32,
+        code: text("code").unwrap_or_default(),
+        masked: run.get("masked").and_then(Json::as_bool).unwrap_or(false),
+        statement: String::new(), // it serves saved queries only: an ad-hoc statement is Python's
         entry: text("entry")?,
         payload_json: String::new(),
     })
@@ -466,7 +473,7 @@ mod tests {
 
     #[test]
     fn a_run_s_row_is_the_one_python_writes() {
-        let run = serde_json::json!({"query": "by_id", "version": 2, "entry": "{\"rows\": 1}",
+        let run = serde_json::json!({"query": "by_id", "version": 2, "entry": "{\"rows\": 1}", "masked": true,
                                      "executed_at": "2026-10-28 12:00:00", "status": "success", "key": "app",
                                      "connection": "shop", "transport": "rest", "rows": 1, "query_seconds": 0.002});
         let row = event_row(&run, true).unwrap();
@@ -484,5 +491,6 @@ mod tests {
             (1, "{\"rows\": 1}", "default")
         );
         assert!(row.in_history);
+        assert!(row.masked && row.code.is_empty());
     }
 }

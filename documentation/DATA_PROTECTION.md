@@ -64,9 +64,10 @@ above stay empty: runs and events are kept in ClickHouse instead, with the same 
 |---|---|---|---|---|
 | `events` | The event log: every run, whatever the sample rate, and its history entry | Caller | `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default) | As the event log above |
 | `history` | The runs history keeps (`QUERYAPIGATE_HISTORY_SAMPLE_RATE`) | Caller | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` (30 by default here) | `observe` |
-| `run_minutes`, `run_hours` | Runs, rows and query times per minute and per hour, by caller, query, version, connection, transport and status | Caller | 7 days by minute, 400 by hour | `observe` |
+| `history_counts` | Runs history holds and the last of them, per day, query, version and caller | Caller | As `history` | `observe` |
+| `run_minutes`, `run_hours` | Runs, rows and query times per minute and per hour, by caller, query, version, connection, transport, status, error code and ad-hoc statement | Caller; a statement may hold values | 7 days by minute, 400 by hour | `observe` |
 
-`forget` erases a caller from all four: hidden at once, and gone from disk once ClickHouse has rewritten the parts that
+`forget` erases a caller from all five: hidden at once, and gone from disk once ClickHouse has rewritten the parts that
 held them.
 
 ## The response cache and Redis

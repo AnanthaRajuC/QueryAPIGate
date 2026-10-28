@@ -27,6 +27,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -38,6 +39,12 @@ PORT = 5091
 U = f'http://127.0.0.1:{PORT}'
 INNER_PORT = PORT + 1  # gunicorn's, behind the data plane (a +dp build, ADR 0028)
 DATAPLANE_SECRET = 'bench-dataplane-secret-0123456789'
+CH = 'qag-oltp-ch'  # the run store (ADR 0029), for the r-blocks
+CH_IMAGE = 'clickhouse/clickhouse-server:24.8'
+CH_PORT = PORT + 2
+RUN_STORE = f'http://default:pw@127.0.0.1:{CH_PORT}/qag_bench'
+RUN_STORE_TABLES = ('events', 'history', 'run_minutes', 'run_hours')
+_run_store = False  # whether the build running now keeps its runs there
 URLS = {
     'lookup': U + r'/q/account\?aid=[1-9][0-9]{0,6}',
     'page': U + r'/q/account_page\?start=[1-9][0-9]{0,5}&page_size=100',
@@ -89,9 +96,11 @@ def rounds(n):
 
 # ---------------------------------------------------------------- accounting
 
-def pg_cpu_s():
+def pg_cpu_s(container=PG):
     """CPU seconds the database container has used (its cgroup v2 cpu.stat)."""
-    full = sh('docker', 'inspect', '-f', '{{.Id}}', PG).stdout.strip()
+    full = sh('docker', 'inspect', '-f', '{{.Id}}', container).stdout.strip()
+    if not full:
+        return 0.0
     for path in glob.glob(f'/sys/fs/cgroup/**/docker-{full}.scope/cpu.stat', recursive=True):
         for line in open(path):
             if line.startswith('usage_usec'):
@@ -141,8 +150,24 @@ def store_tx():
 
 def runs_written():
     """Event ids the store has handed out: one per run recorded (ADR 0020), by whichever process recorded it - so,
-    unlike a process's own /metrics, whole with any number of workers."""
+    unlike a process's own /metrics, whole with any number of workers. With a run store, its events (emptied each
+    cell), whoever wrote them: Python or the data plane."""
+    if _run_store:
+        return int(ch('SELECT count() FROM qag_bench.events') or 0)
     return int(psql('SELECT last_value FROM events_id_seq', 'qagstore') or 0)  # TRUNCATE keeps it counting
+
+
+def ch(sql):
+    return sh('docker', 'exec', CH, 'clickhouse-client', '--password', 'pw', '-q', sql).stdout.strip()
+
+
+def late_events():
+    """The run store's events inserted more than its 1 s settle window after their id's time, and the 99th
+    percentile of that lag (ms) - from written_at, ClickHouse's own clock at the insert, so every writer is counted."""
+    lag = 'toUnixTimestamp64Milli(written_at) - (1767225600000 + intDiv(id, 4096))'
+    out = ch(f'SELECT countIf({lag} > 1000), quantile(0.99)({lag}), max({lag}) FROM qag_bench.events')
+    late, p99, worst = (out.split('\t') + ['', '', ''])[:3]
+    return {'late_events': int(late or 0), 'insert_lag_p99_ms': float(p99 or 0), 'insert_lag_max_ms': float(worst or 0)}
 
 
 def runs_kept(written, requests):
@@ -201,6 +226,8 @@ def b_setup():
     """A pinned PostgreSQL 16 with pgbench's schema at scale 100 (`bench`) and an empty store (`qagstore`), iproute2
     installed for the network-delay block, and the two builds exported from git."""
     sh('docker', 'rm', '-fv', PG)
+    # A new store: the keys an earlier run seeded (seed()) belong to the one just removed
+    (Path(args.out) / 'keys.json').unlink(missing_ok=True)
     started = sh('docker', 'run', '-d', '--name', PG, '--cpuset-cpus', args.db_cpus, '--cap-add', 'NET_ADMIN',
                  '-e', 'POSTGRES_PASSWORD=pw', PG_IMAGE, '-c', 'shared_buffers=2GB', '-c', 'max_connections=300',
                  '-c', 'synchronous_commit=on')
@@ -231,6 +258,25 @@ def b_setup():
             t.extractall(target, filter='data')
         tar.unlink()
     log('setup done; database at', pg_ip())
+
+
+def r_setup():
+    """A pinned ClickHouse for the run store (ADR 0029), on the database's cores, its HTTP port on loopback only."""
+    sh('docker', 'rm', '-fv', CH)
+    started = sh('docker', 'run', '-d', '--name', CH, '--cpuset-cpus', args.ch_cpus, '--ulimit', 'nofile=262144:262144',
+                 '-e', 'CLICKHOUSE_PASSWORD=pw', '-p', f'127.0.0.1:{CH_PORT}:8123', CH_IMAGE)
+    if started.returncode:
+        sys.exit(started.stderr)
+    for _ in range(60):
+        if ch('SELECT 1') == '1':
+            break
+        time.sleep(1)
+    log('run store up:', ch('SELECT version()'))
+
+
+def r_teardown():
+    sh('docker', 'rm', '-fv', CH)  # -v: its data too
+    log('run store removed')
 
 
 def b_teardown():
@@ -273,13 +319,16 @@ def wait_healthy(url, what):
     raise RuntimeError(f'{what} did not start - see {OUT / "server.log"}')
 
 
-def start(build, workers=None, access_log=True, access_format=None, profile_to=None, threads=8):
+def start(build, workers=None, access_log=True, access_format=None, profile_to=None, threads=8, keep_runs=False,
+          discard_logs=False):
     """gunicorn for ``build``, pinned to the gateway's cores, as the Docker image runs it (gthread)."""
     global _server, _server_meta
     stop()
     ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
     extra = dict(extra)
     dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    global _run_store
+    _run_store = extra.pop('run_store', False)  # runs kept in ClickHouse (ADR 0029)
     # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
     # 17k runs/s - fewer than the data plane serves - so with one, most of what it served went unrecorded.
     workers = workers or (DATAPLANE_PYTHON_WORKERS if dataplane else 1)
@@ -315,7 +364,17 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
     # The event log (ADR 0020) keeps every run for at least an hour, whatever its count: tens of millions of rows
     # at the data plane's rates, which slowed each later cell and filled the disk. Each cell starts it empty.
     psql('TRUNCATE events', 'qagstore')
-    out = open(OUT / 'server.log', 'a')
+    if _run_store:  # so too the run store's, every table; the store's record of where runs are stays
+        for table in RUN_STORE_TABLES if not keep_runs else ():
+            ch(f'TRUNCATE TABLE IF EXISTS qag_bench.{table}')
+        env['QUERYAPIGATE_RUN_STORE_URL'] = RUN_STORE
+    else:  # a build without one starts on a store that keeps its own runs: it would refuse one that says otherwise
+        psql('DELETE FROM run_store', 'qagstore')
+    # A long cell's logs go to /dev/null - still written, so what writing them costs is still measured: at 20,000
+    # calls a second the data plane's request lines alone are 6.5 GB in 25 minutes
+    out = open(os.devnull if discard_logs else OUT / 'server.log', 'a')
+    if discard_logs and '--access-logfile' in cmd:
+        cmd[cmd.index('--access-logfile') + 1] = os.devnull
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
     wait_healthy(f'http://127.0.0.1:{port}', f'gateway {build}')
     threads_dp = None
@@ -330,12 +389,16 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
             cwd=home, stdout=out, stderr=out, start_new_session=True)
         wait_healthy(U, f'the data plane for {build}')
     _server_meta = {'build': build, 'workers': workers, 'access_log': access_log, 'threads': threads,
-                    'dataplane_threads': threads_dp}
+                    'dataplane_threads': threads_dp, 'run_store': _run_store}
 
 
 def gateway_cpu_s():
     """CPU seconds the gateway has used: gunicorn's master and workers, and any data plane in front of them."""
     return tree_cpu_s(gunicorn_master()) + (tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0)
+
+
+def _dataplane_cpu_s():
+    return tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0
 
 
 def gunicorn_master():
@@ -423,15 +486,29 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
         while not done.wait(2):
             freqs.append(mhz())
     sampler = threading.Thread(target=sample, daemon=True)
+
+    def watch_disk():  # a long cell stops itself before the disk fills, rather than filling it
+        while not done.wait(10):
+            if shutil.disk_usage(OUT).free < 3 << 30:
+                log(f'{block}: under 3 GB free - stopping the gateway, so the cell ends')
+                stop()
+                return
+    if secs > 300:
+        threading.Thread(target=watch_disk, daemon=True).start()
     if warm:
         time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
     w0 = runs_written()
+    py0, dp0, ch0 = tree_cpu_s(gunicorn_master()), _dataplane_cpu_s(), pg_cpu_s(CH)
     tx0, g0, p0, l0, t0 = store_tx(), gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
     done.set()
+    refused = sum(n for code, n in r['codes'].items() if code != '200')
+    if refused > 0.01 * max(r['requests'], 1):  # oha counts any answer a success: a 401 storm measures nothing
+        raise RuntimeError(f'{block} {scenario}: {refused} of {r["requests"]} answers were not 200: {r["codes"]}')
     wall = time.time() - t0
     g1, p1, l1 = gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus)
+    py1, dp1, ch1 = tree_cpu_s(gunicorn_master()), _dataplane_cpu_s(), pg_cpu_s(CH)
     time.sleep(2.5)  # a flush interval for the data plane's report, another for Python's write
     tx1 = store_tx()
     kept = runs_kept(runs_written() - w0, r['requests'])
@@ -442,7 +519,9 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
            'store_tx_per_req': (tx1['qagstore'] - tx0['qagstore']) / n,
            'data_tx_per_req': (tx1['bench'] - tx0['bench']) / n,
            'mhz_gw': round(sum(f for f in freqs if f) / len(freqs)) if any(freqs) else None,
-           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **kept, **(extra or {})}
+           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **kept,
+           'py_cores': (py1 - py0) / wall, 'dp_cores': (dp1 - dp0) / wall, 'ch_cores': (ch1 - ch0) / wall,
+           **(late_events() if _run_store else {}), **(extra or {})}
     record(row)
     log(f'{block} {row["build"]} w{row["workers"]} t{row["threads"]} {scenario} c={c} q={q} r{rnd}: '
         f'{r["rps"]:.0f} req/s p50 {r["p50"]:.2f} p99 {r["p99"]:.2f} ok {r["success"]:.4f} '
@@ -783,9 +862,318 @@ def d4():
     floor('d4', 'end')
 
 
+# ---------------------------------------------------------------- the run store (ADR 0029)
+
+def run_store_builds():
+    """The data plane on the metadata store, two Python workers behind it (0.44's condition), against the data plane
+    writing its own runs to the run store, with one - both with the metadata cache."""
+    head = args.head_label
+    return [(head + '+dp+cache', None), (head + '+dp+cache+rs', 1)]
+
+
+def r1():
+    """Every run recorded: 20,000 calls a second offered for 30 s, as 0.44's fixed-rate run did."""
+    floor('r1', 'start')
+    for r, order in rotations(run_store_builds(), 3):
+        for build, workers in order:
+            start(build, workers=workers)
+            measure('r1', 'lookup_plain', c=64, secs=30, q=20000, rnd=r)
+    floor('r1', 'end')
+
+
+def r2():
+    """Capacity, 64 callers: calls a second per gateway core, and how they split between the data plane and Python."""
+    floor('r2', 'start')
+    for scenario in ['lookup_plain', 'lookup_gov']:
+        for r, order in rotations(run_store_builds(), 3):
+            for build, workers in order:
+                start(build, workers=workers)
+                measure('r2', scenario, c=64, secs=30, rnd=r)
+    floor('r2', 'end')
+
+
+EVENTS_PORT = PORT + 3
+
+
+class Resumer(threading.Thread):
+    """One `/events` client that hangs up every few seconds and resumes with Last-Event-ID, keeping every id it gets
+    and when it arrived - what the soak checks a resume against (ADR 0029 §2)."""
+
+    def __init__(self, seed):
+        super().__init__(daemon=True)
+        import random
+        self.random = random.Random(seed)
+        self.ids, self.lags_ms, self.reconnects, self.stop = [], [], 0, threading.Event()
+        self.arrivals, self.reconnected_at = [], []  # when each event arrived; when each reconnect happened
+
+    def run(self):
+        import socket
+        last = None
+        while not self.stop.is_set():
+            try:
+                sock = socket.create_connection(('127.0.0.1', EVENTS_PORT), timeout=5)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            headers = ['GET /events HTTP/1.1', 'Host: localhost', 'X-API-Key: bench-admin']
+            if last is not None:
+                headers.append(f'Last-Event-ID: {last}')
+            sock.sendall(('\r\n'.join(headers) + '\r\n\r\n').encode())
+            stream, until = sock.makefile('rb'), time.monotonic() + self.random.uniform(3, 10)
+            try:
+                while time.monotonic() < until and not self.stop.is_set():
+                    line = stream.readline()
+                    if not line:
+                        break
+                    if line.startswith(b'id: '):
+                        event_id = int(line[4:])
+                        self.ids.append(event_id)
+                        now = time.time() * 1000
+                        self.lags_ms.append(now - (1767225600000 + event_id // 4096))
+                        self.arrivals.append(now)
+                        last = event_id
+            except OSError:
+                pass
+            finally:
+                sock.close()
+            self.reconnects += 1
+            self.reconnected_at.append(time.time() * 1000)
+
+
+def check_resumes(clients):
+    """Each client's ids against the run store's, between its first and its last: none missing, none twice."""
+    found = []
+    for client in clients:
+        if not client.ids:
+            found.append({'events': 0})
+            continue
+        first, last = client.ids[0], max(client.ids)
+        expected = ch(f'SELECT groupArray(id) FROM (SELECT id FROM qag_bench.events WHERE id >= {first} AND id <= '
+                      f'{last} ORDER BY id)')
+        expected = set(json.loads(expected or '[]'))
+        got = set(client.ids)
+        lags = sorted(client.lags_ms)
+        settled = sorted(client.lags_ms[len(client.lags_ms) // 8:])  # past the first eighth: the server's own start
+        found.append({'events': len(client.ids), 'missing': len(expected - got), 'extra': len(got - expected),
+                      'lag_p99_after_first_eighth_ms': settled[int(len(settled) * 0.99)] if settled else None,
+                      'repeated': len(client.ids) - len(got), 'reconnects': client.reconnects,
+                      'out_of_order': sum(1 for a, b in zip(client.ids, client.ids[1:], strict=False) if b < a),
+                      'lag_p50_ms': lags[len(lags) // 2], 'lag_p99_ms': lags[int(len(lags) * 0.99)],
+                      'lag_max_ms': lags[-1]})
+    return found
+
+
+def r3():
+    """The soak: 20,000 calls a second for 30 minutes into the run store - 36 million runs, about 1.5 GB - with
+    `queryapigate events` serving two clients that hang up and resume all the while, on the load generator's cores."""
+    floor('r3', 'start')
+    soak(20000, 1800, 'r3')
+    floor('r3', 'end')
+
+
+def soak(rate, secs, block):
+    build = args.head_label + '+dp+cache+rs'
+    start(build, workers=1, discard_logs=True)
+    env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]),
+           'QUERYAPIGATE_HOME': str(OUT / 'home'), 'QUERYAPIGATE_API_KEY': 'bench-admin',
+           'QUERYAPIGATE_RUN_STORE_URL': RUN_STORE,
+           'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore',
+           'QUERYAPIGATE_EVENTS_POLL_INTERVAL': '0.2'}
+    server = subprocess.Popen(['taskset', '-c', args.load_cpus, sys.executable, '-m', 'queryapigate', 'events',
+                               '--port', str(EVENTS_PORT)], env=env, cwd=OUT / 'home',
+                              stdout=open(OUT / 'events.log', 'w'), stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        wait_healthy(f'http://127.0.0.1:{EVENTS_PORT}', 'the events server')
+        keys = json.loads((Path(args.out) / 'keys.json').read_text())
+        oha(URLS['lookup'], keys['plain'], c=8, secs=5)  # the warm-up, before the clients: its burst isn't their lag
+        time.sleep(2.5)
+        clients = [Resumer(seed) for seed in range(2)]
+        for client in clients:
+            client.start()
+        measure(block, 'lookup_plain', c=64, secs=secs, q=rate, rnd=0, warm=False)
+        for client in clients:
+            client.stop.set()
+        for client in clients:
+            client.join(15)
+        time.sleep(runstore_settle_s() + 1)
+        record({'block': f'{block}-events', 'clients': check_resumes(clients),
+                'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+        for i, client in enumerate(clients):  # every event's arrival and lag, to see where a slow one comes from
+            (OUT / f'{block}-client{i}.json').write_text(json.dumps(
+                {'ids': client.ids[-400_000:], 'arrivals': client.arrivals[-400_000:],
+                 'lags_ms': client.lags_ms[-400_000:], 'reconnected_at': client.reconnected_at}))
+    finally:
+        os.killpg(server.pid, signal.SIGTERM)
+        server.wait(timeout=20)
+
+
+def expand(copies=2):
+    """The soak's runs copied ``copies`` times, each shifted back by the soak's own span in time and ids - so ids stay
+    unique and time-ordered - through the same views, which fill history and the rollups as live inserts do. The
+    first copy is MCP traffic of one agent, for the usage report; one run in 10,000 is of a rare query, for a replay
+    that has to look through everything."""
+    low, high = (int(v) for v in ch('SELECT min(id), max(id) FROM qag_bench.events').split('\t'))
+    span = high - low + 1
+    seconds_back = span // (4096 * 1000) + 1
+    made = 0
+    for k in range(1, copies + 1):
+        if shutil.disk_usage(OUT).free < 6 << 30:  # a copy is about 2 GB: at least 4 left after it
+            log(f'r4: under 6 GB free on {OUT} - measuring with {made} copies, not {copies}')
+            break
+        made = k
+        source = "'mcp'" if k == 1 else 'source'
+        key = "'agent-1'" if k == 1 else 'key_name'
+        started = time.time()
+        ch(f"""INSERT INTO qag_bench.events (id, type, source, occurred_at, workspace, query_name, version, key_name,
+              connection_name, status, in_history, rows, seconds, entry, payload_json)
+            SELECT id - {k} * {span}, type, {source},
+              formatDateTime(parseDateTime(occurred_at) - INTERVAL {k * seconds_back} SECOND, '%Y-%m-%d %H:%i:%S'),
+              workspace, if(cityHash64(id) % 10000 = 0, 'rare_q', query_name), version, {key}, connection_name,
+              status, in_history, rows, seconds, entry, payload_json
+            FROM qag_bench.events WHERE id >= {low} AND id <= {high}""")
+        log(f'r4 copy {k}: {time.time() - started:.0f} s')
+    return low - made * span
+
+
+def storage():
+    """Each run store table's rows, and its compressed bytes per run."""
+    out = ch("SELECT table, sum(rows), sum(data_compressed_bytes), sum(data_uncompressed_bytes) FROM system.parts "
+             "WHERE active AND database = 'qag_bench' GROUP BY table ORDER BY table")
+    found = {}
+    for line in out.splitlines():
+        table, rows, packed, raw = line.split('\t')
+        found[table] = {'rows': int(rows), 'bytes': int(packed), 'raw_bytes': int(raw),
+                        'bytes_per_run': int(packed) / max(int(rows), 1)}
+    return found
+
+
+def timed(path, n=20):
+    """p50, p95 and max milliseconds of ``n`` sequential GETs to Python, after two to warm."""
+    took = []
+    for i in range(n + 2):
+        started = time.perf_counter()
+        with urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{PORT}{path}',
+                                                           headers={'X-API-Key': 'bench-admin'}), timeout=120) as res:
+            res.read()
+        if i >= 2:
+            took.append((time.perf_counter() - started) * 1000)
+    took.sort()
+    return {'p50_ms': took[len(took) // 2], 'p95_ms': took[int(len(took) * 0.95)], 'max_ms': took[-1]}
+
+
+def r4():
+    """Storage and reads at about 100 million runs (ADR 0029 §9, 3 and 5): the soak's runs (r3) and two copies, then
+    each read the Console and the API make, timed through Python, and a filtered replay of the whole event log."""
+    floor('r4', 'start')
+    expand()
+    # Merged, as a day-old table would be, before its bytes are measured. OPTIMIZE FINAL rewrites every partition:
+    # it needs about the table's size free again, until the parts it replaced are dropped (old_parts_lifetime)
+    if shutil.disk_usage(OUT).free > 2 * (int(ch("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND "
+                                              "database = 'qag_bench'") or 0) + (2 << 30)):
+        ch('OPTIMIZE TABLE qag_bench.events FINAL')
+    record({'block': 'r4-storage', 'tables': storage(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+    floor('r4', 'end')
+
+
+def r7(target=72_000_000):
+    """Grow the run store to about ``target`` runs by doubling what r6 left, each copy shifted back by the span so far
+    in ids and time, through the same views: half of it one MCP agent's, for the usage report. Synthetic copies of
+    real runs - for timing reads, not for measuring writes."""
+    floor('r7', 'start')
+    rows = int(ch('SELECT count() FROM qag_bench.events'))
+    first = True
+    while rows * 2 <= target * 1.5:  # never a doubling that would overshoot by half
+        size = int(ch("SELECT sum(bytes_on_disk) FROM system.parts WHERE database = 'qag_bench'") or 0)
+        if shutil.disk_usage(OUT).free < 2 * size + (4 << 30):  # the copy, and merges' parts until they're dropped
+            log(f'r7: too little disk for another doubling - stopping at {rows} runs')
+            break
+        low, high = (int(v) for v in ch('SELECT min(id), max(id) FROM qag_bench.events').split('\t'))
+        span = high - low + 1
+        back = span // (4096 * 1000) + 1
+        source = "if(cityHash64(id) % 2 = 0, 'mcp', source)" if first else 'source'
+        key = "if(cityHash64(id) % 2 = 0, 'agent-1', key_name)" if first else 'key_name'
+        ch(f"""INSERT INTO qag_bench.events (id, type, source, occurred_at, workspace, query_name, version,
+              key_name, connection_name, status, in_history, rows, seconds, code, masked, statement, entry,
+              payload_json)
+            SELECT id - {span}, type, {source},
+              formatDateTime(parseDateTime(occurred_at) - INTERVAL {back} SECOND, '%Y-%m-%d %H:%i:%S'),
+              workspace, if(cityHash64(id, 1) % 10000 = 0, 'rare_q', query_name), version, {key}, connection_name,
+              status, in_history, rows, seconds, code, masked, statement, entry, payload_json
+            FROM qag_bench.events""")
+        first = False
+        rows = int(ch('SELECT count() FROM qag_bench.events'))
+        log(f'r7: {rows} runs')
+    record({'block': 'r7-size', 'runs': rows, 'tables': storage()})
+    floor('r7', 'end')
+
+
+def r5():
+    """The reads (ADR 0029 §9, 5), on the run store r3 and r4 filled - each read the Console and the API make, timed
+    through Python, and a filtered replay of the whole event log."""
+    floor('r5', 'start')
+    oldest = int(ch('SELECT min(id) FROM qag_bench.events'))
+    record({'block': 'r5-size', 'runs': int(ch('SELECT count() FROM qag_bench.events'))})
+    build = args.head_label + '+rs'
+    start(build, workers=1, keep_runs=True)
+    reads = {'history_first_page': '/api/v1/history?limit=100',
+             'history_one_key': '/api/v1/history?limit=100&key=agent-1',
+             'history_old_page': '/api/v1/history?limit=100&until=' + urllib.parse.quote(
+                 ch(f'SELECT min(occurred_at) FROM qag_bench.events WHERE id < {oldest + 4096 * 60_000}')),
+             'console_versions': '/api/v1/queries/account',
+             'usage_24h': '/api/v1/usage/agents?hours=24'}
+    for name, path in reads.items():
+        row = {'block': 'r5', 'read': name, 'path': path, **timed(path), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')}
+        record(row)
+        log(f"r5 {name}: p50 {row['p50_ms']:.1f} ms p95 {row['p95_ms']:.1f} ms")
+    expected = int(ch("SELECT count() FROM qag_bench.events WHERE query_name = 'rare_q'"))
+    env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]),
+           'QUERYAPIGATE_HOME': str(OUT / 'home'), 'QUERYAPIGATE_API_KEY': 'bench-admin',
+           'QUERYAPIGATE_RUN_STORE_URL': RUN_STORE,
+           'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore'}
+    server = subprocess.Popen(['taskset', '-c', args.load_cpus, sys.executable, '-m', 'queryapigate', 'events',
+                               '--port', str(EVENTS_PORT)], env=env, cwd=OUT / 'home',
+                              stdout=open(OUT / 'events.log', 'w'), stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        wait_healthy(f'http://127.0.0.1:{EVENTS_PORT}', 'the events server')
+        import socket
+        sock = socket.create_connection(('127.0.0.1', EVENTS_PORT), timeout=120)
+        started, got = time.perf_counter(), 0
+        sock.sendall(('GET /events?query=rare_q HTTP/1.1\r\nHost: localhost\r\nX-API-Key: bench-admin\r\n'
+                      f'Last-Event-ID: {oldest - 1}\r\n\r\n').encode())
+        stream = sock.makefile('rb')
+        while got < expected:
+            line = stream.readline()
+            if not line:
+                break
+            got += line.startswith(b'id: ')
+        record({'block': 'r5-replay', 'filter': 'query=rare_q', 'expected': expected, 'replayed': got,
+                'seconds': time.perf_counter() - started, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+        log(f'r5 replay: {got} of {expected} in {time.perf_counter() - started:.1f} s')
+        sock.close()
+    finally:
+        os.killpg(server.pid, signal.SIGTERM)
+        server.wait(timeout=20)
+    floor('r5', 'end')
+
+
+def r6():
+    """Delivery (ADR 0029 §9, 4) at a rate the events server keeps up with: 2,000 calls a second for 2 minutes, two
+    clients resuming all the while - from a run's id to its arrival. (At 20,000 a second, r3, each client of this
+    asyncio server falls behind: what it measures there is a resume's correctness, not delivery's speed.)"""
+    floor('r6', 'start')
+    soak(2000, 120, 'r6')
+    floor('r6', 'end')
+
+
+def runstore_settle_s():
+    return 1.0  # runstore.SETTLE_SECONDS, of the build under test
+
+
 BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_pgbench, 'b1': b1, 'b2': b2,
           'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11,
-          'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
+          'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
+          'r-setup': r_setup, 'r-teardown': r_teardown, 'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4, 'r5': r5, 'r6': r6,
+          'r7': r7}
 ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
@@ -806,6 +1194,8 @@ def main():
                                                          'queryapigate-dataplane'),
                         help='the Rust data plane, for the d-blocks (default %(default)s)')
     parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
+    parser.add_argument('--ch-cpus', default='8-11',
+                        help='cpuset for the run store\'s ClickHouse (default %(default)s)')
     args = parser.parse_args()
     OUT = Path(args.out)
     OUT.mkdir(parents=True, exist_ok=True)
@@ -817,12 +1207,15 @@ def main():
               args.head_label + '+cache': (args.head, {'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})}
     DATAPLANE_BUILDS.update({args.head_label + '+dp': (args.head, {'dataplane': True}),
                              args.head_label + '+dp+cache': (args.head, {'dataplane': True,
-                                                                         'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
+                                                                         'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
+                             args.head_label + '+rs': (args.head, {'run_store': True}),
+                             args.head_label + '+dp+cache+rs': (args.head, {'dataplane': True, 'run_store': True,
+                                                                            'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
     names = [n for b in args.blocks for n in (ALL if b == 'all' else [b])]
     try:
         for name in names:
             log('=== block', name)
-            if name not in ('setup', 'teardown'):
+            if name not in ('setup', 'teardown', 'r-setup', 'r-teardown'):
                 seed()
             BLOCKS[name]()
     finally:
