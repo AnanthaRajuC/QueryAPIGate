@@ -1,10 +1,11 @@
 # ADR 0029: An optional ClickHouse run store for history, the event log and usage
 
-- **Status:** Proposed. **Prototype built and measured (2026-10-28):** every criterion in section 9 met, at the
-  sizes this laptop's disk allowed - the [Result](#result-every-criterion-met-at-the-sizes-measured), with what
-  differs from plan. Amended while building it: three columns in `events`, a `history_counts` table, and the
-  rollups' code and statement dimensions, each found by measuring a read (sections 3 to 5, *as built*). The go is the
-  owner's to give.
+- **Status:** Accepted (2026-10-28). **Decided: go (2026-10-28),** on the measurements in section 9's
+  [Result](#result-every-criterion-met-at-the-sizes-measured): every criterion met, at the sizes this laptop's disk
+  allowed, with what differs from plan. Amended while building it: three columns in `events`, a `history_counts`
+  table, and the rollups' code and statement dimensions, each found by measuring a read (sections 3 to 5, *as
+  built*). It ships experimental (section 1), and graduates after a release unchanged, a security review and the
+  250-million-run measurement.
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and
@@ -267,7 +268,8 @@ ClickHouse on the same host:
 250 million runs is about 12 GB across the tables, sized to this laptop's free disk with room to spare. Each run
 checks the space first, as the 0.44 benchmarks do.
 
-- **Go:** all six. The run store ships as experimental, and graduates after a release unchanged.
+- **Go:** all six. The run store ships as experimental, and graduates after a release unchanged. *Decided: go,
+  2026-10-28.*
 - **Not met:** the prototype and its results stay as a documented experiment. The SQL stores' bound (section 8)
   ships regardless.
 

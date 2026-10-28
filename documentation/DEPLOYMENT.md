@@ -459,8 +459,8 @@ behind it. To build it, run it and see which calls it serves:
 ## A ClickHouse run store (prototype)
 
 > **Experimental** - outside the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
-> a prototype ([ADR 0029](adr/0029-clickhouse-run-store.md)). Its tables, its event ids and how it's switched on may
-> change before the measured decision the ADR ends in.
+> a prototype ([ADR 0029](adr/0029-clickhouse-run-store.md), measured and decided go). Its tables, its event ids and
+> how it's switched on may change before it graduates.
 
 With `QUERYAPIGATE_RUN_STORE_URL=https://user:password@host:8443/database` set on every instance, run history, the
 event log and per-minute and per-hour usage rollups are kept in ClickHouse (24.8 or later) instead of the metadata

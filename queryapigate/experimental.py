@@ -77,8 +77,8 @@ FEATURES: dict[str, dict[str, Any]] = {
     },
     'run_store': {
         'name': 'A ClickHouse run store for history, the event log and usage',
-        'why': 'a prototype (ADR 0029): its tables, its event ids and how it is switched on may change before the '
-               'measured decision the ADR ends in',
+        'why': 'a prototype (ADR 0029, decided go): its tables, its event ids and how it is switched on may change '
+               'before it graduates',
         'settings': ('QUERYAPIGATE_RUN_STORE_URL',),
         'docs': ('documentation/DEPLOYMENT.md', 'A ClickHouse run store (prototype)'),
     },

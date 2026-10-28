@@ -53,7 +53,7 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Added
 
-- **An optional ClickHouse run store** (experimental, a prototype -
+- **An optional ClickHouse run store** (experimental, a prototype, measured and decided go -
   [ADR 0029](documentation/adr/0029-clickhouse-run-store.md),
   [guide 65](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/65-keep-runs-in-clickhouse.md)). With
   `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups are kept in

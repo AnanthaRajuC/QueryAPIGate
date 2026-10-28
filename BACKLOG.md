@@ -3164,7 +3164,7 @@ traffic, and a p99 that stays in single milliseconds under load.
 
 ## 103. An optional ClickHouse run store
 
-**Status: prototype, measured (2026-10-28); the go is the owner's.** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
+**Status: prototype, measured, decided go (2026-10-28).** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
 with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
 ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.
 The data plane writes its own runs, with ids from a block Python leases it. Event ids are time-ordered, below 2^53,
@@ -3177,6 +3177,6 @@ the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 byte
 path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
 history's sample rate.
 
-**Next:** the owner's go or no-go on section 9's result. Then 250 million runs on a machine with the disk for it, a
-security review (ADR 0017), and the events server's ceiling - about 10,000 events a second per stream from one
+**Next:** to graduate (ADR 0017): a security review, 250 million runs on a machine with the disk for it, and a
+release unchanged. Beside it: the events server's ceiling - about 10,000 events a second per stream from one
 process. The event log's bound for the SQL stores (#102) is separate and ships either way.
