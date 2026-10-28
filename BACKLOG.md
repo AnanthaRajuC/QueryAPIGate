@@ -138,9 +138,13 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md), [Performance, v5](documentation/PERFORMANCE_V5.md)).
     Built from the repository, not yet in the image or the chart; run history writes only the rows it keeps.
     (0.44.0, 2026-10-28.)
-33. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+33. **0.45: An optional ClickHouse run store** (#103, experimental) - run history, the event log and usage rollups in
+    ClickHouse, the data plane writing its own runs: every run recorded at 20,000 a second and at the 64-caller peak,
+    where 0.44's store kept about half, in about 13 bytes a run and with 11% fewer gateway cores; usage reports exact
+    ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)). (0.45.0, 2026-10-28.)
+34. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-34. **1.0.0.**
+35. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3157,14 +3161,14 @@ traffic, and a p99 that stays in single milliseconds under load.
 - **Shipping it** - the follow-up ADR 0028 promised: the Docker image and the Helm chart, a supervisor for the two
   processes, and which of what it forwards to move next (rate-limited keys and `QUERYAPIGATE_TRUST_PROXY` first,
   then other formats and workspaces).
-- **A store for runs at its rate** - #103, ADR 0029 (proposed): every run recorded at 20,000 a second is 1.7 billion
-  rows a day, more than SQLite or the PostgreSQL store should hold.
-- **Until then, the event log needs a bound** at that rate: a row cap or sampling, as history has.
+- **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45 (experimental). Every run recorded at 20,000 a
+  second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
+- **Without it, the event log needs a bound** at that rate: a row cap or sampling, as history has.
 - **Plans before the first call** (ADR 0028's open question): computed when a query is published or a key changes.
 
 ## 103. An optional ClickHouse run store
 
-**Status: prototype, measured, decided go (2026-10-28).** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
+**Status: shipped in 0.45.0 (experimental): a prototype, measured, decided go (2026-10-28).** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
 with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
 ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.
 The data plane writes its own runs, with ids from a block Python leases it. Event ids are time-ordered, below 2^53,
