@@ -552,7 +552,8 @@ class RouteDocumentationTests(AppTestCase):
     the handful of pages that are not part of the JSON API. The spec is also the Console's contract (ADR 0001):
     its TypeScript types are generated from the committed frontend/openapi.json, which must match it."""
     NOT_API = {'/', '/docs', '/favicon.ico', '/openapi.json', '/ui', '/console', '/console/', '/console/<path:path>',
-               '/internal/dataplane/runs'}  # the data plane's reports: only it can reach them (ADR 0028)
+               # the data plane's reports and run store lease: only it can reach them (ADR 0028, ADR 0029)
+               '/internal/dataplane/runs', '/internal/dataplane/lease'}
 
     def test_every_route_and_method_is_in_the_openapi_spec(self):
         app = create_app()

@@ -10,7 +10,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from queryapigate import accesslog, agentwrites, cli, db, engine, history, instances, quotas, sso, store
+from queryapigate import accesslog, agentwrites, cli, db, engine, history, instances, quotas, runstore, sso, store
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGE = os.path.join(ROOT, 'documentation', 'DATA_PROTECTION.md')
@@ -126,6 +126,8 @@ class ForgetTests(unittest.TestCase):
         quotas._counter.add('default', self.PERSON, 'month:2026-10', 1, 1)  # still unwritten
 
     def runs(self, caller):
+        if runstore.enabled():
+            return runstore.query('SELECT count() AS n FROM history WHERE key_name = {c:String}', {'c': caller})[0]['n']
         return db.connection().execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?',
                                        (caller,)).fetchone()[0]
 

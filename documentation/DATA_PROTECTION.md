@@ -52,7 +52,22 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 | `instances` | Each running process: host name, process id, version | - | 1 day after it stops | `observe` |
 | `config_managed`, `config_applied` | What a configuration file manages, and each file applied, by its hash (ADR 0014) | - | Until deleted | `observe` |
 | `server_secrets` | Keys the server makes for itself - masking's `hash` key, unless `QUERYAPIGATE_MASK_KEY` is set | - | For the store's life | - |
+| `run_store`, `run_writer_leases` | Where runs are kept, if not here ([ADR 0029](adr/0029-clickhouse-run-store.md)): the ClickHouse server and database, never its credentials; which process holds which block of event ids, by host name and process id | - | `run_store` until changed; a lease 60 seconds after its holder stops | - |
 | `schema_version` | The store's schema version | - | - | - |
+
+## The run store (ClickHouse, optional)
+
+With `QUERYAPIGATE_RUN_STORE_URL` set ([ADR 0029](adr/0029-clickhouse-run-store.md)), `execution_history` and `events`
+above stay empty: runs and events are kept in ClickHouse instead, with the same fields.
+
+| Table | Holds | Personal data | Kept for | Read by |
+|---|---|---|---|---|
+| `events` | The event log: every run, whatever the sample rate, and its history entry | Caller | `QUERYAPIGATE_EVENTS_RETENTION_HOURS` (24 by default) | As the event log above |
+| `history` | The runs history keeps (`QUERYAPIGATE_HISTORY_SAMPLE_RATE`) | Caller | `QUERYAPIGATE_HISTORY_RETENTION_DAYS` (30 by default here) | `observe` |
+| `run_minutes`, `run_hours` | Runs, rows and query times per minute and per hour, by caller, query, version, connection, transport and status | Caller | 7 days by minute, 400 by hour | `observe` |
+
+`forget` erases a caller from all four: hidden at once, and gone from disk once ClickHouse has rewritten the parts that
+held them.
 
 ## The response cache and Redis
 

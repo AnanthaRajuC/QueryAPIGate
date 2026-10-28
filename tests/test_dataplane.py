@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import apikeys, create_app, dataplane, db, runners, schema, sqltools
+from queryapigate import apikeys, create_app, dataplane, db, runners, runstore, schema, sqltools
 from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
@@ -410,6 +410,9 @@ class RunReportTests(PlanTestCase):
     def test_its_event_is_the_one_python_writes(self):
         from queryapigate import events
         self.assertEqual(self.report().status_code, 204)
-        conn = db.connection()
-        payload = conn.execute('SELECT payload_json FROM events ORDER BY id DESC LIMIT 1').fetchone()[0]
+        if runstore.enabled():
+            row = runstore.query(f'SELECT {runstore.EVENT_COLUMNS} FROM events ORDER BY id DESC LIMIT 1')[0]
+            payload = runstore.event_payload(row)
+        else:
+            payload = db.connection().execute('SELECT payload_json FROM events ORDER BY id DESC LIMIT 1').fetchone()[0]
         self.assertEqual(payload, json.dumps(events.run_payload('by_id', 1, self.ENTRY), default=str))

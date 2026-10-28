@@ -75,6 +75,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_DATAPLANE_SECRET',),
         'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/ (prototype)'),
     },
+    'run_store': {
+        'name': 'A ClickHouse run store for history, the event log and usage',
+        'why': 'a prototype (ADR 0029): its tables, its event ids and how it is switched on may change before the '
+               'measured decision the ADR ends in',
+        'settings': ('QUERYAPIGATE_RUN_STORE_URL',),
+        'docs': ('documentation/DEPLOYMENT.md', 'A ClickHouse run store (prototype)'),
+    },
 }
 
 DB_TYPES = frozenset(t for f in FEATURES.values() for t in f.get('db_types', ()))

@@ -170,9 +170,12 @@ def history_adhoc_sql():
 def history_retention_days():
     """QUERYAPIGATE_HISTORY_RETENTION_DAYS: keep every run for this many days instead of only each version's newest
     history_limit() runs - for watching API behaviour over time, best on a PostgreSQL store. None (the
-    default) keeps the per-version cap. Validated at startup by check_settings()."""
+    default) keeps the per-version cap - except with a run store (runstore.py), where retention is always by time:
+    RUN_STORE_HISTORY_DAYS unless this is set. Validated at startup by check_settings()."""
     raw = os.environ.get('QUERYAPIGATE_HISTORY_RETENTION_DAYS', '').strip()
-    return int(raw) if raw else None
+    if raw:
+        return int(raw)
+    return RUN_STORE_HISTORY_DAYS if run_store_url() else None
 
 
 def history_sample_rate():
@@ -500,6 +503,7 @@ def check_settings():
         raise ValueError('QUERYAPIGATE_HSTS_MAX_AGE must be a whole number of seconds from 1 to '
                          f'{MAX_HSTS_SECONDS} (two years) - 31536000 is a year')
     check_database_url()
+    check_run_store_url()
     check_jwt_settings()
     check_mcp_oauth_settings()
     check_sso_settings()
@@ -670,7 +674,7 @@ def _check_vault():
 SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
                    'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
                    'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID',
-                   'QUERYAPIGATE_METRICS_TOKEN')
+                   'QUERYAPIGATE_METRICS_TOKEN', 'QUERYAPIGATE_RUN_STORE_URL')
 # QUERYAPIGATE_VAULT_TOKEN_FILE isn't one of them: vault.py reads it again at each sign-in, as Vault Agent rotates it.
 _from_files: dict[str, str] = {}  # setting -> the file it was read from
 
@@ -815,6 +819,43 @@ def database_url():
     behind a load balancer can share them (see db.py). None (the default) keeps SQLite. Validated as a
     postgres:// URL, and that psycopg2 is installed, at startup by check_settings()."""
     return os.environ.get('QUERYAPIGATE_DATABASE_URL', '').strip() or None
+
+
+RUN_STORE_HISTORY_DAYS = 30  # history's retention in the run store unless QUERYAPIGATE_HISTORY_RETENTION_DAYS says
+_RUN_STORE_DATABASE_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
+
+
+def run_store_url():
+    """QUERYAPIGATE_RUN_STORE_URL: keep run history, the event log and usage rollups in ClickHouse, at this
+    http(s)://user:password@host:port/database URL, instead of in the metadata store (runstore.py, ADR 0029). None (the
+    default) keeps them there. Validated at startup by check_run_store_url()."""
+    return os.environ.get('QUERYAPIGATE_RUN_STORE_URL', '').strip() or None
+
+
+def check_run_store_url():
+    """Part of check_settings(): the run store's URL is http(s)://, names a host and a database, and is https:// unless
+    the host is this machine - it carries a password, and every run's record."""
+    from urllib.parse import urlsplit
+    raw = run_store_url()
+    if raw is None:
+        return
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+    except ValueError as error:
+        raise ValueError(f'QUERYAPIGATE_RUN_STORE_URL is not a URL: {error}') from None
+    if parts.scheme not in ('http', 'https') or not parts.hostname:
+        raise ValueError("QUERYAPIGATE_RUN_STORE_URL must be http(s)://user:password@host:port/database - ClickHouse's "
+                         'HTTP interface')
+    if parts.scheme == 'http' and parts.hostname not in ('localhost', '127.0.0.1', '::1'):
+        raise ValueError('QUERYAPIGATE_RUN_STORE_URL must be https:// unless ClickHouse is on this machine: it carries '
+                         'a password and every run')
+    database = parts.path.strip('/') or 'queryapigate'
+    if not _RUN_STORE_DATABASE_RE.match(database):
+        raise ValueError(f"QUERYAPIGATE_RUN_STORE_URL: '{database}' is not a database name ClickHouse takes unquoted - "
+                         'letters, digits and _')
+    if port is not None and not 0 < port < 65536:
+        raise ValueError('QUERYAPIGATE_RUN_STORE_URL: the port must be from 1 to 65535')
 
 
 def redis_url():
@@ -1362,6 +1403,10 @@ def describe_settings():
                 'database so several instances can run side by side.', 'QUERYAPIGATE_DATABASE_URL',
                 'SQLite (queryapigate.db)' if database_url() is None
                 else f'PostgreSQL ({redact_url(database_url())})', secret=True),
+            row('Run store', 'Where run history, the event log and usage rollups are kept: the metadata store '
+                '(default), or ClickHouse, for a data plane\'s rates (ADR 0029).', 'QUERYAPIGATE_RUN_STORE_URL',
+                'the metadata store' if run_store_url() is None
+                else f'ClickHouse ({redact_url(run_store_url())})', secret=True),
             row('Load examples', 'Load the example APIs at startup. Idempotent.',
                 'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples())),
             row('Configuration file', 'A configuration file applied at startup, once per file - connections, '

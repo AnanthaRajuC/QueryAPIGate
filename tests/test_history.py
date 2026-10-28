@@ -10,8 +10,8 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, db, history, metrics, store
-from tests import TEST_DATABASE_URL
+from queryapigate import config, create_app, db, history, metrics, runstore, store
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 
 HISTORY_ENV = ('QUERYAPIGATE_HISTORY_LIMIT', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS', 'QUERYAPIGATE_HISTORY_SAMPLE_RATE',
@@ -49,6 +49,9 @@ class HistoryTestCase(unittest.TestCase):
 
     def stored(self):
         """Rows actually in the store - deliberately *without* flushing first."""
+        if runstore.enabled():
+            runstore.ensure_schema()
+            return runstore.query('SELECT count() AS n FROM history')[0]['n']
         return db.connection().execute('SELECT COUNT(*) FROM execution_history').fetchone()[0]
 
     def listed(self, name='q'):
@@ -173,12 +176,14 @@ class SamplingTests(HistoryTestCase):
 
 
 class RetentionTests(HistoryTestCase):
+    @unittest.skipIf(TEST_RUN_STORE_URL, "a run store keeps history by time, not by count")
     def test_without_retention_each_version_keeps_its_newest_runs(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_LIMIT': '5'}):
             self.seed(8, datetime(2026, 1, 1))
             self.assertEqual(self.stored(), 5)
             self.assertEqual([run['i'] for run in self.listed()], [3, 4, 5, 6, 7])
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "a run store keeps history by time, not by count")
     def test_a_batch_leaves_out_only_the_runs_its_trim_would_delete(self):
         """A batch with more of a version's runs than it keeps writes only those the trim keeps - the same ones, newest
         by executed_at then by arrival, rows already stored included - and every run is still an event."""
@@ -223,6 +228,7 @@ class RetentionTests(HistoryTestCase):
             entries = self.client.get('/api/v1/history', headers=self.admin).get_json()['items']
             self.assertEqual(len(entries), 8)  # the whole history is still reachable
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "a run store's TTL, not a sweep, keeps its retention")
     def test_the_sweep_deletes_only_runs_older_than_the_retention_period(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '7'}):
             now = datetime(2026, 3, 1, 12, 0, 0)

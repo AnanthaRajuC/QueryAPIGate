@@ -13,8 +13,8 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
-from queryapigate import config, create_app, db, events
-from tests import TEST_DATABASE_URL
+from queryapigate import config, create_app, db, events, runstore
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 
 
@@ -212,7 +212,8 @@ class DeliveryTests(EventServerTestCase):
         stream = self.open('admin')
         self.run_query(self.alice)
         (event_id, payload), = stream.events(1)
-        stored = db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0]
+        stored = (runstore.newest_event_id(2 ** 63) if runstore.enabled()
+                  else db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0])
         self.assertEqual(event_id, stored)
         self.assertEqual((payload['type'], payload['kind'], payload['query'], payload['version'],
                           payload['entry']['key_name']), ('query.run', 'saved', 'q', 1, 'alice'))
@@ -231,6 +232,7 @@ class DeliveryTests(EventServerTestCase):
         stream = self.open('admin')
         self.assertTrue(stream.nothing_more())
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "the metadata store's event log: test_runstore.py has a run store's late one")
     def test_a_run_committed_out_of_id_order_is_still_delivered(self):
         """On Postgres a smaller id can commit after a larger one was delivered (see events.py)."""
         stream = self.open('admin')
@@ -330,6 +332,7 @@ class EventLogTests(EventServerTestCase):
         (event_id, _), = stream.events(1)
         self.assertGreater(event_id, newest)
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "the metadata store's event log: a run store's TTL keeps its own")
     def test_retention_sweeps_events_older_than_the_window_and_nothing_newer(self):
         with db.transaction() as conn:
             for occurred_at in ('2026-01-01 00:00:00', '2026-01-02 11:00:00', '2026-01-02 13:00:00'):

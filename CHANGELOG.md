@@ -22,8 +22,9 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
 connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
-(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
+(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`), and a ClickHouse run store for history, the event log and usage
+(`QUERYAPIGATE_RUN_STORE_URL`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with

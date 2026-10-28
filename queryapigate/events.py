@@ -26,6 +26,12 @@ it reconnects with Last-Event-ID and catches up.
 **Ordering on Postgres.** Ids are handed out when a row is inserted, but transactions in different processes can
 commit out of id order, so a smaller id can become visible after a larger one was already delivered. Each check
 therefore looks back _LOOKBACK ids behind the newest one delivered and sends any it hasn't seen yet.
+
+**With a run store** (runstore.py, ADR 0029) the event log is ClickHouse's `events` table, polled every
+config.events_poll_interval() seconds: no NOTIFY. Only events older than runstore.SETTLE_SECONDS are delivered, in id
+order, so a resume after any id delivered misses nothing. An event acknowledged later than that (counted as late) is
+still found - each check compares the last _LATE_WINDOW seconds' counts with what was delivered - and sent, out of
+order.
 """
 import asyncio
 import json
@@ -35,7 +41,7 @@ from collections import deque
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, instances, ratelimit, scope, secheaders, tracing
+from . import config, cors, db, instances, ratelimit, runstore, scope, secheaders, tracing
 from .errors import code_for
 
 try:
@@ -58,6 +64,8 @@ _RETRY_MS = 3000            # reconnection delay suggested to EventSource client
 _SWEEP_LOCK_ID = 0x51A8     # next to history's: the advisory lock one instance's retention sweep holds
 _SWEEP_CHUNK = 5_000        # events deleted per sweep transaction
 _LAG_BUCKETS = (0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0)  # seconds; occurred_at has one-second precision
+_LATE_WINDOW = 30           # seconds of a run store's event log checked again for late events (see above)
+_LATE_EVERY = 1.0           # seconds between those checks
 
 RUN = 'query.run'  # the event type of a run, saved or ad-hoc - the only type written so far
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -151,6 +159,8 @@ _COLUMNS = 'id, workspace, key_name, type, query_name, connection_name, status, 
 
 
 def _newest_id():
+    if runstore.enabled():
+        return runstore.newest_event_id(runstore.settled_id())
     row = db.connection().execute('SELECT MAX(id) FROM events').fetchone()
     return row[0] or 0
 
@@ -179,9 +189,13 @@ def _key_since(key_name, workspace='default'):
     return row[0] if row else None
 
 
-def _replay_page(after, key_name, filters, since=None, workspace='default'):
+def _replay_page(after, key_name, filters, since=None, workspace='default', upto=None):
     """One page of the events after ``after`` in ``workspace`` that ``key_name`` may see (None: every event there) and
-    ``filters`` ask for, from ``since`` on, oldest first."""
+    ``filters`` ask for, from ``since`` on, oldest first. ``upto``: a run store's replay stops at the newest id the
+    server has delivered live - newer ones arrive that way, once they're past the settle window."""
+    if runstore.enabled():
+        return runstore.replay_page(after, upto if upto is not None else runstore.settled_id(), workspace, key_name,
+                                    filters, since, _REPLAY_PAGE)
     where, params = _filter_sql(filters)
     where, params = ' AND workspace = ?' + where, [workspace, *params]
     if since is not None:
@@ -198,6 +212,8 @@ def sweep(now=None):
     process's history writer (history.py) every few minutes; on PostgreSQL only by the instance holding the sweep
     lock, so several don't delete the same rows in parallel."""
     from datetime import timedelta
+    if runstore.enabled():
+        return 0  # its TTL keeps the event log's retention
     cutoff = ((now or datetime.now()) - timedelta(hours=config.events_retention_hours())).strftime(TIME_FORMAT)
     conn = db.connection()
     try:
@@ -287,20 +303,26 @@ class EventServer:
         self.slow_disconnects = 0   # clients cut off for falling _QUEUE_SIZE events behind
         self.lag = [0] * (len(_LAG_BUCKETS) + 1)  # occurred_at to delivery, per bucket (the last: +Inf)
         self.lag_sum = 0.0
+        self.by_second = {}         # a run store's: second -> ids delivered in it, for _LATE_WINDOW seconds
+        self.started_at = 0         # a run store's: the newest id when this server started - older ones aren't news
+        self.late_checked = 0.0
 
     # ---- lifecycle ----
 
     async def start(self):
         _raise_open_file_limit()
         self.wake = asyncio.Event()
-        self.cursor = await asyncio.to_thread(_newest_id)
-        for rowid in await asyncio.to_thread(_ids_after, max(0, self.cursor - _LOOKBACK)):
-            if rowid <= self.cursor:  # already there before this server started: not news to anyone
-                self._remember(rowid)
+        if runstore.enabled():
+            await asyncio.to_thread(runstore.ensure_schema)
+        self.cursor = self.started_at = await asyncio.to_thread(_newest_id)
+        if not runstore.enabled():
+            for rowid in await asyncio.to_thread(_ids_after, max(0, self.cursor - _LOOKBACK)):
+                if rowid <= self.cursor:  # already there before this server started: not news to anyone
+                    self._remember(rowid)
         self.server = await asyncio.start_server(self._handle, self.host, self.port, limit=16384)
         self.port = self.server.sockets[0].getsockname()[1]
         self.tasks = [asyncio.create_task(self._tail())]
-        if db.is_postgres():
+        if db.is_postgres() and not runstore.enabled():
             self.tasks.append(asyncio.create_task(self._listen()))
         log.info('Serving events at http://%s:%s/events (metadata: %s)', self.host, self.port, db.describe())
 
@@ -336,6 +358,8 @@ class EventServer:
 
     async def _check(self):
         """Deliver every event written since the last check. True when there may be more right away."""
+        if runstore.enabled():
+            return await self._check_run_store()
         ids = await asyncio.to_thread(_ids_after, max(0, self.cursor - _LOOKBACK))
         new = [i for i in ids if i not in self.recent]
         if not new:
@@ -346,6 +370,44 @@ class EventServer:
             self._deliver(event_id, key_name, (type_, kind, query_name, connection, status),
                           _format(event_id, payload_json), occurred_at, workspace)
         return len(new) > _BATCH or len(ids) >= _BATCH + _LOOKBACK
+
+    async def _check_run_store(self):
+        upto = runstore.settled_id()
+        rows = await asyncio.to_thread(runstore.events_between, self.cursor, upto, _BATCH)
+        for row in rows:
+            self._deliver_row(row)
+        if time.monotonic() - self.late_checked >= _LATE_EVERY:
+            self.late_checked = time.monotonic()
+            await self._deliver_late()
+        return len(rows) == _BATCH
+
+    def _deliver_row(self, row):
+        event_id = row['id']
+        kind = 'saved' if row['query_name'] is not None else 'adhoc'
+        self.by_second.setdefault(event_id // (runstore.PER_MS * 1000), set()).add(event_id)
+        self._deliver(event_id, row['key_name'], (row['type'], kind, row['query_name'], row['connection_name'],
+                                                  row['status']),
+                      _format(event_id, runstore.event_payload(row)), row['occurred_at'], row['workspace'])
+
+    async def _deliver_late(self):
+        """Events below the cursor that weren't there when it passed them: each second of the last _LATE_WINDOW whose
+        count is above what was delivered in it is read again, and what's missing is sent."""
+        newest = self.cursor // (runstore.PER_MS * 1000)
+        for second in [s for s in self.by_second if s < newest - _LATE_WINDOW]:
+            del self.by_second[second]
+        low = max(self.started_at, (newest - _LATE_WINDOW) * runstore.PER_MS * 1000)
+        if low >= self.cursor:
+            return
+        counts = await asyncio.to_thread(runstore.counts_per_second, low, self.cursor)
+        for second, count in sorted(counts.items()):
+            delivered = self.by_second.get(second, set())
+            if count <= len(delivered):
+                continue
+            ids = await asyncio.to_thread(runstore.ids_in_second, second)
+            missing = [i for i in ids if low < i <= self.cursor and i not in delivered]
+            if missing:
+                for row in await asyncio.to_thread(runstore.events_by_id, missing):
+                    self._deliver_row(row)
 
     def _remember(self, rowid):
         self.recent.add(rowid)
@@ -508,7 +570,8 @@ class EventServer:
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
                 after = last_id  # only what is replayed moves `sent`: an id from another store mustn't mute live events
                 while not client.too_slow:  # every page, up to the live stream (ADR 0020 §7)
-                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since, workspace)
+                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since, workspace,
+                                                   self.cursor if runstore.enabled() else None)
                     for event_id, payload_json in page:
                         writer.write(_chunk(_format(event_id, payload_json)))
                         sent = after = event_id

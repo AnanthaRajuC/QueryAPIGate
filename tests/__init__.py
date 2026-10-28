@@ -4,11 +4,16 @@ Set QUERYAPIGATE_TEST_DATABASE_URL (a postgres:// URL to a scratch database) to 
 PostgreSQL metadata backend instead of SQLite. Every test already gets a fresh QUERYAPIGATE_HOME, so each home is
 mapped to its own Postgres schema: the same per-test isolation the SQLite backend gets from a fresh
 queryapigate.db file, with no test needing to know which backend it runs on.
+
+Set QUERYAPIGATE_TEST_RUN_STORE_URL (an http://user:password@host:port URL to a scratch ClickHouse) to run it with
+run history and the event log in a run store (runstore.py, ADR 0029) instead: each home gets its own ClickHouse
+database the same way, dropped with the home.
 """
 import hashlib
 import os
 
 TEST_DATABASE_URL = os.environ.get('QUERYAPIGATE_TEST_DATABASE_URL', '').strip() or None
+TEST_RUN_STORE_URL = os.environ.get('QUERYAPIGATE_TEST_RUN_STORE_URL', '').strip() or None
 _SCHEMA_PREFIX = 'qag_test_'
 _SCHEMA_LOCK_ID = 0x7E57  # distinct from db._PG_LOCK_ID
 
@@ -54,6 +59,27 @@ def _use_postgres(url):
     db._open = open_target
 
 
+def _run_store_database(home):
+    return _SCHEMA_PREFIX + hashlib.sha1(str(home).encode('utf-8')).hexdigest()[:16]
+
+
+def _use_run_store(url):
+    from queryapigate import config, runstore
+
+    config.run_store_url = lambda: url
+    runstore.database = lambda: _run_store_database(config.home())
+    marker = runstore.check_marker
+
+    def check_marker():
+        if os.environ.get('QUERYAPIGATE_HOME'):  # never the working directory's own store: a developer's
+            marker()
+    runstore.check_marker = check_marker
+    # Drop what an earlier run left behind, so databases don't accumulate across runs.
+    for row in runstore.query("SELECT name FROM system.databases WHERE startsWith(name, {p:String})",
+                              {'p': _SCHEMA_PREFIX}, db_name='default'):
+        runstore.execute(f"DROP DATABASE IF EXISTS {row['name']} SYNC", db_name='default')
+
+
 def _flush_history_before_removing_homes():
     """Run history is written in batches by a background thread (history.py). A test's last runs can still be
     queued when its temporary QUERYAPIGATE_HOME is removed; written mid-removal, they recreate queryapigate.db there,
@@ -68,6 +94,15 @@ def _flush_history_before_removing_homes():
     def cleanup(self):
         history.flush()
         remove(self)
+        if TEST_RUN_STORE_URL:  # the home's own run store database goes with it
+            from pathlib import Path
+
+            from queryapigate import runstore
+            try:
+                runstore.execute(f'DROP DATABASE IF EXISTS {_run_store_database(Path(self.name).resolve())} SYNC',
+                                 db_name='default')
+            except runstore.RunStoreError:
+                pass
 
     tempfile.TemporaryDirectory.cleanup = cleanup  # type: ignore[method-assign]
 
@@ -76,3 +111,5 @@ _flush_history_before_removing_homes()
 
 if TEST_DATABASE_URL:
     _use_postgres(TEST_DATABASE_URL)
+if TEST_RUN_STORE_URL:
+    _use_run_store(TEST_RUN_STORE_URL)

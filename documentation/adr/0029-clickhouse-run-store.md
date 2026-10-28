@@ -71,15 +71,15 @@ connections, roles, workspaces, instances, settings and the audit log. The audit
 low volume belong with the definitions it records.
 
 ```
-QUERYAPIGATE_RUN_STORE_URL=https://queryapigate:${file:/run/secrets/ch}@clickhouse.internal:8443/queryapigate
+QUERYAPIGATE_RUN_STORE_URL=https://queryapigate:password@clickhouse.internal:8443/queryapigate
 ```
 
 - **ClickHouse's HTTP interface, from both languages.** Python uses the standard library's `http.client`, with
   keep-alive. It inserts `JSONEachRow`, and every value in a read is a typed query parameter
   (`{key:String}`), never SQL text. That adds no Python dependency. Rust uses the official `clickhouse` crate, which
   sends RowBinary with LZ4 over HTTP. One URL and one port serve both.
-- **TLS:** `https://` is required except to a loopback host. The URL takes `${file:...}` and `${vault:...}`
-  references, as other secrets do (ADR 0015).
+- **TLS:** `https://` is required except to a loopback host. The URL is a secret setting, like
+  `QUERYAPIGATE_DATABASE_URL`: it can be read from a file named by `QUERYAPIGATE_RUN_STORE_URL_FILE` (ADR 0015).
 - **Versions:** ClickHouse 24.8 LTS or later, tested in CI against 24.8 and the newest LTS. One server, or
   ClickHouse Cloud. Self-managed replicated clusters are an open question.
 - **Experimental** (`queryapigate/experimental.py`) until section 9's measurements and a release unchanged.

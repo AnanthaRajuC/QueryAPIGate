@@ -13,7 +13,7 @@ failures are always kept); and runs past QUERYAPIGATE_HISTORY_RETENTION_DAYS are
 import json
 from datetime import datetime, timedelta
 
-from . import config, db, history, scope
+from . import config, db, history, runstore, scope
 from .errors import ApiError
 
 MAX_SCAN = 100_000          # runs read for one summary, newest first; past it the summary says `truncated`
@@ -111,10 +111,16 @@ def agents(since=None, until=None, hours=None, now=None):
     if since >= until:
         raise ApiError('since must be before until', code='invalid_filter')
     history.flush()
-    rows = db.connection().execute(
-        'SELECT query_name, executed_at, entry_json FROM execution_history WHERE workspace = ? AND executed_at >= ? '
-        'AND executed_at < ? ORDER BY executed_at DESC LIMIT ?',
-        (scope.current(), since, until, MAX_SCAN + 1)).fetchall()
+    if runstore.enabled():
+        runstore.ensure_schema()
+        rows = [{'query_name': row['query_name'], 'executed_at': row['executed_at'], 'entry_json': row['entry']}
+                for row in runstore.newest_first('workspace = {ws:String}', {'ws': scope.current()}, MAX_SCAN + 1,
+                                                 top=until, floor=since, columns='query_name, executed_at, entry')]
+    else:
+        rows = db.connection().execute(
+            'SELECT query_name, executed_at, entry_json FROM execution_history WHERE workspace = ? '
+            'AND executed_at >= ? AND executed_at < ? ORDER BY executed_at DESC LIMIT ?',
+            (scope.current(), since, until, MAX_SCAN + 1)).fetchall()
     runs = []
     for row in rows[:MAX_SCAN]:
         try:

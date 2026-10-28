@@ -118,6 +118,15 @@ impl Forwarder {
 
     /// POST a JSON body to one of Python's internal endpoints, as the data plane itself.
     pub async fn post(&self, path: &str, json: String) -> Result<StatusCode, String> {
+        Ok(self.post_json(path, json).await?.0)
+    }
+
+    /// post(), with Python's answer: its status and body.
+    pub async fn post_json(
+        &self,
+        path: &str,
+        json: String,
+    ) -> Result<(StatusCode, String), String> {
         let request = Request::post(format!("http://{}{path}", self.upstream))
             .header(header::CONTENT_TYPE, "application/json")
             .header(SECRET_HEADER, self.secret.clone())
@@ -134,8 +143,13 @@ impl Forwarder {
             .await
             .map_err(|e| e.to_string())?;
         let status = response.status();
-        let _ = response.into_body().collect().await;
-        Ok(status)
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .map(|b| String::from_utf8_lossy(&b.to_bytes()).into_owned())
+            .unwrap_or_default();
+        Ok((status, body))
     }
 }
 

@@ -25,6 +25,7 @@ from . import (
     instances,
     logging_setup,
     postman,
+    runstore,
     scope,
     store,
     workspaces,
@@ -113,6 +114,7 @@ def _events(args):
     experimental.warn_in_use(logging.getLogger('queryapigate'), os.environ, store.read_connections(),
                              store.workspace_names())
     db.init_schema()
+    runstore.check_marker()
     instances.register('events')
     args.port = args.port or config.events_port()
     from .events import run
@@ -718,6 +720,37 @@ def _history_forget(args):
     return 0
 
 
+def _runs_copy(args):
+    """`queryapigate runs copy-to-clickhouse`: this store's run history into the run store (ADR 0029 §6)."""
+    try:
+        config.check_settings()
+        if not runstore.enabled():
+            raise ValueError('QUERYAPIGATE_RUN_STORE_URL is not set - there is no run store to copy to')
+        copied = runstore.copy_history()
+    except (ValueError, runstore.RunStoreError) as error:
+        print(f'queryapigate runs copy-to-clickhouse: {error}', file=sys.stderr)
+        return 1
+    print(f'Copied {copied} run(s) of history to the run store at {runstore.location()}.')
+    return 0
+
+
+def _runs_leave(args):
+    """`queryapigate runs leave-clickhouse`: keep runs in the metadata store again (ADR 0029 §6)."""
+    try:
+        config.check_settings()
+        if not runstore.enabled():
+            raise ValueError('set QUERYAPIGATE_RUN_STORE_URL to the run store being left: its newest event id is read '
+                             'from it')
+        newest = runstore.leave()
+    except (ValueError, runstore.RunStoreError) as error:
+        print(f'queryapigate runs leave-clickhouse: {error}', file=sys.stderr)
+        return 1
+    print(f'Runs and events are kept in the metadata store from the next start; its event ids continue above {newest}. '
+          'Unset QUERYAPIGATE_RUN_STORE_URL on every instance before starting them: the run store\'s history stays '
+          'there, not copied back.')
+    return 0
+
+
 def _audit_verify(args):
     """`queryapigate audit verify [--file PATH]`: walk the audit log's hash chain (ADR 0012) - the store's, or an export
     file's - and say whether it's intact, or where it first breaks. Exit 0 intact, 1 broken, 2 can't be checked
@@ -959,6 +992,15 @@ def build_parser():
     history_forget.add_argument('--dry-run', action='store_true', help='say how much would go; delete nothing')
     history_forget.set_defaults(func=_history_forget)
 
+    runs_parser = commands.add_parser('runs', help='where run history and the event log are kept: a ClickHouse run '
+                                                   'store (ADR 0029, experimental)')
+    runs_parser.set_defaults(func=lambda a: runs_parser.print_help() or 2)
+    runs_actions = runs_parser.add_subparsers(dest='action')
+    runs_actions.add_parser('copy-to-clickhouse', help="copy this store's run history into the run store, once"
+                            ).set_defaults(func=_runs_copy)
+    runs_actions.add_parser('leave-clickhouse', help='keep runs in the metadata store again, its event ids continuing '
+                            'above the run store\'s').set_defaults(func=_runs_leave)
+
     rekey_parser = commands.add_parser('rekey', help='re-encrypt every stored password under the first key in '
                                                      'QUERYAPIGATE_SECRET_KEY, so the others can be removed (rotating '
                                                      'the key)')
@@ -1002,6 +1044,7 @@ def main(argv=None):
     try:
         config.check_database_url()
         db.init_schema()
+        runstore.check_marker()
         store.refuse_legacy_home()
     except ValueError as error:
         print(f'queryapigate: {error}', file=sys.stderr)

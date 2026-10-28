@@ -48,6 +48,7 @@ from . import (
     openapi,
     quotas,
     ratelimit,
+    runstore,
     schema,
     scope,
     secheaders,
@@ -67,9 +68,11 @@ bp = Blueprint('api', __name__)
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
                     'api.console_page', 'api.metrics_endpoint',
-                    'api.dataplane_runs',  # the data plane's reports: gate() lets only its secret through (ADR 0028)
+                    # the data plane's reports and run store lease: gate() lets only its secret through (ADR 0028)
+                    'api.dataplane_runs', 'api.dataplane_lease',
                     # Console sign-in (sso.py): each checks what it needs itself - state, the session and its CSRF token
                     'auth.login', 'auth.callback', 'auth.session', 'auth.logout'}
+DATAPLANE_ENDPOINTS = {'api.dataplane_runs', 'api.dataplane_lease'}
 # Monitoring keeps working while a client is throttled; the Console's static files are exempt so loading the page
 # (several hashed assets) never spends a client's quota - they carry no data and no key.
 RATE_LIMIT_EXEMPT = {'api.health', 'api.metrics_endpoint', 'api.console_page'}
@@ -207,6 +210,7 @@ def create_app():
     config.check_settings()
     logging_setup.configure(log)  # before anything below logs - the legacy import's deprecation warning, for one
     db.init_schema()
+    runstore.check_marker()
     store.refuse_legacy_home()
     experimental.warn_in_use(log, os.environ, store.read_connections(), store.workspace_names())
     warn_env_references()
@@ -325,7 +329,7 @@ def create_app():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
-        if request.endpoint == 'api.dataplane_runs':  # the data plane's own reports: nothing else applies to them
+        if request.endpoint in DATAPLANE_ENDPOINTS:  # the data plane's own calls: nothing else applies to them
             if request.environ.get('queryapigate.dataplane'):
                 return None
             return jsonify(error_body('Not Found', 404)), 404
@@ -370,7 +374,7 @@ def create_app():
 
     @app.after_request
     def decorate(response):
-        if request.endpoint == 'api.dataplane_runs':  # counted and logged as the runs it reports, not itself
+        if request.endpoint in DATAPLANE_ENDPOINTS:  # counted and logged as the runs it reports, not itself
             return response
         if not request.path.startswith('/auth/'):  # Console sign-in is same-origin only (sso.py)
             cors.add_headers(response, request.headers.get('Origin'))
@@ -1229,7 +1233,8 @@ def dataplane_runs():
     """The runs a data plane in front of this server served itself (dataplane.py, ADR 0028), batched: each recorded as
     run_saved() records one - run history, the event log, the live feed - and counted in /metrics as it would have been.
     Only the data plane reaches it: gate() answers 404 to anything without its secret. `dropped`: runs it served but
-    couldn't queue for here, counted as history's own dropped runs are.
+    couldn't queue for here, counted as history's own dropped runs are. `recorded`: with a run store, the data plane has
+    written them there itself (ADR 0029), and only `kept` and `sampled_out` of them are counted here.
 
     Each run comes with its history entry already JSON (`entry`), and the labels and timings /metrics counts it by: at
     the data plane's rates Python's own work per run - encoding it, and its labels - is what it can't keep up with, so
@@ -1238,7 +1243,11 @@ def dataplane_runs():
     runs = report.get('runs') or []
     broadcaster = current_app.extensions['queryapigate_broadcaster']
     with scope.using(scope.current()):  # resolved once, not by each of a busy batch's few thousand label lookups
-        history.record_reported(runs)
+        if report.get('recorded'):  # in the run store already: written by the data plane itself (ADR 0029 §4)
+            metrics.inc_history('recorded', int(report.get('kept') or 0))
+            metrics.inc_history('sampled_out', int(report.get('sampled_out') or 0))
+        else:
+            history.record_reported(runs)
         if broadcaster.subscriber_count():  # the live feed's events, only when anyone is listening
             for run in runs:
                 broadcaster.publish(events.run_payload(run['query'], run['version'], json.loads(run['entry'])),
@@ -1261,6 +1270,32 @@ def dataplane_runs():
     if report.get('dropped'):
         metrics.inc_history('dropped', int(report['dropped']))
     return '', 204
+
+
+@bp.route('/internal/dataplane/lease', methods=['POST'])
+def dataplane_lease():
+    """A data plane's block of the event ids it mints when it writes its runs to the run store itself (runstore.py,
+    ADR 0029 §2), leased here so its store access stays read-only: `{"holder": ...}` leases one, `{"holder": ...,
+    "block": n}` renews it (409 once it has lapsed: lease again). With the layout of an id and the settle window, so
+    the two processes can't disagree on them. 404 without a run store."""
+    if not runstore.enabled():
+        return jsonify(error_body('No run store is configured', 404)), 404
+    body = request.get_json(silent=True) or {}
+    holder = body.get('holder')
+    if not isinstance(holder, str) or not 0 < len(holder) <= 200:
+        return jsonify(error_body('holder: a name for the data plane process', 400)), 400
+    if body.get('block') is not None:
+        if not isinstance(body['block'], int) or not runstore.renew(body['block'], holder):
+            return jsonify(error_body('That lease has lapsed - lease a block again', 409)), 409
+        return jsonify({'block': body['block'], 'lease_seconds': runstore.LEASE_SECONDS}), 200
+    try:
+        block = runstore.lease(runstore.DATAPLANE_BLOCK, holder)
+    except runstore.LeaseError as error:
+        return jsonify(error_body(str(error), 503)), 503
+    return jsonify({'block': block, 'size': runstore.DATAPLANE_BLOCK, 'lease_seconds': runstore.LEASE_SECONDS,
+                    'epoch_ms': runstore.EPOCH_MS, 'per_ms': runstore.PER_MS,
+                    'settle_seconds': runstore.SETTLE_SECONDS, 'database': runstore.database(),
+                    'sample_rate': config.history_sample_rate()}), 200
 
 
 # --------------------------------------------------------------------------------------
