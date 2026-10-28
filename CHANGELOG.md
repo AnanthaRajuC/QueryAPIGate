@@ -51,6 +51,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-28
+
+An optional ClickHouse run store, as a prototype that ended in a measured decision: go
+([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)), the second condition of ADR 0028's. With it, the Rust
+data plane writes every run it serves to ClickHouse itself, and run history, the event log and usage rollups are
+kept there instead of the metadata store. At 20,000 calls a second for 30 minutes, and at the 64-caller peak where
+0.44's store kept about half, every run was recorded, in about 13 bytes each and with 11% fewer gateway cores. It is
+experimental and off unless `QUERYAPIGATE_RUN_STORE_URL` is set; nothing changes without it.
+
 ### Added
 
 - **An optional ClickHouse run store** (experimental, a prototype, measured and decided go -
@@ -3065,7 +3074,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...v0.42.0
