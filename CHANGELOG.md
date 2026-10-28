@@ -50,6 +50,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI tests MongoDB 7.0 for now, not 8.0.** MongoDB 8.0 and later refuse to start on Linux kernels 6.19 to 7.0.13
+  ([SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912)), which GitHub's ubuntu-24.04 runners have run since
+  image 20261025. The integration and oldest-dependencies jobs go back to 8.0 once the runners are on 7.0.14 or later.
+  The upgrade fixtures from 0.44.0 are added, and the rolling-upgrade and Helm checks now start from 0.44.0.
+
 ## [0.44.0] - 2026-10-28
 
 A Rust data plane for `/q/`, as a prototype that ended in a measured decision: go

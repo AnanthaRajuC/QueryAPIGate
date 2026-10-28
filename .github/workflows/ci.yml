@@ -75,7 +75,9 @@ jobs:
           --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
           --health-retries 20
       mongo:
-        image: mongo:8.0
+        # 7.0, not 8.0: MongoDB 8.0+ refuses to start on Linux 6.19-7.0.13 (SERVER-121912, a TCMalloc/rseq crash), the
+        # ubuntu-24.04 runner's kernel since image 20261025. Back to 8.0 once the runners are on 7.0.14 or later.
+        image: mongo:7.0
         ports: ["27017:27017"]
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
@@ -206,7 +208,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mongo:  # pymongo's floor, against a real server
-        image: mongo:8.0
+        image: mongo:7.0  # not 8.0 for now: see the integration job
         ports: ["27017:27017"]
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
