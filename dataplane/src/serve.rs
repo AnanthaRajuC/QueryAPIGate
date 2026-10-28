@@ -36,6 +36,7 @@ use crate::log::{self, Logger};
 use crate::params::{self, Supplied};
 use crate::render::{self, Action};
 use crate::respond;
+use crate::runstore::{self, RunStore};
 use crate::store::{Rows, Store, Value};
 
 /// apikeys._USE_RECORD_INTERVAL: a key's call is forwarded at least this often, so Python records its last use.
@@ -266,10 +267,17 @@ pub struct App {
     in_flight: Arc<Semaphore>,
     /// (kind, key) -> (until, rows): the store rows metacache.py would reuse, for QUERYAPIGATE_METADATA_CACHE_TTL
     rows: Mutex<HashMap<(char, String), Reused>>,
+    /// With a run store (ADR 0029): where its runs are written, by this process, before Python is told of them
+    run_store: Option<Arc<RunStore>>,
 }
 
 impl App {
-    pub fn new(forward: Forwarder, settings: Settings, store: Option<Store>) -> Arc<App> {
+    pub fn new(
+        forward: Forwarder,
+        settings: Settings,
+        store: Option<Store>,
+        run_store: Option<RunStore>,
+    ) -> Arc<App> {
         let (runs, queue) = mpsc::channel(10_000);
         let logger = Logger {
             json: settings.json_logs,
@@ -287,8 +295,12 @@ impl App {
             dropped: AtomicU64::new(0),
             in_flight: Arc::new(Semaphore::new(REPORTS_IN_FLIGHT)),
             rows: Mutex::new(HashMap::new()),
+            run_store: run_store.map(Arc::new),
         });
         tokio::spawn(report(app.clone(), queue));
+        if app.run_store.is_some() {
+            tokio::spawn(keep_lease(app.clone()));
+        }
         app
     }
 
@@ -841,6 +853,7 @@ impl App {
             "connection": field("connection_name"), "transport": field("transport"), "rows": field("rows"),
             "dialect": dialect, "method": parts.method.as_str(), "http_status": status, "seconds": seconds,
             "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
+            "code": field("code"), "masked": entry.get("masked").and_then(Json::as_array).is_some_and(|m| !m.is_empty()),
         });
         if self.runs.try_send(run).is_err() {
             // full: dropped, as Python's own history queue drops when it can't keep up - and counted the same way
@@ -906,6 +919,9 @@ impl App {
 /// Reports at once, at most: one at a time kept up with about 8,600 runs/s - well short of what this serves.
 const REPORTS_IN_FLIGHT: usize = 4;
 
+/// Runs in one insert into the run store at most (ADR 0029 §4): one interval's at 100,000 calls a second.
+const RUN_STORE_BATCH: usize = 100_000;
+
 /// How long a shutdown waits for the runs still queued to reach Python.
 const DRAIN_FOR: Duration = Duration::from_secs(10);
 
@@ -934,6 +950,12 @@ impl App {
 /// take included.
 async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
     let every = app.settings.flush_every;
+    // A run store wants few, large inserts: each is a part ClickHouse later merges, through three views
+    let most = if app.run_store.is_some() {
+        RUN_STORE_BATCH
+    } else {
+        500
+    };
     loop {
         let Some(first) = queue.recv().await else {
             return;
@@ -941,7 +963,7 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
         let mut batch = vec![first];
         if !every.is_zero() {
             let deadline = tokio::time::Instant::now() + every;
-            while batch.len() < 500 {
+            while batch.len() < most {
                 match tokio::time::timeout_at(deadline, queue.recv()).await {
                     Ok(Some(run)) => batch.push(run),
                     Ok(None) | Err(_) => break,
@@ -951,23 +973,84 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
         let Ok(permit) = app.in_flight.clone().acquire_owned().await else {
             return;
         };
-        let dropped = app.dropped.swap(0, Ordering::Relaxed);
-        let body = json!({"runs": batch, "dropped": dropped}).to_string();
         let (app, count) = (app.clone(), batch.len());
         tokio::spawn(async move {
+            // With a run store this process writes the runs itself; Python is told only to count them
+            let recorded = match &app.run_store {
+                Some(run_store) => Some(record(run_store, &batch).await),
+                None => None,
+            };
+            let carried = app.dropped.swap(0, Ordering::Relaxed);
+            let mut dropped = carried;
+            let in_store = matches!(recorded, Some(Ok(_)));
+            let body = match recorded {
+                Some(Ok((kept, sampled_out))) => json!({"runs": batch, "dropped": dropped, "recorded": true,
+                                                        "kept": kept, "sampled_out": sampled_out}),
+                Some(Err(error)) => {
+                    eprintln!("queryapigate-dataplane: writing {count} runs to the run store failed: {error}");
+                    dropped += count as u64;
+                    json!({"runs": batch, "dropped": dropped, "recorded": true, "kept": 0, "sampled_out": 0})
+                }
+                None => json!({"runs": batch, "dropped": dropped}),
+            }
+            .to_string();
             let failed = match app.forward.post("/internal/dataplane/runs", body).await {
                 Ok(status) if status.as_u16() == 204 => None,
                 Ok(status) => Some(format!("got {status}")),
                 Err(error) => Some(format!("failed: {error}")),
             };
             if let Some(why) = failed {
-                // Not sent again (Python may have recorded some), but counted: as dropped, with the next report
-                app.dropped
-                    .fetch_add(count as u64 + dropped, Ordering::Relaxed);
+                // Not sent again (Python may have recorded some), but counted: as dropped, with the next report -
+                // unless they're in the run store already, when only their counts in /metrics are lost
+                let lost = if in_store {
+                    carried
+                } else {
+                    dropped.max(count as u64 + carried)
+                };
+                app.dropped.fetch_add(lost, Ordering::Relaxed);
                 eprintln!("queryapigate-dataplane: reporting {count} runs {why}");
             }
             drop(permit);
         });
+    }
+}
+
+/// A batch of served runs into the run store: (kept in history, sampled out of it).
+async fn record(run_store: &RunStore, batch: &[Json]) -> Result<(u64, u64), String> {
+    let rows: Vec<_> = batch
+        .iter()
+        .filter_map(|run| {
+            let status = run.get("status").and_then(Json::as_str).unwrap_or("");
+            runstore::event_row(run, run_store.keep(status))
+        })
+        .collect();
+    let kept = rows.iter().filter(|row| row.in_history).count() as u64;
+    let total = rows.len() as u64;
+    let written = run_store.write(rows).await? as u64;
+    if written < total {
+        return Err(format!(
+            "{} runs past what its lease allows in a burst",
+            total - written
+        ));
+    }
+    Ok((kept, total - kept))
+}
+
+/// The run store's lease on its ids, kept: leased at startup - retried every second until Python answers - and
+/// renewed every RENEW_EVERY.
+async fn keep_lease(app: Arc<App>) {
+    let Some(run_store) = app.run_store.clone() else {
+        return;
+    };
+    loop {
+        let wait = match run_store.keep_lease(&app.forward).await {
+            Ok(()) => runstore::RENEW_EVERY,
+            Err(error) => {
+                eprintln!("queryapigate-dataplane: run store lease: {error}");
+                Duration::from_secs(1)
+            }
+        };
+        tokio::time::sleep(wait).await;
     }
 }
 

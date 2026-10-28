@@ -7,6 +7,7 @@ edition = "2024"
 base64 = "0.23.1"
 bytes = "1.12.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+clickhouse = { version = "0.15.3", default-features = false, features = ["lz4", "rustls-tls-ring", "rustls-tls-webpki-roots"] }
 fernet = { version = "0.2.2", default-features = false, features = ["rustcrypto"] }
 form_urlencoded = "1.2.2"
 getrandom = "0.4.3"

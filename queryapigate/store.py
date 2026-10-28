@@ -548,6 +548,12 @@ def load_versions(name, with_history=True):
         content['example'] = True
     if row['published_version'] is not None:
         content['published_version'] = row['published_version']
+    from . import runstore
+    kept = None
+    if with_history and runstore.enabled():  # one windowed read for every version (ADR 0029)
+        runstore.ensure_schema()
+        kept = runstore.per_version(workspace, name, [v['version'] for v in rows if v['version'] is not None],
+                                    config.history_limit())
     for v in rows:
         if v['version'] is None:
             continue
@@ -557,11 +563,14 @@ def load_versions(name, with_history=True):
             raise ApiError('Saved query data is not valid JSON', 500) from None
         if not isinstance(fields, dict):
             raise ApiError('Saved query data has an unexpected structure', 500)
-        history_rows = db.connection().execute(
-            'SELECT entry_json FROM (SELECT entry_json, executed_at, rowid FROM execution_history '
-            'WHERE workspace = ? AND query_name = ? AND version = ? ORDER BY executed_at DESC, rowid DESC LIMIT ?) '
-            'AS newest ORDER BY executed_at, rowid', (workspace, name, v['version'], config.history_limit())
-        ).fetchall() if with_history else []
+        if kept is not None:
+            history_rows = [{'entry_json': entry} for entry in kept[v['version']]]
+        else:
+            history_rows = db.connection().execute(
+                'SELECT entry_json FROM (SELECT entry_json, executed_at, rowid FROM execution_history '
+                'WHERE workspace = ? AND query_name = ? AND version = ? ORDER BY executed_at DESC, rowid DESC LIMIT ?) '
+                'AS newest ORDER BY executed_at, rowid', (workspace, name, v['version'], config.history_limit())
+            ).fetchall() if with_history else []
         content[str(v['version'])] = {
             'uuid': v['uuid'],
             **fields,
@@ -851,31 +860,38 @@ def move_collection(old, new):
 def delete_saved(ref, version=None):
     """Delete a saved query, or a single version of it (the query goes with its last version) - cascades to
     that version's/query's own execution_history via the schema's own ON DELETE CASCADE."""
+    from . import runstore
     name = resolve_saved_file(ref)
     ws = scope.current()
     with db.transaction() as conn:
         if version is None:
             conn.execute('DELETE FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name))
-            return
-        row = conn.execute(
-            'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
-            (ws, name, version)).fetchone()
-        if row is None:
-            raise ApiError(f'Version {version} not found', 404, code='version_not_found')
-        conn.execute('DELETE FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
-                     (ws, name, version))
-        remaining = conn.execute(
-            'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? LIMIT 1',
-            (ws, name)).fetchone()
-        if remaining is None:
-            conn.execute('DELETE FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name))
-            return
-        # Deleting the published version falls back to the newest version *older* than it - one that was live
-        # before - never to a newer draft; with none older, the query is left unpublished.
-        conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
-                     'WHERE workspace = ? AND query_name = ? AND version < ?) '
-                     'WHERE workspace = ? AND name = ? AND published_version = ?',
-                     (ws, name, version, ws, name, version))
+        else:
+            _delete_version(conn, ws, name, version)
+    runstore.delete_runs(ws, name, version)  # the run store has no foreign key to cascade through
+
+
+def _delete_version(conn, ws, name, version):
+    """delete_saved() for one version: the query goes with its last one."""
+    row = conn.execute(
+        'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
+        (ws, name, version)).fetchone()
+    if row is None:
+        raise ApiError(f'Version {version} not found', 404, code='version_not_found')
+    conn.execute('DELETE FROM saved_query_versions WHERE workspace = ? AND query_name = ? AND version = ?',
+                 (ws, name, version))
+    remaining = conn.execute(
+        'SELECT 1 FROM saved_query_versions WHERE workspace = ? AND query_name = ? LIMIT 1',
+        (ws, name)).fetchone()
+    if remaining is None:
+        conn.execute('DELETE FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name))
+        return
+    # Deleting the published version falls back to the newest version *older* than it - one that was live
+    # before - never to a newer draft; with none older, the query is left unpublished.
+    conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
+                 'WHERE workspace = ? AND query_name = ? AND version < ?) '
+                 'WHERE workspace = ? AND name = ? AND published_version = ?',
+                 (ws, name, version, ws, name, version))
 
 
 def record_execution(path, version, entry, live=True):

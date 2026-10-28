@@ -3,10 +3,11 @@ the hash chain - and a member reads its workspace's; alerts are a workspace's ow
 roles only; events reach their own workspace's subscribers; metrics tell two workspaces' `partner` keys apart."""
 import asyncio
 import queue
+import time
 from datetime import date, timedelta
 from unittest import mock
 
-from queryapigate import admins, alerts, broadcast, events, history, metrics, scope
+from queryapigate import admins, alerts, broadcast, events, history, metrics, runstore, scope
 from tests.test_workspace_isolation import B, IsolationTestCase
 
 
@@ -90,6 +91,8 @@ class EventTests(ObservabilityTestCase):
         self.titles('/q/films')
         self.titles(f'{B}/q/films')
         history.flush()
+        if runstore.enabled():
+            time.sleep(runstore.SETTLE_SECONDS + 0.1)  # a run store's replay waits for its settle window
         replay = [events._replay_page(0, None, {}, workspace=w) for w in ('default', 'team-b')]
         self.assertEqual([len(page) for page in replay], [1, 1])
         self.assertNotEqual(replay[0][0][0], replay[1][0][0])

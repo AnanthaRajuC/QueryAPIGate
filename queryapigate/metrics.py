@@ -30,6 +30,7 @@ _rate_limit_fallbacks = 0
 _cache_hits = 0                         # responses served from cache.ResponseCache/rediscache.RedisResponseCache
 _cache_misses = 0
 _history_runs: dict[tuple, int] = {}  # (outcome,) -> runs: recorded / sampled_out / dropped / failed
+_events_late = 0                        # events the run store acknowledged after its settle window (ADR 0029)
 
 
 def _bucket_index(elapsed):
@@ -202,6 +203,12 @@ def inc_history(outcome, count=1):
         _history_runs[(outcome,)] = _history_runs.get((outcome,), 0) + count
 
 
+def inc_events_late(count=1):
+    global _events_late
+    with _lock:
+        _events_late += count
+
+
 def history_counts():
     """Runs by history outcome since this process started: recorded, sampled_out, dropped, failed."""
     with _lock:
@@ -297,6 +304,7 @@ def render(cache=None):
         cache_hits = _cache_hits
         cache_misses = _cache_misses
         history_runs = dict(_history_runs)
+        events_late = _events_late
 
     lines = []
     _render_counter(lines, 'queryapigate_requests_total', 'Total HTTP requests.',
@@ -323,6 +331,12 @@ def render(cache=None):
     lines.append('# HELP queryapigate_history_pending Saved-query runs queued for the next batched history write.')
     lines.append('# TYPE queryapigate_history_pending gauge')
     lines.append(f'queryapigate_history_pending {history.pending_count()}')
+    from . import runstore
+    if runstore.enabled():
+        lines.append('# HELP queryapigate_events_late_total Events the run store acknowledged after its settle window: '
+                     'a client resuming from a newer id can miss one (ADR 0029).')
+        lines.append('# TYPE queryapigate_events_late_total counter')
+        lines.append(f'queryapigate_events_late_total {events_late}')
 
     lines.append('# HELP queryapigate_active_queries SQL queries currently executing (paged or mid-stream).')
     lines.append('# TYPE queryapigate_active_queries gauge')

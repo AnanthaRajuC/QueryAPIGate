@@ -21,7 +21,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
 
-from . import admins, apikeys, config, db, history, instances, metrics, oidc, ratelimit, scope, usage
+from . import admins, apikeys, config, db, history, instances, metrics, oidc, ratelimit, runstore, scope, usage
 
 RECENT_RUNS = 5000  # newest runs the history checks look at
 QUERY_WINDOW = timedelta(days=7)  # a query's error rate and speed are judged on its runs this recent ...
@@ -278,10 +278,16 @@ def _keys(now):
 def _recent_runs(now):
     """The newest runs, as (query_name, executed_at, entry) - written ones, including this process's queued."""
     history.flush()
-    rows = db.connection().execute(
-        'SELECT query_name, executed_at, entry_json FROM execution_history WHERE workspace = ? '
-        'ORDER BY rowid DESC LIMIT ?', (scope.current(), RECENT_RUNS)).fetchall()
     oldest = (now - QUERY_WINDOW).strftime(history.TIME_FORMAT)
+    if runstore.enabled():
+        runstore.ensure_schema()
+        rows = [{'query_name': row['query_name'], 'executed_at': row['executed_at'], 'entry_json': row['entry']}
+                for row in runstore.newest_first('workspace = {ws:String}', {'ws': scope.current()}, RECENT_RUNS,
+                                                 floor=oldest, columns='query_name, executed_at, entry')]
+    else:
+        rows = db.connection().execute(
+            'SELECT query_name, executed_at, entry_json FROM execution_history WHERE workspace = ? '
+            'ORDER BY rowid DESC LIMIT ?', (scope.current(), RECENT_RUNS)).fetchall()
     runs = []
     for row in rows:
         if row['executed_at'] < oldest:

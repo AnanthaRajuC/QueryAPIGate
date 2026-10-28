@@ -37,7 +37,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
-from . import config, db, metrics
+from . import config, db, metrics, runstore
 from .errors import ApiError
 
 log = logging.getLogger('queryapigate')
@@ -160,6 +160,8 @@ class _Writer:
         if time.monotonic() - self.last_sweep < _SWEEP_INTERVAL:
             return
         self.last_sweep = time.monotonic()
+        if runstore.enabled():
+            return  # its tables' TTLs keep retention (runstore.py)
         from . import events
         events.sweep()  # the event log's own retention (ADR 0020), whatever history's is
         if config.history_retention_days() is not None:
@@ -260,6 +262,17 @@ def forget(caller, actor, dry_run=False):
         raise ApiError('Name the caller to forget: a key, or jwt:<subject>', code='invalid_body')
     flush()  # runs still queued are written first, so none is missed
     quotas.write()  # and usage counts not written yet: both counted the same whichever came first
+    if runstore.enabled():
+        runs, erased = runstore.forget(caller, dry_run=dry_run)
+        if dry_run:
+            return {'runs': runs, 'events': erased,
+                    'usage_periods': db.connection().execute('SELECT COUNT(*) FROM usage_counters WHERE caller = ?',
+                                                             (caller,)).fetchone()[0]}
+        periods = quotas.forget(caller)
+        found = {'runs': runs, 'events': erased, 'usage_periods': periods}
+        store.record_audit(actor, 'forget_caller', 'history',
+                           {'caller_sha256': hashlib.sha256(caller.encode()).hexdigest(), **found})
+        return found
     conn = db.connection()
     if dry_run:
         runs = conn.execute('SELECT COUNT(*) FROM execution_history WHERE key_name = ?', (caller,)).fetchone()[0]
@@ -310,8 +323,14 @@ def write(rows, target=None):
     """Insert ``rows`` (see _row()) in one transaction - each run's history row, if history keeps it, and its event -
     then trim each version they touch back to its limit (unless a retention period applies instead). A run whose saved
     query or version was deleted meanwhile has no history row, but keeps its event: it happened (ADR 0020 §2). Never
-    raises: a history write must never fail the work it records."""
+    raises: a history write must never fail the work it records. With a run store, the batch goes there instead
+    (runstore.write()), and its tables' TTLs, not trims, keep it bounded."""
     from . import events
+    if runstore.enabled():
+        kept = runstore.write(rows, target or db.current_target())
+        if kept is not None:
+            metrics.inc_history('recorded', kept)
+        return
     found, adhoc, saved = [], [], []
     for name, version, executed_at, entry_json, status, key_name, keep, event, workspace in rows:
         if event is not None:
@@ -505,6 +524,8 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
         clauses.append('(executed_at < ? OR (executed_at = ? AND rowid < ?))')
         params += [executed_at, executed_at, rowid]
     flush()
+    if runstore.enabled():
+        return _search_run_store(query, version, status, key, kind, since, until, limit, cursor)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
     rows = db.connection().execute(
         f'SELECT query_name, version, executed_at, rowid, entry_json FROM execution_history {where} '
@@ -516,11 +537,27 @@ def search(query=None, version=None, status=None, key=None, since=None, until=No
     return entries, (_encode_cursor(last['executed_at'], last['rowid']) if last is not None else None)
 
 
+def _search_run_store(query, version, status, key, kind, since, until, limit, cursor):
+    from . import scope
+    runstore.ensure_schema()
+    where, params = runstore.history_filter(scope.current(), query, version, status, key, kind)
+    top, after = _decode_cursor(cursor) if cursor else (until, None)
+    rows = runstore.newest_first(where, params, limit + 1, top=top, floor=since,
+                                 columns='query_name, version, executed_at, id, entry', after=after)
+    entries = [{'query': row['query_name'], 'version': row['version'],
+                'kind': 'saved' if row['query_name'] is not None else 'adhoc', **json.loads(row['entry'])}
+               for row in rows[:limit]]
+    last = rows[limit - 1] if len(rows) > limit else None
+    return entries, (_encode_cursor(last['executed_at'], last['id']) if last is not None else None)
+
+
 def last_run_times(name=None):
     """{query name: when it last ran} over every stored run - for one query, or (name None) for all of them in
     one grouped read rather than one per query."""
     from . import scope
     flush()
+    if runstore.enabled():
+        return runstore.last_run_times(scope.current(), name)
     where, params = ('AND query_name = ?', (name,)) if name is not None else ('', ())
     rows = db.connection().execute(
         f'SELECT query_name, MAX(executed_at) AS last FROM execution_history WHERE workspace = ? {where} '
@@ -532,6 +569,8 @@ def run_counts(name):
     """{version: how many runs are stored} for one query."""
     from . import scope
     flush()
+    if runstore.enabled():
+        return runstore.run_counts(scope.current(), name)
     rows = db.connection().execute(
         'SELECT version, COUNT(*) AS n FROM execution_history WHERE workspace = ? AND query_name = ? '
         'GROUP BY version', (scope.current(), name)).fetchall()

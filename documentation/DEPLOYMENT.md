@@ -230,6 +230,9 @@ The schema is recreated under its original name, so the URL's `search_path` (if 
   but a lost secret can't be recovered from a backup: issue a new key instead.
 - **The databases QueryAPIGate connects to** - back those up in their own right. The Redis response cache, if
   used, is disposable: it refills.
+- **Run history and the event log, with a run store** (`QUERYAPIGATE_RUN_STORE_URL`, ADR 0029): they're in
+  ClickHouse then, not the metadata store. Back it up with ClickHouse's own tools if history must survive; the store
+  restored without it starts with none.
 
 A restore from an older release's store is upgraded on first start, as any upgrade is; one from a newer release
 is refused rather than run on. `tests/test_backup_restore.py` does all of this on every CI run: it fills a store,
@@ -452,6 +455,21 @@ second per core, with every run still recorded by Python ([Performance, v5](PERF
 `QUERYAPIGATE_DATAPLANE_SECRET` (at least 16 characters) set for both processes, and at least two gunicorn workers
 behind it. To build it, run it and see which calls it serves:
 [Try the Rust data plane](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md).
+
+## A ClickHouse run store (prototype)
+
+> **Experimental** - outside the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
+> a prototype ([ADR 0029](adr/0029-clickhouse-run-store.md), measured and decided go). Its tables, its event ids and
+> how it's switched on may change before it graduates.
+
+With `QUERYAPIGATE_RUN_STORE_URL=https://user:password@host:8443/database` set on every instance, run history, the
+event log and per-minute and per-hour usage rollups are kept in ClickHouse (24.8 or later) instead of the metadata
+store - for a data plane's rates, where every run recorded is billions of rows a day. Keys, queries and the audit log
+stay where they are. History is kept by time (`QUERYAPIGATE_HISTORY_RETENTION_DAYS`, 30 days unless set), and live
+events arrive about a second later than from the metadata store. Every instance must name the same server and
+database: the store records which one holds its runs, and an instance that disagrees refuses to start.
+The users, the data plane's own insert-only one, copying history across and switching back:
+[Keep run history and the event log in ClickHouse](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/65-keep-runs-in-clickhouse.md).
 
 ## Upgrading
 

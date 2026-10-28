@@ -3157,7 +3157,26 @@ traffic, and a p99 that stays in single milliseconds under load.
 - **Shipping it** - the follow-up ADR 0028 promised: the Docker image and the Helm chart, a supervisor for the two
   processes, and which of what it forwards to move next (rate-limited keys and `QUERYAPIGATE_TRUST_PROXY` first,
   then other formats and workspaces).
-- **A store for runs at its rate** - ADR 0029: every run recorded at 20,000 a second is 1.7 billion rows a day, more
-  than SQLite or the PostgreSQL store should hold. ClickHouse, optional, written by both processes in batches.
+- **A store for runs at its rate** - #103, ADR 0029 (proposed): every run recorded at 20,000 a second is 1.7 billion
+  rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Until then, the event log needs a bound** at that rate: a row cap or sampling, as history has.
 - **Plans before the first call** (ADR 0028's open question): computed when a query is published or a key changes.
+
+## 103. An optional ClickHouse run store
+
+**Status: prototype, measured, decided go (2026-10-28).** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
+with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
+ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.
+The data plane writes its own runs, with ids from a block Python leases it. Event ids are time-ordered, below 2^53,
+and delivered after a 1 s settle window, so a resume misses nothing (ADR 0002). Guide 65. Experimental.
+[Measured](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-2026-10-28/README.md): every run recorded at 20,000/s for 30 minutes and at
+the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 bytes a run, history and usage reads in
+6-17 ms at 107.6 million runs, 35 million events resumed with none missing or repeated.
+
+**Impact:** the second condition of ADR 0028's go. Every run the data plane serves is recorded without Python in its
+path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
+history's sample rate.
+
+**Next:** to graduate (ADR 0017): a security review, 250 million runs on a machine with the disk for it, and a
+release unchanged. Beside it: the events server's ceiling - about 10,000 events a second per stream from one
+process. The event log's bound for the SQL stores (#102) is separate and ships either way.

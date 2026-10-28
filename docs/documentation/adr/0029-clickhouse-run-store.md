@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0029-clickhouse-run-store.md"

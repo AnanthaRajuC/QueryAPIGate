@@ -22,8 +22,9 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
 connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
-(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
+(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`), and a ClickHouse run store for history, the event log and usage
+(`QUERYAPIGATE_RUN_STORE_URL`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -49,6 +50,28 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Added
+
+- **An optional ClickHouse run store** (experimental, a prototype, measured and decided go -
+  [ADR 0029](documentation/adr/0029-clickhouse-run-store.md),
+  [guide 65](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/65-keep-runs-in-clickhouse.md)). With
+  `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups are kept in
+  ClickHouse 24.8 or later instead of the metadata store, for a data plane's rates. Each batch of runs is one insert
+  into `events`; materialized views fill `history` and the rollups, and each table's TTL keeps its retention.
+  - **The Rust data plane writes the runs it serves itself**, with an insert-only user if given one
+    (`QUERYAPIGATE_DATAPLANE_RUN_STORE_URL`); Python only counts them for `/metrics`.
+  - **Event ids stay increasing and below 2^53**, now minted from the time and a block each writer leases in the
+    metadata store (schema 18, additive). `queryapigate events` delivers an event once it's a second old, so a resume
+    misses nothing; `queryapigate_events_late_total` counts any acknowledged later.
+  - **Usage reports are exact** for windows within the event log's retention, whatever the sample rate.
+  - **History is kept by time** there (`QUERYAPIGATE_HISTORY_RETENTION_DAYS`, 30 days unless set).
+  - `queryapigate runs copy-to-clickhouse` brings existing history across; `queryapigate runs leave-clickhouse` goes
+    back, with event ids still increasing. Every instance must name the same run store, or it refuses to start.
+  - CI runs the whole suite against ClickHouse 24.8 and 26.8, and the data plane's tests write to it.
+  - [Measured](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-2026-10-28/README.md) against 0.44's store, the data plane in front of
+    both: every run recorded at 20,000 a second for 30 minutes and at the 64-caller peak, where 0.44's kept about
+    half; 11% fewer gateway cores; about 13 bytes a run; history and usage reads in 6-17 ms at 107.6 million runs.
 
 ### Changed
 

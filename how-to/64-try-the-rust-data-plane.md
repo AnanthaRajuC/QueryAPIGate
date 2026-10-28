@@ -112,5 +112,6 @@ stored on its side: plans live in its memory only.
   zero means Python can't keep up with recording: add a gunicorn worker.
 - **The run history and event log grow with its rate.** The event log keeps every run for
   `QUERYAPIGATE_EVENTS_RETENTION_HOURS`; at tens of thousands of calls a second, that is more than a SQLite store
-  should hold. Shorten it, or use a PostgreSQL store, and watch the disk.
+  should hold. Shorten it, or keep runs in ClickHouse instead
+  ([guide 65](65-keep-runs-in-clickhouse.md)) - the data plane then writes its runs there itself.
 - **Writes and other forwarded calls pay one extra hop:** about 0.35 ms at p50 on the benchmark laptop.

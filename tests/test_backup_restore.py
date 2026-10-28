@@ -14,7 +14,7 @@ from unittest import mock
 from cryptography.fernet import Fernet
 
 from queryapigate import cli, create_app, db, history
-from tests import TEST_DATABASE_URL
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 
 ADMIN = {'X-API-Key': 'admin-key'}
 SNAPSHOT = ('/api/v1/connections', '/api/v1/queries', '/api/v1/queries/films', '/api/v1/api-keys', '/api/v1/roles',
@@ -96,6 +96,7 @@ class BackupRestoreCase(unittest.TestCase):
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the SQLite store')
+@unittest.skipIf(TEST_RUN_STORE_URL, "a backup of the metadata store doesn't hold a run store's runs")
 class SqliteBackupRestoreTests(BackupRestoreCase):
     def test_backup_restore_into_a_new_home(self):
         original = os.path.join(self.tmp.name, 'home')

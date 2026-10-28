@@ -1,0 +1,20 @@
+{
+ "client0": {
+  "events": 262081,
+  "startup_backlog_events": 22084,
+  "startup_backlog_cleared_s": 1.6,
+  "steady_p50_ms": 1201,
+  "steady_p99_ms": 1342,
+  "steady_max_ms": 1360,
+  "reconnects": 21
+ },
+ "client1": {
+  "events": 262081,
+  "startup_backlog_events": 22084,
+  "startup_backlog_cleared_s": 1.6,
+  "steady_p50_ms": 1200,
+  "steady_p99_ms": 1354,
+  "steady_max_ms": 1378,
+  "reconnects": 25
+ }
+}

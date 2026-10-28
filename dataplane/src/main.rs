@@ -19,6 +19,7 @@ mod params;
 mod pyfmt;
 mod render;
 mod respond;
+mod runstore;
 mod serve;
 mod store;
 
@@ -98,6 +99,17 @@ async fn serve(config: config::Config) {
             None
         }
     };
+    // A misconfigured run store fails startup, as Python's does: running would record its runs nowhere
+    let run_store = match runstore::url_from(get) {
+        Ok(target) => target.map(runstore::RunStore::new),
+        Err(error) => {
+            eprintln!("queryapigate-dataplane: {error}");
+            std::process::exit(2);
+        }
+    };
+    if run_store.is_some() {
+        eprintln!("queryapigate-dataplane: writing its runs to the run store (ADR 0029)");
+    }
     if let Some(reason) = settings.forward_everything {
         eprintln!("queryapigate-dataplane: forwarding everything - {reason} is set");
     }
@@ -105,7 +117,7 @@ async fn serve(config: config::Config) {
         "queryapigate-dataplane: listening on {}, in front of {} ({} threads)",
         config.listen, config.upstream, config.threads
     );
-    let app = serve::App::new(forward::Forwarder::new(&config), settings, store);
+    let app = serve::App::new(forward::Forwarder::new(&config), settings, store, run_store);
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     loop {

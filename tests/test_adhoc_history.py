@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import create_app, db, events, history, mcp_server
-from tests import TEST_DATABASE_URL
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
@@ -153,6 +153,7 @@ class SqlKeptTests(AdhocTestCase):
             config.check_settings()
 
 
+@unittest.skipIf(TEST_RUN_STORE_URL, 'a run store keeps history by time, not by count')
 class LimitTests(AdhocTestCase):
     env = {'QUERYAPIGATE_HISTORY_ADHOC_LIMIT': '3', 'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0'}
 

@@ -28,13 +28,13 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 17  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 18  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
 #                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied;
-#                    16: events; 17: workspaces - see _upgrade()
+#                    16: events; 17: workspaces; 18: run_store, run_writer_leases - see _upgrade()
 
 _local = threading.local()
 _savepoints = itertools.count(1)  # names for nested transactions' savepoints - see transaction()
@@ -320,6 +320,26 @@ CREATE TABLE IF NOT EXISTS events (
   workspace TEXT NOT NULL DEFAULT 'default'  -- the run's (schema 17)
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
+
+-- The run store (runstore.py, ADR 0029): where runs, the event log and usage rollups are kept when it isn't this store.
+-- No row: here. One row: ClickHouse at `location` (host, port and database - never its credentials), from event id
+-- `first_id` on; `history_copied` when `queryapigate runs copy-to-clickhouse` copied this store's history there. Every
+-- process checks its QUERYAPIGATE_RUN_STORE_URL against it at startup.
+CREATE TABLE IF NOT EXISTS run_store (
+  kind TEXT NOT NULL,
+  location TEXT NOT NULL,
+  first_id INTEGER NOT NULL,
+  since TEXT NOT NULL,
+  history_copied TEXT
+);
+-- Blocks of the 4,096 event ids in each millisecond, leased by the processes writing to the run store (ADR 0029 §2):
+-- two writers never mint the same id. A lease lapses at expires_at (Unix seconds) unless its holder renews it.
+CREATE TABLE IF NOT EXISTS run_writer_leases (
+  block_start INTEGER PRIMARY KEY,
+  size INTEGER NOT NULL,
+  holder TEXT NOT NULL,
+  expires_at REAL NOT NULL
+);
 """
 
 
@@ -581,6 +601,19 @@ CREATE TABLE IF NOT EXISTS events (
   workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(occurred_at);
+CREATE TABLE IF NOT EXISTS run_store (
+  kind TEXT COLLATE "C" NOT NULL,
+  location TEXT COLLATE "C" NOT NULL,
+  first_id BIGINT NOT NULL,
+  since TEXT NOT NULL,
+  history_copied TEXT
+);
+CREATE TABLE IF NOT EXISTS run_writer_leases (
+  block_start INTEGER PRIMARY KEY,
+  size INTEGER NOT NULL,
+  holder TEXT COLLATE "C" NOT NULL,
+  expires_at DOUBLE PRECISION NOT NULL
+);
 """
 # Text columns use the "C" collation so ORDER BY name sorts byte-wise, exactly as SQLite does - a database's
 # default locale collation would otherwise reorder every list the API and UI return.
@@ -855,7 +888,9 @@ def _upgrade(conn, postgres):
         those tables' primary keys (and the foreign keys naming them) gain the column: SQLite rebuilds each table,
         keeping its rowids; PostgreSQL alters it in place. **Not additive** - the one exception, before 1.x's rule:
         a 0.37 process can't write to an upgraded store (its upserts name the old keys), so every instance is
-        stopped before the first 0.38 one starts (_add_workspaces())."""
+        stopped before the first 0.38 one starts (_add_workspaces()).
+    18: run_store and run_writer_leases (ADR 0029) - new tables, made by CREATE TABLE IF NOT EXISTS; additive. Both
+        stay empty unless QUERYAPIGATE_RUN_STORE_URL is set."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -867,6 +902,8 @@ def _upgrade(conn, postgres):
         else:
             conn.execute("UPDATE execution_history SET status = json_extract(entry_json, '$.status'), "
                          "key_name = json_extract(entry_json, '$.key_name')")
+    if 'history_copied' not in _columns(conn, 'run_store', postgres):  # schema 18, as a pre-release build made it
+        conn.execute('ALTER TABLE run_store ADD COLUMN history_copied TEXT')
     if 'published_version' not in _columns(conn, 'saved_queries', postgres):
         conn.execute('ALTER TABLE saved_queries ADD COLUMN published_version INTEGER')
         conn.execute('UPDATE saved_queries SET published_version = (SELECT MAX(version) FROM saved_query_versions '
@@ -1277,6 +1314,8 @@ _MIGRATED_TABLES = (
     # With their ids: an event id is what a client resumes from (ADR 0020 §4)
     ('events', ('workspace', 'id', 'type', 'source', 'occurred_at', 'key_name', 'connection_name', 'query_name',
                 'status', 'payload_json'), 'id'),
+    # Where runs are kept (ADR 0029); its leases are a running process's, not data
+    ('run_store', ('kind', 'location', 'first_id', 'since', 'history_copied'), 'first_id'),
 )
 
 

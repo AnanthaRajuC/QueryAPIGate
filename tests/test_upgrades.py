@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 from queryapigate import create_app, db, events, history
-from tests import TEST_DATABASE_URL
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import needs_sqlite_335
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'stores')
@@ -144,6 +144,7 @@ class StoreChecks(FixtureTestCase):
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the SQLite stores and JSON homes')
+@unittest.skipIf(TEST_RUN_STORE_URL, "each fixture's runs are in its own metadata store, until copied to a run store")
 class UpgradeTests(StoreChecks):
     def test_there_is_a_fixture_for_every_supported_release(self):
         self.assertGreaterEqual(len(fixture_versions()), 7)
@@ -158,6 +159,7 @@ class UpgradeTests(StoreChecks):
 
 
 @unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
+@unittest.skipIf(TEST_RUN_STORE_URL, "each fixture's runs are in its own metadata store, until copied to a run store")
 class PostgresUpgradeTests(StoreChecks):
     kind = '.postgres'
 

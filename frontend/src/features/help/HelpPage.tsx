@@ -417,6 +417,12 @@ const DOCS = [
     path: 'how-to/64-try-the-rust-data-plane.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-65',
+    title: 'Keep runs in ClickHouse',
+    path: 'how-to/65-keep-runs-in-clickhouse.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

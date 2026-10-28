@@ -307,8 +307,17 @@ jobs:
         ports: ["3306:3306"]
         options: >-
           --health-cmd "mysqladmin ping -ppw" --health-interval 5s --health-timeout 5s --health-retries 20
+      clickhouse:  # the run store (ADR 0029): the data plane writes its runs there itself
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_PASSWORD: pw
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
+          --health-retries 20
     env:
       QUERYAPIGATE_DATAPLANE_TEST_POSTGRES: 127.0.0.1:5432:postgres:pw:postgres
+      QUERYAPIGATE_DATAPLANE_TEST_RUN_STORE_URL: http://default:pw@127.0.0.1:8123
       QUERYAPIGATE_DATAPLANE_TEST_MYSQL: 127.0.0.1:3306:root:pw:shop
       QUERYAPIGATE_DATAPLANE_TEST_STORE_URL: postgresql://postgres:pw@127.0.0.1:5432/postgres
       CARGO_TERM_COLOR: always
@@ -336,6 +345,40 @@ jobs:
             python "$test" -v 2>&1 | tee -a /tmp/dataplane.log || exit 1
           done
           ! grep -E "skipped '" /tmp/dataplane.log
+
+  run-store:
+    # The whole suite again, with run history, the event log and usage in a ClickHouse run store (ADR 0029) -
+    # tests/__init__.py gives every test its own database - on the oldest ClickHouse it supports and the newest LTS.
+    name: Tests (ClickHouse run store ${{ matrix.clickhouse }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        clickhouse: ["24.8", "26.8"]
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:${{ matrix.clickhouse }}
+        env:
+          CLICKHOUSE_PASSWORD: pw
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
+          --health-retries 20
+    env:
+      QUERYAPIGATE_TEST_RUN_STORE_URL: http://default:pw@localhost:8123
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: The run store's own tests and its differential - none may skip
+        run: |
+          set -o pipefail  # the tests' own result, not tee's
+          python -m unittest tests.test_runstore tests.test_runstore_differential -v 2>&1 | tee /tmp/run-store.log
+          ! grep -E "skipped '" /tmp/run-store.log
+      - run: python -m unittest discover -s tests -t . -v
 
   console-e2e:
     # The built Console driven in Chromium against a real server (frontend/e2e): every screen and the main flows.
