@@ -68,9 +68,10 @@ def enabled():
     return config.run_store_url() is not None
 
 
-def database():
-    """The ClickHouse database the run store's tables are in: the URL's path, `queryapigate` without one. (The test
-    package maps each test's home to a database of its own, as it maps each to a PostgreSQL schema.)"""
+def database(target=None):
+    """The ClickHouse database the run store's tables are in: the URL's path, `queryapigate` without one. ``target``
+    (a db.current_target()) is the metadata store a batch belongs to - one database serves every target in a server,
+    but the test package maps each test's home to a database of its own, as it maps each to a PostgreSQL schema."""
     return urlsplit(config.run_store_url()).path.strip('/') or 'queryapigate'
 
 
@@ -196,12 +197,12 @@ def execute(sql, params=None, db_name=None, settings=None):
     _client().request(qp, sql.encode())
 
 
-def insert(table, rows, token=None):
+def insert(table, rows, token=None, db_name=None):
     """Insert ``rows`` (dicts) into ``table`` as one block, acknowledged once they're readable. ``token``: two inserts
     with the same one are written once (non_replicated_deduplication_window)."""
     if not rows:
         return
-    qp = {'database': database(), 'query': f'INSERT INTO {table} FORMAT JSONEachRow'}
+    qp = {'database': db_name or database(), 'query': f'INSERT INTO {table} FORMAT JSONEachRow'}
     if token:
         qp['insert_deduplication_token'] = token
     body = '\n'.join(json.dumps(row, separators=(',', ':'), default=str) for row in rows).encode()
@@ -308,10 +309,10 @@ _ready: set[tuple[int, str]] = set()  # (pid, database) whose tables this proces
 _ready_guard = threading.Lock()
 
 
-def ensure_schema():
+def ensure_schema(target=None):
     """Create the run store's tables if they don't exist, and bring their retention in line with the settings - once
-    per process and database."""
-    name = database()
+    per process and database (for ``target``: see database())."""
+    name = database(target)
     if (os.getpid(), name) in _ready:
         return
     with _ready_guard:
@@ -321,22 +322,22 @@ def ensure_schema():
             execute(f'CREATE DATABASE IF NOT EXISTS {name}', db_name='default')  # a user who may create it, then
         hours, days = config.events_retention_hours(), config.history_retention_days()
         for statement in _tables(hours, days):
-            execute(statement)
-        _retain('events', f'stamped_at + toIntervalHour({hours})')  # as ClickHouse writes them in engine_full
-        _retain('history', f'stamped_at + toIntervalDay({days})')
-        _retain('history_counts', f'day + toIntervalDay({days})')
-        if not query('SELECT version FROM run_store_schema'):
-            execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})')
+            execute(statement, db_name=name)
+        _retain('events', f'stamped_at + toIntervalHour({hours})', name)  # as ClickHouse writes them in engine_full
+        _retain('history', f'stamped_at + toIntervalDay({days})', name)
+        _retain('history_counts', f'day + toIntervalDay({days})', name)
+        if not query('SELECT version FROM run_store_schema', db_name=name):
+            execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})', db_name=name)
         _ready.add((os.getpid(), name))
 
 
-def _retain(table, ttl):
+def _retain(table, ttl, name):
     """Apply a changed retention setting to an existing table, without rewriting what it holds: rows already past the
     new limit go as their partitions are next merged or dropped."""
     found = query('SELECT engine_full FROM system.tables WHERE database = {db:String} AND name = {t:String}',
-                  {'db': database(), 't': table})
+                  {'db': name, 't': table}, db_name=name)
     if found and f'TTL {ttl}' not in found[0]['engine_full']:
-        execute(f'ALTER TABLE {table} MODIFY TTL {ttl}', settings={'materialize_ttl_after_modify': 0})
+        execute(f'ALTER TABLE {table} MODIFY TTL {ttl}', db_name=name, settings={'materialize_ttl_after_modify': 0})
 
 
 # ---- the clock and the ids ----
@@ -392,11 +393,21 @@ class LeaseError(Exception):
     pass
 
 
-def lease(size, holder):
+_LEASE_LOCK_ID = 0x51A9  # next to db's and history's: the PostgreSQL advisory lock leasing takes
+
+
+def lease(size, holder, target=None):
     """Lease ``size`` of each millisecond's PER_MS ids for ``holder``: the first free block, after lapsed leases are
-    cleared. Returns its first number."""
+    cleared. Returns its first number. Not the store's own write lock, and not a commit that clears the metadata cache
+    (a lease is no key, query or connection): a lock of its own on PostgreSQL - two writers choosing at once could
+    otherwise each see a block free - and a commit that waits for the WAL, as a lease a writer mints from must survive
+    a crash. SQLite's BEGIN IMMEDIATE already serialises it."""
     now = time.time()
-    with db.transaction() as tx:
+    postgres = target[0] == 'postgres' if target else db.is_postgres()
+    with db.transaction(append_only=True, target=target) as tx:
+        if postgres:
+            tx.execute('SET LOCAL synchronous_commit TO ON')
+            tx.execute('SELECT pg_advisory_xact_lock(?)', (_LEASE_LOCK_ID,))
         tx.execute('DELETE FROM run_writer_leases WHERE expires_at < ?', (now,))
         taken = sorted((row[0], row[1]) for row in
                        tx.execute('SELECT block_start, size FROM run_writer_leases').fetchall())
@@ -413,16 +424,17 @@ def lease(size, holder):
     return start
 
 
-def renew(block_start, holder):
-    """Extend a lease. False when it had lapsed and is gone (or another writer holds the block now)."""
-    with db.transaction() as tx:
+def renew(block_start, holder, target=None):
+    """Extend a lease. False when it had lapsed and is gone (or another writer holds the block now). Append-only: one
+    row of this writer's own, so no lock, and the metadata cache isn't cleared every _RENEW_SECONDS (metacache.py)."""
+    with db.transaction(append_only=True, target=target) as tx:
         return tx.execute('UPDATE run_writer_leases SET expires_at = ? WHERE block_start = ? AND holder = ?',
                           (time.time() + LEASE_SECONDS, block_start, holder)).rowcount == 1
 
 
-def release(block_start, holder):
+def release(block_start, holder, target=None):
     try:
-        with db.transaction() as tx:
+        with db.transaction(append_only=True, target=target) as tx:  # its own row, as renew()
             tx.execute('DELETE FROM run_writer_leases WHERE block_start = ? AND holder = ?', (block_start, holder))
     except (OSError, *db.Error):
         pass  # it lapses by itself
@@ -432,8 +444,9 @@ class Minter:
     """This process's ids: its leased block of each millisecond, on ClickHouse's clock, never going backwards. A burst
     that fills its block for one millisecond moves on to the next, never more than _MAX_LEAD_MS ahead of the clock."""
 
-    def __init__(self, size=PYTHON_BLOCK):
+    def __init__(self, size=PYTHON_BLOCK, target=None):
         self.size = size
+        self.target = target  # the metadata store its lease is in (a db.current_target()), or the current one
         self.holder = f'{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}'
         self.block = None
         self.renewed = 0.0
@@ -445,16 +458,16 @@ class Minter:
         age = time.monotonic() - self.renewed
         if self.block is not None and age < _RENEW_SECONDS:
             return
-        if self.block is not None and age < _MINT_WITHIN and renew(self.block, self.holder):
+        if self.block is not None and age < _MINT_WITHIN and renew(self.block, self.holder, self.target):
             self.renewed = time.monotonic()
             return
         if self.block is not None:
-            release(self.block, self.holder)
-        self.block = lease(self.size, self.holder)
+            release(self.block, self.holder, self.target)
+        self.block = lease(self.size, self.holder, self.target)
         self.renewed = time.monotonic()
         self.last_ms, self.seq = -1, 0  # a new block: its numbers start again
         if not getattr(self, '_registered', False):
-            atexit.register(lambda: self.block is not None and release(self.block, self.holder))
+            atexit.register(lambda: self.block is not None and release(self.block, self.holder, self.target))
             self._registered = True
 
     def mint(self, count):
@@ -475,26 +488,28 @@ class Minter:
             return ids
 
 
-_minters: dict[int, "Minter"] = {}
+_minters: dict[tuple, "Minter"] = {}
 
 
-def minter():
-    pid = os.getpid()
-    if pid not in _minters:
-        _minters[pid] = Minter()
-    return _minters[pid]
+def minter(target=None):
+    """This process's minter for ``target``'s metadata store (where its lease is): one in a server, whose store doesn't
+    change; one per store when a process writes to several, as the test suite does."""
+    key = (os.getpid(), target)
+    if key not in _minters:
+        _minters[key] = Minter(target=target)
+    return _minters[key]
 
 
 # ---- writing ----
 
-def _existing_versions(saved):
+def _existing_versions(saved, target=None):
     """Which of ``saved`` - (workspace, query, version) - still exist: a run whose version was deleted before its batch
     was written has no history row, as the metadata store's foreign key has it (ADR 0020 §2)."""
     found = set()
     for workspace in {ws for ws, _, _ in saved}:
         names = sorted({name for ws, name, _ in saved if ws == workspace})
         marks = ', '.join('?' * len(names))
-        found.update((workspace, row[0], row[1]) for row in db.connection().execute(
+        found.update((workspace, row[0], row[1]) for row in db.connection(target).execute(
             f'SELECT query_name, version FROM saved_query_versions WHERE workspace = ? AND query_name IN ({marks})',
             (workspace, *names)).fetchall())
     return found
@@ -517,14 +532,15 @@ def _numbers(entry_json):
             duration / 1000 if isinstance(duration, (int, float)) and duration >= 0 else 0.0, columns)
 
 
-def write(rows):
+def write(rows, target=None):
     """history.write() for the run store: ``rows`` (history._row()'s tuples) as one insert into `events`, and runs that
-    are history only (the examples' seeded runs) into `history`. Never raises: returns how many runs history kept, or
-    None when the batch couldn't be written."""
+    are history only (the examples' seeded runs) into `history`. ``target``: the metadata store they were recorded
+    against - the writer thread writes after the request, so never "whichever is current" (db.current_target()).
+    Never raises: returns how many runs history kept, or None when the batch couldn't be written."""
     try:
-        ensure_schema()
+        ensure_schema(target)
         saved = {(row[8], row[0], row[1]) for row in rows if row[6] and row[0] is not None}
-        existing = _existing_versions(saved) if saved else set()
+        existing = _existing_versions(saved, target) if saved else set()
         events_rows, history_rows = [], []
         for name, version, executed_at, entry_json, status, key_name, keep, event, workspace in rows:
             keep = keep and (name is None or (workspace, name, version) in existing)
@@ -539,8 +555,8 @@ def write(rows):
                                 'query_name': name, 'version': version, 'key_name': event[3],
                                 'connection_name': event[4], 'status': event[6], 'in_history': keep, 'rows': count,
                                 'seconds': seconds, **columns, 'entry': entry_json, 'payload_json': ''})
-        _send('events', events_rows)
-        _send('history', history_rows)
+        _send('events', events_rows, target)
+        _send('history', history_rows, target)
     except (RunStoreError, LeaseError, OSError, *db.Error):
         log.warning('Could not record %d history entries in the run store', len(rows), exc_info=True)
         metrics.inc_history('failed', len(rows))
@@ -548,26 +564,27 @@ def write(rows):
     return sum(1 for row in events_rows if row['in_history']) + len(history_rows)
 
 
-def _send(table, rows):
+def _send(table, rows, target=None):
     """Stamp ``rows`` with fresh ids and insert them. A retry is stamped again - rows that were never inserted were
     never visible - unless the first attempt's outcome is unknown and its rows turn out to be there."""
     if not rows:
         return
+    name = database(target)
     for attempt in (1, 2):
-        ids = minter().mint(len(rows))
+        ids = minter(target).mint(len(rows))
         if len(ids) < len(rows):
             metrics.inc_history('dropped', len(rows) - len(ids))  # a burst past what the lease allows
             rows = rows[:len(ids)]
         for row, event_id in zip(rows, ids, strict=True):
             row['id'] = event_id
-        token = f'{minter().holder}:{ids[0]}'
+        token = f'{minter(target).holder}:{ids[0]}'
         try:
-            insert(table, rows, token=token)
+            insert(table, rows, token=token, db_name=name)
         except RunStoreError as error:
             if attempt == 2 or error.sent is False:
                 raise
             if error.sent is None and query(f'SELECT count() AS n FROM {table} WHERE id = {{id:UInt64}}',
-                                            {'id': ids[0]})[0]['n']:
+                                            {'id': ids[0]}, db_name=name)[0]['n']:
                 break  # it did arrive
             continue
         break

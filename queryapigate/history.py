@@ -327,7 +327,7 @@ def write(rows, target=None):
     (runstore.write()), and its tables' TTLs, not trims, keep it bounded."""
     from . import events
     if runstore.enabled():
-        kept = runstore.write(rows)
+        kept = runstore.write(rows, target or db.current_target())
         if kept is not None:
             metrics.inc_history('recorded', kept)
         return

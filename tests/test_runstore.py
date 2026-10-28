@@ -14,7 +14,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, db, events, history, runstore, store, usage
+from queryapigate import config, create_app, db, events, history, metrics, runstore, store, usage
 from tests import TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 from tests.test_events_server import Stream
@@ -115,6 +115,14 @@ class LeaseTests(HomeTestCase):
         with mock.patch.object(runstore.time, 'time', lambda: real() + runstore.LEASE_SECONDS + 1):
             self.assertEqual(runstore.lease(16, 'd'), 0)  # every lease above had lapsed
         self.assertFalse(runstore.renew(second, 'b'))
+
+    def test_leasing_leaves_the_metadata_cache_alone(self):
+        from queryapigate import metacache
+        with mock.patch.object(metacache, 'clear') as cleared:
+            block = runstore.lease(16, 'w')
+            self.assertTrue(runstore.renew(block, 'w'))
+            runstore.release(block, 'w')
+        cleared.assert_not_called()
 
     def test_every_block_taken(self):
         runstore.lease(runstore.PER_MS - 8, 'big')
@@ -229,6 +237,19 @@ class WriteTests(StoreTestCase):
         history.write([row])
         self.assertEqual((self.count('events', "query_name = 'q'"), self.count('history', "query_name = 'q'")),
                          (1, 0))
+
+    def test_a_batch_goes_to_the_store_it_was_recorded_against(self):
+        """The writer thread writes after the request - by then the process may be pointed at another home (as each test
+        is): the batch still goes to its own metadata store's run store, checked against its own versions."""
+        target = db.current_target()
+        row = history._row('q', 1, {'executed_at': store.now(), 'status': 'success', 'key_name': 'admin'})
+        failed = metrics.history_counts().get('failed', 0)
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': elsewhere.name}):  # a home with no store yet
+            history.write([row], target)
+        self.assertEqual(metrics.history_counts().get('failed', 0), failed)
+        self.assertEqual((self.count('events'), self.count('history')), (1, 1))
 
     def test_ids_increase_with_every_batch(self):
         for _ in range(3):

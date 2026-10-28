@@ -11,6 +11,7 @@ database the same way, dropped with the home.
 """
 import hashlib
 import os
+from pathlib import Path
 
 TEST_DATABASE_URL = os.environ.get('QUERYAPIGATE_TEST_DATABASE_URL', '').strip() or None
 TEST_RUN_STORE_URL = os.environ.get('QUERYAPIGATE_TEST_RUN_STORE_URL', '').strip() or None
@@ -67,7 +68,13 @@ def _use_run_store(url):
     from queryapigate import config, runstore
 
     config.run_store_url = lambda: url
-    runstore.database = lambda: _run_store_database(config.home())
+
+    def database(target=None):  # the home a batch's metadata store is in (db.current_target()), or the current one
+        if target is None:
+            return _run_store_database(config.home())
+        home = target[1] if target[0] == 'postgres' else os.path.dirname(target[1])  # _use_postgres maps homes so
+        return _run_store_database(Path(home).resolve())
+    runstore.database = database
     marker = runstore.check_marker
 
     def check_marker():
