@@ -90,24 +90,37 @@ def observe_request(method, endpoint, status, elapsed, key='-'):
     """`key` is the calling API key's name ('admin' for QUERYAPIGATE_API_KEY, '-' when none is configured), kept
     on the request/query counters (audit: who did what) but not the latency histograms, so the number of
     distinct keys never multiplies the size of the bucketed output."""
+    observe_requests(method, endpoint, status, (elapsed,), key)
+
+
+def observe_requests(method, endpoint, status, elapsed, key='-'):
+    """observe_request() for several calls with the same labels at once, ``elapsed`` one duration each - the labels
+    worked out and the lock taken once (the runs a data plane reports, ADR 0028)."""
     with _lock:
         count_key = (method, endpoint, status, _key_label(key))
-        _request_counts[count_key] = _request_counts.get(count_key, 0) + 1
+        _request_counts[count_key] = _request_counts.get(count_key, 0) + len(elapsed)
         hkey = (method, endpoint)
         counts = _request_hist.setdefault(hkey, [0] * (len(_BUCKETS) + 1))
-        counts[_bucket_index(elapsed)] += 1
-        _request_sum[hkey] = _request_sum.get(hkey, 0.0) + elapsed
+        for seconds in elapsed:
+            counts[_bucket_index(seconds)] += 1
+        _request_sum[hkey] = _request_sum.get(hkey, 0.0) + sum(elapsed)
 
 
 def observe_query(connection_name, dialect, status, elapsed, key='-'):
+    observe_queries(connection_name, dialect, status, (elapsed,), key)
+
+
+def observe_queries(connection_name, dialect, status, elapsed, key='-'):
+    """observe_query() for several queries with the same labels at once, as observe_requests() is."""
     connection_name = _in_workspace(connection_name)
     with _lock:
         count_key = (connection_name, dialect, status, _key_label(key))
-        _query_counts[count_key] = _query_counts.get(count_key, 0) + 1
+        _query_counts[count_key] = _query_counts.get(count_key, 0) + len(elapsed)
         hkey = (connection_name, dialect)
         counts = _query_hist.setdefault(hkey, [0] * (len(_BUCKETS) + 1))
-        counts[_bucket_index(elapsed)] += 1
-        _query_sum[hkey] = _query_sum.get(hkey, 0.0) + elapsed
+        for seconds in elapsed:
+            counts[_bucket_index(seconds)] += 1
+        _query_sum[hkey] = _query_sum.get(hkey, 0.0) + sum(elapsed)
 
 
 def observe_stream(connection_name, dialect, status, key='-'):
@@ -137,11 +150,17 @@ def observe_serialization(output_format, elapsed):
     after the query itself has already finished. Only ever called for a paged (non-streaming) response:
     streaming formats it row by row, interleaved with network I/O, so there's no single "serialization
     happened here" span to measure the way there is for a page built in memory up front."""
+    observe_serializations(output_format, (elapsed,))
+
+
+def observe_serializations(output_format, elapsed):
+    """observe_serialization() for several responses at once, as observe_requests() is."""
     with _lock:
         hkey = (output_format,)
         counts = _serialization_hist.setdefault(hkey, [0] * (len(_BUCKETS) + 1))
-        counts[_bucket_index(elapsed)] += 1
-        _serialization_sum[hkey] = _serialization_sum.get(hkey, 0.0) + elapsed
+        for seconds in elapsed:
+            counts[_bucket_index(seconds)] += 1
+        _serialization_sum[hkey] = _serialization_sum.get(hkey, 0.0) + sum(elapsed)
 
 
 def inc_active_query():

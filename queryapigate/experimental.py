@@ -68,6 +68,13 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_AWS_REGION', 'QUERYAPIGATE_AWS_SECRET_PREFIXES', 'QUERYAPIGATE_AWS_RDS_HOSTS'),
         'docs': ('documentation/API.md', 'Secrets and credentials from AWS'),
     },
+    'dataplane': {
+        'name': 'The Rust data plane in front of /q/',
+        'why': 'a prototype (ADR 0028, decided go in 0.44): built from the repository, not in the image or the chart; '
+               'what it serves, its settings and its headers may change before the ADR that ships it',
+        'settings': ('QUERYAPIGATE_DATAPLANE_SECRET',),
+        'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/ (prototype)'),
+    },
 }
 
 DB_TYPES = frozenset(t for f in FEATURES.values() for t in f.get('db_types', ()))

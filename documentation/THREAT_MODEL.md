@@ -404,6 +404,58 @@ within one database must hold *across catalogs*. Reviewed for its introduction (
 What remains before tier 1 is a release of unchanged shape and real-deployment use; agent writes (ADR 0008) are not
 offered on Trino, and the schema browser not showing keys or DDL is a capability gap, not a security one.
 
+### The Rust data plane (ADR 0028, a prototype)
+
+A second process, `dataplane/`, can listen on the public port in front of the Python server. It serves `/q/<name>`
+reads itself from *plans* Python gives it, and forwards everything else unchanged
+([ADR 0028](adr/0028-rust-data-plane-prototype.md)). It isn't in the Docker image, the PyPI package or the Helm chart:
+nothing changes for a deployment that doesn't build and run it. Where it does run:
+
+- **It makes no security decision of its own.** The SQL guard, the table allow-list, masking and every refusal stay
+  in Python. A plan is Python's verdict for one key, one saved query version and one connection, made only on a call
+  that succeeded, and only for a scoped API key in the `default` workspace with no rate limit, quota, concurrency,
+  time or row limit of its own. Administrators, signed-in users (JWT, SSO, MCP OAuth), other workspaces, writes,
+  streams, other formats and every dialect but PostgreSQL and MySQL are always forwarded. With a server-wide rate
+  limit, a trusted proxy hop count or OpenTelemetry tracing configured, it forwards every call.
+- **A plan is checked against the store on every call.** It names digests of the key, query and connection rows it
+  was computed from. The data plane reads those rows for each call, with Python's own SELECTs, and serves only when
+  they digest the same. A revoked, expired or re-scoped key, an edited query or a changed connection doesn't match, and
+  the call goes to Python. With `QUERYAPIGATE_METADATA_CACHE_TTL` set, both processes reuse those rows for the same
+  number of seconds, so a change takes effect within that time, as it does on Python alone. A masked plan expires
+  with the schema its trace was made from. Plans live in the data plane's memory only.
+- **One shared secret ties the two processes together.** `QUERYAPIGATE_DATAPLANE_SECRET`, at least 16 characters,
+  goes in `X-QAG-Dataplane` on every request the data plane forwards; Python compares it in constant time. The data
+  plane removes `X-QAG-Dataplane`, `X-QAG-Peer` and `X-QAG-Plan` from anything a client sends, and Python's
+  outermost WSGI layer removes the first two again before anything else reads or logs a request. Without the secret, Python
+  gives no plan, ignores `X-QAG-Peer`, and answers 404 at `/internal/dataplane/runs`.
+- **The client's address is the client's.** With the secret, `X-QAG-Peer` carries the client's own socket address,
+  and Python takes it as the real peer before `ProxyFix`. So open-access mode's loopback rule, a key's `allowed_ips`
+  and `QUERYAPIGATE_TRUST_PROXY` judge the client, not the data plane's loopback connection. A peer that isn't an IP
+  address counts as remote.
+- **Parameter values go into the SQL as literals,** as psycopg2 and mysql-connector do, so the quoting is the
+  injection boundary. PostgreSQL strings are sent as pure-ASCII `E'...'` with `\u` escapes, and MySQL strings as
+  `_utf8mb4 X'...'`, so neither depends on a session setting a query could change (`standard_conforming_strings`,
+  `sql_mode`). Each PostgreSQL message ends with `RESET ALL`. The differential test sends hostile strings for exactly
+  this.
+- **Its runs are recorded by Python.** The data plane reports each served run to `/internal/dataplane/runs`, with the
+  secret, and Python writes its history, event and metrics. Python trusts those entries: whoever holds the secret
+  can write run history. Runs the data plane can't queue, and reports Python doesn't take, are counted as dropped in
+  `/metrics`, never lost silently. On SIGTERM it sends what it still holds before it exits, for up to 10 seconds, as
+  Python's own history writer flushes at exit; a hard kill loses up to one flush interval of runs, as Python's does.
+- **Resource use before the key is checked is bounded.** The data plane reads a request's body itself only when it
+  has a Content-Length of at most 64 KiB; anything larger, or chunked, streams through to Python unread. A connection
+  whose database can't be reached is left to Python for 30 seconds, rather than each call waiting on a connect.
+- **What the process holds:** the store's credentials (`QUERYAPIGATE_DATABASE_URL`, or the SQLite file) for reading,
+  each connection's credentials as the store keeps them, and the shared secret. A compromise of the data plane is a
+  compromise of what those reach, as for the Python process. Run it as the same user, with the same secrets, and never
+  expose Python's own port once the data plane is in front of it.
+
+*Reviewed for 0.44.* The gate is the differential test (`dataplane/tests/test_differential.py`): random calls sent to
+both processes, comparing whole responses and the history rows they leave, with expired and rotated keys, hostile
+parameters, and grants changed, a key revoked and a query given a new version while calls run. Every run of it was clean, over 13,500 calls on
+PostgreSQL and MySQL. The data plane's Rust dependencies are pinned in `dataplane/Cargo.lock` and updated by
+Dependabot.
+
 ### Secrets at rest
 
 Connection passwords in the store can be a literal string, an

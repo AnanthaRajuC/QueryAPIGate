@@ -219,6 +219,35 @@ def _window_value(token, params, clause):
     return int(value)
 
 
+def own_window(sql, dialect=None):
+    """(sql, limit, offset): the statement without its own trailing row window (any form in _TRAILING_WINDOW_RES), and
+    that window's operands, unresolved - each a (token, clause) pair, the token a literal's digits or a `:name`, the
+    clause the keyword its error names. `limit` is None for no limit (none written, or LIMIT ALL), `offset` None for
+    none written. A FETCH without a count is a limit of '1'. Split out of paginate() so the data plane's plans
+    (dataplane.py, ADR 0028) carry the window as the statement wrote it, to be resolved per call."""
+    masked = _window_mask(sql, dialect)
+    for kind, pattern in _TRAILING_WINDOW_RES:
+        match = pattern.search(masked)
+        if not match:
+            continue
+        groups = [sql[match.start(i):match.end(i)] if match.start(i) != -1 else None
+                  for i in range(1, pattern.groups + 1)]
+        limit = offset = None
+        if kind == 'offset_count':
+            offset, limit = (groups[0], 'OFFSET'), (groups[1], 'LIMIT')
+        elif kind == 'limit_offset':
+            limit = (groups[0], 'LIMIT') if groups[0] else None  # LIMIT ALL: no limit
+            offset = (groups[1], 'OFFSET') if groups[1] else None
+        elif kind == 'offset_fetch':
+            offset = (groups[0], 'OFFSET')
+            if 'FETCH' in masked[match.start():].upper():
+                limit = (groups[1], 'FETCH') if groups[1] else ('1', 'FETCH')
+        else:  # fetch
+            limit = (groups[0], 'FETCH') if groups[0] else ('1', 'FETCH')
+        return sql[:match.start()], limit, offset
+    return sql, None, None
+
+
 def paginate(sql, limit, offset, params=None, dialect=None):
     """Apply the requested page window (`limit` rows from `offset`) *within* the statement's own row window.
 
@@ -228,28 +257,9 @@ def paginate(sql, limit, offset, params=None, dialect=None):
     `own_limit - offset` rows - so a caller's "one more row than the page" probe (has_more) is naturally false
     once the author's limit is reached. Without a window of its own, the page window is simply appended."""
     limit, offset = int(limit), int(offset)
-    own_limit, own_offset = None, 0
-    masked = _window_mask(sql, dialect)
-    for kind, pattern in _TRAILING_WINDOW_RES:
-        match = pattern.search(masked)
-        if not match:
-            continue
-        groups = [sql[match.start(i):match.end(i)] if match.start(i) != -1 else None
-                  for i in range(1, pattern.groups + 1)]
-        if kind == 'offset_count':
-            own_offset = _window_value(groups[0], params, 'OFFSET')
-            own_limit = _window_value(groups[1], params, 'LIMIT')
-        elif kind == 'limit_offset':
-            own_limit = _window_value(groups[0], params, 'LIMIT') if groups[0] else None  # LIMIT ALL: no limit
-            own_offset = _window_value(groups[1], params, 'OFFSET') if groups[1] else 0
-        elif kind == 'offset_fetch':
-            own_offset = _window_value(groups[0], params, 'OFFSET')
-            if 'FETCH' in masked[match.start():].upper():
-                own_limit = _window_value(groups[1], params, 'FETCH') if groups[1] else 1
-        else:  # fetch
-            own_limit = _window_value(groups[0], params, 'FETCH') if groups[0] else 1
-        sql = sql[:match.start()]
-        break
+    sql, own_limit, own_offset = own_window(sql, dialect)
+    own_limit = None if own_limit is None else _window_value(*own_limit[:1], params, own_limit[1])
+    own_offset = 0 if own_offset is None else _window_value(*own_offset[:1], params, own_offset[1])
     window = limit if own_limit is None else max(0, min(limit, own_limit - offset))
     if dialect == 'trino':  # Trino (ANSI order) wants OFFSET before LIMIT, not MySQL/Postgres's LIMIT ... OFFSET
         return f'{sql}\nOFFSET {own_offset + offset} LIMIT {window}'

@@ -24,6 +24,7 @@ from . import (
     config,
     console,
     cors,
+    dataplane,
     db,
     definitions,
     deprecations,
@@ -40,6 +41,7 @@ from . import (
     limits,
     logging_setup,
     masking,
+    metacache,
     metrics,
     mongodocs,
     mongotools,
@@ -65,6 +67,7 @@ bp = Blueprint('api', __name__)
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
                     'api.console_page', 'api.metrics_endpoint',
+                    'api.dataplane_runs',  # the data plane's reports: gate() lets only its secret through (ADR 0028)
                     # Console sign-in (sso.py): each checks what it needs itself - state, the session and its CSRF token
                     'auth.login', 'auth.callback', 'auth.session', 'auth.logout'}
 # Monitoring keeps working while a client is throttled; the Console's static files are exempt so loading the page
@@ -167,12 +170,24 @@ def warn_env_references():
 
 class _CapturePeer:
     """Record the real socket address (`REMOTE_ADDR`) before ProxyFix can replace it with an X-Forwarded-For value,
-    so the open-access loopback check (gate()) judges the actual connection and never a header a client can forge."""
+    so the open-access loopback check (gate()) judges the actual connection and never a header a client can forge.
+
+    Behind a data plane (dataplane.py, ADR 0028) every request comes from it, over loopback: one that carries its
+    secret names the client's own socket address in X-QAG-Peer, and that address is taken as the real one - so this
+    server sees the request as if the client had connected directly, ProxyFix and QUERYAPIGATE_TRUST_PROXY included.
+    A peer that isn't an IP address counts as remote, as a Unix socket does. Both headers are removed here, so
+    nothing after this layer reads, logs or passes on the secret."""
 
     def __init__(self, app):
         self.app = app
 
     def __call__(self, environ, start_response):
+        supplied = environ.pop(dataplane.SECRET_ENVIRON, None)
+        peer = environ.pop(dataplane.PEER_ENVIRON, None)
+        wanted = environ.pop(dataplane.WANTED_ENVIRON, None)
+        if supplied is not None and dataplane.matches(supplied):
+            environ['queryapigate.dataplane'] = 'plan' if wanted == '1' else True
+            environ['REMOTE_ADDR'] = peer if dataplane.is_address(peer) else ''
         environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
         return self.app(environ, start_response)
 
@@ -301,12 +316,21 @@ def create_app():
     @app.teardown_request
     def end_trace(_error):
         tracing.finish(g.pop('trace', None))
+        token = g.pop('dataplane_token', None)
+        if token is not None:
+            metacache.reset(token)
 
     @app.before_request
     def gate():
         # Set first so every request - including one rejected below - gets an ID and a measured duration.
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
+        if request.endpoint == 'api.dataplane_runs':  # the data plane's own reports: nothing else applies to them
+            if request.environ.get('queryapigate.dataplane'):
+                return None
+            return jsonify(error_body('Not Found', 404)), 404
+        if request.environ.get('queryapigate.dataplane') == 'plan':  # before the key is read: a plan names its row
+            g.dataplane_record, g.dataplane_token = metacache.capture()
         # The request's span (tracing.py, ADR 0010): named by the route rule, never the path's values or query string
         rule = request.url_rule.rule if request.url_rule is not None else None
         g.trace = tracing.start(f'{request.method} {rule}' if rule else request.method, 'server', {
@@ -346,6 +370,8 @@ def create_app():
 
     @app.after_request
     def decorate(response):
+        if request.endpoint == 'api.dataplane_runs':  # counted and logged as the runs it reports, not itself
+            return response
         if not request.path.startswith('/auth/'):  # Console sign-in is same-origin only (sso.py)
             cors.add_headers(response, request.headers.get('Origin'))
         if g.get('rate_limit'):
@@ -1075,6 +1101,12 @@ def _run_saved(ref, body, url_params):
                                          **masked_entry(result.masked)})
     if cache_key is not None:
         response = cache_store(cache_key, response, ttl, cache_meta)
+    elif (g.get('dataplane_record') is not None and g.get('transport', 'rest') == 'rest' and not ttl
+          and output_format == 'json'):  # the one format the data plane renders
+        plan = dataplane.build(g.dataplane_record, g.permission, query_name, number, saved, connection_name, result,
+                               config.allow_writes() and effective_allow_writes)
+        if plan is not None:
+            response.headers[dataplane.PLAN_HEADER] = dataplane.encode(plan)
     return response
 
 
@@ -1190,6 +1222,45 @@ def run_named_query(name):
     body = get_json_body(required=False) if request.method == 'POST' else {}
     url_params = {k: v for k, v in request.args.items() if k not in RESERVED_ARGS}
     return run_saved(name, body, url_params)
+
+
+@bp.route('/internal/dataplane/runs', methods=['POST'])
+def dataplane_runs():
+    """The runs a data plane in front of this server served itself (dataplane.py, ADR 0028), batched: each recorded as
+    run_saved() records one - run history, the event log, the live feed - and counted in /metrics as it would have been.
+    Only the data plane reaches it: gate() answers 404 to anything without its secret. `dropped`: runs it served but
+    couldn't queue for here, counted as history's own dropped runs are.
+
+    Each run comes with its history entry already JSON (`entry`), and the labels and timings /metrics counts it by: at
+    the data plane's rates Python's own work per run - encoding it, and its labels - is what it can't keep up with, so
+    a batch is queued at once (history.record_reported()) and counted once per set of labels."""
+    report = request.get_json(silent=True) or {}
+    runs = report.get('runs') or []
+    broadcaster = current_app.extensions['queryapigate_broadcaster']
+    with scope.using(scope.current()):  # resolved once, not by each of a busy batch's few thousand label lookups
+        history.record_reported(runs)
+        if broadcaster.subscriber_count():  # the live feed's events, only when anyone is listening
+            for run in runs:
+                broadcaster.publish(events.run_payload(run['query'], run['version'], json.loads(run['entry'])),
+                                    run['key'], scope.current())
+        labelled = {}
+        for run in runs:
+            seen = labelled.setdefault((run['connection'], run['dialect'], run['status'], run['key'], run['method'],
+                                        str(run['http_status'])), ([], [], [], [0]))
+            seen[0].append(run['query_seconds'])
+            seen[1].append(run['seconds'])
+            if run['status'] == 'success':
+                seen[2].append(run['serialization_seconds'])
+                seen[3][0] += run['rows']
+        for (connection, dialect, status, key, method, http_status), seen in labelled.items():
+            metrics.observe_queries(connection, dialect, status, seen[0], key)
+            if status == 'success':
+                metrics.observe_rows(connection, dialect, key, seen[3][0])
+                metrics.observe_serializations('json', seen[2])
+            metrics.observe_requests(method, 'api.run_named_query', http_status, seen[1], key or '-')
+    if report.get('dropped'):
+        metrics.inc_history('dropped', int(report['dropped']))
+    return '', 204
 
 
 # --------------------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+# The toolchain the data plane is built and checked with, here and in CI (.github/workflows/ci.yml, `dataplane`):
+# bumped by hand, as Dependabot doesn't update this file.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

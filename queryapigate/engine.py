@@ -153,6 +153,9 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
         columns, result_rows = masked.apply(columns, list(result_rows))
     result = ResultSetDTO(result_rows, columns, has_more=has_more)
     result.masked = masked.fired if masked is not None else []
+    # What was sent and how it was masked, for a data plane's plan (dataplane.py, ADR 0028)
+    result.prepared = {'sql': sql, 'details': details, 'mask_plan': masked,
+                       'search_path': _search_path(details, allowed_tables).get('search_path')}
     return result
 
 

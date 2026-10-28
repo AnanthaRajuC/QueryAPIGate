@@ -88,6 +88,20 @@ class _Writer:
         if full:
             self.wake.set()
 
+    def add_many(self, target, rows):
+        """add() for each of ``rows``, under the lock once: those that don't fit in the queue dropped and counted."""
+        with self.cond:
+            room = max(_MAX_PENDING - len(self.pending), 0)
+            taken = rows[:room]
+            self.pending.extend((target, row) for row in taken)
+            self.queued += len(taken)
+            full = len(self.pending) >= _BATCH_SIZE
+        if len(rows) > len(taken):
+            metrics.inc_history('dropped', len(rows) - len(taken))
+        self._ensure_thread()
+        if full:
+            self.wake.set()
+
     def unwritten(self):
         """Runs queued but not yet handled - including a batch the writer thread is in the middle of writing."""
         with self.cond:
@@ -194,6 +208,29 @@ def record(name, version, entry, sample=True, live=True):
         _writer().add(target, row)
 
 
+def record_reported(runs):
+    """Queue the saved-query runs a data plane reports (ADR 0028), each with its entry already JSON (``entry``, as
+    json.dumps writes it): as record() queues each, sampled the same way, but in one go and without decoding or
+    encoding an entry - at its rates, record()'s own work per run is what Python can't keep up with."""
+    from . import events, scope
+    workspace, rate, rows, sampled_out = scope.current(), config.history_sample_rate(), [], 0
+    for run in runs:
+        name, version, executed_at, status = run['query'], run['version'], run['executed_at'], run['status']
+        keep = status == 'error' or rate >= 1 or random.random() < rate
+        sampled_out += not keep
+        event = (events.RUN, run['transport'], executed_at, run['key'], run['connection'], name, status,
+                 events.run_payload_json(name, version, run['entry'], run['transport'], executed_at,
+                                         run['connection']), workspace)
+        rows.append((name, version, executed_at, run['entry'], status, run['key'], keep, event, workspace))
+    if sampled_out:
+        metrics.inc_history('sampled_out', sampled_out)
+    target = db.current_target()
+    if config.history_flush_interval() == 0:
+        write(rows, target)
+    else:
+        _writer().add_many(target, rows)
+
+
 def record_adhoc(entry, sql, params=None, sample=True):
     """Queue one ad-hoc run (/execute_sql, /execute_mongo, MCP's execute_sql) for history, like record(): sampled the
     same way (failures always kept), written in the same batches. Keeps its SQL as QUERYAPIGATE_HISTORY_ADHOC_SQL
@@ -286,6 +323,9 @@ def write(rows, target=None):
         else:
             saved.append((workspace, name, version, executed_at, entry_json, status, key_name,
                           workspace, name, version))
+    if config.history_retention_days() is None:  # only what the trims below would keep: a busy batch is mostly not
+        saved = _newest(saved, config.history_limit(), lambda row: row[:3], lambda row: row[3])
+        adhoc = _newest(adhoc, config.history_adhoc_limit(), lambda row: row[0], lambda row: row[1])
     try:
         # One executemany() per statement rather than a round trip per row: a busy server's batch is hundreds of rows.
         with db.transaction(append_only=True, target=target) as conn:
@@ -311,6 +351,21 @@ def write(rows, target=None):
     if config.history_retention_days() is None:
         for workspace, name, version in dict.fromkeys((row[8], row[0], row[1]) for row in rows if row[6]):
             _trim(workspace, name, version, target)
+
+
+def _newest(rows, limit, group, executed_at):
+    """The rows, in arrival order, that trimming each ``group`` to ``limit`` would keep: its newest by executed_at,
+    then by arrival - _trim()'s order (executed_at DESC, rowid DESC, rowids handed out in arrival order). The others
+    would be deleted the moment they were written: at data-plane rates (ADR 0028) that is most of a batch."""
+    found = {}
+    for i, row in enumerate(rows):
+        found.setdefault(group(row), []).append(i)
+    if all(len(indexes) <= limit for indexes in found.values()):
+        return rows
+    kept = set()
+    for indexes in found.values():
+        kept.update(sorted(indexes, key=lambda i: executed_at(rows[i]))[-limit:])  # a stable sort: ties by arrival
+    return [row for i, row in enumerate(rows) if i in kept]
 
 
 def _trim(workspace, name, version, target):

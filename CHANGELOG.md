@@ -22,7 +22,8 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
 connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`), and semantic search (embed parameters). The list is `queryapigate/experimental.py`.
+(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -48,6 +49,33 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+A Rust data plane for `/q/`, as a prototype that ended in a measured decision: go
+([ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md)). In front of the Python server, it serves
+saved-query reads itself from the plans Python computes, and forwards everything else. Against the Python build
+behind it, it serves 3.2-3.5x the calls a second per gateway core without the metadata cache and 4.0-9.4x with it,
+about 8x with each side at its best on the same 8 cores, with p99 2-20x lower and every run recorded
+([Performance, v5](documentation/PERFORMANCE_V5.md)). It is built from the repository, not shipped in the image or
+the chart.
+
+### Added
+- **The Rust data plane** (experimental), in `dataplane/`: the plans it applies (`queryapigate/dataplane.py`), the
+  `QUERYAPIGATE_DATAPLANE_SECRET` setting both processes share (at least 16 characters, checked at startup), and the
+  internal endpoint it reports served runs to, which Python records in run history, the event log and `/metrics`.
+  [Try the Rust data plane](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md) builds and runs it; the threat model has
+  [its entry](documentation/THREAT_MODEL.md#the-rust-data-plane-adr-0028-a-prototype).
+- **The differential test** (`dataplane/tests/test_differential.py`): random calls, including hostile parameters and
+  keys revoked and re-granted mid-run, sent to Python directly and through the data plane, compared response for
+  response and history row for history row. CI runs it against real PostgreSQL and MySQL, with the data plane's own
+  checks, in a new `dataplane` job; Dependabot updates its Rust dependencies.
+- **Benchmarks of the data plane:** blocks d1-d4 in `benchmarks/oltp.py` and `benchmarks/tpcc_mysql.py`, each cell
+  recording the share of its runs kept, with results in `benchmarks/results/dataplane-*-2026-10-27/`.
+
+### Changed
+- **Run history writes only the runs a version keeps.** A batch with more of a version's runs than
+  `QUERYAPIGATE_HISTORY_LIMIT` inserts only the newest, instead of inserting all and deleting most. The rows kept are
+  the same. On a PostgreSQL store, a batch's events go as one multi-row INSERT. Together, a batch of 500 runs of one
+  query took 10 ms to write instead of 33 in a profile.
 
 ## [0.43.0] - 2026-10-27
 

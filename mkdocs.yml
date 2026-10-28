@@ -22,6 +22,7 @@ nav:
   - Configuration: documentation/CONFIGURATION.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Performance: documentation/PERFORMANCE.md
+  - A Rust data plane (v5, 0.44): documentation/PERFORMANCE_V5.md
   - Performance on PostgreSQL (v4, 0.43): documentation/PERFORMANCE_V4.md
   - Performance on PostgreSQL (v3): documentation/PERFORMANCE_V3.md
   - Performance on MySQL (v2, 0.43): documentation/PERFORMANCE_MYSQL_V2.md
@@ -66,6 +67,7 @@ nav:
       - 0025 Semantic retrieval: documentation/adr/0025-semantic-retrieval.md
       - 0026 Trino connections: documentation/adr/0026-trino-connections.md
       - 0027 Fewer round trips per query: documentation/adr/0027-fewer-round-trips-per-query.md
+      - 0028 Rust data plane prototype: documentation/adr/0028-rust-data-plane-prototype.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

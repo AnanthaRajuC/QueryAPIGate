@@ -128,6 +128,19 @@ class BatchingTests(HistoryTestCase):
         self.assertEqual(metrics._history_runs.get(('dropped',), 0) - before.get(('dropped',), 0), 3)
         self.assertEqual(self.stored(), 2)
 
+    def test_reported_runs_queue_as_far_as_the_queue_goes_and_the_rest_are_counted(self):
+        entry = {'executed_at': '2026-01-01 00:00:00', 'status': 'success', 'key_name': 'admin', 'transport': 'rest',
+                 'connection_name': 'lite'}
+        run = {'query': 'q', 'version': 1, 'entry': json.dumps(entry), 'executed_at': entry['executed_at'],
+               'status': 'success', 'key': 'admin', 'connection': 'lite', 'transport': 'rest'}
+        before = dict(metrics._history_runs)
+        with mock.patch.object(history, '_MAX_PENDING', 2), self.no_writer_thread():
+            history.record_reported([run] * 5)
+            self.assertEqual(history.pending_count(), 2)
+            history._writer().flush()
+        self.assertEqual(metrics._history_runs.get(('dropped',), 0) - before.get(('dropped',), 0), 3)
+        self.assertEqual(self.listed(), [entry, entry])
+
     def test_a_run_of_a_query_deleted_meanwhile_is_skipped_not_fatal(self):
         with self.no_writer_thread():
             self.run_query('q')
@@ -165,6 +178,41 @@ class RetentionTests(HistoryTestCase):
             self.seed(8, datetime(2026, 1, 1))
             self.assertEqual(self.stored(), 5)
             self.assertEqual([run['i'] for run in self.listed()], [3, 4, 5, 6, 7])
+
+    def test_a_batch_leaves_out_only_the_runs_its_trim_would_delete(self):
+        """A batch with more of a version's runs than it keeps writes only those the trim keeps - the same ones, newest
+        by executed_at then by arrival, rows already stored included - and every run is still an event."""
+        start = datetime(2026, 1, 1)
+
+        def at(minutes):
+            return (start + timedelta(minutes=minutes)).strftime(history.TIME_FORMAT)
+        batch = []
+        for i in range(30):  # out of order, with ties
+            for name in ('q', 'other', None):
+                batch.append(history._row(name, None if name is None else 1,
+                                          {'executed_at': at((i * 7) % 11), 'status': 'success', 'key_name': 'admin',
+                                           'i': i}))
+        conn = db.connection()
+
+        def written():
+            history.write([history._row('q', 1, {'executed_at': at(5), 'status': 'success', 'i': 'stored'})],
+                          db.current_target())
+            history.write(batch, db.current_target())
+            kept = [tuple(row) for row in conn.execute(
+                'SELECT query_name, executed_at, entry_json FROM execution_history '
+                'ORDER BY query_name, executed_at, rowid')]
+            events = conn.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+            conn.execute('DELETE FROM execution_history')
+            conn.execute('DELETE FROM events')
+            return kept, events
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_LIMIT': '5',
+                                          'QUERYAPIGATE_HISTORY_ADHOC_LIMIT': '4'}):
+            with mock.patch.object(history, '_newest', lambda rows, *_: rows):
+                before = written()  # every run inserted, then trimmed
+            after = written()
+        self.assertEqual(after, before)
+        self.assertEqual(len(after[0]), 5 + 5 + 4)
+        self.assertEqual(after[1], 1 + 90)
 
     def test_with_retention_every_run_is_kept_and_lists_still_show_only_the_newest(self):
         env = {'QUERYAPIGATE_HISTORY_LIMIT': '5', 'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '30'}

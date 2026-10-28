@@ -36,6 +36,8 @@ PG_IMAGE = 'postgres:16'
 PG = 'qag-oltp-bench'
 PORT = 5091
 U = f'http://127.0.0.1:{PORT}'
+INNER_PORT = PORT + 1  # gunicorn's, behind the data plane (a +dp build, ADR 0028)
+DATAPLANE_SECRET = 'bench-dataplane-secret-0123456789'
 URLS = {
     'lookup': U + r'/q/account\?aid=[1-9][0-9]{0,6}',
     'page': U + r'/q/account_page\?start=[1-9][0-9]{0,5}&page_size=100',
@@ -48,7 +50,10 @@ SCENARIOS = {'lookup_plain': ('lookup', 'plain'), 'lookup_gov': ('lookup', 'gove
 
 args = None
 OUT = BUILDS = None
+DATAPLANE_PYTHON_WORKERS = 2  # Python workers behind the data plane, unless a block says (see start())
+DATAPLANE_BUILDS = {}  # the head with the Rust data plane in front: outside BUILDS, so the b-blocks are as they were
 _server = None
+_dataplane = None
 _server_meta = {}
 TICK = os.sysconf('SC_CLK_TCK')
 
@@ -79,7 +84,7 @@ def seconds(n):
 
 
 def rounds(n):
-    return 1 if args.smoke else n
+    return 1 if args.smoke else min(n, args.rounds or n)
 
 
 # ---------------------------------------------------------------- accounting
@@ -132,6 +137,18 @@ def store_tx():
     rows = psql("select datname, xact_commit + xact_rollback from pg_stat_database "
                 "where datname in ('bench', 'qagstore') order by 1")
     return {d: int(n) for d, n in (r.split('|') for r in rows.splitlines())}
+
+
+def runs_written():
+    """Event ids the store has handed out: one per run recorded (ADR 0020), by whichever process recorded it - so,
+    unlike a process's own /metrics, whole with any number of workers."""
+    return int(psql('SELECT last_value FROM events_id_seq', 'qagstore') or 0)  # TRUNCATE keeps it counting
+
+
+def runs_kept(written, requests):
+    """The cell's runs written to the store, and the share of its calls that is: what the gateway kept of its audit
+    trail. Every call here is a run, served by Python or by the data plane."""
+    return {'runs_written': written, 'runs_written_share': written / requests if requests else None}
 
 
 def cpu_list(spec):
@@ -225,29 +242,50 @@ def b_teardown():
 # ---------------------------------------------------------------- the gateway
 
 def stop():
-    global _server, _server_meta
+    global _server, _dataplane, _server_meta
     _server_meta = {}
-    if _server is not None:
+    for process in (_dataplane, _server):
+        if process is None:
+            continue
         try:
-            os.killpg(_server.pid, signal.SIGTERM)
-            _server.wait(timeout=20)
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=20)
         except Exception:
             try:
-                os.killpg(_server.pid, signal.SIGKILL)
+                os.killpg(process.pid, signal.SIGKILL)
             except Exception:
                 pass
-        _server = None
-    for _ in range(50):
-        if sh('bash', '-c', f'ss -ltn | grep -q ":{PORT} "').returncode:
+    _server = _dataplane = None
+    for port in (PORT, INNER_PORT):
+        for _ in range(50):
+            if sh('bash', '-c', f'ss -ltn | grep -q ":{port} "').returncode:
+                break
+            time.sleep(0.2)
+
+
+def wait_healthy(url, what):
+    for _ in range(150):
+        try:
+            urllib.request.urlopen(url + '/health', timeout=1)
             return
-        time.sleep(0.2)
+        except Exception:
+            time.sleep(0.2)
+    raise RuntimeError(f'{what} did not start - see {OUT / "server.log"}')
 
 
-def start(build, workers=1, access_log=True, access_format=None, profile_to=None, threads=8):
+def start(build, workers=None, access_log=True, access_format=None, profile_to=None, threads=8):
     """gunicorn for ``build``, pinned to the gateway's cores, as the Docker image runs it (gthread)."""
     global _server, _server_meta
     stop()
-    ref, extra = BUILDS[build]
+    ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
+    extra = dict(extra)
+    dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
+    # 17k runs/s - fewer than the data plane serves - so with one, most of what it served went unrecorded.
+    workers = workers or (DATAPLANE_PYTHON_WORKERS if dataplane else 1)
+    port = INNER_PORT if dataplane else PORT
+    if dataplane:
+        extra['QUERYAPIGATE_DATAPLANE_SECRET'] = DATAPLANE_SECRET
     home = OUT / 'home'
     home.mkdir(exist_ok=True)
     bindir = Path(sys.executable).parent
@@ -256,7 +294,7 @@ def start(build, workers=1, access_log=True, access_format=None, profile_to=None
            'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore', **extra,
            # from 0.43 gunicorn_conf.py writes an access log to stdout unless told not to: say so either way
            'QUERYAPIGATE_ACCESS_LOG': 'on' if access_log else 'off'}
-    cmd = [str(bindir / 'gunicorn'), '--bind', f'127.0.0.1:{PORT}', '--workers', str(workers), '--worker-class',
+    cmd = [str(bindir / 'gunicorn'), '--bind', f'127.0.0.1:{port}', '--workers', str(workers), '--worker-class',
            'gthread', '--threads', str(threads), '--timeout', '120', '--no-control-socket',
            '-c', 'python:queryapigate.gunicorn_conf']
     if access_log:
@@ -268,21 +306,41 @@ def start(build, workers=1, access_log=True, access_format=None, profile_to=None
         cmd = [args.py_spy, 'record', '--subprocesses', '--rate', '200', '--format', 'raw', '-o', str(profile_to),
                '--'] + cmd
     cmd = ['taskset', '-c', args.gateway_cpus] + cmd
+    # Each cell starts both logs afresh: the data plane writes ~27k lines/s, and a full run kept them all until the
+    # disk filled. They are still written, so what writing them costs is still measured.
+    if shutil.disk_usage(OUT).free < 3 << 30:
+        raise RuntimeError(f'under 3 GB free on {OUT}: stopping before the disk fills')
+    for log in ('server.log', 'access.log'):
+        (OUT / log).write_bytes(b'')
+    # The event log (ADR 0020) keeps every run for at least an hour, whatever its count: tens of millions of rows
+    # at the data plane's rates, which slowed each later cell and filled the disk. Each cell starts it empty.
+    psql('TRUNCATE events', 'qagstore')
     out = open(OUT / 'server.log', 'a')
     _server = subprocess.Popen(cmd, env=env, cwd=home, stdout=out, stderr=out, start_new_session=True)
-    for _ in range(150):
-        try:
-            urllib.request.urlopen(U + '/health', timeout=1)
-            break
-        except Exception:
-            time.sleep(0.2)
-    else:
-        raise RuntimeError(f'gateway {build} did not start - see {OUT / "server.log"}')
-    _server_meta = {'build': build, 'workers': workers, 'access_log': access_log, 'threads': threads}
+    wait_healthy(f'http://127.0.0.1:{port}', f'gateway {build}')
+    threads_dp = None
+    if dataplane:  # after gunicorn: it reads the store gunicorn's process keeps
+        global _dataplane
+        threads_dp = args.dataplane_threads or len(cpu_list(args.gateway_cpus))
+        _dataplane = subprocess.Popen(
+            ['taskset', '-c', args.gateway_cpus, args.dataplane_bin],
+            env={**env, 'QUERYAPIGATE_DATAPLANE_LISTEN': f'127.0.0.1:{PORT}',
+                 'QUERYAPIGATE_DATAPLANE_UPSTREAM': f'http://127.0.0.1:{INNER_PORT}',
+                 'QUERYAPIGATE_DATAPLANE_THREADS': str(threads_dp)},
+            cwd=home, stdout=out, stderr=out, start_new_session=True)
+        wait_healthy(U, f'the data plane for {build}')
+    _server_meta = {'build': build, 'workers': workers, 'access_log': access_log, 'threads': threads,
+                    'dataplane_threads': threads_dp}
+
+
+def gateway_cpu_s():
+    """CPU seconds the gateway has used: gunicorn's master and workers, and any data plane in front of them."""
+    return tree_cpu_s(gunicorn_master()) + (tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0)
 
 
 def gunicorn_master():
-    pids = [int(p) for p in sh('pgrep', '-f', f'gunicorn --bind 127.0.0.1:{PORT}').stdout.split()]
+    port = INNER_PORT if _dataplane is not None else PORT
+    pids = [int(p) for p in sh('pgrep', '-f', f'gunicorn --bind 127.0.0.1:{port}').stdout.split()]
     for p in pids:  # the master is the one whose parent isn't another match
         try:
             ppid = int(open(f'/proc/{p}/stat').read().rsplit(')', 1)[1].split()[1])
@@ -354,26 +412,29 @@ def oha(url, key=None, c=32, secs=30, q=None, correction=False, regex=True):
 
 
 def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True, extra=None, rnd=None):
-    keys = json.loads((OUT / 'keys.json').read_text())
+    keys = json.loads((Path(args.out) / 'keys.json').read_text())  # where seed() keeps them, smoke or not
     kind, keyname = SCENARIOS[scenario]
     url, key = URLS[kind], keys[keyname]
     if warm:
         oha(url, key, c=8, secs=5)
-    master = gunicorn_master()
     freqs, done = [], threading.Event()
 
     def sample():
         while not done.wait(2):
             freqs.append(mhz())
     sampler = threading.Thread(target=sample, daemon=True)
-    tx0, g0, p0, l0, t0 = store_tx(), tree_cpu_s(master), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
+    if warm:
+        time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
+    w0 = runs_written()
+    tx0, g0, p0, l0, t0 = store_tx(), gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
     done.set()
     wall = time.time() - t0
-    g1, p1, l1 = tree_cpu_s(master), pg_cpu_s(), cpus_busy_s(args.load_cpus)
-    time.sleep(1.5)
+    g1, p1, l1 = gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus)
+    time.sleep(2.5)  # a flush interval for the data plane's report, another for Python's write
     tx1 = store_tx()
+    kept = runs_kept(runs_written() - w0, r['requests'])
     n = max(r['requests'], 1)
     row = {'block': block, 'scenario': scenario, 'c': c, 'q': q, 'seconds': seconds(secs), 'round': rnd,
            **_server_meta, **r, 'gw_cores': (g1 - g0) / wall, 'pg_cores': (p1 - p0) / wall,
@@ -381,11 +442,12 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
            'store_tx_per_req': (tx1['qagstore'] - tx0['qagstore']) / n,
            'data_tx_per_req': (tx1['bench'] - tx0['bench']) / n,
            'mhz_gw': round(sum(f for f in freqs if f) / len(freqs)) if any(freqs) else None,
-           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **(extra or {})}
+           'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **kept, **(extra or {})}
     record(row)
     log(f'{block} {row["build"]} w{row["workers"]} t{row["threads"]} {scenario} c={c} q={q} r{rnd}: '
         f'{r["rps"]:.0f} req/s p50 {r["p50"]:.2f} p99 {r["p99"]:.2f} ok {r["success"]:.4f} '
-        f'gw {row["gw_cores"]:.2f} pg {row["pg_cores"]:.2f} store_tx {row["store_tx_per_req"]:.2f}')
+        f'gw {row["gw_cores"]:.2f} pg {row["pg_cores"]:.2f} store_tx {row["store_tx_per_req"]:.2f}'
+        + f' runs kept {kept["runs_written_share"]:.0%}')
     return row
 
 
@@ -421,6 +483,7 @@ def b_env():
             'kernel': os.uname().release,
             'cpu': sh('bash', '-c', "lscpu | sed -n 's/^Model name: *//p'").stdout.strip(),
             'cpus': {'gateway': args.gateway_cpus, 'database': args.db_cpus, 'load': args.load_cpus},
+            'dataplane': dataplane_identity(),
             'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
     log('environment recorded')
 
@@ -534,7 +597,7 @@ def b7(delay='0.5ms'):
 def b8():
     """Reads and writes at once; writes on 99 hot rows."""
     floor('b8', 'start')
-    keys = json.loads((OUT / 'keys.json').read_text())
+    keys = json.loads((Path(args.out) / 'keys.json').read_text())  # where seed() keeps them, smoke or not
     for r in range(rounds(5)):
         start(args.head_label)
         oha(URLS['lookup'], keys['plain'], c=8, secs=5)
@@ -642,8 +705,87 @@ def b11():
     floor('b11', 'end')
 
 
+# ---------------------------------------------------------------- the Rust data plane (ADR 0028)
+
+def dataplane_builds(base=True):
+    """The builds the d-blocks compare: Python as 0.43 ships it (base), the head with and without the metadata cache,
+    and the head with the data plane in front - on the same gateway cores - with and without it."""
+    head = args.head_label
+    return ([args.base.split('/')[-1]] if base else []) + [head, head + '+cache', head + '+dp', head + '+dp+cache']
+
+
+def dataplane_identity():
+    """Which data plane the d-blocks ran: its binary's SHA-256, the commit it was built from, and the compiler."""
+    binary = Path(args.dataplane_bin)
+    if not binary.exists():
+        return None
+    import hashlib
+    return {'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+            'commit': sh('git', '-C', str(REPO), 'rev-parse', 'HEAD').stdout.strip(),
+            'dirty': bool(sh('git', '-C', str(REPO), 'status', '--porcelain', 'dataplane').stdout.strip()),
+            'rustc': sh('rustc', '--version').stdout.strip()}
+
+
+def d1():
+    """32 callers, one gunicorn worker (as b1) - and the data plane in front of one. Calls a second per gateway core is
+    the decision's measure; the write is forwarded, so it shows what the extra hop costs."""
+    floor('d1', 'start')
+    for scenario in ['lookup_plain', 'lookup_gov', 'page_plain']:
+        for r, order in rotations(dataplane_builds(), 5):
+            for build in order:
+                start(build)
+                measure('d1', scenario, c=32, secs=30, rnd=r)
+    for r, order in rotations([args.head_label + '+cache', args.head_label + '+dp+cache'], 3):
+        for build in order:
+            start(build)
+            measure('d1', 'write_writer', c=32, secs=30, rnd=r)
+    floor('d1', 'end')
+
+
+def d2():
+    """One caller at a time: the latency of a single call, with and without the data plane."""
+    floor('d2', 'start')
+    for scenario in ['lookup_plain', 'lookup_gov']:
+        for r, order in rotations(dataplane_builds(base=False), 5):
+            for build in order:
+                start(build)
+                measure('d2', scenario, c=1, secs=20, rnd=r)
+    floor('d2', 'end')
+
+
+def d3(delay='0.5ms'):
+    """The database 0.5 ms away (netem): one caller, and 32 - the store is in the same container, so its reads wait
+    too: where the metadata cache matters most."""
+    floor('d3', 'start')
+    netem(delay)
+    try:
+        for c in (1, 32):
+            for r, order in rotations(dataplane_builds(base=False), 5):
+                for build in order:
+                    start(build)
+                    measure('d3', 'lookup_plain', c=c, secs=20, rnd=r, extra={'netem': delay})
+    finally:
+        netem('0ms')
+    floor('d3', 'end')
+
+
+def d4():
+    """Capacity on the whole gateway: Python's best (one worker per gateway CPU) against the data plane with one
+    worker behind it, 64 callers - both with the metadata cache."""
+    floor('d4', 'start')
+    workers = len(cpu_list(args.gateway_cpus))
+    builds = [(args.head_label + '+cache', workers), (args.head_label + '+dp+cache', None)]
+    for scenario in ['lookup_plain', 'lookup_gov']:
+        for r, order in rotations(builds, 3):
+            for build, n in order:
+                start(build, workers=n)
+                measure('d4', scenario, c=64, secs=30, rnd=r)
+    floor('d4', 'end')
+
+
 BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_pgbench, 'b1': b1, 'b2': b2,
-          'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11}
+          'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11,
+          'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
 ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
@@ -659,6 +801,11 @@ def main():
     parser.add_argument('--load-cpus', default='12-19', help='cpuset for oha and pgbench (default %(default)s)')
     parser.add_argument('--py-spy', default=shutil.which('py-spy'), help='py-spy binary, for b9')
     parser.add_argument('--smoke', action='store_true', help='2 s runs, one round: checks the mechanics only')
+    parser.add_argument('--rounds', type=int, help='at most this many rounds per comparison (default: each block\'s)')
+    parser.add_argument('--dataplane-bin', default=str(REPO / 'dataplane' / 'target' / 'release' /
+                                                         'queryapigate-dataplane'),
+                        help='the Rust data plane, for the d-blocks (default %(default)s)')
+    parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
     args = parser.parse_args()
     OUT = Path(args.out)
     OUT.mkdir(parents=True, exist_ok=True)
@@ -668,6 +815,9 @@ def main():
     base_label, args.head_label = args.base.split('/')[-1], args.head.split('/')[-1]
     BUILDS = {base_label: (args.base, {}), args.head_label: (args.head, {}),
               args.head_label + '+cache': (args.head, {'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})}
+    DATAPLANE_BUILDS.update({args.head_label + '+dp': (args.head, {'dataplane': True}),
+                             args.head_label + '+dp+cache': (args.head, {'dataplane': True,
+                                                                         'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
     names = [n for b in args.blocks for n in (ALL if b == 'all' else [b])]
     try:
         for name in names:
