@@ -3157,7 +3157,24 @@ traffic, and a p99 that stays in single milliseconds under load.
 - **Shipping it** - the follow-up ADR 0028 promised: the Docker image and the Helm chart, a supervisor for the two
   processes, and which of what it forwards to move next (rate-limited keys and `QUERYAPIGATE_TRUST_PROXY` first,
   then other formats and workspaces).
-- **A store for runs at its rate** - ADR 0029: every run recorded at 20,000 a second is 1.7 billion rows a day, more
-  than SQLite or the PostgreSQL store should hold. ClickHouse, optional, written by both processes in batches.
+- **A store for runs at its rate** - #103, ADR 0029 (proposed): every run recorded at 20,000 a second is 1.7 billion
+  rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Until then, the event log needs a bound** at that rate: a row cap or sampling, as history has.
 - **Plans before the first call** (ADR 0028's open question): computed when a query is published or a key changes.
+
+## 103. An optional ClickHouse run store
+
+**Status: proposed.** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md): with `QUERYAPIGATE_RUN_STORE_URL`
+set, run history, the event log and per-minute and per-hour usage rollups go to ClickHouse. The data plane and Python
+each insert batches into one `events` table, and materialized views fill `history` and the rollups. Event ids are
+time-ordered and stay below 2^53. Writers lease blocks of each millisecond's 4,096 ids, and delivery waits a 1 s
+settle window, so a resume still misses nothing (ADR 0002). Measured first on 5 million runs: about 24 bytes a run in
+`events` and in `history`, and every read the design needs in 2 to 30 ms. Built as a prototype that ends in a measured
+decision. Experimental.
+
+**Impact:** the second condition of ADR 0028's go. Every run the data plane serves is recorded without Python in its
+path, and the event log can hold a day at 20,000 events a second, about 41 GB. Usage reports and alerts become exact
+whatever history's sample rate.
+
+**Next:** the prototype on one branch, then section 9's six measurements. The event log's bound for the SQL stores
+(#102) is separate and ships either way.
