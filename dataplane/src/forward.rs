@@ -176,11 +176,11 @@ pub fn clean(headers: &mut HeaderMap) {
 
 /// A JSON error in the shape the Python server answers with, for what only the data plane can say.
 pub fn error_response(status: StatusCode, message: &str, code: &str) -> Response<Body> {
-    let body = format!(
-        r#"{{"error":{},"code":{}}}"#,
-        json_string(message),
-        json_string(code)
-    );
+    let mut body = String::from(r#"{"error":"#);
+    crate::render::json_string(message, &mut body);
+    body.push_str(r#","code":"#);
+    crate::render::json_string(code, &mut body);
+    body.push('}');
     let mut response = Response::new(
         Full::new(Bytes::from(body))
             .map_err(|never| match never {})
@@ -192,21 +192,6 @@ pub fn error_response(status: StatusCode, message: &str, code: &str) -> Response
         HeaderValue::from_static("application/json"),
     );
     response
-}
-
-fn json_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]
@@ -266,6 +251,21 @@ mod tests {
 
     #[test]
     fn an_error_s_text_is_valid_json() {
-        assert_eq!(json_string("a \"b\" \\ \n"), r#""a \"b\" \\ \u000a""#);
+        let response = error_response(StatusCode::BAD_GATEWAY, "a \"b\" \\ \n é", "upstream");
+        let body = response.into_body();
+        let bytes = futures_body(body);
+        assert_eq!(
+            bytes,
+            r#"{"error":"a \"b\" \\ \n \u00e9","code":"upstream"}"#
+        );
+    }
+
+    fn futures_body(body: Body) -> String {
+        let collected = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(body.collect())
+            .unwrap();
+        String::from_utf8(collected.to_bytes().to_vec()).unwrap()
     }
 }

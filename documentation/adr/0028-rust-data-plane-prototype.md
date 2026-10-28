@@ -1,12 +1,13 @@
 # ADR 0028: A Rust data plane for `/q/`, as a prototype with a go/no-go decision
 
-- **Status:** Accepted (2026-10-27). Amended 2026-10-27, before any Rust code: plans travel back on the forwarded
+- **Status:** Accepted (2026-10-27). **Decided: go (2026-10-28),** on the measurements in section 6's
+  [Result](#result-go). Amended 2026-10-27, before any Rust code: plans travel back on the forwarded
   response and are kept in the data plane's memory, not in the store; they name the rows they were computed from by
   digest; and the data plane sends SQL as Python's drivers do (sections 2 and 3). Amended again while building it: served
   runs are reported to Python, which records them, and the cases the implementation forwards are listed (sections 3, 4
   and Consequences). Amended a third time after the first benchmark: Python's work per reported run couldn't keep up
   with what the data plane serves, so runs arrive already serialized and are queued a batch at a time (section 3, item
-  8, and Consequences).
+  8, and Consequences). Corrected with the decision: sections 7 and 8 describe what was built.
 - **Backlog:** 0.44. Motivated by the CPU profiles in [PERFORMANCE_MYSQL_V2.md](../PERFORMANCE_MYSQL_V2.md#where-the-time-goes-now)
   and [PERFORMANCE_V4.md](../PERFORMANCE_V4.md). This is a prototype: it ends in a measured decision, not a commitment
   to ship a second runtime.
@@ -203,13 +204,45 @@ The decision:
 - **Under 1.5x, or any differential failure that can't be fixed within the design:** stop. The prototype and its
   results stay as a documented experiment.
 
+#### Result: go
+
+Measured on 2026-10-27 and 28, on [Performance, v5](../PERFORMANCE_V5.md)'s laptop, with every run the data plane
+served recorded by Python, except where noted. Each data-plane build is compared with the Python build behind it,
+metadata cache with cache.
+
+| Criterion | Measured |
+|---|---|
+| Differential test clean | Every run of it clean: 0 response and 0 history differences over 13,500 calls, PostgreSQL and MySQL |
+| At least 3x calls a second per gateway core, plain and governed lookups | 3.2x (PostgreSQL) and 3.2-3.5x (MySQL) without the metadata cache; 4.0-9.4x with it; 7.8-7.9x with each side at its best on the same 8 cores (MySQL, 64 callers) |
+| p99 no worse | Lower in every cell: 5-20x on the same host, about 2x with the database 0.5 ms away |
+| The forwarded path's added latency | +0.35 ms at p50 for a forwarded write (1.43 to 1.78 ms, one caller); p99 no worse at 400 calls a second |
+| Memory per process | The data plane 19 MB; each Python worker behind it 64 MB, against 52 MB for a worker on its own |
+
+Below the bar: a 100-row page on PostgreSQL without the metadata cache, 2.8x per core (PostgreSQL itself is the
+limit; 3.5x with the cache), and writes, 0.8x, which the data plane forwards. Neither is a criterion.
+
+The decision comes with three conditions, each found by measuring:
+
+1. **At least two Python workers behind the data plane** (Consequences). With one, about half its runs went
+   unrecorded at full rate.
+2. **A store built for runs at the data plane's rate.** Every run recorded at 20,000 a second is 1.7 billion rows a
+   day, and the event log keeps each for an hour at least. That is ADR 0029's subject.
+3. **The pull request that reports this** adds the CI job that builds the data plane and runs the differential test,
+   cargo's Dependabot updates, the threat-model entry, and a guide for trying it (64).
+
+Shipping it - the Docker image, the Helm chart, which rows of section 4 to move - is the follow-up ADR this section
+promised. Until then it stays a prototype, built from the repository.
+
 ### 7. Security notes
 
 - **Open-access mode** answers local clients only, judged by the real socket peer. Behind the data plane, every
-  forwarded request reaches Python from loopback. So the data plane applies the rule itself, on its own socket peer,
-  and refuses to start in front of a server with no credential configured unless it listens on loopback only.
-- **The trusted-proxy hop count** gains one when the data plane fronts Python. Python must trust `X-Forwarded-For`
-  only from it: over a Unix socket, or from loopback with a hop count of exactly one.
+  forwarded request reaches Python from loopback. *As built:* the data plane sends the client's own socket address in
+  `X-QAG-Peer`, with the secret, and Python takes it as the real peer, so its own loopback rule and a key's
+  `allowed_ips` judge the client. A peer that isn't an IP address counts as remote. The data plane makes no access
+  decision of its own here.
+- **The trusted-proxy hop count** doesn't change: Python takes `X-QAG-Peer` as the socket address before `ProxyFix`
+  reads `X-Forwarded-For`, so `QUERYAPIGATE_TRUST_PROXY` counts the same hops it would without the data plane. With a
+  hop count set, the prototype forwards every call (section 4).
 - **Plans are security decisions.** Only Python makes them, only for a request with the shared secret, and the data
   plane uses one only for a call whose rows digest as the plan's did. A plan doesn't widen anything: the
   key, its grants and the query are still read and checked on every call.
@@ -217,14 +250,18 @@ The decision:
   quoting for PostgreSQL that holds whatever `standard_conforming_strings` is, and for MySQL whether or not the
   session's `sql_mode` has `NO_BACKSLASH_ESCAPES`, on a `utf8mb4` connection. The differential test includes hostile
   strings for exactly this.
-- The data plane gets an entry in THREAT_MODEL.md before any benchmark is published.
+- The data plane gets an entry in THREAT_MODEL.md before any benchmark is published. *Done:*
+  [the Rust data plane](../THREAT_MODEL.md#the-rust-data-plane-adr-0028-a-prototype).
 
 ### 8. Where it lives
 
-A Cargo crate in `dataplane/`: Axum and Tokio, sqlx for PostgreSQL, MySQL and the SQLite store. It is built by the
-benchmark harness and the differential test only: it isn't in the Docker image, the PyPI package or the Helm chart
-while it's a prototype. The CI job that builds it and runs the differential test is added with the pull request that
-reports the result.
+A Cargo crate in `dataplane/`. *As built:* hyper and Tokio rather than Axum (the front is a proxy, with one route of
+its own), and sqlx for PostgreSQL, MySQL and the store. tokio-postgres reads, once per pool, the `TimeZone` and
+`DateStyle` a PostgreSQL session has before sqlx's startup sets its own, since Python's driver keeps the server's.
+Its toolchain is pinned in `dataplane/rust-toolchain.toml`. It isn't in
+the Docker image, the PyPI package or the Helm chart while it's a prototype. CI's `dataplane` job builds and lints it,
+runs its unit tests, and runs its Python-driven tests and the differential test against real PostgreSQL and MySQL,
+none of them allowed to skip.
 
 ## Consequences
 
@@ -268,6 +305,8 @@ reports the result.
 ## Open questions
 
 - Should the data plane read the store through the metadata cache's rules (`QUERYAPIGATE_METADATA_CACHE_TTL`), or
-  always read key and query rows fresh? Matching Python's setting is the default.
+  always read key and query rows fresh? Matching Python's setting is the default. *Answered:* it matches Python's
+  setting, and that is where much of the speed comes from: 3.2x per core without the cache, 4.0-9.4x with it.
 - Is a plan returned on Python's normal path enough, or should Python precompute plans when a query is published or
-  a key is changed, so the first call is fast too?
+  a key is changed, so the first call is fast too? *Still open,* for the follow-up ADR: the benchmarks measured steady
+  state, where the first call is one in thousands.

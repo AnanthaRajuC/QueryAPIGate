@@ -219,7 +219,7 @@ fn parse(spec: &Json) -> Out<Spec> {
 
 /// Decimal digits with an optional sign, nothing else - `int()` also takes spaces, `_` and other scripts' digits,
 /// which this declines.
-fn plain_integer(text: &str) -> Option<i64> {
+pub fn plain_integer(text: &str) -> Option<i64> {
     let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;

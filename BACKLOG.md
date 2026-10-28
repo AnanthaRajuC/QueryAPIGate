@@ -3134,3 +3134,24 @@ FIPS 140 validated. Answering means reading the code today.
 parameter names, never values; masked results; write requests' arguments for 30 days) for GDPR records of processing.
 FIPS: the server's own cryptography is `cryptography` (OpenSSL) and `hashlib`; document running on a FIPS-mode OpenSSL,
 and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIPS-approved algorithms).
+
+## 102. A Rust data plane for `/q/`
+
+**Status: prototype, decided go (0.44).** [ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
+a Rust process on the public port that serves saved-query reads from the plans Python computes and forwards
+everything else; runs it serves are reported to Python and recorded there. Gated by a differential test against
+Python, in CI against real PostgreSQL and MySQL. Measured in [Performance, v5](documentation/PERFORMANCE_V5.md):
+3.2-9.4x the calls a second per gateway core on lookups, about 8x on the same 8 cores. Guide 64. Experimental.
+
+**Impact:** the profiles in v4 and MySQL v2 put most of a call's CPU in Python's per-request work - Flask, the store
+reads, rendering - not the database. One gateway core serving several times the calls is fewer containers for the same
+traffic, and a p99 that stays in single milliseconds under load.
+
+**Next:**
+- **Shipping it** - the follow-up ADR 0028 promised: the Docker image and the Helm chart, a supervisor for the two
+  processes, and which of what it forwards to move next (rate-limited keys and `QUERYAPIGATE_TRUST_PROXY` first,
+  then other formats and workspaces).
+- **A store for runs at its rate** - ADR 0029: every run recorded at 20,000 a second is 1.7 billion rows a day, more
+  than SQLite or the PostgreSQL store should hold. ClickHouse, optional, written by both processes in batches.
+- **Until then, the event log needs a bound** at that rate: a row cap or sampling, as history has.
+- **Plans before the first call** (ADR 0028's open question): computed when a query is published or a key changes.

@@ -44,8 +44,10 @@ const MYSQL_TIMEOUT_ERRNOS: [&str; 2] = ["3024", "1969"];
 
 #[derive(Debug)]
 pub enum Failure {
-    /// Something this doesn't do as Python would: forward the call.
+    /// Something this doesn't do as Python would: forward the call, and the calls after it.
     Decline,
+    /// This call's own values can't be sent as Python's driver sends them: forward it, and only it.
+    Unsent,
     /// The time limit cancelled it: Python's 504.
     Timeout,
     /// The database refused or failed - forwarded, so Python answers it as it would. The text is for the probe.
@@ -284,7 +286,10 @@ pub fn build(
             None => window,
             Some(own) => 0.max(window.min(own - offset)),
         };
-        sql.push_str(&format!("\nLIMIT {window} OFFSET {}", own_offset + offset));
+        sql.push_str(&format!(
+            "\nLIMIT {window} OFFSET {}",
+            own_offset.checked_add(offset)?
+        ));
     }
     Some(sql)
 }
@@ -336,10 +341,16 @@ pub enum Pool {
     Mysql { pool: MySqlPool, mariadb: bool },
 }
 
+/// How long a connection whose pool couldn't be opened is left to Python before trying again.
+const RETRY_OPEN_AFTER: Duration = Duration::from_secs(30);
+
 /// One pool per connection, as its row stands: a changed connection gets a new pool.
 #[derive(Default)]
 pub struct Pools {
     pools: Mutex<HashMap<String, (Target, Arc<Pool>)>>,
+    /// Connections whose pool failed to open, until when: their calls go straight to Python, rather than each
+    /// waiting up to CONNECT_TIMEOUT on a database that is down.
+    failed: Mutex<HashMap<String, (Target, std::time::Instant)>>,
 }
 
 impl Pools {
@@ -349,7 +360,24 @@ impl Pools {
         {
             return Ok(pool.clone());
         }
-        let pool = Arc::new(open(target, size).await?);
+        if let Some((known, until)) = self.failed.lock().expect("failed pools").get(name)
+            && known == target
+            && std::time::Instant::now() < *until
+        {
+            return Err(Failure::Database("its pool failed to open just now".into()));
+        }
+        let pool = match open(target, size).await {
+            Ok(pool) => Arc::new(pool),
+            Err(failure) => {
+                let until = std::time::Instant::now() + RETRY_OPEN_AFTER;
+                self.failed
+                    .lock()
+                    .expect("failed pools")
+                    .insert(name.to_string(), (target.clone(), until));
+                return Err(failure);
+            }
+        };
+        self.failed.lock().expect("failed pools").remove(name);
         self.pools
             .lock()
             .expect("pools")
@@ -548,7 +576,7 @@ pub async fn run(
     let mut output = match pool {
         Pool::Postgres { pool, defaults } => {
             let sql = build(statement, values, Dialect::Postgres, limit, offset, None)
-                .ok_or(Failure::Decline)?;
+                .ok_or(Failure::Unsent)?;
             // ...and RESET ALL after it, in the same transaction: the next message is parsed with nothing set
             let message = format!(
                 "{}{sql}; RESET ALL",
@@ -594,7 +622,7 @@ pub async fn run(
                     )),
                 ),
             };
-            let sql = sql.ok_or(Failure::Decline)?;
+            let sql = sql.ok_or(Failure::Unsent)?;
             let sql = match wrap {
                 Some(wrap) => format!("{wrap}{sql}"),
                 None => sql,
@@ -713,6 +741,14 @@ mod tests {
             ("n", Param::Text("٣".into())),
         ]);
         assert!(build(&statement, &unsafe_window, Dialect::Mysql, 10, 0, None).is_none());
+        // an offset past what an i64 holds is never wrapped round to a small one
+        let huge = values(&[("a", Param::Text("x".into())), ("n", Param::Int(5))]);
+        let unpaged: Statement = serde_json::from_value(serde_json::json!({
+            "segments": ["SELECT id FROM t WHERE a = ", {"param": "a"}],
+            "paginated": true, "limit": null, "offset": {"value": 2}, "hint_at": null,
+        }))
+        .unwrap();
+        assert!(build(&unpaged, &huge, Dialect::Mysql, 10, i64::MAX, None).is_none());
     }
 
     #[test]

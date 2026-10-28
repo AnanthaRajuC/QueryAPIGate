@@ -146,20 +146,17 @@ impl Settings {
             pool_size: get("QUERYAPIGATE_DATAPLANE_POOL_SIZE")
                 .and_then(|v| v.trim().parse().ok())
                 .unwrap_or(16),
-            flush_every: Duration::from_secs_f64(
-                get("QUERYAPIGATE_HISTORY_FLUSH_INTERVAL")
-                    .and_then(|v| v.trim().parse().ok())
-                    .unwrap_or(1.0f64)
-                    .max(0.0),
-            ),
+            flush_every: get("QUERYAPIGATE_HISTORY_FLUSH_INTERVAL")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .filter(|v| v.is_finite()) // NaN.max(0.0) is 0.0
+                .and_then(|v| Duration::try_from_secs_f64(v.max(0.0)).ok())
+                .unwrap_or(Duration::from_secs(1)),
             json_logs: flag("QUERYAPIGATE_JSON_LOGS"),
-            metadata_ttl: Duration::from_secs_f64(
-                get("QUERYAPIGATE_METADATA_CACHE_TTL")
-                    .and_then(|v| v.trim().parse::<f64>().ok())
-                    .filter(|v| v.is_finite())
-                    .unwrap_or(0.0)
-                    .max(0.0),
-            ),
+            metadata_ttl: get("QUERYAPIGATE_METADATA_CACHE_TTL")
+                .and_then(|v| v.trim().parse::<f64>().ok())
+                .filter(|v| v.is_finite()) // NaN.max(0.0) is 0.0
+                .and_then(|v| Duration::try_from_secs_f64(v.max(0.0)).ok())
+                .unwrap_or(Duration::ZERO),
         }
     }
 }
@@ -265,6 +262,8 @@ pub struct App {
     runs: mpsc::Sender<Json>,
     /// Runs served but not queued for Python (the queue was full): sent with the next report, for its /metrics
     dropped: AtomicU64,
+    /// Reports being sent, at most REPORTS_IN_FLIGHT: all of its permits free means none is.
+    in_flight: Arc<Semaphore>,
     /// (kind, key) -> (until, rows): the store rows metacache.py would reuse, for QUERYAPIGATE_METADATA_CACHE_TTL
     rows: Mutex<HashMap<(char, String), Reused>>,
 }
@@ -286,6 +285,7 @@ impl App {
             store_mask_key: Mutex::new(None),
             runs,
             dropped: AtomicU64::new(0),
+            in_flight: Arc::new(Semaphore::new(REPORTS_IN_FLIGHT)),
             rows: Mutex::new(HashMap::new()),
         });
         tokio::spawn(report(app.clone(), queue));
@@ -615,7 +615,11 @@ impl App {
             (Some(asked), None) => Some(asked),
             (Some(asked), Some(server)) => Some(asked.min(server)),
         };
-        let (limit, offset) = (request.page_size, (request.page - 1) * request.page_size);
+        // Python's offset is unbounded, and the database refuses one this large: forward it, and Python answers
+        let Some(offset) = (request.page - 1).checked_mul(request.page_size) else {
+            return Forward(None);
+        };
+        let limit = request.page_size;
         let executed_at = clock.stored.clone();
         let request_id = respond::request_id(request.request_id.as_deref());
         if self.settings.log_requests {
@@ -691,6 +695,7 @@ impl App {
                 self.python_only(&digests);
                 return Forward(None);
             }
+            Err(Failure::Unsent) => return Forward(None), // this call's values only: the plan stays
             Err(Failure::Database(_)) => return Forward(None), // Python runs it again, and answers as it does
         };
 
@@ -872,10 +877,13 @@ impl App {
             );
         }
         if self.settings.access_log {
+            // A body built here has no Content-Length yet (hyper adds it as it sends): its size is exact all the same
             let bytes = response
                 .headers()
                 .get(header::CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok()?.parse().ok());
+                .and_then(|v| v.to_str().ok()?.parse().ok())
+                .or_else(|| hyper::body::Body::size_hint(response.body()).exact())
+                .and_then(|n| usize::try_from(n).ok());
             let agent = parts
                 .headers
                 .get(header::USER_AGENT)
@@ -898,11 +906,34 @@ impl App {
 /// Reports at once, at most: one at a time kept up with about 8,600 runs/s - well short of what this serves.
 const REPORTS_IN_FLIGHT: usize = 4;
 
+/// How long a shutdown waits for the runs still queued to reach Python.
+const DRAIN_FOR: Duration = Duration::from_secs(10);
+
+impl App {
+    /// On shutdown: every run still queued sent to Python, as Python's own history writer flushes at exit - for up to
+    /// DRAIN_FOR. Runs it can't send by then are lost, as Python's are on a hard kill.
+    pub async fn drain(&self) {
+        let until = tokio::time::Instant::now() + DRAIN_FOR;
+        while self.runs.capacity() < self.runs.max_capacity() && tokio::time::Instant::now() < until
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // The batch being gathered is sent at its interval's end, then every report finishes
+        tokio::time::sleep_until(
+            (tokio::time::Instant::now() + self.settings.flush_every).min(until),
+        )
+        .await;
+        let _ =
+            tokio::time::timeout_at(until, self.in_flight.acquire_many(REPORTS_IN_FLIGHT as u32))
+                .await;
+    }
+}
+
 /// Sends served runs to Python in batches, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL (each at once for 0), up to
-/// REPORTS_IN_FLIGHT at once, each with how many runs were dropped since the one before.
+/// REPORTS_IN_FLIGHT at once, each with how many runs were dropped since the one before - a report Python didn't
+/// take included.
 async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
     let every = app.settings.flush_every;
-    let in_flight = Arc::new(Semaphore::new(REPORTS_IN_FLIGHT));
     loop {
         let Some(first) = queue.recv().await else {
             return;
@@ -917,21 +948,23 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
                 }
             }
         }
-        let Ok(permit) = in_flight.clone().acquire_owned().await else {
+        let Ok(permit) = app.in_flight.clone().acquire_owned().await else {
             return;
         };
         let dropped = app.dropped.swap(0, Ordering::Relaxed);
         let body = json!({"runs": batch, "dropped": dropped}).to_string();
         let (app, count) = (app.clone(), batch.len());
         tokio::spawn(async move {
-            match app.forward.post("/internal/dataplane/runs", body).await {
-                Ok(status) if status.as_u16() == 204 => {}
-                Ok(status) => {
-                    eprintln!("queryapigate-dataplane: reporting {count} runs got {status}")
-                }
-                Err(error) => {
-                    eprintln!("queryapigate-dataplane: reporting {count} runs failed: {error}")
-                }
+            let failed = match app.forward.post("/internal/dataplane/runs", body).await {
+                Ok(status) if status.as_u16() == 204 => None,
+                Ok(status) => Some(format!("got {status}")),
+                Err(error) => Some(format!("failed: {error}")),
+            };
+            if let Some(why) = failed {
+                // Not sent again (Python may have recorded some), but counted: as dropped, with the next report
+                app.dropped
+                    .fetch_add(count as u64 + dropped, Ordering::Relaxed);
+                eprintln!("queryapigate-dataplane: reporting {count} runs {why}");
             }
             drop(permit);
         });
@@ -948,6 +981,26 @@ fn candidate(request: &Request<Incoming>) -> bool {
     (request.method() == Method::GET || request.method() == Method::POST)
         && request.uri().path().starts_with("/q/")
         && request.headers().contains_key("x-api-key")
+        && small_body(request.headers())
+}
+
+/// The largest body read before the key is checked: a `/q/` call's parameters are a few hundred bytes.
+const MAX_READ_BODY: u64 = 64 * 1024;
+
+/// Whether a request's body is one this may read whole before the key is checked: no body, or a Content-Length of
+/// at most MAX_READ_BODY. Anything else - chunked, or larger - streams through to Python, which reads it as it would.
+fn small_body(headers: &HeaderMap) -> bool {
+    if headers.contains_key(header::TRANSFER_ENCODING) {
+        return false;
+    }
+    match headers.get(header::CONTENT_LENGTH) {
+        None => true,
+        Some(value) => value
+            .to_str()
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .is_some_and(|n| n <= MAX_READ_BODY),
+    }
 }
 
 /// `/q/<name>`: the one path segment, percent-decoded as Werkzeug decodes it - or None.
@@ -1093,13 +1146,7 @@ impl Call {
         let int_arg = |name: &str| -> Option<Option<i64>> {
             match arg(name) {
                 None | Some("") => Some(None),
-                Some(text) => {
-                    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-                    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                        return None;
-                    }
-                    Some(Some(text.parse().ok()?))
-                }
+                Some(text) => Some(Some(params::plain_integer(text)?)),
             }
         };
         let page = int_arg("page")?.unwrap_or(1);
@@ -1178,6 +1225,35 @@ mod tests {
         let limited =
             Settings::from(|name| (name == "QUERYAPIGATE_RATE_LIMIT").then(|| "10/minute".into()));
         assert!(limited.forward_everything.is_some());
+    }
+
+    #[test]
+    fn intervals_that_aren_t_durations_fall_back_to_the_defaults() {
+        for text in ["inf", "1e300", "nan", "x"] {
+            let settings = Settings::from(|name| {
+                (name == "QUERYAPIGATE_HISTORY_FLUSH_INTERVAL"
+                    || name == "QUERYAPIGATE_METADATA_CACHE_TTL")
+                    .then(|| text.into())
+            });
+            assert_eq!(settings.flush_every, Duration::from_secs(1), "{text}");
+            assert_eq!(settings.metadata_ttl, Duration::ZERO, "{text}");
+        }
+    }
+
+    #[test]
+    fn only_a_small_body_of_known_size_is_read_before_the_key_is_checked() {
+        let headers = |pairs: &[(&'static str, &str)]| {
+            let mut map = HeaderMap::new();
+            for (name, value) in pairs {
+                map.insert(*name, value.parse().unwrap());
+            }
+            map
+        };
+        assert!(small_body(&headers(&[])));
+        assert!(small_body(&headers(&[("content-length", "120")])));
+        assert!(!small_body(&headers(&[("content-length", "65537")])));
+        assert!(!small_body(&headers(&[("content-length", "x")])));
+        assert!(!small_body(&headers(&[("transfer-encoding", "chunked")])));
     }
 
     #[test]

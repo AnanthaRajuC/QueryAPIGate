@@ -59,7 +59,8 @@ class DigestTests:
             'sql_query': 'SELECT id, name FROM t WHERE id = :id', 'query_parameters': {'id': 'int'}})
 
     def plan_and_probe(self, key):
-        res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': key, dataplane.SECRET_HEADER: SECRET})
+        res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': key, dataplane.SECRET_HEADER: SECRET,
+                                                       dataplane.WANTED_HEADER: '1'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         plan = dataplane.decode(res.headers[dataplane.PLAN_HEADER])
         probe = subprocess.run([str(binary()), '--probe-digests', key, 'by_id'], env={**os.environ, **self.env},

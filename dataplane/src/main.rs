@@ -1,8 +1,8 @@
-//! QueryAPIGate's data plane (ADR 0028, a prototype): listens on the public port in front of the Python server and
-//! forwards every request to it unchanged - the Console, the Management API, MCP, `/events`, everything. Serving
-//! `/q/<name>` itself from Python's plans comes next; until then this is the front alone.
+//! QueryAPIGate's data plane (ADR 0028, a prototype): listens on the public port in front of the Python server,
+//! serves `/q/<name>` reads itself from the plans Python gives it (serve.rs), and forwards every other request to it
+//! unchanged - the Console, the Management API, MCP, `/events`, everything.
 //!
-//! What it changes on the way through, and nothing else:
+//! What it changes on a forwarded request's way through, and nothing else:
 //! - removes the data plane's own headers from what a client sends (`X-QAG-Dataplane`, `X-QAG-Peer`,
 //!   `X-QAG-Plan`), so only this process can speak for itself - the Console's `X-QAG-CSRF` passes;
 //! - adds `X-QAG-Dataplane` (the shared secret) and `X-QAG-Peer` (the client's socket address), which Python takes
@@ -122,6 +122,7 @@ async fn serve(config: config::Config) {
         let _ = stream.set_nodelay(true);
         tokio::spawn(connection(app.clone(), stream, peer));
     }
+    app.drain().await;
 }
 
 async fn connection(app: Arc<serve::App>, stream: tokio::net::TcpStream, peer: SocketAddr) {

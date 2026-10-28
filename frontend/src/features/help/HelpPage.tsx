@@ -411,6 +411,12 @@ const DOCS = [
     path: 'how-to/63-tune-a-deployment-for-throughput.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-64',
+    title: 'Try the Rust data plane',
+    path: 'how-to/64-try-the-rust-data-plane.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

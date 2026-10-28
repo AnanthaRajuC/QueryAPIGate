@@ -119,6 +119,46 @@ class ServingTests(unittest.TestCase):
         status, _body = self.assertServedAsPython('/q/sleepy?s=2&timeout=0.3', self.keys['plain'], warm='/q/sleepy?s=0')
         self.assertEqual(status, 504)
 
+    def test_one_call_s_own_values_leave_the_plan_as_it_was(self):
+        """A value the data plane can't send as the driver does (a NUL) forwards that call alone: the next ordinary
+        call to the same query is served, not left to Python for five minutes."""
+        key = self.keys['plain']
+        self.assertServedAsPython('/q/by_name?name=Name%206', key)
+        status, _h, _body = self.call('/q/by_name?name=a%00b', key, 'nul')
+        self.assertEqual(status, self.call('/q/by_name?name=a%00b', key, 'nul', host=self.python)[0])
+        before = self.served()
+        self.call('/q/by_name?name=Name%207', key, 'after-nul')
+        self.assertEqual(self.served(), before + 1, 'the plan was left to Python after one odd call')
+
+    def test_a_large_body_streams_through_to_python_unread(self):
+        key = self.keys['plain']
+        self.assertServedAsPython('/q/by_name', key, method='POST', body={'params': {'name': 'Name 5'}})
+        before = self.served()
+        large = {'params': {'name': 'Name 5'}, 'padding': 'x' * 70_000}
+        status, _h, payload = self.call('/q/by_name', key, 'large', method='POST', body=large)
+        self.assertEqual(self.served(), before)  # forwarded, not read and served
+        self.assertEqual((status, payload), self.call('/q/by_name', key, 'large', host=self.python, method='POST',
+                                                      body=large)[:3:2])
+
+    def test_runs_still_queued_at_shutdown_reach_python(self):
+        """SIGTERM sends what the data plane still holds, as Python's own history writer flushes at exit: here a run
+        served inside a 5 s report interval."""
+        pair = Pair(self.pair.home, {'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_MASK_KEY': 'serving-mask',
+                                     'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '5'})
+        try:
+            key = self.keys['plain']
+            for i in range(3):
+                request('127.0.0.1', pair.port, 'GET', '/q/by_id?id=9',
+                        {'X-API-Key': key, 'X-Request-Id': f'drain-{i}'})
+            pair.dataplane.terminate()
+            self.assertEqual(pair.dataplane.wait(timeout=15), 0)
+            status, _h, body = request('127.0.0.1', pair.python_port, 'GET', '/api/v1/history?query=by_id&limit=200',
+                                       self.admin)
+            mine = {e.get('request_id') for e in json.loads(body)['items']} & {f'drain-{i}' for i in range(3)}
+            self.assertEqual(mine, {f'drain-{i}' for i in range(3)})
+        finally:
+            pair.stop()
+
     def test_a_served_run_is_in_python_s_history(self):
         self.assertServedAsPython('/q/by_id?id=7', self.keys['plain'], request_id='history-check')
         for _ in range(50):

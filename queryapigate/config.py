@@ -387,6 +387,9 @@ def check_settings():
     for folder in os.environ.get('QUERYAPIGATE_SECRET_FILE_DIRS', '').split(','):
         if folder.strip() and not os.path.isabs(folder.strip()):
             raise ValueError(f"QUERYAPIGATE_SECRET_FILE_DIRS: '{folder.strip()}' must be an absolute path")
+    if dataplane_secret() is not None and len(dataplane_secret()) < DATAPLANE_SECRET_MIN:
+        raise ValueError(f'QUERYAPIGATE_DATAPLANE_SECRET must be at least {DATAPLANE_SECRET_MIN} characters - the data '
+                         'plane refuses a shorter one too')
     if metrics_token() is not None and len(metrics_token()) < METRICS_TOKEN_MIN:
         raise ValueError(f'QUERYAPIGATE_METRICS_TOKEN must be at least {METRICS_TOKEN_MIN} characters - '
                          '`openssl rand -hex 32` makes one')
@@ -699,6 +702,7 @@ def secret_source(name):
 
 
 METRICS_TOKEN_MIN = 16
+DATAPLANE_SECRET_MIN = 16  # dataplane/src/config.rs's MIN_SECRET: it is all that lets a request speak for a client
 
 
 def metrics_token():
@@ -1408,6 +1412,9 @@ def describe_settings():
                 secret=True),
             row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
                 'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
+            row('Data plane secret', 'Shared with a Rust data plane in front of this server (ADR 0028), which then '
+                'serves /q/ reads itself. Unset: no data plane can.',
+                'QUERYAPIGATE_DATAPLANE_SECRET', 'configured' if dataplane_secret() else 'not set', secret=True),
             row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',
                 'QUERYAPIGATE_EXPORT_DIRS', ', '.join(export_dirs()) or 'object storage only'),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',

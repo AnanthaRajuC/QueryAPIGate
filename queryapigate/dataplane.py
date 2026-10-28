@@ -107,6 +107,8 @@ def statement(sql, dialect):
     segments.append(sql[position:])
     if hint_at is not None and hint_at > len(segments[0]):
         return None
+    if hint_at is not None:  # a UTF-8 byte offset, as the data plane slices: a character before it can be wider
+        hint_at = len(segments[0][:hint_at].encode('utf-8'))
     return {'segments': segments, 'paginated': paginated, 'limit': _operand(limit), 'offset': _operand(offset),
             'hint_at': hint_at}
 

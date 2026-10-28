@@ -22,6 +22,10 @@ updates:
       # (#78-#80 came one each and all failed)
       codeql-action:
         patterns: ["github/codeql-action*"]
+  - package-ecosystem: cargo  # the Rust data plane (ADR 0028); its toolchain is pinned by hand, in rust-toolchain.toml
+    directory: /dataplane
+    schedule:
+      interval: weekly
   - package-ecosystem: docker
     directory: /
     schedule:

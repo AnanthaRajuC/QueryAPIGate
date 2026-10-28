@@ -35,6 +35,7 @@ with the Python build behind it, cache with cache.
 - [Results on PostgreSQL](#results-on-postgresql)
 - [Results on MySQL](#results-on-mysql)
 - [Keeping every run](#keeping-every-run)
+- [The forwarded hop, and memory](#the-forwarded-hop-and-memory)
 - [Where the data plane doesn't help](#where-the-data-plane-doesnt-help)
 - [What a go takes](#what-a-go-takes)
 - [Limits](#limits)
@@ -196,11 +197,29 @@ What changed:
   next batch.
 - **Two Python workers behind it, not one:** one process's writer keeps up with about 17,000 runs a second.
 
+## The forwarded hop, and memory
+
+The two figures ADR 0028 also asked for, measured on 2026-10-28, 07:41-07:57: PostgreSQL, the metadata cache on in
+both builds, each latency the middle of 3 runs of 30 s.
+
+| | Python + cache, direct | Through the data plane |
+|---|---|---|
+| Write (forwarded), one caller: p50 / p99 | 1.43 / 2.28 ms | 1.78 / 3.52 ms |
+| Write (forwarded), 400 a second: p50 / p99 | 1.77 / 5.04 ms | 2.12 / 4.40 ms |
+| Lookup (served), one caller: p50 / p99 | 1.38 / 3.04 ms | 0.18 / 0.64 ms |
+| Lookup (served), 400 a second: p50 / p99 | 1.58 / 4.71 ms | 0.63 / 1.38 ms |
+| Memory (VmRSS) after the cells | master 48 MB, worker 52 MB | data plane 19 MB; master 48 MB, 2 workers 64 MB each |
+
+- **A forwarded call pays 0.35 ms at p50,** at both loads. At 400 a second its p99 is no worse.
+- **The data plane holds 19 MB.** Each Python worker behind it holds 12 MB more than a worker on its own.
+- One caller's lookup through Python + cache took 1.38 ms here, against 1.01 ms in the decision run's 1-caller block:
+  this was a separate session, so compare within the table, not across runs.
+
 ## Where the data plane doesn't help
 
 - **Writes** are forwarded to Python: 1,653 calls a second through the data plane with its 2 workers, against 1,030
-  for one worker on its own: **0.8x per core.** The forwarding hop costs CPU, and writes were never the data plane's
-  to serve.
+  for one worker on its own: **0.8x per core,** and 0.35 ms more at p50 ([above](#the-forwarded-hop-and-memory)). The
+  forwarding hop costs CPU, and writes were never the data plane's to serve.
 - **A 100-row page on PostgreSQL without the cache: 2.8x per core,** below the bar. PostgreSQL sets the limit there
   (3.9 of 4 cores); with the cache, 3.5x.
 - **The first call to each query, key and schema, and every call using a feature the data plane leaves to Python**

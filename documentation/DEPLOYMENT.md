@@ -440,6 +440,19 @@ Walkthrough, run on kind:
 Plain manifests of the PostgreSQL shape, kept in step with the chart by a test:
 [`deploy/kubernetes/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/deploy/kubernetes).
 
+## A Rust data plane in front of /q/ (prototype)
+
+> **Experimental** - outside the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
+> a prototype ([ADR 0028](adr/0028-rust-data-plane-prototype.md), decided go). It is built from the repository and
+> isn't in the image or the chart; what it serves, its settings and its headers may change before it ships.
+
+A second process, `dataplane/`, can take the public port and serve saved-query reads itself, from plans the Python
+server gives it, forwarding everything else to Python unchanged. For the calls it serves it measured 3-9x the calls a
+second per core, with every run still recorded by Python ([Performance, v5](PERFORMANCE_V5.md)). It needs
+`QUERYAPIGATE_DATAPLANE_SECRET` (at least 16 characters) set for both processes, and at least two gunicorn workers
+behind it. To build it, run it and see which calls it serves:
+[Try the Rust data plane](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md).
+
 ## Upgrading
 
 1. Read the [Changelog](../CHANGELOG.md) entry for the target version, especially anything under a

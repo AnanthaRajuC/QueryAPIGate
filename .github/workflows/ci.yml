@@ -282,6 +282,59 @@ jobs:
         run: python -m venv /tmp/previous-release && /tmp/previous-release/bin/pip install -q "queryapigate[postgres]==$PREVIOUS_RELEASE"
       - run: python -m unittest discover -s tests -t . -v
 
+  dataplane:
+    # The Rust data plane in front of /q/ (ADR 0028): its own checks, then its tests and the differential gate - the
+    # same calls sent to Python directly and through the data plane, compared whole, against real PostgreSQL and MySQL.
+    name: Data plane (Rust, and the differential gate)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        # 64 MB of /dev/shm, Docker's default, runs out under the gate's parallel queries
+        options: >-
+          --shm-size=256m
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: pw
+          MYSQL_DATABASE: shop
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -ppw" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      QUERYAPIGATE_DATAPLANE_TEST_POSTGRES: 127.0.0.1:5432:postgres:pw:postgres
+      QUERYAPIGATE_DATAPLANE_TEST_MYSQL: 127.0.0.1:3306:root:pw:shop
+      QUERYAPIGATE_DATAPLANE_TEST_STORE_URL: postgresql://postgres:pw@127.0.0.1:5432/postgres
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: The toolchain dataplane/rust-toolchain.toml pins (rustup is on the runner)
+        working-directory: dataplane
+        run: rustup toolchain install && rustc --version
+      - name: Format, lint, unit tests and the release build
+        working-directory: dataplane
+        run: |
+          cargo fmt --check
+          cargo clippy --release --locked --all-targets -- -D warnings
+          cargo test --release --locked
+          cargo build --release --locked
+      - run: pip install -e ".[dev,server]"
+      - name: The data plane's tests, and the differential gate - none may skip
+        run: |
+          set -o pipefail  # each file's own result, not tee's
+          for test in dataplane/tests/test_*.py; do
+            python "$test" -v 2>&1 | tee -a /tmp/dataplane.log || exit 1
+          done
+          ! grep -E "skipped '" /tmp/dataplane.log
+
   console-e2e:
     # The built Console driven in Chromium against a real server (frontend/e2e): every screen and the main flows.
     # Here rather than in frontend.yml because a backend change can break the Console just as well.

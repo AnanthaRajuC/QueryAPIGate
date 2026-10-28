@@ -12,7 +12,7 @@ from queryapigate import apikeys, create_app, dataplane, db, runners, schema, sq
 from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
-SECRET = 'dp-secret'
+SECRET = 'dp-secret-0123456789'
 WANTED = 'X-QAG-Plan-Wanted'
 COLUMNS = ['id', 'email', 'name']
 TABLES = {'tables': [{'name': 'customers', 'columns': [{'name': c} for c in COLUMNS]}]}
@@ -101,6 +101,13 @@ class WhoGetsAPlanTests(PlanTestCase):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATAPLANE_SECRET': ''}):
             self.assertIsNone(self.call('/q/by_id?id=1', self.plain)[1])
 
+    def test_a_short_secret_stops_startup_as_it_stops_the_data_plane(self):
+        from queryapigate import config
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATAPLANE_SECRET': 'fifteen-chars-x'}), \
+                self.assertRaises(ValueError) as caught:
+            config.check_settings()
+        self.assertIn('at least 16 characters', str(caught.exception))
+
     def test_never_for_an_administrator(self):
         res = self.client.get('/q/by_id?id=1', headers={**ADMIN, dataplane.SECRET_HEADER: SECRET, WANTED: '1'})
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
@@ -174,6 +181,14 @@ class WhatAPlanHoldsTests(PlanTestCase):
         self.assertTrue(statement['paginated'])
         self.assertIsNone(statement['limit'])
         self.assertIsNone(statement['hint_at'])
+
+    def test_mysql_s_hint_goes_at_a_byte_offset_after_a_comment_that_isn_t_ascii(self):
+        """The data plane slices the SQL's UTF-8 bytes: counted in characters, a wider character before SELECT would
+        put the time limit inside the comment, and the query would run without one."""
+        sql = '-- ééééééééé\nSELECT id FROM customers'
+        statement = dataplane.statement(sql, 'mysql')
+        text = statement['segments'][0].encode('utf-8')
+        self.assertEqual(text[:statement['hint_at']].decode('utf-8'), '-- ééééééééé\nSELECT')
 
     def test_its_own_window_apart_to_be_resolved_per_call(self):
         statement = self.call('/q/paged?n=5', self.plain)[1]['statement']

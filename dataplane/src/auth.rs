@@ -124,6 +124,8 @@ fn ip_allowed(allowed: Option<&Json>, client: Option<IpAddr>) -> Option<bool> {
     let Some(client) = client else {
         return Some(false);
     };
+    // As forward::peer_text() sends it to Python: an IPv4 client on a dual-stack socket is IPv4, not ::ffff:a.b.c.d
+    let client = client.to_canonical();
     let mut found = false;
     for value in list {
         let text = value.as_str()?;
@@ -256,6 +258,11 @@ mod tests {
             )
             .is_none()
         );
+        // an IPv4 client on a dual-stack socket is judged as IPv4, as Python receives it in X-QAG-Peer
+        let mapped = Some(IpAddr::V6("::ffff:10.9.8.7".parse().unwrap()));
+        assert!(authenticate(SECRET, None, &office, mapped, &at).is_some());
+        let any_v6 = rows(1, None, r#"{"allowed_ips": ["::/0"]}"#);
+        assert!(authenticate(SECRET, None, &any_v6, mapped, &at).is_none());
         // a host address with a prefix, as ip_network(strict=False) reads it
         let host = rows(1, None, r#"{"allowed_ips": ["10.1.2.3/24"]}"#);
         assert!(authenticate(SECRET, None, &host, ip("10.1.2.200"), &at).is_some());
