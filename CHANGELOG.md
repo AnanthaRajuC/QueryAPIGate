@@ -50,6 +50,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-28
+
 A Rust data plane for `/q/`, as a prototype that ended in a measured decision: go
 ([ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md)). In front of the Python server, it serves
 saved-query reads itself from the plans Python computes, and forwards everything else. Against the Python build
@@ -3033,7 +3035,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.40.0...v0.41.0
