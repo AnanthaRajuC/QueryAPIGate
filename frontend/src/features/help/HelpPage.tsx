@@ -359,7 +359,7 @@ const DOCS = [
   },
   {
     id: 'howto-55',
-    title: 'Promote a setup from dev to prod through a pull request',
+    title: 'Manage your setup as code, and promote it from dev to prod through a pull request',
     path: 'how-to/55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md',
     group: 'How-to guides',
   },
