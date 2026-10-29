@@ -7,8 +7,8 @@
   built*). It ships experimental (section 1), and graduates after a release unchanged, a security review and the
   250-million-run measurement. **Security review: done (2026-10-28),** its findings fixed in section 7's
   *Reviewed*; schema version 2 of the run store's tables. **250 million runs: measured (2026-10-29),** every
-  criterion met with the replay reading its ids in batches (section 9, *At 250 million runs*). What's left to
-  graduate: a release unchanged.
+  criterion met with the replay reading its ids in batches (section 9, *At 250 million runs*). Both shipped in 0.46.0.
+  What's left to graduate: a release unchanged after 0.46.0.
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and

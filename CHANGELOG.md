@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-29
+
+The experimental ClickHouse run store's security review, and a replay twice as fast at 250 million runs. Only a
+deployment with `QUERYAPIGATE_RUN_STORE_URL` set is affected by the review's fixes; its tables move to version 2 at
+the first start, under a lock, with the grants guide 65 gives. Upgrade if you run the run store from 0.45.0. The
+Console's DOMPurify is updated too.
+
 ### Security
 
 The experimental ClickHouse run store's security review (ADR 0029, one of its conditions to graduate). Nothing here
@@ -3119,7 +3126,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.42.0...v0.43.0
