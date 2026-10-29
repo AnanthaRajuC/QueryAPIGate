@@ -926,6 +926,13 @@ const RUN_STORE_BATCH: usize = 100_000;
 const DRAIN_FOR: Duration = Duration::from_secs(10);
 
 impl App {
+    /// On shutdown, after drain(): the run store's lease given back.
+    pub async fn release_lease(&self) {
+        if let Some(run_store) = &self.run_store {
+            run_store.release(&self.forward).await;
+        }
+    }
+
     /// On shutdown: every run still queued sent to Python, as Python's own history writer flushes at exit - for up to
     /// DRAIN_FOR. Runs it can't send by then are lost, as Python's are on a hard kill.
     pub async fn drain(&self) {

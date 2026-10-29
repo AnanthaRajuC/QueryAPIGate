@@ -1276,14 +1276,19 @@ def dataplane_runs():
 def dataplane_lease():
     """A data plane's block of the event ids it mints when it writes its runs to the run store itself (runstore.py,
     ADR 0029 §2), leased here so its store access stays read-only: `{"holder": ...}` leases one, `{"holder": ...,
-    "block": n}` renews it (409 once it has lapsed: lease again). With the layout of an id and the settle window, so
-    the two processes can't disagree on them. 404 without a run store."""
+    "block": n}` renews it (409 once it has lapsed: lease again), and with `"release": true` gives it back, as it stops.
+    With the layout of an id and the settle window, so the two processes can't disagree on them, and where the run
+    store is (`location`, as the metadata store records it): a data plane configured with another one writes nothing
+    there. 404 without a run store."""
     if not runstore.enabled():
         return jsonify(error_body('No run store is configured', 404)), 404
     body = request.get_json(silent=True) or {}
     holder = body.get('holder')
     if not isinstance(holder, str) or not 0 < len(holder) <= 200:
         return jsonify(error_body('holder: a name for the data plane process', 400)), 400
+    if body.get('release') is True and isinstance(body.get('block'), int):
+        runstore.release(body['block'], holder)
+        return '', 204
     if body.get('block') is not None:
         if not isinstance(body['block'], int) or not runstore.renew(body['block'], holder):
             return jsonify(error_body('That lease has lapsed - lease a block again', 409)), 409
@@ -1295,6 +1300,7 @@ def dataplane_lease():
     return jsonify({'block': block, 'size': runstore.DATAPLANE_BLOCK, 'lease_seconds': runstore.LEASE_SECONDS,
                     'epoch_ms': runstore.EPOCH_MS, 'per_ms': runstore.PER_MS,
                     'settle_seconds': runstore.SETTLE_SECONDS, 'database': runstore.database(),
+                    'location': runstore.location(),
                     'sample_rate': config.history_sample_rate()}), 200
 
 

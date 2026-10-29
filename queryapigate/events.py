@@ -150,6 +150,12 @@ def _chunk(data):
 
 
 def _format(event_id, payload_json):
+    """One event's frame. Its data is one line whatever the payload holds: this server's JSON never has a line break,
+    but a run store row is written by whoever has its credentials (runstore.py), and a break would end the frame early
+    and start one of the writer's own - another event, an `id:` that moves every client's resume point. JSON allows a
+    raw break only between tokens, where a space means the same (security review, 2026-10-28)."""
+    if '\n' in payload_json or '\r' in payload_json:
+        payload_json = payload_json.replace('\r', ' ').replace('\n', ' ')
     return f'id: {event_id}\ndata: {payload_json}\n\n'.encode()
 
 

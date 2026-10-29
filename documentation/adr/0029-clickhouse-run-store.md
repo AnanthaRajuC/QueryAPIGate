@@ -5,7 +5,8 @@
   allowed, with what differs from plan. Amended while building it: three columns in `events`, a `history_counts`
   table, and the rollups' code and statement dimensions, each found by measuring a read (sections 3 to 5, *as
   built*). It ships experimental (section 1), and graduates after a release unchanged, a security review and the
-  250-million-run measurement.
+  250-million-run measurement. **Security review: done (2026-10-28),** its findings fixed in section 7's
+  *Reviewed*; schema version 2 of the run store's tables.
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and
@@ -241,6 +242,36 @@ history's newest runs, as with the metadata store. A replay page finds its ids f
 - The threat model gains an entry: what a stolen run-store credential reads (entries, not results) or forges
   (runs and events, not definitions).
 
+#### Reviewed (2026-10-28), and what changed
+
+A review of 0.45.0's run store: Python's and the data plane's code, the views and grants, against the threat model.
+Parameterisation, transport and credential handling, the insert-only user, the lease's gate, the marker on every
+Python entry point and the scoping of replay and delivery held. What it found, each fixed with a test that fails
+without the fix:
+
+1. **A row could split an event stream** (medium). The events server wrote a stored payload into its frame as it
+   was, so a line break in a row - from anyone with an insert credential, the data plane's included - made frames of
+   the writer's own, with an `id:` that moved every client's resume point. A frame's data is one line now (a break
+   becomes a space, which means the same between JSON tokens), and `events` has a check constraint: ids at most
+   2^53 - 1.
+2. **The data plane's run store wasn't checked** (medium). Python's instances refuse to start against another run
+   store than the metadata store records (section 6); the data plane read only its own URL. The lease now carries
+   the location, and a data plane whose own differs writes none of its runs - counted as dropped, and logged - until
+   they agree.
+3. **Ad-hoc statements outlived the retention settings** (medium, data protection). `run_hours` kept their text for
+   400 days and `run_minutes` for 7, though only `run_minutes` is read, and only within the event log's retention.
+   `run_hours`' view hashes them now (SHA-256, the `sha:` form of `QUERYAPIGATE_HISTORY_ADHOC_SQL=hash`), and
+   `run_minutes` expires with the event log.
+4. **`forget` could miss runs in flight** (low): it deletes a second time once a flush interval and the settle
+   window have passed, as deleting a query's runs already did.
+5. **`leave` trusted the newest id** (low): it now continues from the newest id up to the clock and a writer's lead.
+6. **A forged history cursor was a 500** (low): it's a 400.
+
+Schema version 2 (`run_store_schema`) is reached at the first start, under a lock in the metadata store, with the
+grants guide 65 gives (no `DROP`): the constraint added, `run_hours_mv` changed by `MODIFY QUERY`, and each of
+`run_hours`' rows that holds a statement's text inserted again hashed, then deleted. That runs at any start that
+finds such a row, for an insert that was under way as the view changed.
+
 ### 8. What the SQL stores keep
 
 Nothing changes for them. The bound the event log needs at the data plane's rate (BACKLOG #102, a row cap or
@@ -348,8 +379,8 @@ against the run store with one.
   settle window. `select_sequential_consistency`, or reading from the inserting replica, needs measuring.
 - **Should the main server's `GET /events` tail the store** too, instead of its in-process broadcaster?
 - **Time-ordered ids for the SQL stores**, replacing the 1,000-id look-back (section 8).
-- **The rollups' grains and defaults** (7 days by minute, 400 days by hour), once real traffic's combinations per
-  minute are known.
+- **The rollups' grains and defaults** (by minute for the event log's retention, by hour for 400 days), once real
+  traffic's combinations per minute are known.
 - **The events server's ceiling:** about 10,000 events a second per stream from one process, below what a data plane
   serves. Several processes behind a load balancer each tail the store already; whether one process should serve
   more is a separate measurement.

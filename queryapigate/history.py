@@ -475,6 +475,13 @@ def _time_bound(value, label):
     return value
 
 
+def _real_time(value):
+    try:
+        return _time_bound(value, 'cursor') == value
+    except ApiError:
+        return False
+
+
 def _encode_cursor(executed_at, rowid):
     return base64.urlsafe_b64encode(json.dumps([executed_at, rowid]).encode()).decode().rstrip('=')
 
@@ -542,6 +549,8 @@ def _search_run_store(query, version, status, key, kind, since, until, limit, cu
     runstore.ensure_schema()
     where, params = runstore.history_filter(scope.current(), query, version, status, key, kind)
     top, after = _decode_cursor(cursor) if cursor else (until, None)
+    if cursor and not (0 <= after <= runstore.MAX_ID and _real_time(top)):  # the read cuts its windows at the time
+        raise ApiError('cursor is not one this server returned', code='invalid_filter')
     rows = runstore.newest_first(where, params, limit + 1, top=top, floor=since,
                                  columns='query_name, version, executed_at, id, entry', after=after)
     entries = [{'query': row['query_name'], 'version': row['version'],
