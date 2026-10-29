@@ -529,6 +529,12 @@ class LeaseEndpointTests(StoreTestCase):
         self.assertEqual(self.lease(block=block, release=True).status_code, 204)
         self.assertFalse(runstore.renew(block, 'dp'))  # given back, not lapsing a minute later
 
+    def test_every_block_taken_is_a_503_that_says_so(self):
+        with mock.patch.object(runstore, 'lease', side_effect=runstore.LeaseError('a message of its own')):
+            res = self.lease()
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.get_json()['error'], runstore.LEASES_TAKEN)
+
 
 class EventServerTests(StoreTestCase):
     def setUp(self):

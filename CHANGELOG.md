@@ -77,6 +77,16 @@ grants guide 65 gave.
   `invalid_filter`, not a 500; the data plane gives its id lease back as it stops; guide 65 no longer grants
   `TRUNCATE`, which nothing uses.
 
+Beside the review, dependencies with published advisories, and one code-scanning alert:
+
+- **The Console's DOMPurify is 3.4.17**, for GHSA-cg2g-xh64-v4q7 (critical), GHSA-mrv2-3pqr-j5jr and
+  GHSA-c6gr-qvv4-5v3f. The Console sanitises the Help page's Markdown with DOMPurify's defaults, and those three need
+  options it doesn't set (`SAFE_FOR_TEMPLATES`, `IN_PLACE` with hooks, `PARSER_MEDIA_TYPE`), so it wasn't open to them;
+  it ships, so it's updated all the same. undici 7.30.1 and zod 4.6.7, for nine more advisories, are only in the
+  Console's tests and lint. The data plane's `block-buffer` 0.10.4 (GHSA-qwgh-2vcv-g2f7, a panic that can corrupt a
+  hash's buffer) waits on `fernet` and `sqlx-core`, which pin it.
+- The run store lease's 503 says why in fixed words, not an exception's text.
+
 ### Changed
 
 - **A run store replay is about twice as fast at 250 million runs:** a Last-Event-ID resume finds up to 100,000 of

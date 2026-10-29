@@ -466,6 +466,10 @@ class LeaseError(Exception):
     pass
 
 
+LEASES_TAKEN = (f'every one of the {PER_MS} event ids in each millisecond is leased to a running writer - too many '
+                'processes are recording runs at once')
+
+
 _LEASE_LOCK_ID = 0x51A9  # next to db's and history's: the PostgreSQL advisory lock leasing takes
 
 
@@ -490,8 +494,7 @@ def lease(size, holder, target=None):
                 break
             start = max(start, block_start + block_size)
         if start + size > PER_MS:
-            raise LeaseError(f'every one of the {PER_MS} event ids in each millisecond is leased to a running writer - '
-                             'too many processes are recording runs at once')
+            raise LeaseError(LEASES_TAKEN)
         tx.execute('INSERT INTO run_writer_leases (block_start, size, holder, expires_at) VALUES (?, ?, ?, ?)',
                    (start, size, holder, now + LEASE_SECONDS))
     return start
