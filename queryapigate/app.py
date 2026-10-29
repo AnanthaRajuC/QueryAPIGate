@@ -1295,8 +1295,8 @@ def dataplane_lease():
         return jsonify({'block': body['block'], 'lease_seconds': runstore.LEASE_SECONDS}), 200
     try:
         block = runstore.lease(runstore.DATAPLANE_BLOCK, holder)
-    except runstore.LeaseError as error:
-        return jsonify(error_body(str(error), 503)), 503
+    except runstore.LeaseError:
+        return jsonify(error_body(runstore.LEASES_TAKEN, 503)), 503  # the only reason, and no exception's text
     return jsonify({'block': block, 'size': runstore.DATAPLANE_BLOCK, 'lease_seconds': runstore.LEASE_SECONDS,
                     'epoch_ms': runstore.EPOCH_MS, 'per_ms': runstore.PER_MS,
                     'settle_seconds': runstore.SETTLE_SECONDS, 'database': runstore.database(),
