@@ -153,7 +153,8 @@ guide covers one scenario end to end, and every command and response in it was r
     PostgreSQL and Redis shared, failover and rolling updates.
 54. [**Install on Kubernetes with Helm**](54-install-on-kubernetes-with-helm.md) - one pod on SQLite
     or several on PostgreSQL, what the chart refuses and keeps, changed while serving with no failed request.
-55. [**Promote a setup from dev to prod through a pull request**](55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md)
-    - configuration as code: export, review the diff against prod, apply on merge, locked.
+55. [**Manage your setup as code, and promote it from dev to prod through a pull request**](55-promote-a-setup-from-dev-to-prod-through-a-pull-request.md)
+    - configuration as code: export, review the diff against prod, apply on merge, locked; drift; applied at
+    start-up for GitOps.
 56. [**Use short-lived database credentials from Vault**](56-use-short-lived-database-credentials-from-vault.md)
     (experimental) - no database password anywhere: a user per lease, rotated without a failed call, failing closed.

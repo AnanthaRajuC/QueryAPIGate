@@ -1,4 +1,4 @@
-# How to promote a setup from dev to prod through a pull request
+# How to manage your setup as code, and promote it from dev to prod through a pull request
 
 **Time:** 20 minutes. **You'll end up with:** dev's connections, queries, roles and keys in a file in git; prod made
 to match it by CI after a reviewed pull request, all or nothing; and prod refusing changes made any other way.
