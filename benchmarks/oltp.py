@@ -27,6 +27,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -1138,16 +1139,18 @@ RARE_KEY = 'rare-key'  # about one run in 10,000 of r7's copies: a scoped key's 
 
 
 def rare_key():
-    """The secret of the key named RARE_KEY, made once per store. r7's runs of it are copies dated before the key was
-    made, and a key sees no event from before then (ADR 0021): its creation is dated back, in this store only."""
-    keys_file = Path(args.out) / 'keys.json'
-    keys = json.loads(keys_file.read_text())
-    if 'rare' not in keys:
-        keys['rare'] = api('POST', '/api/v1/api-keys', {'name': RARE_KEY, 'connections': [],
-                                                        'queries': ['account']})['secret']
-        keys_file.write_text(json.dumps(keys))
+    """A secret for the key named RARE_KEY: made once per store, rotated each time after, so it's never written down.
+    r7's runs of it are copies dated before the key was made, and a key sees no event from before then (ADR 0021): its
+    creation is dated back, in this store only."""
+    try:
+        secret = api('POST', f'/api/v1/api-keys/{RARE_KEY}/rotate', {'grace_minutes': 0})['secret']
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        secret = api('POST', '/api/v1/api-keys', {'name': RARE_KEY, 'connections': [],
+                                                  'queries': ['account']})['secret']
     psql(f"UPDATE api_keys SET created_at = '2000-01-01 00:00:00' WHERE name = '{RARE_KEY}'", 'qagstore')
-    return keys['rare']
+    return secret
 
 
 def replay(name, path, key, expected, after):
