@@ -135,6 +135,7 @@ async fn serve(config: config::Config) {
         tokio::spawn(connection(app.clone(), stream, peer));
     }
     app.drain().await;
+    app.release_lease().await;
 }
 
 async fn connection(app: Arc<serve::App>, stream: tokio::net::TcpStream, peer: SocketAddr) {

@@ -19,7 +19,7 @@ ClickHouse 24.8 or later. On it, a database and a user for QueryAPIGate, which c
 ```sql
 CREATE DATABASE queryapigate;
 CREATE USER queryapigate IDENTIFIED BY '...';
-GRANT SELECT, INSERT, CREATE TABLE, CREATE VIEW, ALTER TABLE, ALTER VIEW, ALTER DELETE, TRUNCATE
+GRANT SELECT, INSERT, CREATE TABLE, CREATE VIEW, ALTER TABLE, ALTER VIEW, ALTER DELETE
     ON queryapigate.* TO queryapigate;
 ```
 
@@ -59,7 +59,7 @@ queryapigate runs copy-to-clickhouse
 
 ## 3. The data plane
 
-Give it the same URL, or its own insert-only one:
+Give it the same URL, or its own insert-only one - for the same server and database, named the same way:
 
 ```bash
 QUERYAPIGATE_DATAPLANE_RUN_STORE_URL=https://queryapigate_dataplane:...@clickhouse.internal:8443/queryapigate \
@@ -68,7 +68,9 @@ QUERYAPIGATE_DATAPLANE_LISTEN=0.0.0.0:5000 QUERYAPIGATE_DATAPLANE_UPSTREAM=http:
 ```
 
 It logs `writing its runs to the run store (ADR 0029)`. It then writes the runs it serves straight to ClickHouse, with
-event ids from a block Python leases it, and Python only counts them for `/metrics`. One gunicorn worker behind it is
+event ids from a block Python leases it, and Python only counts them for `/metrics`. The lease names where Python
+keeps runs: a data plane whose URL names another server or database writes none of them, and logs
+`Python keeps runs in ClickHouse at ..., not ...` until it's corrected. One gunicorn worker behind it is
 enough again: Python no longer queues every run.
 
 ## 4. See it working
@@ -96,6 +98,8 @@ The Console's history, `GET /api/v1/history` and `/events` read from it as they 
 - **Backups:** a backup of the metadata store doesn't hold the runs any more. Back up ClickHouse with its own tools,
   if you need history kept.
 - **`queryapigate history forget`** erases a person from all five tables in ClickHouse too.
+- **Ad-hoc statements** are kept as text, by minute, only as long as the event log; the hourly rollup keeps a year
+  of their SHA-256 hashes instead.
 
 ## To stop using it
 

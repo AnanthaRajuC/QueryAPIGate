@@ -97,7 +97,13 @@ pub fn url_from(get: impl Fn(&str) -> Option<String>) -> Result<Option<Target>, 
             .decode_utf8_lossy()
             .into_owned()
     };
+    // As runstore.location() writes it - what Python's lease names, and the metadata store records
+    let bare = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
     Ok(Some(Target {
+        location: format!("{bare}:{port}/{database}"),
         url: format!("{scheme}://{host}:{port}"),
         user: if user.is_empty() {
             "default".into()
@@ -118,6 +124,8 @@ fn redact(url: &str) -> String {
 
 pub struct Target {
     pub url: String,
+    /// host:port/database: where runs go, to compare with where Python keeps them
+    pub location: String,
     pub user: String,
     pub password: String,
     pub database: String,
@@ -169,6 +177,7 @@ struct Clock {
 
 pub struct RunStore {
     client: Client,
+    location: String,
     holder: String,
     lease: Mutex<Option<Lease>>,
     ids: Mutex<Ids>,
@@ -184,6 +193,7 @@ fn now_ms() -> f64 {
 
 impl RunStore {
     pub fn new(target: Target) -> RunStore {
+        let location = target.location.clone();
         // RowBinary as the struct is laid out: the schema isn't fetched first, which an insert-only user couldn't
         let client = Client::default()
             .with_url(target.url)
@@ -193,6 +203,7 @@ impl RunStore {
             .with_validation(false);
         RunStore {
             client,
+            location,
             holder: format!("dataplane:{}:{:x}", std::process::id(), rand_u64()),
             lease: Mutex::new(None),
             ids: Mutex::new(Ids {
@@ -226,6 +237,10 @@ impl RunStore {
             ));
         }
         let answer: Json = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+        same_store(
+            answer.get("location").and_then(Json::as_str),
+            &self.location,
+        )?;
         let field = |name: &str| answer.get(name).and_then(Json::as_u64);
         let lease = Lease {
             block: field("block").ok_or("a lease without a block")?,
@@ -243,6 +258,16 @@ impl RunStore {
         };
         *self.lease.lock().unwrap() = Some(lease);
         Ok(())
+    }
+
+    /// Give the lease back, as this process stops: its block is free at once, not a minute later.
+    pub async fn release(&self, forward: &Forwarder) {
+        let held = self.lease.lock().unwrap().take().map(|l| l.block);
+        if let Some(block) = held {
+            let body = serde_json::json!({"holder": self.holder, "block": block, "release": true})
+                .to_string();
+            let _ = forward.post_json("/internal/dataplane/lease", body).await;
+        }
     }
 
     async fn store_ms(&self, epoch_ms: i64) -> i64 {
@@ -361,6 +386,20 @@ impl RunStore {
     }
 }
 
+/// Whether Python keeps runs where this process would write them (`location`, from its lease). Every instance must name
+/// the same run store - Python's refuse to start otherwise (runstore.check_marker()) - or this one's runs would be out
+/// of history and out of an erasure's reach; so it writes none, and says why, until they agree.
+fn same_store(theirs: Option<&str>, ours: &str) -> Result<(), String> {
+    match theirs {
+        Some(theirs) if theirs == ours => Ok(()),
+        theirs => Err(format!(
+            "Python keeps runs in ClickHouse at {}, not {ours} - QUERYAPIGATE_DATAPLANE_RUN_STORE_URL must name the \
+             same server and database; writing no runs until it does",
+            theirs.unwrap_or("a run store it didn't name")
+        )),
+    }
+}
+
 fn rand_u64() -> u64 {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).unwrap_or_default();
@@ -469,6 +508,29 @@ mod tests {
         .err()
         .unwrap();
         assert!(!error.contains("secret"), "{error}");
+    }
+
+    #[test]
+    fn names_its_store_as_python_does() {
+        for (raw, location) in [
+            ("https://u:p@CH.Internal:9443/runs", "ch.internal:9443/runs"),
+            ("https://ch", "ch:8443/queryapigate"),
+            ("http://[::1]:8123/runs", "::1:8123/runs"),
+        ] {
+            let target = url(&[("QUERYAPIGATE_RUN_STORE_URL", raw)])
+                .unwrap()
+                .unwrap();
+            assert_eq!(target.location, location, "{raw}");
+        }
+    }
+
+    #[test]
+    fn writes_only_to_the_store_python_keeps_runs_in() {
+        assert!(same_store(Some("ch:8443/runs"), "ch:8443/runs").is_ok());
+        for theirs in [Some("ch:8443/other"), Some("ch2:8443/runs"), None] {
+            let error = same_store(theirs, "ch:8443/runs").unwrap_err();
+            assert!(error.contains("writing no runs"), "{error}");
+        }
     }
 
     #[test]

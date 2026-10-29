@@ -139,5 +139,48 @@ class RunStoreTests(unittest.TestCase):
         self.assertIn('dp-read', [item.get('request_id') for item in json.loads(body)['items']])
 
 
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(POSTGRES is None, 'set QUERYAPIGATE_DATAPLANE_TEST_POSTGRES')
+@unittest.skipIf(CLICKHOUSE is None, 'set QUERYAPIGATE_DATAPLANE_TEST_RUN_STORE_URL')
+class AnotherRunStoreTests(RunStoreTests):
+    """A data plane given another run store than Python's - a database with the same tables - writes none of its runs
+    there: they'd be out of history and out of an erasure's reach (the security review, 2026-10-28)."""
+
+    ELSEWHERE = 'qag_dataplane_elsewhere'
+
+    @classmethod
+    def setUpClass(cls):
+        clickhouse(f'DROP DATABASE IF EXISTS {cls.ELSEWHERE} SYNC')
+        clickhouse(f'CREATE DATABASE {cls.ELSEWHERE}')
+        os.environ['QUERYAPIGATE_DATAPLANE_RUN_STORE_URL'] = f'{CLICKHOUSE}/{cls.ELSEWHERE}'
+        try:
+            super().setUpClass()
+        finally:
+            del os.environ['QUERYAPIGATE_DATAPLANE_RUN_STORE_URL']
+        clickhouse(f'CREATE TABLE {cls.ELSEWHERE}.events AS {DATABASE}.events')
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        clickhouse(f'DROP DATABASE IF EXISTS {cls.ELSEWHERE} SYNC')
+
+    def test_it_writes_none_of_its_runs_there(self):
+        for _ in range(2):
+            self.call('warm')
+        before = self.served()
+        self.assertEqual(self.call('dp-elsewhere')[0], 200)
+        self.assertEqual(self.served(), before + 1)
+        time.sleep(2)  # a flush interval and more
+        self.assertEqual(clickhouse(f'SELECT count() AS n FROM {self.ELSEWHERE}.events')[0]['n'], 0)
+        self.pair.dataplane_log.flush()
+        parts = urllib.parse.urlsplit(CLICKHOUSE)
+        self.assertIn(f'not {parts.hostname}:{parts.port or 8123}/{self.ELSEWHERE}',
+                      (self.pair.home / 'dataplane.log').read_text())
+
+    test_a_served_run_is_written_with_an_id_from_the_data_plane_s_own_block = None
+    test_its_entry_is_the_one_python_writes_for_the_same_call = None
+    test_it_reads_back_through_python = None
+
+
 if __name__ == '__main__':
     unittest.main()

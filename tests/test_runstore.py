@@ -4,6 +4,7 @@ The first classes need no ClickHouse: the URL's rules, the parameters' escaping,
 the id leases and the marker's refusals. The rest run when QUERYAPIGATE_TEST_RUN_STORE_URL names a scratch ClickHouse
 (tests/__init__.py), as CI's run-store job does - and then the whole suite runs with the run store too."""
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -14,9 +15,10 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, db, events, history, metrics, runstore, store, usage
+from queryapigate import config, create_app, dataplane, db, events, history, metrics, runstore, store, usage
 from tests import TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
+from tests.test_dataplane import SECRET
 from tests.test_events_server import Stream
 
 
@@ -83,6 +85,16 @@ class PayloadTests(unittest.TestCase):
 
     def test_any_other_event_as_written(self):
         self.assertEqual(runstore.event_payload({'type': 'key.revoked', 'payload_json': '{"x": 1}'}), '{"x": 1}')
+
+    def test_a_line_break_in_a_stored_row_never_ends_its_frame(self):
+        """Whoever has the run store's credentials writes its rows: a break in one must not start a frame of its own -
+        another event, with an id that moves every client's resume point (the security review, 2026-10-28)."""
+        row = self.row('q', 1, {'executed_at': '2026-10-28 12:00:00', 'status': 'success'})
+        row['entry'] = '{"status": "success"}\n\nid: 9007199254740000\r\ndata: {"type": "forged"}'
+        frame = events._format(1, runstore.event_payload(row)).decode()
+        self.assertEqual(frame.count('\n'), 3, frame)  # its id, its data, the blank line that ends it
+        self.assertEqual(frame.count('\r'), 0)
+        self.assertEqual(json.loads(events._format(2, '{\n"a": 1\r\n}').decode().split('data: ')[1]), {'a': 1})
 
 
 class WindowTests(unittest.TestCase):
@@ -251,6 +263,24 @@ class WriteTests(StoreTestCase):
         self.assertEqual(metrics.history_counts().get('failed', 0), failed)
         self.assertEqual((self.count('events'), self.count('history')), (1, 1))
 
+    def test_an_id_above_2_to_the_53_is_refused(self):
+        row = {'type': 'x', 'occurred_at': store.now(), 'workspace': 'default', 'in_history': False, 'rows': 0,
+               'seconds': 0, 'entry': '', 'payload_json': ''}
+        runstore.insert('events', [{**row, 'id': runstore.MAX_ID}])
+        with self.assertRaisesRegex(runstore.RunStoreError, 'id_below_2_53'):
+            runstore.insert('events', [{**row, 'id': runstore.MAX_ID + 1}])
+
+    def test_an_ad_hoc_statement_is_kept_hashed_by_the_hour_and_as_text_only_as_long_as_the_event_log(self):
+        history.write([history._row(None, None, {'executed_at': store.now(), 'transport': 'mcp', 'key_name': 'agent',
+                                                 'status': 'success', 'sql': "SELECT 'a@b.example'"}, keep=False)])
+        hashed = 'sha:' + hashlib.sha256("SELECT 'a@b.example'".encode()).hexdigest()  # as history.py hashes it
+        self.assertEqual([row['statement'] for row in runstore.query('SELECT statement FROM run_hours')], [hashed])
+        self.assertEqual([row['statement'] for row in runstore.query('SELECT statement FROM run_minutes')],
+                         ["sql:SELECT 'a@b.example'"])
+        ttl = runstore.query("SELECT engine_full FROM system.tables WHERE database = {db:String} AND "
+                             "name = 'run_minutes'", {'db': runstore.database()})[0]['engine_full']
+        self.assertIn(f'TTL minute + toIntervalHour({config.events_retention_hours()})', ttl)
+
     def test_ids_increase_with_every_batch(self):
         for _ in range(3):
             self.run_query()
@@ -306,6 +336,30 @@ class ReadTests(StoreTestCase):
         for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
             self.assertEqual(self.count(table, "key_name = 'alice'"), 0, table)
         self.assertEqual(self.count('history', "key_name = 'bob'"), 2)
+
+    def test_forget_erases_a_run_that_lands_after_its_first_delete(self):
+        """A data plane's batch, or another worker's queue, written while the erasure runs: it deletes again once
+        they would have landed."""
+        self.seed(2, datetime.now() - timedelta(minutes=5), key='alice')
+        waited = []
+
+        def landing(seconds):
+            waited.append(seconds)
+            self.seed(1, datetime.now(), key='alice')
+        with mock.patch.object(runstore, 'time', mock.Mock(wraps=time, sleep=landing)):
+            self.assertEqual(self.client.delete('/api/v1/history', headers=self.admin,
+                                                query_string={'caller': 'alice'}).status_code, 200)
+        self.assertEqual(waited, [runstore._in_flight_seconds()])
+        for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
+            self.assertEqual(self.count(table, "key_name = 'alice'"), 0, table)
+
+    def test_a_cursor_this_server_never_returned_is_refused(self):
+        for top, after in (('garbage', 1), ('2026-13-45 00:00:00', 1), ('2026-10-28 12:00:00', -1),
+                           ('2026-10-28 12:00:00', 2 ** 64)):
+            with self.subTest(top=top, after=after):
+                res = self.client.get('/api/v1/history', headers=self.admin,
+                                      query_string={'cursor': history._encode_cursor(top, after)})
+                self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_filter'))
 
     def test_deleting_a_query_deletes_its_runs(self):
         self.seed(3, datetime.now() - timedelta(minutes=5))
@@ -401,6 +455,69 @@ class SwitchTests(StoreTestCase):
         with mock.patch.object(config, 'run_store_url', lambda: None):
             history.write([history._row('q', 1, {'executed_at': store.now(), 'status': 'success'})])
             self.assertGreater(db.connection().execute('SELECT MAX(id) FROM events').fetchone()[0], newest)
+
+    def test_leaving_carries_no_id_from_ahead_of_the_clock(self):
+        """An id no minter handed out - written with the run store's credentials - isn't where the metadata store's
+        event log continues from."""
+        self.run_query()
+        newest = runstore.newest_event_id(runstore.MAX_ID)
+        row = runstore.query(f'SELECT {runstore.EVENT_COLUMNS} FROM events WHERE id = {{id:UInt64}}', {'id': newest})[0]
+        runstore.insert('events', [{**row, 'id': runstore.MAX_ID, 'in_history': False, 'rows': 0, 'seconds': 0.0}])
+        left = runstore.leave()
+        self.assertGreaterEqual(left, newest)
+        self.assertLess(left, runstore.id_floor(runstore.store_ms() + 60_000))
+
+
+class MigrationTests(StoreTestCase):
+    def test_a_0_45_store_is_brought_to_version_2_once(self):
+        """0.45's tables (schema 1): the hourly rollup kept statements' text, events had no id check, the minutes
+        kept 7 days. The counts stay; only the text goes."""
+        old_view = runstore._ROLLUP_VIEW.format(fn='toStartOfHour', grain='hour', key=runstore._ROLLUP_KEY,
+                                                group=runstore._ROLLUP_KEY)
+        for statement in ('ALTER TABLE run_hours_mv MODIFY QUERY ' + old_view,
+                          'ALTER TABLE events DROP CONSTRAINT id_below_2_53',
+                          'ALTER TABLE run_minutes MODIFY TTL minute + INTERVAL 7 DAY',
+                          'TRUNCATE TABLE run_store_schema', 'INSERT INTO run_store_schema VALUES (1)'):
+            runstore.execute(statement)
+        for sql in ('SELECT 1', 'SELECT 1', 'SELECT 2'):
+            history.write([history._row(None, None, {'executed_at': store.now(), 'transport': 'mcp',
+                                                     'key_name': 'agent', 'status': 'success', 'sql': sql})])
+        self.run_query()
+        self.assertEqual(runstore.query("SELECT uniqExact(statement) AS n FROM run_hours "
+                                        "WHERE startsWith(statement, 'sql:')")[0]['n'], 2)  # their text, as 0.45 kept
+
+        def started():
+            runstore._ready.discard((os.getpid(), runstore.database()))
+            runstore.ensure_schema()
+            return {row['statement']: row['n'] for row in runstore.query(
+                'SELECT statement, sum(runs) AS n FROM run_hours GROUP BY statement')}
+        sha = {sql: 'sha:' + hashlib.sha256(sql.encode()).hexdigest() for sql in ('SELECT 1', 'SELECT 2')}
+        expected = {sha['SELECT 1']: 2, sha['SELECT 2']: 1, '': 1}
+        self.assertEqual(started(), expected)
+        self.assertEqual(runstore._schema_version(runstore.database()), 2)
+        with self.assertRaisesRegex(runstore.RunStoreError, 'id_below_2_53'):
+            runstore.insert('events', [{'id': runstore.MAX_ID + 1, 'type': 'x', 'occurred_at': store.now(),
+                                        'workspace': 'default', 'in_history': False, 'rows': 0, 'seconds': 0,
+                                        'entry': '', 'payload_json': ''}])
+        history.write([history._row(None, None, {'executed_at': store.now(), 'transport': 'mcp', 'key_name': 'agent',
+                                                 'status': 'success', 'sql': 'SELECT 2'})])
+        self.assertEqual(started(), {**expected, sha['SELECT 2']: 2})  # hashed by the view now; nothing counted twice
+
+
+class LeaseEndpointTests(StoreTestCase):
+    env = {'QUERYAPIGATE_DATAPLANE_SECRET': SECRET}
+
+    def lease(self, **body):
+        return self.client.post('/internal/dataplane/lease', json={'holder': 'dp', **body},
+                                headers={dataplane.SECRET_HEADER: SECRET})
+
+    def test_names_where_runs_are_and_takes_the_block_back(self):
+        res = self.lease()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['location'], runstore.location())
+        block = res.get_json()['block']
+        self.assertEqual(self.lease(block=block, release=True).status_code, 204)
+        self.assertFalse(runstore.renew(block, 'dp'))  # given back, not lapsing a minute later
 
 
 class EventServerTests(StoreTestCase):

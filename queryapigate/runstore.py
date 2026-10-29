@@ -50,7 +50,8 @@ _MINT_WITHIN = 45.0              # a writer whose last renewal is older than thi
 _MAX_LEAD_MS = 1000              # how far a writer's ids may run ahead of the clock in a burst
 _CLOCK_SECONDS = 60.0            # how often the offset to ClickHouse's clock is measured again
 _TIMEOUT = 30.0                  # seconds for one request to ClickHouse
-_SCHEMA_VERSION = 1              # of the run store's tables: run_store_schema records it
+_SCHEMA_VERSION = 2              # of the run store's tables: run_store_schema records it (_migrate())
+MAX_ID = 2 ** 53 - 1             # the largest event id: what a JavaScript client holds exactly (ADR 0002)
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
@@ -221,6 +222,17 @@ _RUN_COLUMNS = """
   status LowCardinality(Nullable(String)),"""
 _ROLLUP_DIMENSIONS = 'key_name, query_name, version, connection_name, source, status, code, statement'
 _ROLLUP_KEY = 'workspace, ' + _ROLLUP_DIMENSIONS
+# run_hours keeps a year of rollups: an ad-hoc statement's text, which may hold values, as its SHA-256 instead - the
+# `sha:` form QUERYAPIGATE_HISTORY_ADHOC_SQL=hash writes, of the same bytes. run_minutes keeps the text, for usage
+# reports, only as long as the event log (security review, 2026-10-28)
+_HASHED_STATEMENT = ("if(startsWith(statement, 'sql:'), concat('sha:', lower(hex(SHA256(substring(statement, 5))))), "
+                     "statement)")
+_ROLLUP_VIEW = """SELECT {fn}(parseDateTimeBestEffortOrZero(occurred_at, 'UTC')) AS {grain}, {key},
+  count() AS runs, sum(rows) AS rows, sum(toUInt64(masked)) AS masked, min(occurred_at) AS first,
+  max(occurred_at) AS last, quantilesTDigestState(0.5, 0.95, 0.99)(seconds) AS seconds
+FROM events WHERE type = 'query.run' GROUP BY {grain}, {group}"""
+_HOURS_VIEW = _ROLLUP_VIEW.format(fn='toStartOfHour', grain='hour', group=_ROLLUP_KEY,
+                                  key=_ROLLUP_KEY.replace('statement', f'{_HASHED_STATEMENT} AS statement'))
 
 
 def _tables(events_hours, history_days):
@@ -243,12 +255,8 @@ def _tables(events_hours, history_days):
   last SimpleAggregateFunction(max, String),
   seconds AggregateFunction(quantilesTDigest(0.5, 0.95, 0.99), Float32)
 ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM({grain})
-ORDER BY (workspace, {grain}, {dimensions}) TTL {grain} + INTERVAL {days} DAY
+ORDER BY (workspace, {grain}, {dimensions}) TTL {grain} + INTERVAL {ttl}
 SETTINGS allow_nullable_key = 1"""
-    rollup_view = """AS SELECT {fn}(parseDateTimeBestEffortOrZero(occurred_at, 'UTC')) AS {grain}, {key},
-  count() AS runs, sum(rows) AS rows, sum(toUInt64(masked)) AS masked, min(occurred_at) AS first,
-  max(occurred_at) AS last, quantilesTDigestState(0.5, 0.95, 0.99)(seconds) AS seconds
-FROM events WHERE type = 'query.run' GROUP BY {grain}, {key}"""
     return [
         'CREATE TABLE IF NOT EXISTS run_store_schema (version UInt32) ENGINE = TinyLog',
         f"""CREATE TABLE IF NOT EXISTS events (
@@ -265,7 +273,8 @@ FROM events WHERE type = 'query.run' GROUP BY {grain}, {key}"""
   entry String CODEC(ZSTD(3)),
   payload_json String CODEC(ZSTD(3)),
   stamped_at DateTime('UTC') DEFAULT {_STAMPED},
-  written_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD(1))
+  written_at DateTime64(3, 'UTC') DEFAULT now64(3) CODEC(Delta, ZSTD(1)),
+  {_ID_CONSTRAINT}
 ) ENGINE = MergeTree PARTITION BY toStartOfHour(stamped_at) ORDER BY id
 TTL stamped_at + INTERVAL {events_hours} HOUR
 SETTINGS ttl_only_drop_parts = 1, non_replicated_deduplication_window = 1000""",
@@ -292,17 +301,23 @@ DEFINER = CURRENT_USER SQL SECURITY DEFINER
 AS SELECT workspace, query_name, version, key_name, toDate(stamped_at) AS day, count() AS runs, max(executed_at) AS last
 FROM history GROUP BY workspace, query_name, version, key_name, day""",
         'CREATE TABLE IF NOT EXISTS run_minutes ' + rollup.format(grain='minute', dimensions=_ROLLUP_DIMENSIONS,
-                                                                  days=7),
-        'CREATE TABLE IF NOT EXISTS run_hours ' + rollup.format(grain='hour', dimensions=_ROLLUP_DIMENSIONS, days=400),
+                                                                  ttl=f'{events_hours} HOUR'),
+        'CREATE TABLE IF NOT EXISTS run_hours ' + rollup.format(grain='hour', dimensions=_ROLLUP_DIMENSIONS,
+                                                                ttl='400 DAY'),
         """CREATE MATERIALIZED VIEW IF NOT EXISTS history_mv TO history
 DEFINER = CURRENT_USER SQL SECURITY DEFINER
 AS SELECT id, occurred_at AS executed_at, workspace, query_name, version, key_name, status, entry
 FROM events WHERE type = 'query.run' AND in_history""",
         'CREATE MATERIALIZED VIEW IF NOT EXISTS run_minutes_mv TO run_minutes DEFINER = CURRENT_USER SQL SECURITY '
-        'DEFINER ' + rollup_view.format(fn='toStartOfMinute', grain='minute', key=_ROLLUP_KEY),
+        'DEFINER AS ' + _ROLLUP_VIEW.format(fn='toStartOfMinute', grain='minute', key=_ROLLUP_KEY, group=_ROLLUP_KEY),
         'CREATE MATERIALIZED VIEW IF NOT EXISTS run_hours_mv TO run_hours DEFINER = CURRENT_USER SQL SECURITY '
-        'DEFINER ' + rollup_view.format(fn='toStartOfHour', grain='hour', key=_ROLLUP_KEY),
+        'DEFINER AS ' + _HOURS_VIEW,
     ]
+
+
+# Ids from the minters stay below 2^53; one above it - from a writer with the run store's credentials but not its ids -
+# would be delivered to clients that can't hold it, and carried into the metadata store by leave()
+_ID_CONSTRAINT = f'CONSTRAINT id_below_2_53 CHECK id <= {MAX_ID}'
 
 
 _ready: set[tuple[int, str]] = set()  # (pid, database) whose tables this process has made sure of
@@ -326,9 +341,67 @@ def ensure_schema(target=None):
         _retain('events', f'stamped_at + toIntervalHour({hours})', name)  # as ClickHouse writes them in engine_full
         _retain('history', f'stamped_at + toIntervalDay({days})', name)
         _retain('history_counts', f'day + toIntervalDay({days})', name)
-        if not query('SELECT version FROM run_store_schema', db_name=name):
-            execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})', db_name=name)
+        _retain('run_minutes', f'minute + toIntervalHour({hours})', name)
+        _migrate(name, target)
         _ready.add((os.getpid(), name))
+
+
+_MIGRATE_LOCK_ID = 0x51AA  # beside leasing's: the PostgreSQL advisory lock a migration takes
+
+
+def _schema_version(name):
+    found = query('SELECT max(version) AS v, count() AS n FROM run_store_schema', db_name=name)[0]
+    return found['v'] if found['n'] else None
+
+
+def _migrate(name, target=None):
+    """Bring tables an older release made up to _SCHEMA_VERSION; a new store's are made at it. Under a lock in the
+    metadata store, which every instance shares, so two starting together migrate once."""
+    version = _schema_version(name)
+    if version is None:
+        execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})', db_name=name)
+        return
+    if version >= _SCHEMA_VERSION and not _statement_texts(name):
+        return
+    postgres = target[0] == 'postgres' if target else db.is_postgres()
+    with db.transaction(append_only=True, target=target) as tx:  # a lock only: it writes nothing there
+        if postgres:
+            tx.execute('SELECT pg_advisory_xact_lock(?)', (_MIGRATE_LOCK_ID,))
+        version = _schema_version(name)
+        if version < 2:
+            _to_2(name)
+        _hash_statements(name)
+        if version < _SCHEMA_VERSION:
+            execute(f'INSERT INTO run_store_schema VALUES ({_SCHEMA_VERSION})', db_name=name)
+            log.info('Run store: its tables at %s are at version %d now (were %d)', name, _SCHEMA_VERSION, version)
+
+
+def _to_2(name):
+    """0.45's tables to version 2 (the security review of 2026-10-28): event ids checked below 2^53, run_hours' view
+    hashing ad-hoc statements, and run_minutes' text kept only as long as the event log."""
+    execute(f'ALTER TABLE events ADD CONSTRAINT IF NOT EXISTS {_ID_CONSTRAINT.removeprefix("CONSTRAINT ")}',
+            db_name=name)
+    execute('ALTER TABLE run_hours_mv MODIFY QUERY ' + _HOURS_VIEW, db_name=name)
+    execute('ALTER TABLE run_minutes MATERIALIZE TTL', db_name=name, settings={'mutations_sync': 1})
+
+
+def _statement_texts(name):
+    return query("SELECT count() AS n FROM run_hours WHERE startsWith(statement, 'sql:')", db_name=name)[0]['n']
+
+
+def _hash_statements(name):
+    """Rewrite run_hours' rows that hold a statement's text with its hash - those from before version 2, and any an
+    insert ClickHouse was already running as the view changed added after. The text is in the sort key, which a
+    mutation can't change: each such row is inserted again hashed, then deleted, so the hourly counts stay (but for
+    one landing between the two, a moment after the view changed). Under _migrate()'s lock, as two instances doing it
+    at once would count them twice."""
+    if not _statement_texts(name):
+        return
+    columns = f'hour, {_ROLLUP_KEY}, runs, rows, masked, first, last, seconds'
+    execute(f'INSERT INTO run_hours ({columns}) SELECT {columns.replace("statement", _HASHED_STATEMENT)} '
+            "FROM run_hours WHERE startsWith(statement, 'sql:')", db_name=name)
+    execute("ALTER TABLE run_hours DELETE WHERE startsWith(statement, 'sql:')", db_name=name,
+            settings={'mutations_sync': 1})
 
 
 def _retain(table, ttl, name):
@@ -679,17 +752,28 @@ def per_version(workspace, name, versions, limit):
     return {version: entries[::-1] for version, entries in found.items()}
 
 
+def _in_flight_seconds():
+    """How long after a moment a run served before it may still land: a batch's flush interval - Python's queues and
+    a data plane's (ADR 0028) - and the settle window."""
+    return (config.history_flush_interval() or config.DEFAULT_HISTORY_FLUSH_INTERVAL) + SETTLE_SECONDS
+
+
 def forget(caller, dry_run=False):
     """Erase every run and event by ``caller``, and their rollups, in every workspace (ADR 0016) - hidden at once,
-    purged from disk once ClickHouse has rewritten their parts. Returns (runs, events) counted before."""
+    purged from disk once ClickHouse has rewritten their parts. Returns (runs, events) counted before. Its runs still
+    in flight - a data plane's batch, another worker's queue - land after the first delete, so it deletes again once
+    they would have: waiting, not on a timer, as `queryapigate history forget` exits when it returns."""
     ensure_schema()
     params = {'c': caller}
     runs = query('SELECT count() AS n FROM history WHERE key_name = {c:String}', params)[0]['n']
     found = query('SELECT count() AS n FROM events WHERE key_name = {c:String}', params)[0]['n']
     if not dry_run:
-        for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
-            execute(f'DELETE FROM {table} WHERE key_name = {{c:String}}', params)
-            execute(f'ALTER TABLE {table} APPLY DELETED MASK')
+        for attempt in (1, 2):
+            if attempt == 2:
+                time.sleep(_in_flight_seconds())
+            for table in ('events', 'history', 'history_counts', 'run_minutes', 'run_hours'):
+                execute(f'DELETE FROM {table} WHERE key_name = {{c:String}}', params)
+                execute(f'ALTER TABLE {table} APPLY DELETED MASK')
     return runs, found
 
 
@@ -717,8 +801,7 @@ def delete_runs(workspace, name=None, version=None):
 
     ensure_schema()
     run()
-    delay = (config.history_flush_interval() or config.DEFAULT_HISTORY_FLUSH_INTERVAL) + SETTLE_SECONDS
-    timer = threading.Timer(delay, run)
+    timer = threading.Timer(_in_flight_seconds(), run)
     timer.daemon = True
     timer.start()
 
@@ -1002,7 +1085,10 @@ def leave():
     if db.connection().execute('SELECT 1 FROM run_store').fetchone() is None:
         raise ValueError('runs are already kept in the metadata store')
     ensure_schema()
-    newest = max(newest_event_id(2 ** 63 - 1), id_floor(store_ms()) + PER_MS)  # ids minted this very millisecond too
+    # Ids minted this very millisecond too, and none from ahead of the clock (a writer's lead is at most _MAX_LEAD_MS):
+    # an id beyond that wasn't minted here, and the metadata store's would continue from it
+    now = id_floor(store_ms()) + PER_MS
+    newest = max(newest_event_id(min(now + id_floor(_MAX_LEAD_MS), MAX_ID)), now)
     with db.transaction() as tx:
         db._set_events_sequence(tx, db.is_postgres(), newest)
         tx.execute('DELETE FROM run_store')

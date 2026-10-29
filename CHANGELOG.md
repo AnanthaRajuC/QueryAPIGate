@@ -51,6 +51,32 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Security
+
+The experimental ClickHouse run store's security review (ADR 0029, one of its conditions to graduate). Nothing here
+affects a deployment without `QUERYAPIGATE_RUN_STORE_URL`. Its tables move to version 2 at the first start, with the
+grants guide 65 gave.
+
+- **A run store row could split an event stream.** `queryapigate events` wrote an event's stored text into its frame
+  as it was, so a row with a line break - written by anyone with an insert credential for the run store, such as the
+  data plane's - became frames of the writer's choosing: other events, in any workspace, and an `id:` that moved
+  clients' resume points past every event to come. Frames are one line now whatever a row holds, and `events`
+  refuses ids above 2^53.
+- **A data plane given another run store wrote its runs there**, out of history and out of an erasure's reach: unlike
+  Python's instances, it never checked where the metadata store keeps runs. Python's lease now names it, and a data
+  plane configured with another writes none of its runs, and logs why, until they agree.
+- **Ad-hoc statements were kept past the retention settings:** 400 days in `run_hours` and 7 in `run_minutes`,
+  whatever `QUERYAPIGATE_HISTORY_RETENTION_DAYS` said, though a statement may hold values. `run_hours` keeps their
+  SHA-256 now, the hash `QUERYAPIGATE_HISTORY_ADHOC_SQL=hash` records - existing rows are rewritten, their counts
+  kept - and `run_minutes` keeps rows only as long as the event log (`QUERYAPIGATE_EVENTS_RETENTION_HOURS`), all a
+  usage report reads.
+- **`forget` could miss runs still on their way**, in a data plane's batch or another worker's queue: it deletes
+  again once they'd have landed, a flush interval and the settle window later.
+- `queryapigate runs leave-clickhouse` continues the metadata store's event ids from the newest one up to the clock,
+  not from any id a writer put in the run store; a history cursor that this server didn't return is a 400
+  `invalid_filter`, not a 500; the data plane gives its id lease back as it stops; guide 65 no longer grants
+  `TRUNCATE`, which nothing uses.
+
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.45.0 are added, and the rolling-upgrade and Helm checks now start from 0.45.0.
