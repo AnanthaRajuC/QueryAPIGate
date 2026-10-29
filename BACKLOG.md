@@ -142,9 +142,13 @@ documentation. #99 workspaces only if asked for.
     ClickHouse, the data plane writing its own runs: every run recorded at 20,000 a second and at the 64-caller peak,
     where 0.44's store kept about half, in about 13 bytes a run and with 11% fewer gateway cores; usage reports exact
     ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)). (0.45.0, 2026-10-28.)
-34. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+34. **0.46: The run store's security review** (ADR 0029) - event frames that a stored row can't split, a data plane
+    that writes only to the run store Python names, ad-hoc statements kept as hashes within the retention settings,
+    `forget` reaching runs still in flight; schema version 2, migrated at the first start; a replay of the whole log
+    twice as fast at 250 million runs. (0.46.0, 2026-10-29.)
+35. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-35. **1.0.0.**
+36. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3181,8 +3185,8 @@ the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 byte
 path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
 history's sample rate.
 
-**Next:** to graduate (ADR 0017): a release unchanged. The security review is done (2026-10-28): six findings, fixed
-in the run store's schema version 2 (ADR 0029 section 7); and 250 million runs measured (2026-10-29), every
-criterion met once a replay finds its ids in batches (ADR 0029 section 9). Beside it: the events server's ceiling
-per stream under a soak. Beside it: the events server's ceiling - about 10,000 events a second per stream from one
-process. The event log's bound for the SQL stores (#102) is separate and ships either way.
+**Next:** to graduate (ADR 0017): a release unchanged, counted from 0.46.0. The security review is done
+(2026-10-28): six findings, fixed in the run store's schema version 2 (ADR 0029 section 7, 0.46.0); and 250 million
+runs measured (2026-10-29), every criterion met once a replay finds its ids in batches (ADR 0029 section 9, 0.46.0).
+Beside it: the events server's ceiling - about 10,000 events a second per stream from one process - under a soak.
+The event log's bound for the SQL stores (#102) is separate and ships either way.
