@@ -962,6 +962,32 @@ def events_by_id(ids):
 def replay_page(after, upto, workspace, key_name, filters, since, limit):
     """One page of a resume: the events after ``after`` (up to ``upto``) in ``workspace`` that ``key_name`` may see
     (None: all) and ``filters`` (events.parse_filters()) ask for, from ``since`` on, oldest first, as (id, payload)."""
+    found = replay_ids(after, upto, workspace, key_name, filters, since, limit)
+    return [(row['id'], event_payload(row)) for row in events_by_id(found)] if found else []
+
+
+REPLAY_IDS = 100_000  # ids a resume finds in one read (replay_pages())
+
+
+def replay_pages(after, upto, workspace, key_name, filters, since, page):
+    """A resume's pages of up to ``page`` events, oldest first, as replay_page() reads them - but its ids found up to
+    REPLAY_IDS at a time, in one read: at 250 million runs, finding a page's 1,000 cost 0.1-0.2 s of planning and
+    index work whatever was found, and all 35,000 of a rare key's 0.5 s (ADR 0029 §9). ``upto``: a function, called
+    for each read, of the newest id it may reach - the newest the events server has delivered live by then. A key's
+    creation (``since``) bounds the ids too: none stamped before it can hold its runs (_id_span())."""
+    if since is not None:
+        after = max(after, _id_span(since, since)[0] - 1)
+    while True:
+        found = replay_ids(after, upto(), workspace, key_name, filters, since, REPLAY_IDS)
+        for start in range(0, len(found), page):
+            yield [(row['id'], event_payload(row)) for row in events_by_id(found[start:start + page])]
+        if len(found) < REPLAY_IDS:
+            return
+        after = found[-1]
+
+
+def replay_ids(after, upto, workspace, key_name, filters, since, limit):
+    """The ids of the first ``limit`` events replay_page() would return, oldest first."""
     ensure_schema()
     clauses = ['id > {after:UInt64}', 'id <= {upto:UInt64}', 'workspace = {ws:String}']
     params = {'after': after, 'upto': upto, 'ws': workspace}
@@ -978,11 +1004,10 @@ def replay_page(after, upto, workspace, key_name, filters, since, limit):
             column = {'type': 'type', 'query': 'query_name', 'connection': 'connection_name', 'status': 'status'}[name]
             clauses.append(f'{column} = {{f_{name}:String}}')
             params[f'f_{name}'] = value
-    # The page's ids first, from the columns it filters on, then those rows: a rare match is in nearly every granule,
-    # and reading `entry` and `payload_json` for all of them is most of what one read would cost
-    found = [row['id'] for row in query(
+    # The ids first, from the columns it filters on, then their rows: a rare match is in nearly every granule, and
+    # reading `entry` and `payload_json` for all of them is most of what one read would cost
+    return [row['id'] for row in query(
         f'SELECT id FROM events WHERE {" AND ".join(clauses)} ORDER BY id LIMIT {int(limit)}', params)]
-    return [(row['id'], event_payload(row)) for row in events_by_id(found)] if found else []
 
 
 # ---- which store holds runs ----

@@ -491,7 +491,7 @@ in the metadata store, so the run store never decides who may do what. Where it 
 
 *Reviewed* on 2026-10-28, part of what it needs to graduate (ADR 0017): six findings, fixed in schema version 2 of
 its tables ([ADR 0029 section 7](adr/0029-clickhouse-run-store.md#reviewed-2026-10-28-and-what-changed)). It stays
-experimental until a release unchanged and the 250-million-run measurement.
+experimental until a release unchanged (the 250-million-run measurement is done).
 
 ### Secrets at rest
 

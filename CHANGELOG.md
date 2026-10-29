@@ -79,6 +79,11 @@ grants guide 65 gave.
 
 ### Changed
 
+- **A run store replay is about twice as fast at 250 million runs:** a Last-Event-ID resume finds up to 100,000 of
+  its event ids in one read, not 1,000 a read, and a key's creation date bounds the ids it reads. One key's replay of
+  the whole log went from 12.0 s to 6.2 s, inside ADR 0029's 10 s, and a busy replay is no slower. The run store's
+  storage and reads were measured at 250 million runs: 13.8 bytes a run, every read within its target
+  ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-250m-2026-10-29/README.md)).
 - **CI:** the upgrade fixtures from 0.45.0 are added, and the rolling-upgrade and Helm checks now start from 0.45.0.
 
 ## [0.45.0] - 2026-10-28

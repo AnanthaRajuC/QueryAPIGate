@@ -213,6 +213,23 @@ def _replay_page(after, key_name, filters, since=None, workspace='default', upto
         (after, *params, _REPLAY_PAGE)).fetchall()
 
 
+def _replay_pages(after, key_name, filters, since=None, workspace='default', upto=None):
+    """A resume's pages, oldest first, until it's caught up: a run store's ids found many pages at a time
+    (runstore.replay_pages()), the metadata store's a page at a time. ``upto``: a function of the newest id a run
+    store's replay may reach - the newest delivered live (None: the newest settled)."""
+    if runstore.enabled():
+        yield from runstore.replay_pages(after, upto or runstore.settled_id, workspace, key_name, filters, since,
+                                         _REPLAY_PAGE)
+        return
+    while True:
+        page = _replay_page(after, key_name, filters, since, workspace)
+        if page:
+            yield page
+        if len(page) < _REPLAY_PAGE:
+            return
+        after = page[-1][0]
+
+
 def sweep(now=None):
     """Delete events older than config.events_retention_hours(), in chunks. Returns how many were deleted. Run by each
     process's history writer (history.py) every few minutes; on PostgreSQL only by the instance holding the sweep
@@ -576,17 +593,17 @@ class EventServer:
             writer.write(('\r\n'.join(head) + '\r\n\r\n').encode() + _chunk(f'retry: {_RETRY_MS}\n\n'.encode()))
             sent = 0
             if last_id is not None:  # ...while what was missed is sent first, so nothing falls in between
-                after = last_id  # only what is replayed moves `sent`: an id from another store mustn't mute live events
+                # Only what is replayed moves `sent`: an id from another store mustn't mute live events
+                pages = _replay_pages(last_id, key_name, filters, since, workspace, lambda: self.cursor)
                 while not client.too_slow:  # every page, up to the live stream (ADR 0020 §7)
-                    page = await asyncio.to_thread(_replay_page, after, key_name, filters, since, workspace,
-                                                   self.cursor if runstore.enabled() else None)
+                    page = await asyncio.to_thread(next, pages, None)
+                    if page is None:
+                        break
                     for event_id, payload_json in page:
                         writer.write(_chunk(_format(event_id, payload_json)))
-                        sent = after = event_id
+                        sent = event_id
                     self.replayed += len(page)
                     await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
-                    if len(page) < _REPLAY_PAGE:
-                        break
             watcher = asyncio.create_task(self._watch(reader, client))
             try:
                 await self._pump(client, secret, client_ip, sent)

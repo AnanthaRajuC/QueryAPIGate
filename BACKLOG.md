@@ -3181,6 +3181,8 @@ the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 byte
 path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
 history's sample rate.
 
-**Next:** to graduate (ADR 0017): 250 million runs on a machine with the disk for it, and a release unchanged. The
-security review is done (2026-10-28): six findings, fixed in the run store's schema version 2 (ADR 0029 section 7). Beside it: the events server's ceiling - about 10,000 events a second per stream from one
+**Next:** to graduate (ADR 0017): a release unchanged. The security review is done (2026-10-28): six findings, fixed
+in the run store's schema version 2 (ADR 0029 section 7); and 250 million runs measured (2026-10-29), every
+criterion met once a replay finds its ids in batches (ADR 0029 section 9). Beside it: the events server's ceiling
+per stream under a soak. Beside it: the events server's ceiling - about 10,000 events a second per stream from one
 process. The event log's bound for the SQL stores (#102) is separate and ships either way.
