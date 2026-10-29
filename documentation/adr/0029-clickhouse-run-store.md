@@ -6,7 +6,9 @@
   table, and the rollups' code and statement dimensions, each found by measuring a read (sections 3 to 5, *as
   built*). It ships experimental (section 1), and graduates after a release unchanged, a security review and the
   250-million-run measurement. **Security review: done (2026-10-28),** its findings fixed in section 7's
-  *Reviewed*; schema version 2 of the run store's tables.
+  *Reviewed*; schema version 2 of the run store's tables. **250 million runs: measured (2026-10-29),** every
+  criterion met with the replay reading its ids in batches (section 9, *At 250 million runs*). What's left to
+  graduate: a release unchanged.
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and
@@ -219,7 +221,8 @@ still carries each run: Python counts it for /metrics and the Console's live fee
 
 *As built:* a usage report takes the window's whole minutes from `run_minutes` and only its partial minutes at either
 end from `events`, found by id range, so it costs the same whatever the traffic and stays exact. Alerts still read
-history's newest runs, as with the metadata store. A replay page finds its ids first, then reads those rows.
+history's newest runs, as with the metadata store. A replay finds its ids first, up to 100,000 in one read and from
+the key's creation on, then reads their rows a page at a time (measured at 250 million runs, section 9).
 `queryapigate events` doesn't format an event no stream is listening for.
 
 ### 6. Switching it on and off
@@ -330,6 +333,26 @@ against the run store with one.
   5 describe: usage 4,991 ms (JSON parsed per run), the Console's version list 723 ms (the whole history scanned for
   counts), the replay 41 s (`entry` read for nearly every granule).
 
+#### At 250 million runs (2026-10-29)
+
+Measured on `main` with the review's fixes ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/runstore-250m-2026-10-29/README.md)),
+the laptop and set-up as before, at 250,029,885 runs (and again at 250,028,467): a 30-minute soak's real runs,
+doubled twice and copied once in part through the same views.
+
+| Criterion | Measured |
+|---|---|
+| 3. Storage ≤ 40 B a run | 13.8 B in `events`, 13.7 B in `history`: 6.9 GB for 134 GB of entries |
+| 5. History pages, the Console's versions, p95 ≤ 100 ms | 12.5 ms (first page), 73.6 ms (one key's), 37.3 ms (versions) |
+| 5. Usage report, 24 hours, p95 ≤ 500 ms | 66.7 ms |
+| 5. One key's replay ≤ 10 s | **11.8 s: missed;** 6.2 s once a replay finds its ids in batches |
+
+The replay missed by 18%: finding each page's 1,000 ids was a read of its own, 0.1-0.2 s of planning and index work
+at this size whatever it found - 7.0 s of 11.3 - where all of them came back in one read in 0.5 s. A run store
+replay now finds up to 100,000 ids in one read, bounded below by the key's creation, and fetches their rows a page at
+a time (section 5): on the same runs, 12.0 s to 6.2 s for a key's, 9.1 to 5.7 s for a query's, and no slower when
+most events match. The soak again recorded every run with none late, and its resuming clients missed and repeated
+nothing; the id check schema 2 adds to each insert cost nothing measurable.
+
 ## Alternatives considered
 
 - **Partitioned PostgreSQL** (hourly partitions dropped for retention, `COPY` ingestion, BRIN indexes). No new
@@ -384,4 +407,6 @@ against the run store with one.
 - **The events server's ceiling:** about 10,000 events a second per stream from one process, below what a data plane
   serves. Several processes behind a load balancer each tail the store already; whether one process should serve
   more is a separate measurement.
-- **250 million runs:** section 9's size, on a machine with the disk for it.
+- **The events server under a soak:** each stream delivered about 6,500 events a second in the 250-million-run
+  soaks, against about 9,700 the day before, on a busier or hotter laptop; its clients fell behind and resumed
+  through the replay, faster now. A soak with the batched replay is the next measurement of that ceiling.

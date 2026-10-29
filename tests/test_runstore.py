@@ -114,6 +114,16 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(next(runstore._windows('2026-10-28', None)), ('2026-10-27 23:59:00', '2026-10-28'))
 
 
+class ReplayTests(unittest.TestCase):
+    def test_a_keys_creation_bounds_the_ids_a_replay_reads(self):
+        since = '2026-10-28 12:00:00'
+        for given, starts in ((since, runstore._id_span(since, since)[0] - 1), (None, 5)):
+            with self.subTest(since=given), mock.patch.object(runstore, 'replay_ids', return_value=[]) as ids:
+                self.assertEqual(list(runstore.replay_pages(5, lambda: runstore.MAX_ID, 'default', 'k', {}, given,
+                                                            1000)), [])
+                self.assertEqual(ids.call_args[0][0], starts)
+
+
 class LeaseTests(HomeTestCase):
     def test_writers_get_blocks_that_dont_overlap(self):
         starts = [runstore.lease(16, f'w{i}') for i in range(3)] + [runstore.lease(256, 'dataplane')]
@@ -564,6 +574,24 @@ class EventServerTests(StoreTestCase):
         self.assertEqual([payload['query'] for _, payload in found], ['q', 'other', 'q'])
         self.assertTrue(all(event_id > first for event_id, _ in found))
         self.assertTrue(again.nothing_more(wait=1.5))
+
+    def test_a_long_resume_finds_its_ids_in_batches_and_misses_nothing(self):
+        stream = self.stream()
+        self.run_query()
+        first = stream.events(1, timeout=10)[0][0]
+        stream.close()
+        for i in range(7):
+            self.run_query('q' if i % 2 else 'other')
+        time.sleep(runstore.SETTLE_SECONDS + 0.5)  # past the settle window: the resume, not live delivery, has them
+        with mock.patch.object(runstore, 'REPLAY_IDS', 4), mock.patch.object(events, '_REPLAY_PAGE', 2), \
+                mock.patch.object(runstore, 'replay_ids', wraps=runstore.replay_ids) as reads:
+            again = self.stream(last_id=first)
+            found = again.events(7, timeout=10)
+            self.assertTrue(again.nothing_more(wait=1.5))
+        ids = [event_id for event_id, _ in found]
+        self.assertEqual(ids, sorted(set(ids)))
+        self.assertTrue(all(event_id > first for event_id in ids))
+        self.assertEqual(reads.call_count, 2)  # 4 ids, then the 3 left: two reads for four pages
 
     def test_a_late_event_is_still_delivered_live(self):
         stream = self.stream()

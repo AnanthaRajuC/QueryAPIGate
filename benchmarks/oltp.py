@@ -27,6 +27,7 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -1066,45 +1067,111 @@ def r4():
     each read the Console and the API make, timed through Python, and a filtered replay of the whole event log."""
     floor('r4', 'start')
     expand()
-    # Merged, as a day-old table would be, before its bytes are measured. OPTIMIZE FINAL rewrites every partition:
-    # it needs about the table's size free again, until the parts it replaced are dropped (old_parts_lifetime)
-    if shutil.disk_usage(OUT).free > 2 * (int(ch("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND "
-                                              "database = 'qag_bench'") or 0) + (2 << 30)):
-        ch('OPTIMIZE TABLE qag_bench.events FINAL')
+    merge()
     record({'block': 'r4-storage', 'tables': storage(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
     floor('r4', 'end')
 
 
-def r7(target=72_000_000):
-    """Grow the run store to about ``target`` runs by doubling what r6 left, each copy shifted back by the span so far
-    in ids and time, through the same views: half of it one MCP agent's, for the usage report. Synthetic copies of
-    real runs - for timing reads, not for measuring writes."""
+def merge():
+    """Merged, as a day-old table would be, before its bytes are measured. OPTIMIZE FINAL rewrites every partition:
+    it needs about the table's size free again, until the parts it replaced are dropped (old_parts_lifetime)."""
+    if shutil.disk_usage(OUT).free > 2 * (int(ch("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND "
+                                              "database = 'qag_bench'") or 0) + (2 << 30)):
+        started = time.time()
+        # It reports no progress while it works: clickhouse-client's own 300 s receive timeout would end it early
+        done = sh('docker', 'exec', CH, 'clickhouse-client', '--password', 'pw', '--receive_timeout', '7200',
+                  '-q', 'OPTIMIZE TABLE qag_bench.events FINAL')
+        if done.returncode:
+            sys.exit(f'merging failed: {done.stderr.strip()}')
+        log(f'merged in {time.time() - started:.0f} s')
+    else:
+        log('too little disk to merge: measuring the parts as they are')
+
+
+def r7():
+    """Grow the run store to about --runs runs by doubling what the soak (or r6) left, each copy shifted back by the
+    span so far in ids and time, through the same views: half of it one MCP agent's, for the usage report, and about
+    one run in 10,000 a rare query's and a rare key's, for the replays. The last copy is of only part of what's there,
+    to land near --runs rather than up to twice it. Synthetic copies of real runs - for timing reads, not writes."""
     floor('r7', 'start')
+    target = args.runs
     rows = int(ch('SELECT count() FROM qag_bench.events'))
+    if not rows:
+        sys.exit('r7: the run store is empty - run r3 (or r6) first')
     first = True
-    while rows * 2 <= target * 1.5:  # never a doubling that would overshoot by half
+    while rows < target * 0.99:
+        share = min(1.0, (target - rows) / rows)
+        permille = round(share * 1000)
+        if permille == 0:
+            break
         size = int(ch("SELECT sum(bytes_on_disk) FROM system.parts WHERE database = 'qag_bench'") or 0)
-        if shutil.disk_usage(OUT).free < 2 * size + (4 << 30):  # the copy, and merges' parts until they're dropped
-            log(f'r7: too little disk for another doubling - stopping at {rows} runs')
+        if shutil.disk_usage(OUT).free < 2 * size * share + (4 << 30):  # the copy, and merges' parts until dropped
+            log(f'r7: too little disk for another copy - stopping at {rows} runs')
             break
         low, high = (int(v) for v in ch('SELECT min(id), max(id) FROM qag_bench.events').split('\t'))
         span = high - low + 1
         back = span // (4096 * 1000) + 1
         source = "if(cityHash64(id) % 2 = 0, 'mcp', source)" if first else 'source'
         key = "if(cityHash64(id) % 2 = 0, 'agent-1', key_name)" if first else 'key_name'
+        part = f'WHERE cityHash64(id, 2) % 1000 < {permille}' if permille < 1000 else ''
+        started = time.time()
         ch(f"""INSERT INTO qag_bench.events (id, type, source, occurred_at, workspace, query_name, version,
               key_name, connection_name, status, in_history, rows, seconds, code, masked, statement, entry,
               payload_json)
             SELECT id - {span}, type, {source},
               formatDateTime(parseDateTime(occurred_at) - INTERVAL {back} SECOND, '%Y-%m-%d %H:%i:%S'),
-              workspace, if(cityHash64(id, 1) % 10000 = 0, 'rare_q', query_name), version, {key}, connection_name,
+              workspace, if(cityHash64(id, 1) % 10000 = 0, 'rare_q', query_name), version,
+              if(cityHash64(id, 3) % 10000 = 0, '{RARE_KEY}', {key}), connection_name,
               status, in_history, rows, seconds, code, masked, statement, entry, payload_json
-            FROM qag_bench.events""")
+            FROM qag_bench.events {part}""")
         first = False
-        rows = int(ch('SELECT count() FROM qag_bench.events'))
-        log(f'r7: {rows} runs')
-    record({'block': 'r7-size', 'runs': rows, 'tables': storage()})
+        before, rows = rows, int(ch('SELECT count() FROM qag_bench.events'))
+        if rows <= before:
+            sys.exit(f'r7: a copy added no runs ({rows}) - see ClickHouse\'s log')
+        log(f'r7: {rows} runs ({permille / 10:g}% copied in {time.time() - started:.0f} s), '
+            f'{shutil.disk_usage(OUT).free / (1 << 30):.1f} GB free')
+    merge()
+    record({'block': 'r7-size', 'runs': rows, 'tables': storage(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
     floor('r7', 'end')
+
+
+RARE_KEY = 'rare-key'  # about one run in 10,000 of r7's copies: a scoped key's replay
+
+
+def rare_key():
+    """A secret for the key named RARE_KEY: made once per store, rotated each time after, so it's never written down.
+    r7's runs of it are copies dated before the key was made, and a key sees no event from before then (ADR 0021): its
+    creation is dated back, in this store only."""
+    try:
+        secret = api('POST', f'/api/v1/api-keys/{RARE_KEY}/rotate', {'grace_minutes': 0})['secret']
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        secret = api('POST', '/api/v1/api-keys', {'name': RARE_KEY, 'connections': [],
+                                                  'queries': ['account']})['secret']
+    psql(f"UPDATE api_keys SET created_at = '2000-01-01 00:00:00' WHERE name = '{RARE_KEY}'", 'qagstore')
+    return secret
+
+
+def replay(name, path, key, expected, after):
+    """One resume from ``after``: how long until the ``expected`` events of ``path`` (GET /events and its filters) have
+    all arrived, through the events server on EVENTS_PORT."""
+    import socket
+    sock = socket.create_connection(('127.0.0.1', EVENTS_PORT), timeout=120)
+    started, got = time.perf_counter(), 0
+    sock.sendall((f'GET {path} HTTP/1.1\r\nHost: localhost\r\nX-API-Key: {key}\r\n'
+                  f'Last-Event-ID: {after}\r\n\r\n').encode())
+    stream = sock.makefile('rb')
+    while got < expected:
+        line = stream.readline()
+        if not line:
+            break
+        got += line.startswith(b'id: ')
+    took = time.perf_counter() - started
+    sock.close()
+    record({'block': 'r5-replay', 'replay': name, 'path': path, 'expected': expected, 'replayed': got, 'seconds': took,
+            'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+    log(f'r5 replay {name}: {got} of {expected} in {took:.1f} s')
 
 
 def r5():
@@ -1125,7 +1192,9 @@ def r5():
         row = {'block': 'r5', 'read': name, 'path': path, **timed(path), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')}
         record(row)
         log(f"r5 {name}: p50 {row['p50_ms']:.1f} ms p95 {row['p95_ms']:.1f} ms")
-    expected = int(ch("SELECT count() FROM qag_bench.events WHERE query_name = 'rare_q'"))
+    rare = rare_key()
+    by_query = int(ch("SELECT count() FROM qag_bench.events WHERE query_name = 'rare_q'"))
+    by_key = int(ch(f"SELECT count() FROM qag_bench.events WHERE key_name = '{RARE_KEY}'"))
     env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]),
            'QUERYAPIGATE_HOME': str(OUT / 'home'), 'QUERYAPIGATE_API_KEY': 'bench-admin',
            'QUERYAPIGATE_RUN_STORE_URL': RUN_STORE,
@@ -1135,21 +1204,8 @@ def r5():
                               stdout=open(OUT / 'events.log', 'w'), stderr=subprocess.STDOUT, start_new_session=True)
     try:
         wait_healthy(f'http://127.0.0.1:{EVENTS_PORT}', 'the events server')
-        import socket
-        sock = socket.create_connection(('127.0.0.1', EVENTS_PORT), timeout=120)
-        started, got = time.perf_counter(), 0
-        sock.sendall(('GET /events?query=rare_q HTTP/1.1\r\nHost: localhost\r\nX-API-Key: bench-admin\r\n'
-                      f'Last-Event-ID: {oldest - 1}\r\n\r\n').encode())
-        stream = sock.makefile('rb')
-        while got < expected:
-            line = stream.readline()
-            if not line:
-                break
-            got += line.startswith(b'id: ')
-        record({'block': 'r5-replay', 'filter': 'query=rare_q', 'expected': expected, 'replayed': got,
-                'seconds': time.perf_counter() - started, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
-        log(f'r5 replay: {got} of {expected} in {time.perf_counter() - started:.1f} s')
-        sock.close()
+        replay('one_query', '/events?query=rare_q', 'bench-admin', by_query, oldest - 1)
+        replay('one_key', '/events', rare, by_key, oldest - 1)  # §9 5: a key's replay of the whole log
     finally:
         os.killpg(server.pid, signal.SIGTERM)
         server.wait(timeout=20)
@@ -1194,6 +1250,8 @@ def main():
                                                          'queryapigate-dataplane'),
                         help='the Rust data plane, for the d-blocks (default %(default)s)')
     parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
+    parser.add_argument('--runs', type=lambda s: int(float(s)), default=72_000_000,
+                        help='the run store\'s size r7 grows it to, e.g. 250e6 (default %(default)s)')
     parser.add_argument('--ch-cpus', default='8-11',
                         help='cpuset for the run store\'s ClickHouse (default %(default)s)')
     args = parser.parse_args()
