@@ -3151,7 +3151,8 @@ and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIP
 
 ## 102. A Rust data plane for `/q/`
 
-**Status: prototype, decided go (0.44).** [ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
+**Status: decided go (0.44); in the image and the chart (ADR 0030, unreleased), experimental.**
+[ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
 a Rust process on the public port that serves saved-query reads from the plans Python computes and forwards
 everything else; runs it serves are reported to Python and recorded there. Gated by a differential test against
 Python, in CI against real PostgreSQL and MySQL. Measured in [Performance, v5](documentation/PERFORMANCE_V5.md):
@@ -3162,10 +3163,14 @@ reads, rendering - not the database. One gateway core serving several times the 
 traffic, and a p99 that stays in single milliseconds under load.
 
 **Next:**
-- **Shipping it** - [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md) (proposed), the follow-up ADR 0028
-  promised: the binary in the image, two containers sharing a pod's network instead of a supervisor, one Python
-  worker per pod, a `dataplane` block in the chart, and `QUERYAPIGATE_TRUST_PROXY` moved out of what it forwards, so
-  it serves behind the chart's ingress. Rate-limited keys next, then other formats and workspaces.
+- **Shipping it** - [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md), built (2026-10-30): the binary in
+  the image, two containers sharing a pod's network instead of a supervisor, one Python worker per pod, a `dataplane`
+  block in the chart and a Compose override, and `QUERYAPIGATE_TRUST_PROXY` moved out of what it forwards, so it serves
+  behind the chart's ingress. Left for it to be Accepted: its measurement (the image against the from-source build,
+  and a 2-CPU pod without a run store). Rate-limited keys next, then other formats and workspaces.
+- **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
+  psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answers `query_failed`, where a 400
+  `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Not fixed yet.
 - **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45 (experimental). Every run recorded at 20,000 a
   second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Without it, the event log needs a bound** at that rate: a row cap or sampling, as history has.

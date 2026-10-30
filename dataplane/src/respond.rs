@@ -1,6 +1,7 @@
 //! The response around a body, as Python sends it for a `/q/` call: render()'s paging headers, after_request's request
-//! ID and security headers (secheaders.py), and the 504 a time limit ends in. CORS and HSTS are never needed here: a
-//! request with an Origin, or one that could have arrived over HTTPS with HSTS on, is forwarded.
+//! ID and security headers (secheaders.py), and the 504 a time limit ends in. CORS is never needed here: a request
+//! with an Origin is forwarded. HSTS is added to a call that arrived over HTTPS, which only a trusted proxy can say
+//! (proxy.rs).
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -90,6 +91,17 @@ pub fn page(
     response
 }
 
+/// secheaders.apply()'s Strict-Transport-Security, given QUERYAPIGATE_HSTS_MAX_AGE for a call that arrived over HTTPS.
+pub fn hsts(mut response: Response<Body>, max_age: Option<u64>) -> Response<Body> {
+    if let Some(seconds) = max_age {
+        response.headers_mut().insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_str(&format!("max-age={seconds}")).expect("digits"),
+        );
+    }
+    response
+}
+
 /// runners._timed_out(), as handle_api_error() answers it: error_body()'s keys in its order.
 pub fn timed_out(timeout: f64, request_id: &str) -> (Response<Body>, String) {
     let message = format!(
@@ -153,6 +165,14 @@ mod tests {
             .unwrap()
             .to_bytes();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn hsts_only_when_it_is_given() {
+        let sent = hsts(page("[]\n".into(), 1, 10, 0, false, "rid"), Some(600));
+        assert_eq!(sent.headers()["strict-transport-security"], "max-age=600");
+        let none = hsts(page("[]\n".into(), 1, 10, 0, false, "rid"), None);
+        assert!(!none.headers().contains_key("strict-transport-security"));
     }
 
     #[test]

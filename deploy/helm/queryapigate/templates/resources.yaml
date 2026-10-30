@@ -53,6 +53,20 @@ type: Opaque
 data:
   {{ .Values.metricsAuth.key }}: {{ if and $existing $existing.data (hasKey $existing.data .Values.metricsAuth.key) }}{{ index $existing.data .Values.metricsAuth.key }}{{ else }}{{ randAlphaNum 48 | b64enc }}{{ end }}
 {{- end }}
+{{- if and .Values.dataplane.enabled (not .Values.dataplane.existingSecret) }}
+---
+# The secret the data plane and Python share (dataplane): made once, then kept - lookup finds the one in the cluster
+{{- $dataplaneSecret := printf "%s-dataplane" $fullname }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $dataplaneSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $dataplaneSecret }}
+  labels: {{- include "queryapigate.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{ .Values.dataplane.key }}: {{ if and $existing $existing.data (hasKey $existing.data .Values.dataplane.key) }}{{ index $existing.data .Values.dataplane.key }}{{ else }}{{ randAlphaNum 48 | b64enc }}{{ end }}
+{{- end }}
 {{- if and .Values.configAsCode.enabled .Values.configAsCode.file }}
 ---
 # The configuration file (ADR 0014): no secret in it - passwords are ${VAR} references to the Secret above

@@ -189,7 +189,9 @@ mkdocs serve
 ### Releasing
 
 1. Bump `__version__` in `queryapigate/__init__.py`, and `version` and `appVersion` in
-   `deploy/helm/queryapigate/Chart.yaml` with it (a test fails if they differ), and turn `## [Unreleased]` in
+   `deploy/helm/queryapigate/Chart.yaml` and the data plane's `version` in `dataplane/Cargo.toml` with it (build it
+   once, `cargo build --manifest-path dataplane/Cargo.toml`, so `Cargo.lock` follows; a test fails if any differ - the
+   data plane pairs only with Python of its own release, ADR 0030), and turn `## [Unreleased]` in
    CHANGELOG.md into a dated `## [X.Y.Z] - YYYY-MM-DD` section, with what upgraders must know first. `main` takes
    changes only through a pull request whose required checks pass: commit on a `release/X.Y.Z` branch, open a pull
    request, and squash-merge it once it's green.

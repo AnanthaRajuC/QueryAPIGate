@@ -15,7 +15,19 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from queryapigate import config, create_app, dataplane, db, events, history, metrics, runstore, store, usage
+from queryapigate import (
+    __version__,
+    config,
+    create_app,
+    dataplane,
+    db,
+    events,
+    history,
+    metrics,
+    runstore,
+    store,
+    usage,
+)
 from tests import TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 from tests.test_dataplane import SECRET
@@ -519,7 +531,12 @@ class LeaseEndpointTests(StoreTestCase):
 
     def lease(self, **body):
         return self.client.post('/internal/dataplane/lease', json={'holder': 'dp', **body},
-                                headers={dataplane.SECRET_HEADER: SECRET})
+                                headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: __version__})
+
+    def test_a_data_plane_from_another_release_gets_none(self):
+        res = self.client.post('/internal/dataplane/lease', json={'holder': 'dp'},
+                               headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: '0.1.0'})
+        self.assertEqual((res.status_code, res.get_json()['error']), (409, dataplane.UNPAIRED))
 
     def test_names_where_runs_are_and_takes_the_block_back(self):
         res = self.lease()

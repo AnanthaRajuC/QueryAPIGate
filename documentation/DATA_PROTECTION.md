@@ -184,6 +184,10 @@ on a validated OpenSSL in FIPS mode, and that is a choice of platform.
   MySQL connections are outside the validated boundary unless your connector build uses the system's. Also outside
   QueryAPIGate's control: DuckDB's own TLS for remote files, and a JDBC or H2 connection's Java runtime - use a
   FIPS-configured JRE, or don't use them there.
+- **Leave the Rust data plane off** (experimental, [ADR 0030](adr/0030-shipping-the-data-plane.md)). Its cryptography -
+  the Fernet passwords it decrypts, the SHA-256 and HMAC it hashes keys and masks with, its TLS - is ring and
+  RustCrypto, not a validated module. It runs only when started (`dataplane.enabled` in the chart), so a deployment
+  without it is unchanged.
 - **What your platform's FIPS policy refuses is refused** - a JWT algorithm in `QUERYAPIGATE_JWT_ALGORITHMS` its
   module doesn't offer, a TLS cipher it doesn't allow - with an error, never a weaker fallback.
 

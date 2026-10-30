@@ -443,17 +443,23 @@ Walkthrough, run on kind:
 Plain manifests of the PostgreSQL shape, kept in step with the chart by a test:
 [`deploy/kubernetes/`](https://github.com/AnanthaRajuC/QueryAPIGate/tree/main/deploy/kubernetes).
 
-## A Rust data plane in front of /q/ (prototype)
+## A Rust data plane in front of /q/
 
 > **Experimental** - outside the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
-> a prototype ([ADR 0028](adr/0028-rust-data-plane-prototype.md), decided go). It is built from the repository and
-> isn't in the image or the chart; what it serves, its settings and its headers may change before it ships.
+> decided go in 0.44 ([ADR 0028](adr/0028-rust-data-plane-prototype.md)) and shipped in the image and the chart
+> ([ADR 0030](adr/0030-shipping-the-data-plane.md)); what it serves, its settings and its headers may change before it
+> graduates.
 
-A second process, `dataplane/`, can take the public port and serve saved-query reads itself, from plans the Python
-server gives it, forwarding everything else to Python unchanged. For the calls it serves it measured 3-9x the calls a
-second per core, with every run still recorded by Python ([Performance, v5](PERFORMANCE_V5.md)). It needs
-`QUERYAPIGATE_DATAPLANE_SECRET` (at least 16 characters) set for both processes, and at least two gunicorn workers
-behind it. To build it, run it and see which calls it serves:
+A second process, `queryapigate-dataplane` in the image, can take the public port and serve saved-query reads itself,
+from plans the Python server gives it, forwarding everything else to Python unchanged. For the calls it serves it
+measured 3-9x the calls a second per core, with every run still recorded ([Performance, v5](PERFORMANCE_V5.md)).
+
+It runs as a second container from the same image, sharing the first one's network: Python on `127.0.0.1:5001`
+(`QUERYAPIGATE_BIND`), the data plane on port 5000, both with the same `QUERYAPIGATE_DATAPLANE_SECRET` (at least 16
+characters) and settings. The Helm chart does that with `dataplane.enabled: true`. One gunicorn worker records about
+17,000 runs a second: without a run store ([guide 65](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/65-keep-runs-in-clickhouse.md)),
+keep a pod's data plane near 2 CPUs and scale out with pods. It isn't for FIPS 140 deployments: its cryptography isn't
+a validated module. To turn it on, and see which calls it serves:
 [Try the Rust data plane](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md).
 
 ## A ClickHouse run store (prototype)

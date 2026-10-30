@@ -244,6 +244,13 @@ def threads():
     return int(raw) if raw.isdigit() and 1 <= int(raw) <= MAX_THREADS else DEFAULT_THREADS
 
 
+def bind():
+    """QUERYAPIGATE_BIND: the address the Docker image's gunicorn listens on (gunicorn_conf.py) - the image sets
+    0.0.0.0:5000, and behind the Rust data plane, which then takes that port, 127.0.0.1:5001 (ADR 0030). None when
+    unset: gunicorn's own default, or its --bind."""
+    return os.environ.get('QUERYAPIGATE_BIND', '').strip() or None
+
+
 def access_log():
     """QUERYAPIGATE_ACCESS_LOG: the image's gunicorn writes an access line per request to stdout (on by default). Off
     for a server whose proxy or load balancer already logs requests - what a line costs, with no one reading it."""
@@ -1500,6 +1507,8 @@ def describe_settings():
          'description': 'Requests served at once, and idle connections kept open per distinct connection.', 'rows': [
             row('Threads', "Requests one server process serves at once - the Docker image's gunicorn. Read at "
                 'startup.', 'QUERYAPIGATE_THREADS', str(threads())),
+            row('Listen address', "Where the Docker image's gunicorn listens: 127.0.0.1:5001 behind the data plane, "
+                'which takes the public port. Read at startup.', 'QUERYAPIGATE_BIND', bind() or "gunicorn's own"),
             row('Pool size', 'Idle connections kept per connection - by default, one per thread. 0 disables pooling.',
                 'QUERYAPIGATE_POOL_SIZE', str(pool_size())),
             row('Idle timeout', 'How long an idle pooled connection is kept before it is closed.',

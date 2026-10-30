@@ -1,5 +1,6 @@
 {{- include "queryapigate.validate" . -}}
 {{- $sqlite := eq .Values.store.type "sqlite" }}
+{{- $dataplane := .Values.dataplane.enabled }}
 # The API server: REST, the Management API, the Console. SQLite: one pod on a volume, replaced not rolled. PostgreSQL:
 # several, replaced one at a time while the previous release keeps serving (DEPLOYMENT.md, Rolling upgrades).
 apiVersion: apps/v1
@@ -33,6 +34,16 @@ spec:
         - name: queryapigate
           image: {{ include "queryapigate.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if $dataplane }}
+          # Behind the data plane, on the pod's loopback: the kubelet can't reach it there, so its check runs inside
+          {{- include "queryapigate.env" (dict "root" . "server" true) | nindent 10 }}
+            - {name: QUERYAPIGATE_BIND, value: "127.0.0.1:5001"}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=3)"]}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- else }}
           ports: [{name: http, containerPort: 5000}]
           {{- include "queryapigate.env" (dict "root" . "server" true) | nindent 10 }}
           readinessProbe:
@@ -42,6 +53,7 @@ spec:
             httpGet: {path: /health, port: http}
             periodSeconds: 30
             failureThreshold: 3
+          {{- end }}
           lifecycle:
             # Keep serving a few seconds after being told to stop, while the endpoint is removed everywhere -
             # otherwise a rolling update drops the requests still arriving in that moment.
@@ -58,6 +70,31 @@ spec:
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if $dataplane }}
+        # The Rust data plane (ADR 0030): the pod's public port, the same image, settings and store as Python's
+        - name: dataplane
+          image: {{ include "queryapigate.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["queryapigate-dataplane"]
+          ports: [{name: http, containerPort: 5000}]
+          {{- include "queryapigate.env" (dict "root" . "server" true) | nindent 10 }}
+            - {name: QUERYAPIGATE_DATAPLANE_LISTEN, value: "0.0.0.0:5000"}
+            - {name: QUERYAPIGATE_DATAPLANE_UPSTREAM, value: "http://127.0.0.1:5001"}
+          readinessProbe:   # through it to Python: ready when both are
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:    # its own: a slow Python doesn't restart it
+            tcpSocket: {port: http}
+            periodSeconds: 30
+            failureThreshold: 3
+          lifecycle:
+            preStop: {exec: {command: ["sleep", "10"]}}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.dataplane.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /data}   # the SQLite store, which it reads as Python does
+            - {name: tmp, mountPath: /tmp}
+        {{- end }}
       volumes:
         {{- if $sqlite }}
         - name: data

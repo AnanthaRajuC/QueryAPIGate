@@ -408,15 +408,33 @@ offered on Trino, and the schema browser not showing keys or DDL is a capability
 
 A second process, `dataplane/`, can listen on the public port in front of the Python server. It serves `/q/<name>`
 reads itself from *plans* Python gives it, and forwards everything else unchanged
-([ADR 0028](adr/0028-rust-data-plane-prototype.md)). It isn't in the Docker image, the PyPI package or the Helm chart:
-nothing changes for a deployment that doesn't build and run it. Where it does run:
+([ADR 0028](adr/0028-rust-data-plane-prototype.md)). It's in the Docker image, and the Helm chart's `dataplane` block
+runs it as a second container in each API server pod ([ADR 0030](adr/0030-shipping-the-data-plane.md)), but it runs
+only when started: nothing changes for a deployment that doesn't. It isn't in the PyPI package. Where it does run:
 
 - **It makes no security decision of its own.** The SQL guard, the table allow-list, masking and every refusal stay
   in Python. A plan is Python's verdict for one key, one saved query version and one connection, made only on a call
   that succeeded, and only for a scoped API key in the `default` workspace with no rate limit, quota, concurrency,
   time or row limit of its own. Administrators, signed-in users (JWT, SSO, MCP OAuth), other workspaces, writes,
   streams, other formats and every dialect but PostgreSQL and MySQL are always forwarded. With a server-wide rate
-  limit, a trusted proxy hop count or OpenTelemetry tracing configured, it forwards every call.
+  limit or OpenTelemetry tracing configured, it forwards every call.
+- **Behind trusted proxies, it finds the client as Python does.** With `QUERYAPIGATE_TRUST_PROXY` set, the address a
+  key's `allowed_ips` is checked against comes from `X-Forwarded-For`, as `ProxyFix` takes it, so this is an access
+  decision made in two places. The data plane serves only a call whose forwarding headers read one way: one line each,
+  no quotes, no empty item, an address in its own spelling, a scheme of `http` or `https`, and a host werkzeug can
+  encode. Anything else is forwarded for Python to read. The differential test's proxied run sends both every shape of those headers, against
+  IP-restricted keys, and requires the same answers (ADR 0030, section 5).
+- **Behind it, gunicorn trusts no client's forwarding headers.** Every request reaches gunicorn over loopback, and
+  gunicorn trusts loopback by default to set the scheme (`X-Forwarded-Proto`, `-Ssl`, `-Protocol`) and `SCRIPT_NAME`
+  from headers. A client's own were passed on, so it could make Python send HSTS over plain HTTP, turn a call into a
+  400, or move part of a path out of what Flask routes, past a proxy's rules for that path. With the secret set,
+  `gunicorn_conf.py` trusts no peer's (`forwarded_allow_ips` empty, unless `FORWARDED_ALLOW_IPS` says otherwise), and
+  Python reads the forwarding headers only through `ProxyFix`, as it does without the data plane. Found and fixed
+  shipping it, 2026-10-30.
+- **The two come from one release.** The protocol between them is internal and unversioned, so the data plane sends
+  its version with the secret (`X-QAG-Dataplane-Version`), and Python gives no plan and no run store lease to another.
+  A mismatched pair forwards every call. In the image both come from one build, and the crate's version is the
+  release's, checked by a test.
 - **A plan is checked against the store on every call.** It names digests of the key, query and connection rows it
   was computed from. The data plane reads those rows for each call, with Python's own SELECTs, and serves only when
   they digest the same. A revoked, expired or re-scoped key, an edited query or a changed connection doesn't match, and
@@ -448,13 +466,20 @@ nothing changes for a deployment that doesn't build and run it. Where it does ru
 - **What the process holds:** the store's credentials (`QUERYAPIGATE_DATABASE_URL`, or the SQLite file) for reading,
   each connection's credentials as the store keeps them, and the shared secret. A compromise of the data plane is a
   compromise of what those reach, as for the Python process. Run it as the same user, with the same secrets, and never
-  expose Python's own port once the data plane is in front of it.
+  expose Python's own port once the data plane is in front of it. The image and the chart put Python on the pod's
+  loopback (`QUERYAPIGATE_BIND=127.0.0.1:5001`), reachable from its own pod only.
 
 *Reviewed for 0.44.* The gate is the differential test (`dataplane/tests/test_differential.py`): random calls sent to
 both processes, comparing whole responses and the history rows they leave, with expired and rotated keys, hostile
 parameters, and grants changed, a key revoked and a query given a new version while calls run. Every run of it was clean, over 13,500 calls on
 PostgreSQL and MySQL. The data plane's Rust dependencies are pinned in `dataplane/Cargo.lock` and updated by
 Dependabot.
+
+*Reviewed for shipping it (ADR 0030).* The differential test also runs behind two trusted proxies with HSTS on: 9,000
+more calls over three seeds, every one the same. CI audits the crates against RustSec (`cargo audit`) and fails on a known
+vulnerability, and the image's binary is built with `cargo auditable`, so the image's SBOM and scanners see its crates.
+Its cryptography (ring, RustCrypto) isn't a FIPS-validated module: a deployment that needs FIPS 140 leaves the data
+plane off.
 
 ### The ClickHouse run store (ADR 0029, a prototype)
 

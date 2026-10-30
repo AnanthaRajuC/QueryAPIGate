@@ -16,6 +16,12 @@ See it's up:
   curl http://127.0.0.1:8080/health
 then open http://127.0.0.1:8080/console/
 {{- end }}
+{{- if .Values.dataplane.enabled }}
+
+The Rust data plane (experimental, ADR 0030) is in front of each API server pod: it serves saved-query reads it has a
+plan for and passes the rest to Python. Its log says which it served:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "queryapigate.fullname" . }} -c dataplane
+{{- end }}
 {{- if .Values.mcp.enabled }}
 
 The MCP server: {{ if .Values.mcp.ingress.host }}https://{{ .Values.mcp.ingress.host }}/mcp{{ else }}http://{{ include "queryapigate.fullname" . }}-mcp.{{ .Release.Namespace }}.svc/mcp, in the cluster{{ end }}

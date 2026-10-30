@@ -1,0 +1,47 @@
+# The Rust data plane in front of each instance (ADR 0030, experimental) - on top of docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dataplane.yml up -d
+#
+# Each instance's Python moves to its own loopback (QUERYAPIGATE_BIND), and a data plane from the same image shares
+# its network and takes port 5000: Caddy, and the image's health check, reach the data plane, which serves the
+# saved-query reads it has a plan for and passes everything else to Python. Set QUERYAPIGATE_DATAPLANE_SECRET in .env:
+# the same for every container. See how-to/64-try-the-rust-data-plane.md.
+
+x-dataplane: &dataplane
+  image: ${QUERYAPIGATE_IMAGE:?set QUERYAPIGATE_IMAGE in .env}
+  restart: unless-stopped
+  env_file: .env
+  command: ["queryapigate-dataplane"]
+  environment: &dataplane-environment
+    QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:${POSTGRES_PASSWORD}@postgres:5432/queryapigate
+    QUERYAPIGATE_TRUST_PROXY: "1"                       # one proxy in front: Caddy - read as Python reads it
+    QUERYAPIGATE_DATAPLANE_LISTEN: 0.0.0.0:5000
+    QUERYAPIGATE_DATAPLANE_SECRET: ${QUERYAPIGATE_DATAPLANE_SECRET:?set QUERYAPIGATE_DATAPLANE_SECRET in .env}
+
+x-behind: &behind
+  QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:${POSTGRES_PASSWORD}@postgres:5432/queryapigate
+  QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
+  QUERYAPIGATE_TRUST_PROXY: "1"
+  QUERYAPIGATE_BIND: 127.0.0.1:5001                   # the data plane takes 5000
+  QUERYAPIGATE_DATAPLANE_SECRET: ${QUERYAPIGATE_DATAPLANE_SECRET:?set QUERYAPIGATE_DATAPLANE_SECRET in .env}
+
+services:
+  queryapigate-1:
+    environment: *behind
+  queryapigate-2:
+    environment: *behind
+  queryapigate-3:
+    environment: *behind
+
+  dataplane-1:
+    <<: *dataplane
+    network_mode: service:queryapigate-1
+    depends_on: [queryapigate-1]
+  dataplane-2:
+    <<: *dataplane
+    network_mode: service:queryapigate-2
+    depends_on: [queryapigate-2]
+  dataplane-3:
+    <<: *dataplane
+    network_mode: service:queryapigate-3
+    depends_on: [queryapigate-3]

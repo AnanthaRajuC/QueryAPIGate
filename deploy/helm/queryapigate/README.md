@@ -50,6 +50,7 @@ database URL, a secret setting in `config` instead of the secret, a misspelt val
 | `extraVolumes`, `extraVolumeMounts` | `[]` | Files settings name by path (the SIEM's certificates, an export directory), in every pod |
 | `ingress.*` | off | `className`, `host`, `tls`, `annotations` (ingress-nginx's no-buffering for `/events`) |
 | `events.*`, `mcp.*` | off | The events server and the MCP server, each its own Deployment; `mcp.ingress.host` for its own host |
+| `dataplane.*` | off | The Rust data plane (experimental, ADR 0030): a second container in each API server pod, from the same image, serving saved-query reads it has a plan for; Python moves to the pod's loopback. The shared secret is made in the chart's own Secret (`<release>-dataplane`) and kept across upgrades; `existingSecret` for yours (`helm template`, Argo CD). `resources` its own: without a run store, about 2 CPUs a pod ([guide 64](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md)) |
 | `resources` | 250m / 256Mi, 1Gi limit | Per API server pod. For throughput: request 1 CPU, limit 1.5 - a pod at full load uses 1.1-1.3 cores ([guide 63](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/63-tune-a-deployment-for-throughput.md)) |
 | `podSecurityContext`, `securityContext` | non-root, read-only root filesystem, no capabilities, RuntimeDefault seccomp | |
 | `podDisruptionBudget.*` | on with more than one pod | All but one kept up |

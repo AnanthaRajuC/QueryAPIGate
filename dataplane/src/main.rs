@@ -16,6 +16,7 @@ mod db;
 mod forward;
 mod log;
 mod params;
+mod proxy;
 mod pyfmt;
 mod render;
 mod respond;
@@ -111,11 +112,14 @@ async fn serve(config: config::Config) {
         eprintln!("queryapigate-dataplane: writing its runs to the run store (ADR 0029)");
     }
     if let Some(reason) = settings.forward_everything {
-        eprintln!("queryapigate-dataplane: forwarding everything - {reason} is set");
+        eprintln!("queryapigate-dataplane: forwarding everything - {reason}");
     }
     eprintln!(
-        "queryapigate-dataplane: listening on {}, in front of {} ({} threads)",
-        config.listen, config.upstream, config.threads
+        "queryapigate-dataplane {}: listening on {}, in front of {} ({} threads)",
+        forward::VERSION,
+        config.listen,
+        config.upstream,
+        config.threads
     );
     let app = serve::App::new(forward::Forwarder::new(&config), settings, store, run_store);
     let shutdown = shutdown_signal();

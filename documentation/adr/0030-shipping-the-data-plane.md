@@ -1,6 +1,10 @@
 # ADR 0030: Shipping the Rust data plane in the image and the Helm chart
 
-- **Status:** Proposed (2026-10-30).
+- **Status:** Proposed (2026-10-30), agreed and built the same day. Amended while building it: the crate's version is
+  checked by a test, as the chart's is; Python moves with a new setting, `QUERYAPIGATE_BIND`; Python's check in the pod
+  runs inside its container; the data plane serves only what its forwarding headers say plainly, and a scheme of `http`
+  or `https`; and building it found gunicorn trusting a client's forwarding headers behind the data plane, fixed here
+  (sections 1, 2, 4, 5 and 7, *as built*). Accepted once section 8's measurement is made.
 - **Date:** 2026-10-30
 - **Backlog:** #102, *Next: shipping it*. The follow-up [ADR 0028](0028-rust-data-plane-prototype.md#result-go)
   promised: packaging, the Docker image, the Helm chart, and which of what it forwards to move. Since
@@ -42,7 +46,9 @@ One image means the two processes of a deployment always come from one release, 
 scanned together (ADR 0018). As a check for anyone who pairs them otherwise, the crate's version becomes the release's
 (`dataplane/Cargo.toml`, checked by `check_release.py` with the other version strings). The data plane sends it with
 the secret, and Python gives no plan and no lease to a different version, logging why once. A mismatched pair then
-forwards every call, which is slower but answers correctly.
+forwards every call, which is slower but answers correctly. *As built:* the version is checked by a test
+(`tests/test_dataplane.py`, with `Cargo.lock`'s), as the chart's is by `tests/test_helm.py`; it goes in
+`X-QAG-Dataplane-Version`, and the lease's refusal is a 409.
 
 It isn't added to the PyPI package. A wheel per platform with a Rust binary in it is a different build, for a smaller
 audience than the image's. Guide 64's build from the repository keeps working.
@@ -58,6 +64,11 @@ data plane binds `0.0.0.0:5000`.
 - **The image's health check keeps working unchanged.** In the shared namespace, `127.0.0.1:5000` is the data plane
   from either container, and it forwards `/health` to Python, so the check passes only when both are up.
 - **Python's port is reachable from the pod only,** on loopback. Nothing outside it can skip the data plane.
+
+*As built:* the image's command had `--bind 0.0.0.0:5000`, which would beat anything else, so the address became a
+setting: `QUERYAPIGATE_BIND`, which the image sets to `0.0.0.0:5000` and `gunicorn_conf.py` reads only when it's set.
+`QUERYAPIGATE_HOST` and `QUERYAPIGATE_PORT` were not reused: they're `queryapigate serve`'s, and its default host is
+loopback, so an environment that already sets one could have moved a deployment's gunicorn without anyone asking.
 
 There's no single-container mode. A supervisor in the image (tini, s6, or a Python one) would be new code in the
 path of every call, would hide one process's crash behind the other's health, and would share one resource limit
@@ -113,6 +124,12 @@ With `enabled: true`:
 - **A rolling upgrade replaces both containers together,** from one image. A new pod starts with no plans, so each
   query's and key's first call goes to Python, as on any restart.
 
+*As built:* there's no `poolSize` value: `config` reaches both containers, so `QUERYAPIGATE_DATAPLANE_POOL_SIZE` and
+`QUERYAPIGATE_DATAPLANE_THREADS` are set there. The kubelet probes the pod's address, not its loopback, so Python's
+check is an exec probe inside its container (liveness, every 30 s), and its readiness is the data plane's, which goes
+through to it. The chart refuses `QUERYAPIGATE_BIND` and the data plane's listen and upstream addresses in `config`,
+and its secret in `config` or `secret.values`.
+
 `deploy/scale-out` gets an opt-in override file, `docker-compose.dataplane.yml`, that adds a data plane service in
 front of each instance. Guide 64 is rewritten around the image and the chart, with the build from the repository
 kept as its last section.
@@ -140,6 +157,16 @@ agree exactly:
 Everything else in ADR 0028's section 4 stays forwarded. Rate-limited keys with Redis come next, as their own change
 with their own differential tests. Then other formats and workspaces.
 
+*As built:* rather than reproduce every reading `parse_list_header` and werkzeug make, the data plane serves only
+headers that read one way, and forwards the rest: one line of each, no quotes, no empty item; an address in its own
+spelling (`2001:db8::5`, not `2001:DB8::5`), not an IPv4 address written as IPv6; and a scheme of `http` or `https`.
+The proxied differential run found the reason for the last: werkzeug answers `wss` on a request that isn't a
+WebSocket's with 400. The host is checked too, though the data plane uses none of it: werkzeug answers 400 to one it
+can't encode as IDNA (`a..b`, a label over 63 characters), from `Host` - which was so before this ADR, and is fixed with
+it - or behind proxies from `X-Forwarded-Host`. A hop count or HSTS value Python's `int()` would read but Rust wouldn't (`1_0`, another script's
+digits) makes it forward every call. The differential test's proxied run - two hops, HSTS on, every shape of both
+headers against IP-restricted keys, IPv6 ones included - found no difference in 9,000 calls, over three seeds.
+
 ### 6. The build
 
 - **The Dockerfile gets a stage that compiles on the build machine's architecture and cross-compiles to the target's**
@@ -150,12 +177,22 @@ with their own differential tests. Then other formats and workspaces.
   crate list in the binary, so the image's SBOM and scanners such as Trivy and Grype see its dependencies, not an
   opaque file.
 - **CI's `dataplane` job adds `cargo audit`** (RustSec), failing on an advisory with no recorded exception.
-  `block-buffer` 0.10.4 (GHSA-qwgh-2vcv-g2f7) starts as one, with the reason it's waiting.
+  `block-buffer` 0.10.4 (GHSA-qwgh-2vcv-g2f7) starts as one, with the reason it's waiting. *As built:* RustSec has no
+  advisory for it (it's GitHub's alone), so no exception was needed: `cargo audit` 0.22.2 found none in 255 crates.
 - **The image's smoke test** (`docker.yml`) also starts the image as two containers in one namespace, calls a saved
   query twice with a scoped key, and checks that the data plane served the second call (its log line). It runs for
   both architectures' builds of the binary.
 - **The Helm job on kind** installs with `dataplane.enabled`, behind the ingress, and makes the same check. That's
   the case section 5 exists for.
+
+*As built:* the cross-compiled build takes about 2 minutes for either architecture on the laptop. The smoke test is
+`.github/scripts/smoke_dataplane.sh`, run by CI's image job on every pull request and by `docker.yml` on a release; it
+calls until the data plane serves, since Python records a key's use within a history flush and forwards its calls
+until then. The arm64 binary is started under QEMU from the pushed image, on a release: it can't serve a call there in
+reasonable time. The kind job has no ingress controller, so it sets `ingress.enabled` (and with it the hop count) and
+sends `X-Forwarded-For` as the controller would. The scale-out example was also run once on the laptop, behind Caddy:
+three data planes served 26 of 30 calls, and a client's own `X-Forwarded-For` didn't move an IP-restricted key's
+verdict.
 
 ### 7. Security
 
@@ -166,12 +203,20 @@ with their own differential tests. Then other formats and workspaces.
 - **The client address behind a proxy is an access decision** (a key's `allowed_ips`) made in Rust as well as
   Python, which is why section 5 has its own differential cases. THREAT_MODEL's data plane entry says so.
 - **Version pairing** is checked, not assumed (section 1).
+- *Found building it:* **behind the data plane, gunicorn trusted every client's forwarding headers.** Every request
+  reaches gunicorn over loopback, which gunicorn trusts by default to set the scheme (`X-Forwarded-Proto`, `-Ssl`,
+  `-Protocol`) and `SCRIPT_NAME` from headers, and the data plane passed a client's own on. A client could move part
+  of a path out of what Flask routes, past a proxy's rules for that path, turn a call into a 400 with contradictory
+  scheme headers, or have HSTS sent over plain HTTP. With the data plane's secret set, `gunicorn_conf.py` trusts no
+  peer's (`forwarded_allow_ips` empty, unless `FORWARDED_ALLOW_IPS` says otherwise), and Python reads them through
+  `ProxyFix` only, as it does without the data plane.
 - **FIPS:** the data plane's cryptography isn't a validated module. A deployment that needs FIPS 140 leaves it off,
   and the FIPS documentation says so. A FIPS build (rustls on aws-lc-rs's FIPS module) is possible later, if asked.
 
 ### 8. Done when
 
-It stays experimental (`queryapigate/experimental.py`). This ADR is done, and it's Accepted, when:
+It stays experimental (`queryapigate/experimental.py`). This ADR is done, and it's Accepted, when (*as of
+2026-10-30:* 3 and 5 done; 1 and 2 done but for CI's first run of them; 4 to measure):
 
 1. The image and its `-h2` variant contain the binary, built for amd64 and arm64 by cross-compiling, with
    `cargo auditable`. The smoke test is green for both.
