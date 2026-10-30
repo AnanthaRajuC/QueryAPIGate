@@ -60,7 +60,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `dataplane.enabled` adds it to each API server pod as a second container from the same image, takes the pod's port
   with it, moves Python to the pod's loopback, and makes the secret the two share, kept across upgrades. With Docker,
   it's a second container sharing the first one's network; `deploy/scale-out/docker-compose.dataplane.yml` puts one in
-  front of each instance. Nothing changes unless it's turned on.
+  front of each instance. Nothing changes unless it's turned on. Measured: the image's data plane serves as fast as the
+  from-source one, and a pod with it held to 2 CPUs and no run store recorded every one of 9.8 million runs at 16,400
+  calls a second ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)).
 - **`QUERYAPIGATE_BIND`:** where the image's gunicorn listens - `0.0.0.0:5000`, as before, or `127.0.0.1:5001` behind
   the data plane. The image's command no longer has `--bind`; unset outside the image, gunicorn's own default applies.
 

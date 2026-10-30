@@ -58,5 +58,6 @@ for n in $(seq 1 10); do
     sleep 0.5
 done
 [ "$served" -gt 0 ] || fail "the data plane served none of $n calls"
-docker logs "$run-dp" 2>&1 | head -1
+# sed reads the log to its end: head would stop after one line, and the SIGPIPE back would fail this under pipefail
+docker logs "$run-dp" 2>&1 | sed -n 1p
 echo "The data plane served call $n; Python answered the ones before it."

@@ -1,10 +1,11 @@
 # ADR 0030: Shipping the Rust data plane in the image and the Helm chart
 
-- **Status:** Proposed (2026-10-30), agreed and built the same day. Amended while building it: the crate's version is
+- **Status:** Accepted (2026-10-30), on section 8's measurement ([*Result*](#result)). Proposed and built the same
+  day. Amended while building it: the crate's version is
   checked by a test, as the chart's is; Python moves with a new setting, `QUERYAPIGATE_BIND`; Python's check in the pod
   runs inside its container; the data plane serves only what its forwarding headers say plainly, and a scheme of `http`
   or `https`; and building it found gunicorn trusting a client's forwarding headers behind the data plane, fixed here
-  (sections 1, 2, 4, 5 and 7, *as built*). Accepted once section 8's measurement is made.
+  (sections 1, 2, 4, 5 and 7, *as built*).
 - **Date:** 2026-10-30
 - **Backlog:** #102, *Next: shipping it*. The follow-up [ADR 0028](0028-rust-data-plane-prototype.md#result-go)
   promised: packaging, the Docker image, the Helm chart, and which of what it forwards to move. Since
@@ -85,7 +86,9 @@ not workers. For the shipped form, this replaces ADR 0028's two-worker condition
 - **Without it,** a pod should stay below one worker's 17,000 recorded runs a second. At about 7,000 calls a second
   per data plane core (2.9 cores at 20,000 a second, ADR 0029), that's a data plane limited to about 2 CPUs per pod.
   The chart's docs say so. A pod that goes past it counts what it can't record in
-  `queryapigate_history_runs_total{outcome="dropped"}`, as it does today.
+  `queryapigate_history_runs_total{outcome="dropped"}`, as it does today. *Measured (section 8):* held to 2 CPUs, the
+  image's data plane served about 8,900 calls a second per CPU, and one Python worker recorded every run, 9.8 million
+  over 10 minutes, with half a core.
 
 Shared metrics across workers (Prometheus' multiprocess mode, or the data plane aggregating) would lift the per-pod
 limit. That's a separate change, only worth making if one-worker pods turn out too small.
@@ -216,7 +219,7 @@ verdict.
 ### 8. Done when
 
 It stays experimental (`queryapigate/experimental.py`). This ADR is done, and it's Accepted, when (*as of
-2026-10-30:* 3 and 5 done; 1 and 2 done but for CI's first run of them; 4 to measure):
+2026-10-30:* all five - 1 and 2 by CI on #127, its image job and the chart on kind, and a `docker.yml` rehearsal):
 
 1. The image and its `-h2` variant contain the binary, built for amd64 and arm64 by cross-compiling, with
    `cargo auditable`. The smoke test is green for both.
@@ -232,6 +235,23 @@ It stays experimental (`queryapigate/experimental.py`). This ADR is done, and it
 
 To graduate later, on the terms in `experimental.GRADUATION`, it needs a release unchanged and a security review of
 the shipped form. Moving more of ADR 0028's forwarded rows isn't a condition.
+
+#### Result
+
+Measured on 2026-10-30, on the laptop and in the setup of the earlier data plane measurements, `benchmarks/oltp.py`
+blocks s1 and s2 ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)):
+
+| Criterion 4 | Measured |
+|---|---|
+| The image against the from-source build, same commit, same 8 cores: calls a second per gateway core | 0.98-0.99x on the plain and governed lookups, 0.95x on a 100-row page; the data plane's own CPU and p99 the same |
+| One pod, the data plane held to 2 CPUs, no run store, 64 callers | 16,400-17,000 calls a second, every run recorded: 9,842,067 over a 10-minute run |
+
+The data plane runs as fast in the image as from source. What differs is the Python behind it, and the measurement
+traced it past containers: with the image's exact packages on the from-source side the numbers were the same, and a
+Python workload alone, pinned to one core, ran 29-34% slower with the image's interpreter, seccomp on or off. The
+official `python:3.12-slim` image links Python against a shared `libpython`, where the laptop's is linked statically.
+That's how the image has always run, with or without the data plane; a faster interpreter in the image is BACKLOG
+#104, not a condition of this ADR.
 
 ## Consequences
 

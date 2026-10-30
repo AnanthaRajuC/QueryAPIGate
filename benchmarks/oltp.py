@@ -346,7 +346,7 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
         extra['QUERYAPIGATE_DATAPLANE_SECRET'] = DATAPLANE_SECRET
     home = OUT / 'home'
     home.mkdir(exist_ok=True)
-    bindir = Path(sys.executable).parent
+    bindir = Path(args.python_env) / 'bin' if args.python_env else Path(sys.executable).parent
     env = {**os.environ, 'PYTHONPATH': str(OUT / 'builds' / build.split('+')[0]), 'QUERYAPIGATE_HOME': str(home),
            'QUERYAPIGATE_API_KEY': 'bench-admin', 'QUERYAPIGATE_ALLOW_WRITES': '1',
            'QUERYAPIGATE_DATABASE_URL': f'postgresql://postgres:pw@{pg_ip()}:5432/qagstore', **extra,
@@ -402,7 +402,7 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
             cwd=home, stdout=out, stderr=out, start_new_session=True)
         wait_healthy(U, f'the data plane for {build}')
     _server_meta = {'build': build, 'workers': workers, 'access_log': access_log, 'threads': threads,
-                    'dataplane_threads': threads_dp, 'run_store': _run_store}
+                    'dataplane_threads': threads_dp, 'run_store': _run_store, 'python_env': args.python_env}
 
 
 def start_image(build, settings, dp_cpus=None):
@@ -1384,6 +1384,8 @@ def main():
     parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
     parser.add_argument('--runs', type=lambda s: int(float(s)), default=72_000_000,
                         help='the run store\'s size r7 grows it to, e.g. 250e6 (default %(default)s)')
+    parser.add_argument('--python-env', help='a virtualenv for the builds\' gunicorn and libraries - one with the '
+                        'image\'s package versions, say, so s1 compares containers alone (default: this Python\'s)')
     parser.add_argument('--pod-cpus', type=float, default=2.0,
                         help='s2: the CPU limit on the image\'s data plane, as a pod\'s (default %(default)s)')
     parser.add_argument('--ch-cpus', default='8-11',

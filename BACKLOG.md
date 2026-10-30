@@ -3151,7 +3151,7 @@ and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIP
 
 ## 102. A Rust data plane for `/q/`
 
-**Status: decided go (0.44); in the image and the chart (ADR 0030, unreleased), experimental.**
+**Status: decided go (0.44); in the image and the chart (ADR 0030, accepted, unreleased), experimental.**
 [ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
 a Rust process on the public port that serves saved-query reads from the plans Python computes and forwards
 everything else; runs it serves are reported to Python and recorded there. Gated by a differential test against
@@ -3166,8 +3166,10 @@ traffic, and a p99 that stays in single milliseconds under load.
 - **Shipping it** - [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md), built (2026-10-30): the binary in
   the image, two containers sharing a pod's network instead of a supervisor, one Python worker per pod, a `dataplane`
   block in the chart and a Compose override, and `QUERYAPIGATE_TRUST_PROXY` moved out of what it forwards, so it serves
-  behind the chart's ingress. Left for it to be Accepted: its measurement (the image against the from-source build,
-  and a 2-CPU pod without a run store). Rate-limited keys next, then other formats and workspaces.
+  behind the chart's ingress. Accepted on its measurement: the image's data plane serves as the from-source one does,
+  and a 2-CPU pod without a run store recorded every one of 9.8 million runs
+  ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)). Rate-limited keys
+  next, then other formats and workspaces.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answers `query_failed`, where a 400
   `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Not fixed yet.
@@ -3196,3 +3198,21 @@ history's sample rate.
 runs measured (2026-10-29), every criterion met once a replay finds its ids in batches (ADR 0029 section 9, 0.46.0).
 Beside it: the events server's ceiling - about 10,000 events a second per stream from one process - under a soak.
 The event log's bound for the SQL stores (#102) is separate and ships either way.
+
+## 104. A faster Python interpreter in the image
+
+**Status: found, not planned (2026-10-30).** Measuring ADR 0030 found the image's Python about 30% slower per CPU than
+the laptop's: 148-152 ms against 115-116 ms for the same workload pinned to one core, and 146 ms against 109 ms for a
+loop with no library in it ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)).
+Not containers - seccomp off made no difference - and not the packages, matched to the image's exact versions: the
+official `python:3.12-slim` image links Python against a shared `libpython3.12.so`, built with PGO and LTO, where
+Ubuntu's `/usr/bin/python3.12` is linked statically.
+
+**Impact:** every call Python handles in the image, with or without the data plane - Python alone, and everything the
+data plane forwards and records. Behind the data plane it is about 5% of the gateway's CPU on a 100-row page, and 19%
+fewer runs one worker records once it is past its ceiling.
+
+**Next:** measure the candidates the same way, the whole gateway and the interpreter alone, before an ADR: a
+statically linked CPython (python-build-standalone, as `uv` installs it), Debian's own Python on a `debian:trixie-slim`
+base (3.13), or building CPython in the image without `--enable-shared`. Each changes the base image, so each is
+weighed against ADR 0018's pinning, the FIPS job and the image's size.
