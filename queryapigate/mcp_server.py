@@ -20,6 +20,7 @@ package isn't."""
 import functools
 import json
 import logging
+import os
 import re
 import time
 import urllib.parse
@@ -604,6 +605,17 @@ def permission_for_listing(flask_app, api_key, authorization, client_ip):
 
 
 PERMISSION_STATE = 'queryapigate_permission'  # where the gate leaves the caller, in the ASGI scope's state
+SOCKET_PEER = 'queryapigate.socket_peer'  # the connection's own address, kept before X-Forwarded-For can replace it
+
+
+def keep_socket_peer(app):
+    """Record each request's real socket peer in its scope, for the gate's open-access rule, before the proxy-header
+    middleware inside it rewrites `client` from X-Forwarded-For (run())."""
+    async def wrapped(scope, receive, send):
+        if scope['type'] == 'http' and scope.get('client'):
+            scope[SOCKET_PEER] = scope['client'][0]
+        return await app(scope, receive, send)
+    return wrapped
 
 
 def resource_metadata_url():
@@ -659,7 +671,8 @@ def gate(flask_app, inner):
                                     headers={'Retry-After': str(verdict.retry_after), 'X-Request-Id': request_id})
         else:
             api_key, authorization = headers.get('x-api-key', ''), headers.get('authorization', '')
-            permission, refusal = governance.authenticate_mcp(api_key, authorization, client_ip)
+            permission, refusal = governance.authenticate_mcp(api_key, authorization, client_ip,
+                                                              peer=scope.get(SOCKET_PEER))
             if permission is not None:
                 scope.setdefault('state', {})[PERMISSION_STATE] = permission
                 return await inner(scope, receive, send)
@@ -784,7 +797,11 @@ def build_asgi_app(flask_app):
 
 
 def run(flask_app, host, port):
-    """Serves build_asgi_app() until interrupted."""
+    """Serves build_asgi_app() until interrupted. Uvicorn's own proxy-header handling is applied here instead, with
+    the same trusted hosts (FORWARDED_ALLOW_IPS, else loopback), so the socket peer can be kept before it."""
     import uvicorn
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-    uvicorn.run(build_asgi_app(flask_app), host=host, port=port, server_header=False)  # no version banner
+    trusted = os.environ.get('FORWARDED_ALLOW_IPS', '127.0.0.1,::1')  # uvicorn.Config's own default
+    app = keep_socket_peer(ProxyHeadersMiddleware(build_asgi_app(flask_app), trusted_hosts=trusted))
+    uvicorn.run(app, host=host, port=port, server_header=False, proxy_headers=False)  # no version banner

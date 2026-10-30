@@ -342,8 +342,8 @@ class IntegrationBase:
             return self.client.post('/api/v1/queries', json={'name': name, 'description': 'd', 'sql': sql,
                                                              'connection_name': 'it', 'publish': True, **fields})
 
-        def call(tool, **arguments):
-            return mcp_server.handle_call(self.client.application, '', '', '10.0.0.1', tool,
+        def call(tool, **arguments):  # with no key set, as a local client: open access answers no other
+            return mcp_server.handle_call(self.client.application, '', '', '127.0.0.1', tool,
                                           arguments)['structuredContent']
 
         def names():

@@ -94,6 +94,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Security
 
+- **The MCP server answered any client in open-access mode, as an unrestricted admin.** With no API key,
+  administrator, JWT or MCP OAuth configured, REST answers local (loopback) clients only and refuses others with
+  `403 open_access_remote`; `queryapigate mcp` never applied that rule. On any address but loopback - and the Docker
+  image needs `--host 0.0.0.0` - any client that reached its port could list and run every saved query, run read-only
+  SQL on every connection and use an agent's write tools, with no credential. It now refuses them as REST does, from
+  the connection's peer, before a session starts. A server with a key, administrators, JWT or OAuth configured wasn't
+  affected, nor one on its default loopback address. If you ran `queryapigate mcp` on another address without a key,
+  set `QUERYAPIGATE_API_KEY`.
 - **Behind the data plane, gunicorn took a client's forwarding headers as a trusted proxy's.** Every request reaches
   gunicorn over loopback then, which gunicorn trusts by default to set the scheme (`X-Forwarded-Proto`, `-Ssl`,
   `-Protocol`) and `SCRIPT_NAME` from headers - and the data plane passed a client's own on. A client could move part

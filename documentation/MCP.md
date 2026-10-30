@@ -91,7 +91,10 @@ when [signed-in users](API.md#signed-in-users-jwt) are enabled, an `Authorizatio
 acting for a user gets that user's role and its `from_claim` row filters. A call carrying an API key is judged on
 that key alone; a wrong key never falls back to the token. Send either as a request header, the way any
 HTTP-capable MCP client configuration allows - never as a URL parameter, which would leak it into logs. An unset
-server key means open access, same as the REST API.
+server key means open access, same as the REST API: local (loopback) clients only, and any other is refused with a
+`403 open_access_remote` before its session starts. That includes a client reaching `docker run -p`, which arrives
+from the container's network, not loopback: in Docker, set `QUERYAPIGATE_API_KEY`. Before 0.47 the MCP server let
+any client in, as an unrestricted admin.
 
 Every request to `/mcp` is checked before the MCP session sees it: a missing or wrong credential is an HTTP `401`
 with a `WWW-Authenticate` header (until 0.17 it was a tool error inside a `200`), a refused one a `403`, and
