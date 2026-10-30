@@ -1,7 +1,7 @@
 [package]
 name = "queryapigate-dataplane"
 # The release's, as queryapigate/__init__.py's: Python pairs only with its own (ADR 0030). tests/test_dataplane.py checks.
-version = "0.46.0"
+version = "0.47.0"
 edition = "2024"
 
 [dependencies]

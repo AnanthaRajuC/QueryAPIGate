@@ -51,6 +51,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-30
+
+The Rust data plane ships in the image and the Helm chart - experimental, and off unless started - and two security
+fixes. Upgrade now if you run `queryapigate mcp` on an address other than loopback without an API key: any client that
+reached it was an unrestricted admin. The image's listening address now comes from `QUERYAPIGATE_BIND`
+(`0.0.0.0:5000`, as before), not a `--bind` in its command.
+
 ### Added
 
 - **The Rust data plane ships in the image and the Helm chart** (experimental -
@@ -3186,7 +3193,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...HEAD
+[0.47.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.43.0...v0.44.0
