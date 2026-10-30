@@ -51,6 +51,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.46.0 are added, and the rolling-upgrade and Helm checks now start from 0.46.0.
+
 ## [0.46.0] - 2026-10-29
 
 The experimental ClickHouse run store's security review, and a replay twice as fast at 250 million runs. Only a
