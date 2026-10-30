@@ -63,6 +63,9 @@ DATAPLANE_BUILDS = {}  # the head with the Rust data plane in front: outside BUI
 _server = None
 _dataplane = None
 _server_meta = {}
+IMAGE = 'qag-bench-image'  # the head's Docker image, built by the s-blocks (ADR 0030)
+PY_CONTAINER, DP_CONTAINER = 'qag-bench-py', 'qag-bench-dp'
+_containers = ()  # the image's two containers, while a +img build runs
 TICK = os.sysconf('SC_CLK_TCK')
 
 
@@ -289,8 +292,11 @@ def b_teardown():
 # ---------------------------------------------------------------- the gateway
 
 def stop():
-    global _server, _dataplane, _server_meta
+    global _server, _dataplane, _server_meta, _containers
     _server_meta = {}
+    if _containers:
+        sh('docker', 'rm', '-fv', *_containers)  # -v: the image's /data volume too
+        _containers = ()
     for process in (_dataplane, _server):
         if process is None:
             continue
@@ -321,13 +327,15 @@ def wait_healthy(url, what):
 
 
 def start(build, workers=None, access_log=True, access_format=None, profile_to=None, threads=8, keep_runs=False,
-          discard_logs=False):
-    """gunicorn for ``build``, pinned to the gateway's cores, as the Docker image runs it (gthread)."""
+          discard_logs=False, dp_cpus=None):
+    """gunicorn for ``build``, pinned to the gateway's cores, as the Docker image runs it (gthread). A +img build is
+    the image itself, as two containers (start_image()); ``dp_cpus`` limits its data plane's, as a pod's limit would."""
     global _server, _server_meta
     stop()
     ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
     extra = dict(extra)
-    dataplane = extra.pop('dataplane', False)  # the Rust data plane in front (ADR 0028), on the same cores
+    image = extra.pop('image', False)  # the Docker image's two containers (ADR 0030), not processes from a build
+    dataplane = extra.pop('dataplane', False) or image  # the Rust data plane in front (ADR 0028), on the same cores
     global _run_store
     _run_store = extra.pop('run_store', False)  # runs kept in ClickHouse (ADR 0029)
     # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
@@ -373,6 +381,10 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
         psql('DELETE FROM run_store', 'qagstore')
     # A long cell's logs go to /dev/null - still written, so what writing them costs is still measured: at 20,000
     # calls a second the data plane's request lines alone are 6.5 GB in 25 minutes
+    if image:
+        start_image(build, {k: v for k, v in env.items() if k.startswith('QUERYAPIGATE_') and k != 'QUERYAPIGATE_HOME'},
+                    dp_cpus)
+        return
     out = open(os.devnull if discard_logs else OUT / 'server.log', 'a')
     if discard_logs and '--access-logfile' in cmd:
         cmd[cmd.index('--access-logfile') + 1] = os.devnull
@@ -393,12 +405,50 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
                     'dataplane_threads': threads_dp, 'run_store': _run_store}
 
 
+def start_image(build, settings, dp_cpus=None):
+    """The image as the chart runs it (ADR 0030): Python in one container on 127.0.0.1:INNER_PORT, the data plane in
+    another on PORT, both on the gateway's cores. Both use the host's network, so they meet on loopback as the
+    from-source pair does - in a pod they share one network namespace - and no Docker port proxy sits in the path that
+    isn't the image's. Their logs are written and dropped (--log-driver none), as discard_logs drops the processes'."""
+    global _containers, _server_meta
+    common = ['docker', 'run', '-d', '--network', 'host', '--cpuset-cpus', args.gateway_cpus, '--log-driver', 'none']
+    env = [flag for name, value in settings.items() for flag in ('-e', f'{name}={value}')]
+    _containers = (PY_CONTAINER, DP_CONTAINER)
+    sh('docker', 'rm', '-fv', *_containers)
+    started = sh(*common, '--name', PY_CONTAINER, *env, '-e', f'QUERYAPIGATE_BIND=127.0.0.1:{INNER_PORT}', IMAGE)
+    if started.returncode:
+        raise RuntimeError(f'the image\'s Python container: {started.stderr.strip()}')
+    wait_healthy(f'http://127.0.0.1:{INNER_PORT}', f'the image\'s Python for {build}')
+    # Its threads: the gateway's CPUs, as the from-source data plane gets - or, held to dp_cpus, what the container
+    # may use, which is what the image does by itself in a pod
+    threads_dp = None if dp_cpus else args.dataplane_threads or len(cpu_list(args.gateway_cpus))
+    started = sh(*common, '--name', DP_CONTAINER, *(['--cpus', str(dp_cpus)] if dp_cpus else []), *env,
+                 '-e', f'QUERYAPIGATE_DATAPLANE_LISTEN=127.0.0.1:{PORT}',
+                 '-e', f'QUERYAPIGATE_DATAPLANE_UPSTREAM=http://127.0.0.1:{INNER_PORT}',
+                 *(['-e', f'QUERYAPIGATE_DATAPLANE_THREADS={threads_dp}'] if threads_dp else []),
+                 IMAGE, 'queryapigate-dataplane')
+    if started.returncode:
+        raise RuntimeError(f'the image\'s data plane container: {started.stderr.strip()}')
+    wait_healthy(U, f'the image\'s data plane for {build}')
+    _server_meta = {'build': build, 'workers': 1, 'access_log': settings.get('QUERYAPIGATE_ACCESS_LOG') == 'on',
+                    'threads': 8, 'dataplane_threads': threads_dp, 'dp_cpu_limit': dp_cpus, 'run_store': _run_store}
+
+
 def gateway_cpu_s():
-    """CPU seconds the gateway has used: gunicorn's master and workers, and any data plane in front of them."""
+    """CPU seconds the gateway has used: gunicorn's master and workers, and any data plane in front of them - or the
+    image's two containers, from their cgroups."""
+    if _containers:
+        return sum(pg_cpu_s(c) for c in _containers)
     return tree_cpu_s(gunicorn_master()) + (tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0)
 
 
+def python_cpu_s():
+    return pg_cpu_s(PY_CONTAINER) if _containers else tree_cpu_s(gunicorn_master())
+
+
 def _dataplane_cpu_s():
+    if _containers:
+        return pg_cpu_s(DP_CONTAINER)
     return tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0
 
 
@@ -499,7 +549,7 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
     if warm:
         time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
     w0 = runs_written()
-    py0, dp0, ch0 = tree_cpu_s(gunicorn_master()), _dataplane_cpu_s(), pg_cpu_s(CH)
+    py0, dp0, ch0 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH)
     tx0, g0, p0, l0, t0 = store_tx(), gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
@@ -509,7 +559,7 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
         raise RuntimeError(f'{block} {scenario}: {refused} of {r["requests"]} answers were not 200: {r["codes"]}')
     wall = time.time() - t0
     g1, p1, l1 = gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus)
-    py1, dp1, ch1 = tree_cpu_s(gunicorn_master()), _dataplane_cpu_s(), pg_cpu_s(CH)
+    py1, dp1, ch1 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH)
     time.sleep(2.5)  # a flush interval for the data plane's report, another for Python's write
     tx1 = store_tx()
     kept = runs_kept(runs_written() - w0, r['requests'])
@@ -861,6 +911,88 @@ def d4():
                 start(build, workers=n)
                 measure('d4', scenario, c=64, secs=30, rnd=r)
     floor('d4', 'end')
+
+
+# ---------------------------------------------------------------- the image (ADR 0030)
+
+_image_ready = False
+
+
+class image_builds:
+    """For an s-block: the head ref exported whole, the image built from it, and the from-source data plane compiled
+    from the same export with the toolchain it pins - so +dp and +img are one commit in two forms. The +dp builds use
+    that binary for the block, and --dataplane-bin again after it."""
+
+    def __enter__(self):
+        global _image_ready
+        source = OUT.parent / 'image-src' if args.smoke else OUT / 'image-src'
+        binary = source / 'target' / 'release' / 'queryapigate-dataplane'
+        if not _image_ready:
+            if not (source / 'Dockerfile').exists():
+                source.mkdir(parents=True, exist_ok=True)
+                archive = subprocess.run(['git', '-C', str(REPO), 'archive', '--format=tar', args.head],
+                                         capture_output=True)
+                if archive.returncode:
+                    sys.exit(f'git archive {args.head}: {archive.stderr}')
+                tar = OUT / 'image-src.tar'
+                tar.write_bytes(archive.stdout)
+                with tarfile.open(tar) as t:
+                    t.extractall(source, filter='data')
+                tar.unlink()
+            began = time.time()
+            built = sh('docker', 'build', '-t', IMAGE, str(source))
+            if built.returncode:
+                sys.exit(f'docker build: {built.stderr[-2000:]}')
+            log(f'image built in {time.time() - began:.0f} s')
+            built = sh('cargo', 'build', '--release', '--locked', '--manifest-path', str(source / 'dataplane' /
+                       'Cargo.toml'), '--target-dir', str(source / 'target'))
+            if built.returncode:
+                sys.exit(f'cargo build: {built.stderr[-2000:]}')
+            record({'block': 'image', 'scenario': 'identity', 'ref': args.head,
+                    'commit': sh('git', '-C', str(REPO), 'rev-parse', f'{args.head}^{{commit}}').stdout.strip(),
+                    'image': sh('docker', 'image', 'inspect', '-f', '{{.Id}}', IMAGE).stdout.strip(),
+                    'image_dataplane_bytes': int(sh('docker', 'run', '--rm', '--entrypoint', 'stat', IMAGE, '-c', '%s',
+                                                    '/usr/local/bin/queryapigate-dataplane').stdout.strip() or 0),
+                    'source_dataplane_bytes': binary.stat().st_size,
+                    'rustc': sh('rustc', '--version', cwd=source / 'dataplane').stdout.strip(),
+                    'ts': time.strftime('%Y-%m-%dT%H:%M:%S')})
+            _image_ready = True
+        self.was, args.dataplane_bin = args.dataplane_bin, str(binary)
+        return self
+
+    def __exit__(self, *exc):
+        args.dataplane_bin = self.was
+
+
+def s1():
+    """The image against the from-source build of the same commit (ADR 0030, section 8): the data plane in front of
+    one Python worker, on the same gateway cores, the metadata cache on, 64 callers - calls a second per gateway core.
+    A regression here is what running in containers costs."""
+    with image_builds():
+        floor('s1', 'start')
+        builds = [args.head_label + '+dp+cache', args.head_label + '+img+cache']
+        for scenario in ['lookup_plain', 'lookup_gov', 'page_plain']:
+            for r, order in rotations(builds, 5):
+                for build in order:
+                    start(build, workers=1, discard_logs=True)
+                    measure('s1', scenario, c=64, secs=30, rnd=r)
+        floor('s1', 'end')
+
+
+def s2():
+    """One pod's ceiling without a run store (ADR 0030, section 3): the image's data plane held to --pod-cpus CPUs,
+    one Python worker recording every run on the PostgreSQL store, 64 callers with no rate limit. Every run must be
+    recorded (runs_written_share 100%): five short rounds, then one sustained."""
+    with image_builds():
+        floor('s2', 'start')
+        build = args.head_label + '+img+cache'
+        limit = {'dp_cpu_limit': args.pod_cpus}
+        for r in range(rounds(5)):
+            start(build, dp_cpus=args.pod_cpus, discard_logs=True)
+            measure('s2', 'lookup_plain', c=64, secs=30, rnd=r, extra=limit)
+        start(build, dp_cpus=args.pod_cpus, discard_logs=True)
+        measure('s2', 'lookup_plain', c=64, secs=600, rnd='sustained', extra=limit)
+        floor('s2', 'end')
 
 
 # ---------------------------------------------------------------- the run store (ADR 0029)
@@ -1229,7 +1361,7 @@ BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_p
           'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11,
           'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
           'r-setup': r_setup, 'r-teardown': r_teardown, 'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4, 'r5': r5, 'r6': r6,
-          'r7': r7}
+          'r7': r7, 's1': s1, 's2': s2}
 ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
@@ -1252,6 +1384,8 @@ def main():
     parser.add_argument('--dataplane-threads', type=int, help='its Tokio threads (default: one per gateway CPU)')
     parser.add_argument('--runs', type=lambda s: int(float(s)), default=72_000_000,
                         help='the run store\'s size r7 grows it to, e.g. 250e6 (default %(default)s)')
+    parser.add_argument('--pod-cpus', type=float, default=2.0,
+                        help='s2: the CPU limit on the image\'s data plane, as a pod\'s (default %(default)s)')
     parser.add_argument('--ch-cpus', default='8-11',
                         help='cpuset for the run store\'s ClickHouse (default %(default)s)')
     args = parser.parse_args()
@@ -1267,6 +1401,8 @@ def main():
                              args.head_label + '+dp+cache': (args.head, {'dataplane': True,
                                                                          'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
                              args.head_label + '+rs': (args.head, {'run_store': True}),
+                             args.head_label + '+img+cache': (args.head, {'image': True,
+                                                                          'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
                              args.head_label + '+dp+cache+rs': (args.head, {'dataplane': True, 'run_store': True,
                                                                             'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
     names = [n for b in args.blocks for n in (ALL if b == 'all' else [b])]
