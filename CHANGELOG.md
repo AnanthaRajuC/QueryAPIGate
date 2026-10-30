@@ -51,6 +51,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.47.0 are added, and the rolling-upgrade and Helm checks now start from 0.47.0.
+
 ## [0.47.0] - 2026-10-30
 
 The Rust data plane ships in the image and the Helm chart - experimental, and off unless started - and two security
