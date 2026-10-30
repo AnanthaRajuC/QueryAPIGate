@@ -140,8 +140,10 @@ In the chart, `dataplane.enabled: false`. With Docker, stop the second container
 ## What to watch for
 
 - **Runs it can't record are dropped and counted** in `queryapigate_history_runs_total{outcome="dropped"}`. One Python
-  worker records about 17,000 runs a second, and a data plane serves about 7,000 calls a second per CPU. Without a run
-  store, keep a pod's data plane near 2 CPUs and add pods past that; with one
+  worker records about 17,000 runs a second, and a data plane serves about 9,000 calls a second per CPU. Without a run
+  store, keep a pod's data plane near 2 CPUs and add pods past that - held to 2, it recorded every one of 9.8 million
+  runs at 16,400 calls a second
+  ([measured](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)); with one
   ([guide 65](65-keep-runs-in-clickhouse.md)), the data plane writes its runs there itself and there's no such limit.
   More workers per pod would lift it too, but `/metrics` is kept per worker, so a scrape would see one of them.
 - **The run history and event log grow with its rate.** The event log keeps every run for
