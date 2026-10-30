@@ -146,9 +146,13 @@ documentation. #99 workspaces only if asked for.
     that writes only to the run store Python names, ad-hoc statements kept as hashes within the retention settings,
     `forget` reaching runs still in flight; schema version 2, migrated at the first start; a replay of the whole log
     twice as fast at 250 million runs. (0.46.0, 2026-10-29.)
-35. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+35. **0.47: The data plane ships** in the image and the Helm chart (experimental,
+    [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md)) - one image with both, a second container sharing
+    the pod's network, behind trusted proxies, paired within a release; the image's data plane measured as fast as the
+    from-source one. And the MCP server refuses remote clients in open-access mode, as REST does. (0.47.0, 2026-10-30.)
+36. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-36. **1.0.0.**
+37. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3151,7 +3155,7 @@ and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIP
 
 ## 102. A Rust data plane for `/q/`
 
-**Status: decided go (0.44); in the image and the chart (ADR 0030, accepted, unreleased), experimental.**
+**Status: decided go (0.44); in the image and the chart (ADR 0030, 0.47.0), experimental.**
 [ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
 a Rust process on the public port that serves saved-query reads from the plans Python computes and forwards
 everything else; runs it serves are reported to Python and recorded there. Gated by a differential test against
@@ -3193,9 +3197,10 @@ the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 byte
 path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
 history's sample rate.
 
-**Next:** to graduate (ADR 0017): a release unchanged, counted from 0.46.0. The security review is done
-(2026-10-28): six findings, fixed in the run store's schema version 2 (ADR 0029 section 7, 0.46.0); and 250 million
-runs measured (2026-10-29), every criterion met once a replay finds its ids in batches (ADR 0029 section 9, 0.46.0).
+**Next:** to graduate (ADR 0017): a release unchanged, counted from 0.46.0 - 0.47.0 leaves it unchanged. The
+security review is done (2026-10-28): six findings, fixed in the run store's schema version 2 (ADR 0029 section 7,
+0.46.0); and 250 million runs measured (2026-10-29), every criterion met once a replay finds its ids in batches (ADR
+0029 section 9, 0.46.0).
 Beside it: the events server's ceiling - about 10,000 events a second per stream from one process - under a soak.
 The event log's bound for the SQL stores (#102) is separate and ships either way.
 

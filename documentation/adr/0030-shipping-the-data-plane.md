@@ -5,7 +5,7 @@
   checked by a test, as the chart's is; Python moves with a new setting, `QUERYAPIGATE_BIND`; Python's check in the pod
   runs inside its container; the data plane serves only what its forwarding headers say plainly, and a scheme of `http`
   or `https`; and building it found gunicorn trusting a client's forwarding headers behind the data plane, fixed here
-  (sections 1, 2, 4, 5 and 7, *as built*).
+  (sections 1, 2, 4, 5 and 7, *as built*). Shipped in 0.47.0.
 - **Date:** 2026-10-30
 - **Backlog:** #102, *Next: shipping it*. The follow-up [ADR 0028](0028-rust-data-plane-prototype.md#result-go)
   promised: packaging, the Docker image, the Helm chart, and which of what it forwards to move. Since
