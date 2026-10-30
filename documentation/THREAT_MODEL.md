@@ -94,6 +94,15 @@ the moment more than loopback should reach it, setting `QUERYAPIGATE_API_KEY` (o
 MCP OAuth) stops being optional - SECURITY.md's first checklist item. Behind a reverse proxy or in a container, the
 peer is the proxy or the pod network, not loopback, so open-access mode is refused there too: set a key.
 
+The MCP server (`queryapigate mcp`) applies the same rule to every request to `/mcp`, before a session starts, and
+more strictly: a caller is local only if the connection's own address is loopback and so is the client a trusted
+proxy names, if one does. So a forged `X-Forwarded-For`, even with `FORWARDED_ALLOW_IPS` wide open, doesn't make a
+remote client local, and neither does a proxy on the same host passing a remote client on. *Fixed 2026-10-30:* until then
+it didn't apply it at all. With no key, administrator, JWT or OAuth configured, any client that could reach its port
+was the unrestricted caller - every saved query, read-only SQL on every connection, an agent's writes. Its default
+address is loopback, but the Docker image needs `--host 0.0.0.0`, so a container started without a key served the
+network. Found while drafting the MCP Registry entry, which is exactly that command.
+
 ### Authorization: what a scoped key can actually do
 
 Three grant fields say what a key reaches, and they **add up** - a saved query is reachable if `connections`,

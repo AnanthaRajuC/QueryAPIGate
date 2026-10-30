@@ -59,6 +59,82 @@ class McpTestCase(unittest.TestCase):
         return res.get_json()['secret']
 
 
+@unittest.skipUnless(HAVE_MCP_SDK, 'the mcp package is not installed')
+class OpenAccessTests(McpTestCase):
+    """With no key, administrator, JWT or OAuth configured, the MCP server answers only local clients - as REST's gate
+    does (open_access_remote) - however a client reaches it. Before 0.47 it let any client in as the unrestricted OPEN
+    caller: every saved query, ad-hoc SQL on every connection, an agent's writes."""
+
+    def setUp(self):
+        super().setUp()
+        self.save('q1')
+        os.environ.pop('QUERYAPIGATE_API_KEY')  # the patch.dict in McpTestCase restores it
+        self.assertFalse(apikeys.auth_required())
+
+    def http(self, peer):
+        from starlette.testclient import TestClient
+        client = TestClient(mcp_server.build_asgi_app(self.app), client=(peer, 50000))
+        client.__enter__()
+        self.addCleanup(client.__exit__, None, None, None)
+        return client
+
+    def initialize(self, client, headers=None):
+        return client.post('/mcp/', headers={'Accept': 'application/json, text/event-stream', **(headers or {})},
+                           json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                                 'params': {'protocolVersion': '2025-06-18', 'capabilities': {},
+                                            'clientInfo': {'name': 'test', 'version': '1'}}})
+
+    def test_a_remote_client_is_refused_before_anything_is_answered(self):
+        # 172.17.0.1 is how a client reaching `docker run -p` looks from inside the container, even from the host
+        for peer in ('203.0.113.9', '172.17.0.1', '10.0.0.5', '::ffff:10.0.0.5', 'testclient'):
+            with self.subTest(peer=peer):
+                res = self.initialize(self.http(peer))
+                self.assertEqual((res.status_code, res.json()['code']), (403, 'open_access_remote'))
+                self.assertIn('QUERYAPIGATE_API_KEY', res.json()['error'])
+
+    def test_a_local_client_is_answered_as_before(self):
+        for peer in ('127.0.0.1', '::1'):
+            with self.subTest(peer=peer):
+                self.assertEqual(self.initialize(self.http(peer)).status_code, 200)
+
+    def test_a_tool_call_and_the_tool_listing_judge_the_peer_too(self):
+        refused = mcp_server.handle_call(self.app, '', '', '203.0.113.9', 'q1', {})
+        self.assertTrue(refused['isError'])
+        self.assertEqual(refused['structuredContent']['code'], 'open_access_remote')
+        self.assertFalse(mcp_server.handle_call(self.app, '', '', '127.0.0.1', 'q1', {}).get('isError'))
+        self.assertIsNone(mcp_server.permission_for_listing(self.app, '', '', '203.0.113.9'))
+        self.assertIsNone(mcp_server.permission_for_listing(self.app, '', '', None))  # no address: remote
+        self.assertIs(mcp_server.permission_for_listing(self.app, '', '', '127.0.0.1'), apikeys.OPEN)
+
+    def served(self, peer, trusted):
+        """A client as run() serves it: the socket peer kept, then Uvicorn's proxy headers with `trusted` hosts."""
+        from starlette.testclient import TestClient
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+        app = mcp_server.keep_socket_peer(ProxyHeadersMiddleware(mcp_server.build_asgi_app(self.app),
+                                                                 trusted_hosts=trusted))
+        client = TestClient(app, client=(peer, 50000))
+        client.__enter__()
+        self.addCleanup(client.__exit__, None, None, None)
+        return client
+
+    def test_a_forged_x_forwarded_for_doesn_t_make_a_remote_client_local(self):
+        # FORWARDED_ALLOW_IPS=* trusts every peer's X-Forwarded-For: the connection's own address still decides
+        res = self.initialize(self.served('203.0.113.9', '*'), {'X-Forwarded-For': '127.0.0.1'})
+        self.assertEqual((res.status_code, res.json()['code']), (403, 'open_access_remote'))
+
+    def test_a_remote_client_sent_on_by_a_proxy_on_this_host_is_refused(self):
+        proxy = self.served('127.0.0.1', '127.0.0.1')
+        res = self.initialize(proxy, {'X-Forwarded-For': '203.0.113.9'})
+        self.assertEqual((res.status_code, res.json()['code']), (403, 'open_access_remote'))
+        self.assertEqual(self.initialize(proxy).status_code, 200)  # the proxy's own call, or a local one, is answered
+
+    def test_with_a_key_configured_a_remote_client_with_it_is_let_in(self):
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        client = self.http('203.0.113.9')
+        self.assertEqual(self.initialize(client, {'X-API-Key': 'admin-key'}).status_code, 200)
+        self.assertEqual(self.initialize(client).json()['code'], 'unauthorized')  # and without it, the usual 401
+
+
 class IsReadOnlyTests(unittest.TestCase):
     def test_select_is_read_only(self):
         self.assertTrue(mcp_server.is_read_only({'sql_query': 'SELECT * FROM t'}))

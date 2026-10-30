@@ -10,9 +10,13 @@ The limiters are held on the Flask app. With QUERYAPIGATE_REDIS_URL set they cou
 process - `queryapigate serve`, `queryapigate mcp`, `queryapigate events` - shares one budget per client and per key
 (BACKLOG #55); without it each process counts on its own.
 """
+import ipaddress
 from dataclasses import dataclass
 
 from . import admins, alerts, apikeys, config, jwtauth, metrics
+
+OPEN_ACCESS_REMOTE = ('This server has no API key set, so it answers only local clients. Set QUERYAPIGATE_API_KEY '
+                      'to allow access from other hosts.')
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,15 @@ class Verdict:
     limit: int
     remaining: int
     retry_after: int
+
+
+def is_loopback(peer):
+    """Whether a connection's real peer is a loopback address - the one caller open-access mode answers. Fails closed:
+    an address that can't be parsed, or none at all (a Unix socket, a test client's name), counts as remote."""
+    try:
+        return ipaddress.ip_address(peer or '').is_loopback
+    except ValueError:
+        return False
 
 
 def authenticate(api_key, authorization, client_ip):
@@ -42,13 +55,20 @@ def authenticate(api_key, authorization, client_ip):
     return None if apikeys.auth_required() else apikeys.OPEN
 
 
-def authenticate_mcp(api_key, authorization, client_ip):
+def authenticate_mcp(api_key, authorization, client_ip, peer=None):
     """(Permission, None) for a caller the MCP server lets in, else (None, refusal) - a jwtauth.McpRefusal saying
     401 or 403 and why. An API key is judged as everywhere. A bearer token, with OAuth on for the MCP server
     (ADR 0006), must be one issued for it - a REST token isn't, however valid; with OAuth off, REST's JWT settings
-    apply, as before."""
+    apply, as before. Open access is for a local caller only: `client_ip` (the client a trusted proxy names, if one
+    does) and the connection's own `peer`, when it's known, must both be loopback - so neither a remote client sent
+    on by a proxy on this host, nor a forged X-Forwarded-For that a too-wide FORWARDED_ALLOW_IPS would honour, gets
+    in."""
     if api_key or not authorization or not config.mcp_oauth_enabled():
         permission = authenticate(api_key, authorization, client_ip)
+        if permission is apikeys.OPEN and not (is_loopback(client_ip) and (peer is None or is_loopback(peer))):
+            # No key, administrator, JWT or OAuth configured anywhere: the unrestricted OPEN caller, which only a local
+            # client may be - as REST's gate refuses it (app.py). Before 0.47 the MCP server let any client in as it.
+            return None, jwtauth.McpRefusal(403, 'open_access_remote', OPEN_ACCESS_REMOTE)
         if permission is not None:
             return permission, None
         return None, jwtauth.McpRefusal(401, 'unauthorized', 'Unauthorized: missing or invalid X-API-Key or bearer '

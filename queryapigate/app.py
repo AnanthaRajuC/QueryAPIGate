@@ -1,5 +1,4 @@
 """The Flask application: HTTP routes on top of the store, engine and formatters."""
-import ipaddress
 import json
 import logging
 import math
@@ -200,13 +199,9 @@ class _CapturePeer:
 
 
 def _peer_is_local():
-    """Whether the request's real socket peer is a loopback address. Fails closed: an address that can't be parsed,
-    or none at all (e.g. a Unix socket), counts as remote - in open-access mode the caller must then configure a key."""
-    peer = request.environ.get('queryapigate.peer_addr') or ''
-    try:
-        return ipaddress.ip_address(peer).is_loopback
-    except ValueError:
-        return False
+    """Whether the request's real socket peer is a loopback address (governance.is_loopback(), the MCP server's rule
+    too). Fails closed: in open-access mode a caller it can't place must configure a key."""
+    return governance.is_loopback(request.environ.get('queryapigate.peer_addr'))
 
 
 def create_app():
@@ -366,8 +361,7 @@ def create_app():
         # could reach the port would otherwise be an unrestricted admin. The real socket peer decides, never a
         # forgeable header. The public endpoints (health, docs, the Console shell) are reachable either way.
         if g.permission is apikeys.OPEN and request.endpoint not in PUBLIC_ENDPOINTS and not _peer_is_local():
-            raise ApiError('This server has no API key set, so it answers only local clients. Set '
-                           'QUERYAPIGATE_API_KEY to allow access from other hosts.', 403, code='open_access_remote')
+            raise ApiError(governance.OPEN_ACCESS_REMOTE, 403, code='open_access_remote')
         if g.permission is not None:
             g.permission = settle_workspace(g.permission, named)
         limited = check_key_rate_limit()
