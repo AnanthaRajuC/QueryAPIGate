@@ -77,7 +77,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **The data plane and Python pair only within a release.** The data plane sends its version with its secret, and
   Python gives no plan and no run store lease to a different one, logging why once: a mismatched pair forwards every
   call. The crate's version is now the release's (`dataplane/Cargo.toml`, checked by a test).
-- **CI:** the image's smoke test, on every pull request and release, also runs it as two containers and checks that
+- **CI:** the upgrade fixtures from 0.46.0 are added, and the rolling-upgrade and Helm checks now start from 0.46.0.
+  The image's smoke test, on every pull request and release, also runs it as two containers and checks that
   the data plane serves a call; the Helm chart's kind test turns the data plane on behind the ingress's trusted hop and
   checks an IP-restricted key is judged by the client the hop names; the data plane's crates are audited against
   RustSec (`cargo audit`), and its binary is built with `cargo auditable`, so the image's SBOM lists them.
