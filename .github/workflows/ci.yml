@@ -337,6 +337,11 @@ jobs:
           cargo clippy --release --locked --all-targets -- -D warnings
           cargo test --release --locked
           cargo build --release --locked
+      - name: No crate with a known vulnerability (RustSec) - it ships in the image (ADR 0030)
+        working-directory: dataplane
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
       - run: pip install -e ".[dev,server]"
       - name: The data plane's tests, and the differential gate - none may skip
         run: |
@@ -479,6 +484,8 @@ jobs:
           docker run -d --name s2a -p 5000:5000 queryapigate
           for i in $(seq 1 20); do curl -fs localhost:5000/health && exit 0; sleep 1; done
           docker logs s2a; exit 1
+      - name: The data plane in it, in front of Python (ADR 0030)
+        run: .github/scripts/smoke_dataplane.sh queryapigate 5100
 
   helm-chart:
     # The Helm chart (ADR 0013) with both Helm majors: lint, then rendered with each shape and option and checked

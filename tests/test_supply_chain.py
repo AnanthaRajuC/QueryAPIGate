@@ -31,8 +31,10 @@ class PinnedTests(unittest.TestCase):
 
     def test_every_base_image_is_pinned_by_digest(self):
         with open(os.path.join(ROOT, 'Dockerfile')) as f:
-            froms = [line.split()[1] for line in f if line.startswith('FROM ')]
-        self.assertGreaterEqual(len(froms), 2)
+            # the image after FROM's own flags (--platform=$BUILDPLATFORM, the data plane's cross-compiling stage)
+            froms = [next(word for word in line.split()[1:] if not word.startswith('--'))
+                     for line in f if line.startswith('FROM ')]
+        self.assertGreaterEqual(len(froms), 3)
         for image in froms:
             with self.subTest(image=image):
                 self.assertRegex(image, r'@sha256:[0-9a-f]{64}$')

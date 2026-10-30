@@ -114,6 +114,10 @@ jobs:
           if [ "${{ matrix.with_h2 }}" = "true" ]; then
             docker exec smoke python -c "import jaydebeapi, jpype" && docker exec smoke java -version
           fi
+          docker rm -f smoke
+
+      - name: Smoke test the data plane in it (ADR 0030)
+        run: .github/scripts/smoke_dataplane.sh queryapigate-smoke
 
       - name: Log in to GitHub Container Registry
         if: steps.meta.outputs.push == 'true'
@@ -140,6 +144,16 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=image${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=image${{ matrix.variant }}
+
+      - name: The arm64 image's data plane runs (cross-compiled, ADR 0030)
+        if: steps.meta.outputs.push == 'true'
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+        # Under QEMU: without a secret it starts, says why it can't serve, and stops - proof the binary runs there
+        run: |
+          out="$(docker run --rm --platform linux/arm64 "$REF" queryapigate-dataplane 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q 'QUERYAPIGATE_DATAPLANE_SECRET must be set'
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: steps.meta.outputs.push == 'true'

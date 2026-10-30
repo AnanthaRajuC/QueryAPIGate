@@ -70,10 +70,10 @@ FEATURES: dict[str, dict[str, Any]] = {
     },
     'dataplane': {
         'name': 'The Rust data plane in front of /q/',
-        'why': 'a prototype (ADR 0028, decided go in 0.44): built from the repository, not in the image or the chart; '
-               'what it serves, its settings and its headers may change before the ADR that ships it',
+        'why': 'decided go in 0.44 (ADR 0028) and shipped in the image and the chart (ADR 0030); what it serves, its '
+               'settings and its headers may change before it graduates',
         'settings': ('QUERYAPIGATE_DATAPLANE_SECRET',),
-        'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/ (prototype)'),
+        'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/'),
     },
     'run_store': {
         'name': 'A ClickHouse run store for history, the event log and usage',

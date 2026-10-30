@@ -206,7 +206,7 @@ class ForwardingTests(unittest.TestCase):
 
     def test_a_client_s_own_x_qag_headers_never_reach_python(self):
         spoofed = {'X-API-Key': self.key, 'X-QAG-Dataplane': SECRET, 'X-QAG-Peer': '203.0.113.9',
-                   'X-QAG-Plan': 'e30='}
+                   'X-QAG-Plan': 'e30=', 'X-QAG-Dataplane-Version': '0.0.1'}
         # Even sending the right secret, straight to the data plane, buys nothing: it is replaced, not passed on
         (_s, _h, _b), (status, headers, _body) = self.both('GET', '/q/by_rating?rating=PG', spoofed)
         self.assertEqual(status, 200)

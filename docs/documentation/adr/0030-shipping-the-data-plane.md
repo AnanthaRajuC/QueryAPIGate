@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0030-shipping-the-data-plane.md"

@@ -43,6 +43,10 @@ app.kubernetes.io/component: {{ .component }}
 {{- .Values.metricsAuth.existingSecret | default (printf "%s-metrics" (include "queryapigate.fullname" .)) -}}
 {{- end -}}
 
+{{- define "queryapigate.dataplaneSecretName" -}}
+{{- .Values.dataplane.existingSecret | default (printf "%s-dataplane" (include "queryapigate.fullname" .)) -}}
+{{- end -}}
+
 {{- define "queryapigate.secretName" -}}
 {{- .Values.existingSecret | default (include "queryapigate.fullname" .) -}}
 {{- end -}}
@@ -90,8 +94,16 @@ app.kubernetes.io/component: {{ .component }}
 {{- if or (hasKey .Values.config "QUERYAPIGATE_METRICS_TOKEN") (and .Values.metricsAuth.enabled (hasKey .Values.secret.values "QUERYAPIGATE_METRICS_TOKEN")) -}}
 {{- fail "QUERYAPIGATE_METRICS_TOKEN comes from metricsAuth - the chart's own Secret, or yours as metricsAuth.existingSecret - not config or secret.values." -}}
 {{- end -}}
+{{- if and .Values.dataplane.enabled (hasKey .Values.secret.values "QUERYAPIGATE_DATAPLANE_SECRET") -}}
+{{- fail "QUERYAPIGATE_DATAPLANE_SECRET comes from dataplane - the chart's own Secret, or yours as dataplane.existingSecret - not secret.values." -}}
+{{- end -}}
+{{- range $name := list "QUERYAPIGATE_BIND" "QUERYAPIGATE_DATAPLANE_LISTEN" "QUERYAPIGATE_DATAPLANE_UPSTREAM" -}}
+{{- if hasKey $.Values.config $name -}}
+{{- fail (printf "%s is the chart's to set: the Service, the probes and the data plane (dataplane.enabled) rely on where each listens." $name) -}}
+{{- end -}}
+{{- end -}}
 {{- /* config is plain env in the Deployment, read by anyone who can get deployments: no secrets there. */ -}}
-{{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
+{{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_DATAPLANE_SECRET" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
 {{- if hasKey $.Values.config $name -}}
 {{- fail (printf "%s is a secret: put it in your existingSecret or secret.values, not config - config is plain text in the Deployment." $name) -}}
 {{- end -}}
@@ -117,6 +129,11 @@ env:
   {{- if $root.Values.metricsAuth.enabled }}
   - name: QUERYAPIGATE_METRICS_TOKEN   # /metrics needs it (metricsAuth)
     valueFrom: {secretKeyRef: {name: {{ include "queryapigate.metricsSecretName" $root }}, key: {{ $root.Values.metricsAuth.key }}}}
+  {{- end }}
+  {{- if and .server $root.Values.dataplane.enabled }}
+  # the API server pod's two containers share this (ADR 0030)
+  - name: QUERYAPIGATE_DATAPLANE_SECRET
+    valueFrom: {secretKeyRef: {name: {{ include "queryapigate.dataplaneSecretName" $root }}, key: {{ $root.Values.dataplane.key }}}}
   {{- end }}
   {{- if and .server $root.Values.configAsCode.enabled }}
   # the API server applies the file as it starts, once per file (ADR 0014)

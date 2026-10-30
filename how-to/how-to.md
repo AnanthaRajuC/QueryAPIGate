@@ -128,8 +128,8 @@ guide covers one scenario end to end, and every command and response in it was r
 37. [**Diagnose and tune the connection pool**](37-tune-the-connection-pool.md) - measured, with symptoms and fixes.
 63. [**Tune a deployment for throughput**](63-tune-a-deployment-for-throughput.md) - threads, CPU per container,
     logging, the metadata cache, the event log's disk, and how many containers - each from a measurement.
-64. [**Try the Rust data plane in front of `/q/`**](64-try-the-rust-data-plane.md) (prototype) - build it, put it on
-    the public port with Python behind it, and see which calls it serves.
+64. [**Try the Rust data plane in front of `/q/`**](64-try-the-rust-data-plane.md) (experimental) - turn it on in the
+    Helm chart or with Docker, Python behind it, and see which calls it serves.
 65. [**Keep run history and the event log in ClickHouse**](65-keep-runs-in-clickhouse.md) (prototype) - a run store
     for the data plane's rates: the users, the setting, and what changes.
 38. [**Allow a browser-based frontend to call the API directly**](38-allow-a-browser-frontend-cors.md) - CORS, and

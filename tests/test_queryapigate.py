@@ -1017,6 +1017,14 @@ class PoolTests(unittest.TestCase):
         # imported module named `config`, say: only the settings themselves may be public
         public = {name for name in vars(gunicorn_conf) if not name.startswith('_')}
         self.assertEqual(public, {'threads', 'accesslog', 'access_log_format'})
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATAPLANE_SECRET': 'dp-secret-0123456789',
+                                          'QUERYAPIGATE_BIND': '127.0.0.1:5001'}):
+            os.environ.pop('FORWARDED_ALLOW_IPS', None)
+            importlib.reload(gunicorn_conf)
+            self.assertEqual(gunicorn_conf.bind, '127.0.0.1:5001')
+            public |= {name for name in vars(gunicorn_conf) if not name.startswith('_')}
+        for name in ('forwarded_allow_ips', 'bind'):  # reload() keeps the names an earlier load defined
+            vars(gunicorn_conf).pop(name, None)
         try:
             import gunicorn.config  # the image's server, not a dependency of the package
         except ImportError:
@@ -1028,6 +1036,31 @@ class PoolTests(unittest.TestCase):
         # a flag on the command line would beat gunicorn_conf.py, and the settings would do nothing
         self.assertNotIn('--threads', command)
         self.assertNotIn('--access-logfile', command)
+        self.assertNotIn('--bind', command)
+
+    def test_behind_the_data_plane_gunicorn_trusts_no_peer_s_forwarding_headers(self):
+        # Every request comes over loopback then: gunicorn's default would let a client's X-Forwarded-Proto set the
+        # scheme, and its SCRIPT_NAME header move part of the path out of what Flask routes (ADR 0030)
+        import importlib
+
+        from queryapigate import gunicorn_conf
+
+        def load():  # reload() keeps the names an earlier load defined
+            for name in ('forwarded_allow_ips', 'bind'):
+                vars(gunicorn_conf).pop(name, None)
+            importlib.reload(gunicorn_conf)
+        self.addCleanup(load)
+        secret = {'QUERYAPIGATE_DATAPLANE_SECRET': 'dp-secret-0123456789'}
+        with mock.patch.dict(os.environ, secret):
+            os.environ.pop('FORWARDED_ALLOW_IPS', None)
+            load()
+            self.assertEqual(gunicorn_conf.forwarded_allow_ips, '')
+        with mock.patch.dict(os.environ, {**secret, 'FORWARDED_ALLOW_IPS': '10.0.0.5'}):
+            load()
+            self.assertFalse(hasattr(gunicorn_conf, 'forwarded_allow_ips'))  # gunicorn reads the variable itself
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_DATAPLANE_SECRET': ''}):
+            load()
+            self.assertFalse(hasattr(gunicorn_conf, 'forwarded_allow_ips'))
 
     def test_many_threads_share_the_pool_safely(self):
         errors = []

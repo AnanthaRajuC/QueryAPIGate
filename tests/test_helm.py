@@ -181,6 +181,51 @@ class ShapeTests(unittest.TestCase):
         self.assertFalse(any(e['name'] == 'QUERYAPIGATE_METRICS_TOKEN' for d in by_kind(off, 'Deployment')
                              for e in container(d)['env']))
 
+    def test_the_data_plane_in_front_of_each_api_server_pod(self):
+        """dataplane (ADR 0030): a second container from the same image takes the pod's port, Python moves to its
+        loopback, and the two share a secret the chart makes and keeps - the events and MCP pods are left as they
+        are."""
+        docs = render(*POSTGRES, '--set', 'dataplane.enabled=true', '--set', 'ingress.enabled=true',
+                      '--set', 'events.enabled=true', '--set', 'mcp.enabled=true')
+        [secret] = by_kind(docs, 'Secret', 'qag-queryapigate-dataplane')
+        self.assertGreaterEqual(len(secret['data']['secret']), 48)
+        server = by_kind(docs, 'Deployment', 'qag-queryapigate')[0]
+        python, dataplane = server['spec']['template']['spec']['containers']
+        self.assertEqual((python['name'], dataplane['name']), ('queryapigate', 'dataplane'))
+        self.assertEqual((dataplane['image'], dataplane['command']), (python['image'], ['queryapigate-dataplane']))
+        shared = {'secretKeyRef': {'name': 'qag-queryapigate-dataplane', 'key': 'secret'}}
+        python_env = {e['name']: e for e in python['env']}
+        dataplane_env = {e['name']: e for e in dataplane['env']}
+        for env in (python_env, dataplane_env):
+            self.assertEqual(env['QUERYAPIGATE_DATAPLANE_SECRET']['valueFrom'], shared)
+            self.assertEqual(env['QUERYAPIGATE_TRUST_PROXY']['value'], '1')  # the ingress: read by both now
+        self.assertEqual(python_env['QUERYAPIGATE_BIND']['value'], '127.0.0.1:5001')
+        self.assertEqual(dataplane_env['QUERYAPIGATE_DATAPLANE_LISTEN']['value'], '0.0.0.0:5000')
+        self.assertEqual(dataplane_env['QUERYAPIGATE_DATAPLANE_UPSTREAM']['value'], 'http://127.0.0.1:5001')
+        # the Service's port is the data plane's; Python's, on loopback, is checked from inside its container
+        self.assertEqual(dataplane['ports'], [{'name': 'http', 'containerPort': 5000}])
+        self.assertNotIn('ports', python)
+        self.assertIn('127.0.0.1:5001/health', ' '.join(python['livenessProbe']['exec']['command']))
+        self.assertEqual(dataplane['readinessProbe']['httpGet']['path'], '/health')
+        self.assertIn('tcpSocket', dataplane['livenessProbe'])
+        self.assertEqual(sorted(m['mountPath'] for m in dataplane['volumeMounts']), ['/data', '/tmp'])
+        self.assertEqual(dataplane['resources']['limits'], {'memory': '256Mi'})
+        for name in ('qag-queryapigate-events', 'qag-queryapigate-mcp'):
+            other = by_kind(docs, 'Deployment', name)[0]['spec']['template']['spec']['containers']
+            self.assertEqual(len(other), 1)
+            self.assertNotIn('QUERYAPIGATE_DATAPLANE_SECRET', {e['name'] for e in other[0]['env']})
+        mine = render(*POSTGRES, '--set', 'dataplane.enabled=true', '--set', 'dataplane.existingSecret=mine',
+                      '--set', 'dataplane.key=s')
+        self.assertEqual(by_kind(mine, 'Secret', 'qag-queryapigate-dataplane'), [])
+        python = by_kind(mine, 'Deployment')[0]['spec']['template']['spec']['containers'][0]
+        self.assertEqual({e['name']: e for e in python['env']}['QUERYAPIGATE_DATAPLANE_SECRET']['valueFrom'],
+                         {'secretKeyRef': {'name': 'mine', 'key': 's'}})
+        off = render(*POSTGRES)
+        self.assertEqual(by_kind(off, 'Secret', 'qag-queryapigate-dataplane'), [])
+        [python] = by_kind(off, 'Deployment')[0]['spec']['template']['spec']['containers']
+        self.assertEqual(python['ports'], [{'name': 'http', 'containerPort': 5000}])
+        self.assertNotIn('QUERYAPIGATE_BIND', {e['name'] for e in python['env']})  # the image's own: 0.0.0.0:5000
+
     def test_the_optional_parts(self):
         docs = render(*POSTGRES, '--set', 'serviceMonitor.enabled=true', '--set', 'networkPolicy.enabled=true',
                       '--set', 'autoscaling.enabled=true')
@@ -210,6 +255,11 @@ class HardeningTests(unittest.TestCase):
             self.assertEqual(sorted(m['mountPath'] for m in ctr['volumeMounts']), ['/data', '/tmp'])
             self.assertIn('limits', ctr['resources'])
             self.assertEqual(ctr['readinessProbe']['httpGet']['path'], '/health')
+        # the data plane's container is held to the same
+        server = by_kind(render(*POSTGRES, '--set', 'dataplane.enabled=true'), 'Deployment')[0]
+        dataplane = server['spec']['template']['spec']['containers'][1]
+        self.assertEqual(dataplane['securityContext'], container(deployments[0])['securityContext'])
+        self.assertIn('limits', dataplane['resources'])
 
 
 @unittest.skipUnless(HELM, 'set QUERYAPIGATE_TEST_HELM, or put helm on PATH')
@@ -240,7 +290,13 @@ class RefusalTests(unittest.TestCase):
                   '--set', 'configAsCode.existingConfigMap=y'), 'choose one'),
                 ((*SECRET, '--set', 'config.QUERYAPIGATE_CONFIG_FILE=/x'), 'through configAsCode'),
                 ((*SECRET, '--set', 'config.QUERYAPIGATE_METRICS_TOKEN=x'), 'comes from metricsAuth'),
-                ((*SECRET, '--set', 'secret.values.QUERYAPIGATE_METRICS_TOKEN=x'), 'comes from metricsAuth')):
+                ((*SECRET, '--set', 'secret.values.QUERYAPIGATE_METRICS_TOKEN=x'), 'comes from metricsAuth'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_DATAPLANE_SECRET=x'),
+                 'QUERYAPIGATE_DATAPLANE_SECRET is a secret'),
+                ((*SECRET, '--set', 'dataplane.enabled=true', '--set', 'secret.values.QUERYAPIGATE_DATAPLANE_SECRET=x'),
+                 'comes from dataplane'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_BIND=0.0.0.0:8080'), "is the chart's to set"),
+                ((*SECRET, '--set', 'dataplane.threads=4'), 'threads')):  # not a value: config has its settings
             failed, stderr = refused(*args)
             self.assertTrue(failed, args)
             self.assertIn(words, stderr, args)

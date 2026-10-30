@@ -15,6 +15,10 @@ the rows it was computed from (the key, the saved query, the connection), so the
 whose rows digest the same, and a masked plan expires with the schema its trace was made from. The data plane never
 decides anything of its own: it applies a plan, or it forwards.
 
+A data plane from another release gets no plan, and no run store lease (app.py): the protocol between the two is
+internal, so they must come from one release (X-QAG-Dataplane-Version, ADR 0030 section 1). It then forwards every call,
+which is slower but answers as Python does.
+
 Saved queries with `{name}` text placeholders never get a plan: their values are part of the SQL text, so the verdict
 can change from one call to the next.
 """
@@ -22,12 +26,16 @@ import base64
 import hmac
 import ipaddress
 import json
+import logging
 
-from . import config, runners, sqltools
+from . import __version__, config, runners, sqltools
+
+log = logging.getLogger('queryapigate')
 
 SECRET_HEADER = 'X-QAG-Dataplane'
 PEER_HEADER = 'X-QAG-Peer'
 WANTED_HEADER = 'X-QAG-Plan-Wanted'
+VERSION_HEADER = 'X-QAG-Dataplane-Version'  # the data plane's release, sent with its secret
 PLAN_HEADER = 'X-QAG-Plan'
 VERSION = 1
 DIALECTS = ('postgres', 'mysql')  # the two the prototype serves - every other connection is forwarded
@@ -38,6 +46,10 @@ SECRET_ENVIRON = 'HTTP_X_QAG_DATAPLANE'  # the two headers as WSGI names them - 
 PEER_ENVIRON = 'HTTP_X_QAG_PEER'
 # The data plane asks for a plan only when it would keep one: other calls it forwards keep the metadata cache
 WANTED_ENVIRON = 'HTTP_X_QAG_PLAN_WANTED'
+VERSION_ENVIRON = 'HTTP_X_QAG_DATAPLANE_VERSION'
+UNPAIRED = ('This data plane is from another release than this server: it gets no plans and no run store lease '
+            'until both are the same release')
+_unpaired_seen: set = set()
 
 
 def matches(supplied):
@@ -45,6 +57,16 @@ def matches(supplied):
     drops the header from whatever a client sends, so only it can send the right one."""
     secret = config.dataplane_secret()
     return bool(secret and supplied) and hmac.compare_digest(supplied.encode('utf-8', 'replace'), secret.encode())
+
+
+def paired(version):
+    """Whether a data plane that sent `version` is from this server's release - logged once per other version."""
+    if version == __version__:
+        return True
+    if version not in _unpaired_seen:
+        _unpaired_seen.add(version)
+        log.warning('%s (data plane %s, this server %s).', UNPAIRED, version or 'unknown', __version__)
+    return False
 
 
 def is_address(peer):

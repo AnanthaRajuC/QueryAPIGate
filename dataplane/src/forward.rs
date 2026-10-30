@@ -21,6 +21,9 @@ pub type Body = BoxBody<Bytes, hyper::Error>;
 pub const SECRET_HEADER: HeaderName = HeaderName::from_static("x-qag-dataplane");
 pub const PEER_HEADER: HeaderName = HeaderName::from_static("x-qag-peer");
 pub const PLAN_HEADER: HeaderName = HeaderName::from_static("x-qag-plan");
+/// This build's release, beside the secret: Python gives plans and a run store lease only to its own (ADR 0030).
+pub const VERSION_HEADER: HeaderName = HeaderName::from_static("x-qag-dataplane-version");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Sent only with a call whose plan the data plane would keep: Python reads that call's rows past its metadata cache
 /// to digest them, and every other forwarded call keeps the cache.
 pub const WANTED_HEADER: HeaderName = HeaderName::from_static("x-qag-plan-wanted");
@@ -94,6 +97,9 @@ impl Forwarder {
             })?;
         clean(&mut parts.headers);
         parts.headers.insert(SECRET_HEADER, self.secret.clone());
+        parts
+            .headers
+            .insert(VERSION_HEADER, HeaderValue::from_static(VERSION));
         if want_plan {
             parts
                 .headers
@@ -130,6 +136,7 @@ impl Forwarder {
         let request = Request::post(format!("http://{}{path}", self.upstream))
             .header(header::CONTENT_TYPE, "application/json")
             .header(SECRET_HEADER, self.secret.clone())
+            .header(VERSION_HEADER, VERSION)
             .header(PEER_HEADER, "127.0.0.1")
             .body(
                 Full::new(Bytes::from(json))
@@ -172,7 +179,13 @@ pub fn peer_text(peer: IpAddr) -> String {
 
 /// The headers only the data plane and Python say to each other: removed from what a client sends, so only this
 /// process can speak for itself, and from what Python answers. Python's own `X-QAG-CSRF` passes, as any other.
-const OURS: [HeaderName; 4] = [SECRET_HEADER, PEER_HEADER, PLAN_HEADER, WANTED_HEADER];
+const OURS: [HeaderName; 5] = [
+    SECRET_HEADER,
+    PEER_HEADER,
+    PLAN_HEADER,
+    WANTED_HEADER,
+    VERSION_HEADER,
+];
 
 /// Remove hop-by-hop headers, and the data plane's own (`OURS`).
 pub fn clean(headers: &mut HeaderMap) {

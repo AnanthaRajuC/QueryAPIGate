@@ -178,8 +178,9 @@ class _CapturePeer:
     Behind a data plane (dataplane.py, ADR 0028) every request comes from it, over loopback: one that carries its
     secret names the client's own socket address in X-QAG-Peer, and that address is taken as the real one - so this
     server sees the request as if the client had connected directly, ProxyFix and QUERYAPIGATE_TRUST_PROXY included.
-    A peer that isn't an IP address counts as remote, as a Unix socket does. Both headers are removed here, so
-    nothing after this layer reads, logs or passes on the secret."""
+    A peer that isn't an IP address counts as remote, as a Unix socket does. A data plane from another release
+    (X-QAG-Dataplane-Version) is still the data plane, but is given no plan (dataplane.paired()). Its headers are
+    removed here, so nothing after this layer reads, logs or passes on the secret."""
 
     def __init__(self, app):
         self.app = app
@@ -188,8 +189,11 @@ class _CapturePeer:
         supplied = environ.pop(dataplane.SECRET_ENVIRON, None)
         peer = environ.pop(dataplane.PEER_ENVIRON, None)
         wanted = environ.pop(dataplane.WANTED_ENVIRON, None)
+        version = environ.pop(dataplane.VERSION_ENVIRON, None)
         if supplied is not None and dataplane.matches(supplied):
-            environ['queryapigate.dataplane'] = 'plan' if wanted == '1' else True
+            is_paired = dataplane.paired(version)
+            environ['queryapigate.dataplane'] = 'plan' if wanted == '1' and is_paired else True
+            environ['queryapigate.dataplane_paired'] = is_paired
             environ['REMOTE_ADDR'] = peer if dataplane.is_address(peer) else ''
         environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
         return self.app(environ, start_response)
@@ -1282,6 +1286,8 @@ def dataplane_lease():
     there. 404 without a run store."""
     if not runstore.enabled():
         return jsonify(error_body('No run store is configured', 404)), 404
+    if not request.environ.get('queryapigate.dataplane_paired'):
+        return jsonify(error_body(dataplane.UNPAIRED, 409)), 409
     body = request.get_json(silent=True) or {}
     holder = body.get('holder')
     if not isinstance(holder, str) or not 0 < len(holder) <= 200:

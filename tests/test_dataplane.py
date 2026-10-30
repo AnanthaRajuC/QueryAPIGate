@@ -3,17 +3,19 @@ spec the data plane is built to - that a plan, applied as the data plane applies
 sends. The PostgreSQL and MySQL runners are replaced by recording fakes, so no database is needed."""
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import apikeys, create_app, dataplane, db, runners, runstore, schema, sqltools
+from queryapigate import __version__, apikeys, create_app, dataplane, db, runners, runstore, schema, sqltools
 from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 SECRET = 'dp-secret-0123456789'
 WANTED = 'X-QAG-Plan-Wanted'
+PAIRED = {'X-QAG-Dataplane-Version': __version__}  # a data plane of this release
 COLUMNS = ['id', 'email', 'name']
 TABLES = {'tables': [{'name': 'customers', 'columns': [{'name': c} for c in COLUMNS]}]}
 
@@ -68,7 +70,7 @@ class PlanTestCase(unittest.TestCase):
         return COLUMNS, [(1, 'a@example.com', 'A')]
 
     def call(self, path, key, secret=SECRET):
-        headers = {'X-API-Key': key, **({dataplane.SECRET_HEADER: secret, WANTED: '1'} if secret else {})}
+        headers = {'X-API-Key': key, **({dataplane.SECRET_HEADER: secret, WANTED: '1', **PAIRED} if secret else {})}
         res = self.client.get(path, headers=headers)
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         value = res.headers.get(dataplane.PLAN_HEADER)
@@ -109,7 +111,8 @@ class WhoGetsAPlanTests(PlanTestCase):
         self.assertIn('at least 16 characters', str(caught.exception))
 
     def test_never_for_an_administrator(self):
-        res = self.client.get('/q/by_id?id=1', headers={**ADMIN, dataplane.SECRET_HEADER: SECRET, WANTED: '1'})
+        res = self.client.get('/q/by_id?id=1', headers={**ADMIN, dataplane.SECRET_HEADER: SECRET, WANTED: '1',
+                                                         **PAIRED})
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
 
     def test_never_for_a_key_with_a_rate_limit(self):
@@ -131,7 +134,7 @@ class WhoGetsAPlanTests(PlanTestCase):
 
     def test_a_refusal_gets_none(self):
         res = self.client.get('/q/by_id?id=x', headers={'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET,
-                                                         WANTED: '1'})
+                                                         WANTED: '1', **PAIRED})
         self.assertEqual(res.status_code, 400)
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
 
@@ -141,6 +144,49 @@ class WhoGetsAPlanTests(PlanTestCase):
         after = self.call('/q/by_id?id=1', self.restricted)[1]['rows']
         self.assertNotEqual(before['api_key'], after['api_key'])
         self.assertEqual(before['saved_query'], after['saved_query'])
+
+    def test_never_to_a_data_plane_from_another_release(self):
+        # The protocol between the two is internal: a pair from two releases forwards every call instead (ADR 0030)
+        for version in (None, '0.1.0', __version__ + '.1', ''):
+            with self.subTest(version=version):
+                headers = {'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET, WANTED: '1'}
+                if version is not None:
+                    headers[dataplane.VERSION_HEADER] = version
+                dataplane._unpaired_seen.discard(version)
+                with self.assertLogs('queryapigate', 'WARNING') as logged:  # once for each version it meets
+                    res = self.client.get('/q/by_id?id=1', headers=headers)
+                    self.client.get('/q/by_id?id=1', headers=headers)
+                self.assertEqual(sum('another release' in line for line in logged.output), 1)
+                self.assertEqual(res.status_code, 200)  # answered all the same
+                self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
+
+    def test_the_data_plane_is_built_as_this_release(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, 'dataplane', 'Cargo.toml')) as f:
+            crate = re.search(r'^version = "([^"]+)"', f.read(), re.M).group(1)
+        with open(os.path.join(root, 'dataplane', 'Cargo.lock')) as f:
+            locked = re.search(r'name = "queryapigate-dataplane"\nversion = "([^"]+)"', f.read()).group(1)
+        self.assertEqual((crate, locked), (__version__, __version__),
+                         'set dataplane/Cargo.toml\'s version to the release, then build it to update Cargo.lock')
+
+    def test_the_image_builds_it_with_the_pinned_toolchain(self):
+        # rust-toolchain.toml isn't copied into the image's build, so rustup doesn't fetch one there: the stage's
+        # image must be that toolchain, on the Debian release the Python image is on (the same glibc)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, 'dataplane', 'rust-toolchain.toml')) as f:
+            channel = re.search(r'^channel = "([^"]+)"', f.read(), re.M).group(1)
+        with open(os.path.join(root, 'Dockerfile')) as f:
+            dockerfile = f.read()
+        rust = re.search(r'^FROM --platform=\$BUILDPLATFORM rust:([\d.]+)-slim-(\w+)@sha256:\w+ AS dataplane$',
+                         dockerfile, re.M)
+        python = re.search(r'^FROM python:[\d.]+-slim@sha256:\w+$', dockerfile, re.M)
+        self.assertIsNotNone(rust, 'the data plane stage: rust:<channel>-slim-<debian>@sha256:..., by digest')
+        self.assertIsNotNone(python)
+        self.assertEqual(rust.group(1), channel)
+        self.assertEqual(rust.group(2), 'trixie', 'the Debian release python:3.12-slim is on')
+        self.assertNotIn('COPY dataplane/ ', dockerfile)
+        self.assertIn('COPY --from=dataplane /queryapigate-dataplane /usr/local/bin/queryapigate-dataplane',
+                      dockerfile)
 
     def test_never_unless_the_data_plane_asks_for_one(self):
         res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': self.plain, dataplane.SECRET_HEADER: SECRET})
@@ -161,7 +207,7 @@ class WhoGetsAPlanTests(PlanTestCase):
             db.connection().execute("UPDATE api_keys SET details_json = ? WHERE name = 'restricted'",
                                     (json.dumps(details),))
             self.assertEqual(self.client.get('/q/by_id?id=1', headers=forwarded).status_code, 200)  # cached
-            wanting = {**forwarded, WANTED: '1'}
+            wanting = {**forwarded, WANTED: '1', **PAIRED}
             self.assertEqual(self.client.get('/q/by_id?id=1', headers=wanting).status_code, 403)  # read fresh
 
     def test_the_metadata_cache_is_bypassed_for_the_data_plane(self):
@@ -169,7 +215,7 @@ class WhoGetsAPlanTests(PlanTestCase):
             self.call('/q/by_id?id=1', self.restricted)  # cached for ordinary calls, from here on
             apikeys.update_key('restricted', allowed_tables=['orders'])
             res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': self.restricted,
-                                                             dataplane.SECRET_HEADER: SECRET, WANTED: '1'})
+                                                             dataplane.SECRET_HEADER: SECRET, WANTED: '1', **PAIRED})
         self.assertEqual(res.status_code, 403)  # the fresh grant, not the cached one
 
 

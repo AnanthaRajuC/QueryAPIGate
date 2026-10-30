@@ -205,18 +205,6 @@ echo "pods still serving: $READY"
 helm rollback qag --namespace pg --wait --timeout 6m
 kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
 
-# ---- one pod on SQLite ----
-say "the SQLite shape: one pod, its store on a volume that outlives the pod"
-kubectl create namespace lite
-# with a file mounted by extraVolumes, as the SIEM's CA would be
-kubectl -n lite create secret generic siem-tls --from-literal=ca.crt=not-a-real-certificate
-helm install lite "$CHART" --namespace lite --set secret.create=true --set secret.values.QUERYAPIGATE_API_KEY=ci-key \
-  --set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAGE")" --set resources.requests.cpu=50m \
-  --set 'extraVolumes[0].name=siem-tls' --set 'extraVolumes[0].secret.secretName=siem-tls' \
-  --set 'extraVolumeMounts[0].name=siem-tls' --set 'extraVolumeMounts[0].mountPath=/etc/queryapigate/siem' \
-  --set 'extraVolumeMounts[0].readOnly=true' --wait --timeout 4m
-test "$(kubectl -n lite exec deploy/lite-queryapigate -- cat /etc/queryapigate/siem/ca.crt)" = not-a-real-certificate
-echo "the mounted file is there"
 # A Service just created, or a pod just replaced, can refuse connections for a few seconds: retry those (a refused
 # request never reached the server, so retrying the POST can't make the key twice).
 CALL="
@@ -232,6 +220,58 @@ def call(request):
                 raise
             time.sleep(1)
 "
+
+# ---- the Rust data plane (ADR 0030) ----
+say "the data plane in front of each API server pod, behind the ingress's trusted hop"
+# ingress.enabled sets QUERYAPIGATE_TRUST_PROXY=1: the calls below carry X-Forwarded-For as the controller would send it
+helm upgrade qag "$CHART" "${COMMON[@]}" "${CURRENT[@]}" --set dataplane.enabled=true --set ingress.enabled=true \
+  --set dataplane.resources.requests.cpu=20m --wait --timeout 6m
+kubectl -n pg rollout status deploy/qag-queryapigate --timeout=180s
+only_new_pods pg 3
+kubectl -n pg get pods -l app.kubernetes.io/component=server \
+  -o jsonpath='{range .items[*]}{.metadata.name} {range .status.containerStatuses[*]}{.name}={.ready} {end}{"\n"}{end}'
+NOT_READY=$(kubectl -n pg get pods -l app.kubernetes.io/component=server \
+  -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.ready}{"\n"}{end}{end}' | grep -vc true || true)
+[ "$NOT_READY" = 0 ] || { echo 'a server pod has a container that is not ready'; exit 1; }
+kubectl -n pg run dataplane-check --rm -i --restart=Never --image="$IMAGE" --command -- python -c "$CALL
+admin = {'X-API-Key': 'ci-key', 'Content-Type': 'application/json'}
+def make(name, **grants):
+    r = urllib.request.Request('http://qag-queryapigate/api/v1/api-keys', method='POST', headers=admin,
+                               data=json.dumps({'name': name, 'connections': ['cluster_db'], **grants}).encode())
+    return call(r)['secret']
+def tables(key, client):
+    r = urllib.request.Request('http://qag-queryapigate/q/tables', headers={'X-API-Key': key, 'X-Forwarded-For': client})
+    try:
+        return urllib.request.urlopen(r, timeout=10).status
+    except urllib.error.HTTPError as error:
+        return error.code
+office = make('office', allowed_ips=['203.0.113.0/24'])
+# Python answers each pod's first calls, then the data plane serves; every answer must be Python's
+statuses = []
+for _ in range(40):
+    statuses.append(tables(office, '203.0.113.9'))
+    time.sleep(0.25)
+assert set(statuses) == {200}, statuses
+assert tables(office, '198.51.100.1') == 401  # judged by the client the ingress names, not the ingress
+print('an IP-restricted key: 200 from its range, 401 from outside it, by X-Forwarded-For')
+"
+SERVED=$(kubectl -n pg logs -l app.kubernetes.io/component=server -c dataplane --tail=-1 | grep -c 'Executing on' || true)
+echo "calls the data plane served: $SERVED"
+[ "$SERVED" -gt 0 ] || { kubectl -n pg logs -l app.kubernetes.io/component=server -c dataplane --tail=20; \
+  echo 'the data plane served none of the calls behind the trusted hop'; exit 1; }
+
+# ---- one pod on SQLite ----
+say "the SQLite shape: one pod, its store on a volume that outlives the pod"
+kubectl create namespace lite
+# with a file mounted by extraVolumes, as the SIEM's CA would be
+kubectl -n lite create secret generic siem-tls --from-literal=ca.crt=not-a-real-certificate
+helm install lite "$CHART" --namespace lite --set secret.create=true --set secret.values.QUERYAPIGATE_API_KEY=ci-key \
+  --set image.repository="$(repo "$IMAGE")" --set image.tag="$(tag "$IMAGE")" --set resources.requests.cpu=50m \
+  --set 'extraVolumes[0].name=siem-tls' --set 'extraVolumes[0].secret.secretName=siem-tls' \
+  --set 'extraVolumeMounts[0].name=siem-tls' --set 'extraVolumeMounts[0].mountPath=/etc/queryapigate/siem' \
+  --set 'extraVolumeMounts[0].readOnly=true' --wait --timeout 4m
+test "$(kubectl -n lite exec deploy/lite-queryapigate -- cat /etc/queryapigate/siem/ca.crt)" = not-a-real-certificate
+echo "the mounted file is there"
 kubectl -n lite run make --rm -i --restart=Never --image="$IMAGE" --command -- python -c "$CALL
 r = urllib.request.Request('http://lite-queryapigate/api/v1/api-keys', method='POST', data=json.dumps(
     {'name': 'kept', 'connections': []}).encode(), headers={'X-API-Key': 'ci-key', 'Content-Type': 'application/json'})

@@ -8,6 +8,11 @@ masked, table-restricted, both, by name, IP-restricted, rotated, expired) call s
 benchmarks' and many others, with valid, invalid and hostile parameters, paging and timeouts; partway through, grants
 change, a key is revoked and a query gets a new version.
 
+The proxied run does it all again behind two trusted proxies (QUERYAPIGATE_TRUST_PROXY=2) with HSTS on, each call with
+X-Forwarded-For and X-Forwarded-Proto of every shape - plain, IPv6, quoted, empty items, ports, too few values - so
+the client address that IP-restricted keys are judged by, and the scheme HSTS depends on, are found as ProxyFix finds
+them (ADR 0030, section 5).
+
     cargo build --release --manifest-path dataplane/Cargo.toml
     QUERYAPIGATE_DATAPLANE_TEST_POSTGRES=127.0.0.1:55435:postgres:pw:postgres \\
     QUERYAPIGATE_DATAPLANE_TEST_MYSQL=127.0.0.1:55436:root:pw:shop \\
@@ -187,7 +192,22 @@ KEYS = {  # name -> grants
     'elsewhere': {'connections': ['shop'], 'allowed_ips': ['10.0.0.0/8']},
     'expired': {'connections': ['shop'], 'expires_at': '2020-01-01'},
     'rotated': {'connections': ['shop']},
+    'v6': {'connections': ['shop'], 'allowed_ips': ['2001:db8::/32']},
 }
+# Behind two proxies the client is the second value from the right: plainly written ones, mostly, and every shape
+# Python could read some other way (the data plane forwards those)
+FORWARDED_FOR = ['10.1.2.3, 198.51.100.1', '203.0.113.7, 10.1.2.3, 198.51.100.1', '127.0.0.5, 198.51.100.2',
+                 '2001:db8::5, 10.0.0.2', '10.0.0.2, 2001:db8::5', '192.0.2.44, 127.0.0.1', ' 10.1.2.3 ,\t127.0.0.9',
+                 '10.1.2.3', '1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4']
+ODD_FORWARDED_FOR = ['2001:DB8::5, 1.1.1.1', '::ffff:10.0.0.1, 1.1.1.1', '10.0.0.1:443, 1.1.1.1',
+                     '[2001:db8::5], 1.1.1.1', '"10.0.0.1", 1.1.1.1', 'unknown, 1.1.1.1', '', ',', '10.0.0.1,,1.1.1.1',
+                     '10.0.0.1, 1.1.1.1,', 'garbage', '010.0.0.1, 1.1.1.1', '10.0.0.1 10.0.0.2, 1.1.1.1']
+FORWARDED_PROTO = ['https, http', 'http, https', 'https, https', 'http, http', 'https', ' https , http']
+ODD_FORWARDED_PROTO = ['wss, http', 'HTTPS, http', '"https", http', 'https, http,', '', 'ftp, https']
+# A host werkzeug can't encode as IDNA is a 400: the client's own Host, or behind proxies the one ProxyFix takes
+FORWARDED_HOST = ['api.example.com, gateway.internal', 'api.example.com:8443, lb', 'a b, c', ', ', 'x:99999, y',
+                  '[::1]:80, lb', 'é.example, lb', '..., lb', 'api.example.com']
+HOSTS = ['a..b', '...', 'api.example.com', 'x' * 64 + '.com', 'a.b.:8080', '[::1]:5000']
 
 
 def values(spec, rng):
@@ -210,14 +230,16 @@ def values(spec, rng):
 class DifferentialTests(unittest.TestCase):
     dialect = None
     env = None
+    proxied = False
 
     @classmethod
     def setUpClass(cls):
         cls.settings = details(cls.env)
         load(cls.dialect, cls.settings)
         cls.tmp = tempfile.TemporaryDirectory()
+        proxies = {'QUERYAPIGATE_TRUST_PROXY': '2', 'QUERYAPIGATE_HSTS_MAX_AGE': '600'} if cls.proxied else {}
         cls.pair = Pair(Path(cls.tmp.name), {'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_MASK_KEY': 'diff-mask',
-                                             'QUERYAPIGATE_MAX_PAGE_SIZE': '50'})
+                                             'QUERYAPIGATE_MAX_PAGE_SIZE': '50', **proxies})
         cls.python = ('127.0.0.1', cls.pair.python_port)
         cls.admin = {'X-API-Key': ADMIN}
         status, _h, body = cls.api('POST', '/api/v1/connections', {'name': 'shop', 'db': cls.dialect, **cls.settings,
@@ -270,17 +292,40 @@ class DifferentialTests(unittest.TestCase):
             args.append(('format', rng.choice(['csv', 'JSON', 'json', 'xml'])))
         if rng.random() < 0.05:
             args.append(('timeout', rng.choice(['5', '0.5', 'x', '-1'])))
-        key = rng.choices(list(KEYS) + ['wrong'], weights=[30, 20, 15, 10, 8, 4, 2, 2, 5, 2])[0]
+        key = rng.choices(list(KEYS) + ['wrong'], weights=[30, 20, 15, 10, 8, 4, 2, 2, 5, 3, 2])[0]
         secret = self.secrets.get(key, 'not-a-key')
+        headers = {'X-API-Key': secret, **(self.forwarding(rng) if self.proxied else {})}
+        if rng.random() < 0.04:
+            headers['Host'] = rng.choice(HOSTS)
         path = f'/q/{name}' + (('?' + urllib.parse.urlencode(args)) if args else '')
         if body_params and rng.random() < 0.7:
             # JSON numbers for numeric strings, half the time: the body keeps its types
             typed = {k: (json.loads(v) if rng.random() < 0.5 and v.lstrip('-').replace('.', '', 1).isdigit() else v)
                      for k, v in body_params.items()}
-            return 'POST', path, {'X-API-Key': secret}, {'params': typed}
+            return 'POST', path, headers, {'params': typed}
         for param, value in body_params.items():  # otherwise in the URL after all
             path += ('&' if '?' in path else '?') + urllib.parse.urlencode({param: value})
-        return 'GET', path, {'X-API-Key': secret}, None
+        return 'GET', path, headers, None
+
+    @staticmethod
+    def forwarding(rng):
+        """The headers two proxies in front would send, or a client's own."""
+        headers = {}
+        roll = rng.random()
+        if roll < 0.7:
+            headers['X-Forwarded-For'] = rng.choice(FORWARDED_FOR)
+        elif roll < 0.85:
+            headers['X-Forwarded-For'] = rng.choice(ODD_FORWARDED_FOR)
+        roll = rng.random()
+        if roll < 0.7:
+            headers['X-Forwarded-Proto'] = rng.choice(FORWARDED_PROTO)
+        elif roll < 0.8:
+            headers['X-Forwarded-Proto'] = rng.choice(ODD_FORWARDED_PROTO)
+        if rng.random() < 0.05:  # gunicorn's own scheme headers: not trusted from any peer behind the data plane
+            headers['X-Forwarded-Ssl'] = rng.choice(['on', 'off'])
+        if rng.random() < 0.2:
+            headers['X-Forwarded-Host'] = rng.choice(FORWARDED_HOST)
+        return headers
 
     def mutate(self, step):
         """Partway through: change what calls see - each seen by both at once, or, with the metadata cache on, once
@@ -329,11 +374,13 @@ class DifferentialTests(unittest.TestCase):
                 key = next(k for k, s in self.secrets.items() if s == headers['X-API-Key'])
                 self.forwarded_ok[(path.split('?')[0], key)] += 1
             if not same:
+                sent = {k: v for k, v in headers.items() if k.startswith('X-Forwarded')}
                 mismatches.append({'step': step, 'served': served, 'call': (method, path, headers.get('X-API-Key'),
-                                   body), 'python': (direct[0], direct[2][:300]), 'data plane': (through[0],
+                                   body, sent), 'python': (direct[0], direct[2][:300]), 'data plane': (through[0],
                                    through[2][:300]), 'headers': (strip(direct[1]), strip(through[1]))})
         history = self.history_mismatches()
-        print(f'\n{self.dialect}: {CALLS} calls, seed {SEED}: {dict(outcomes)}; '
+        where = ' behind proxies' if self.proxied else ''
+        print(f'\n{self.dialect}{where}: {CALLS} calls, seed {SEED}: {dict(outcomes)}; '
               f'{len(mismatches)} response and {len(history)} history differences', file=sys.stderr)
         if os.environ.get('DIFFERENTIAL_SHOW_FORWARDED'):
             print('forwarded, though Python answered 200:', self.forwarded_ok.most_common(25), file=sys.stderr)
@@ -379,7 +426,23 @@ class MysqlDifferentialTests(DifferentialTests):
     env = 'QUERYAPIGATE_DATAPLANE_TEST_MYSQL'
 
 
-del DifferentialTests  # the base runs only through its two subclasses
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(details('QUERYAPIGATE_DATAPLANE_TEST_POSTGRES') is None, 'set QUERYAPIGATE_DATAPLANE_TEST_POSTGRES')
+class ProxiedPostgresDifferentialTests(DifferentialTests):
+    dialect = 'postgres'
+    env = 'QUERYAPIGATE_DATAPLANE_TEST_POSTGRES'
+    proxied = True
+
+
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(details('QUERYAPIGATE_DATAPLANE_TEST_MYSQL') is None, 'set QUERYAPIGATE_DATAPLANE_TEST_MYSQL')
+class ProxiedMysqlDifferentialTests(DifferentialTests):
+    dialect = 'mysql'
+    env = 'QUERYAPIGATE_DATAPLANE_TEST_MYSQL'
+    proxied = True
+
+
+del DifferentialTests  # the base runs only through its subclasses
 
 if __name__ == '__main__':
     unittest.main()

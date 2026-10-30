@@ -2,8 +2,9 @@
 //!
 //! A call is served here only when every one of these holds; otherwise it is forwarded, unchanged, and Python
 //! answers it as it always has:
-//! - nothing about the server or the request is outside what the prototype does (a rate limit, tracing, trusted
-//!   proxies, an Origin, a bearer token, a stream, another format, a version or connection chosen per call);
+//! - nothing about the server or the request is outside what the prototype does (a rate limit, tracing, an Origin,
+//!   a bearer token, a stream, another format, a version or connection chosen per call), and behind trusted proxies
+//!   their headers read plainly (proxy.rs);
 //! - the X-API-Key is a scoped key that authenticates (auth.rs), and its use was recorded within the last minute;
 //! - a plan is held for exactly the rows read for this call - the key, the saved query, the connection - by digest;
 //! - the parameters resolve as Python would resolve them (params.rs), the query runs (db.rs), and every value in the
@@ -34,6 +35,7 @@ use crate::db::{self, Dialect, Failure};
 use crate::forward::{self, Body, Forwarder, PLAN_HEADER};
 use crate::log::{self, Logger};
 use crate::params::{self, Supplied};
+use crate::proxy;
 use crate::render::{self, Action};
 use crate::respond;
 use crate::runstore::{self, RunStore};
@@ -64,6 +66,10 @@ const RESERVED: [&str; 7] = [
 pub struct Settings {
     /// Why every call is forwarded, if one is
     pub forward_everything: Option<&'static str>,
+    /// QUERYAPIGATE_TRUST_PROXY: the client is found behind this many proxies (proxy.rs)
+    pub proxy_hops: usize,
+    /// QUERYAPIGATE_HSTS_MAX_AGE: sent on a call that arrived over HTTPS, as secheaders.apply() sends it
+    pub hsts_max_age: Option<u64>,
     pub admin_key: Option<String>,
     pub secret_keys: Vec<String>,
     pub mask_key: Option<Vec<u8>>,
@@ -90,6 +96,21 @@ fn off(value: Option<String>) -> bool {
     })
 }
 
+/// A whole number as Python's int() reads a setting: Ok(None) when it is unset or isn't one (int() raises), Err for
+/// what int() could read otherwise - `1_0`, other scripts' digits, a number past i128 - which this leaves to Python.
+fn whole(value: Option<String>) -> Result<Option<i128>, ()> {
+    let Some(value) = value else { return Ok(None) };
+    let text = value.trim();
+    if !text.is_ascii() || text.contains('_') {
+        return Err(());
+    }
+    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(None);
+    }
+    text.parse::<i128>().map(Some).map_err(|_| ())
+}
+
 /// A positive number of seconds as config.py reads one: `default` when unset, invalid or negative, None for 0.
 fn seconds(value: Option<String>, default: f64) -> Option<f64> {
     match value.map(|v| v.trim().parse::<f64>()) {
@@ -101,14 +122,29 @@ fn seconds(value: Option<String>, default: f64) -> Option<f64> {
 
 impl Settings {
     pub fn from(get: impl Fn(&str) -> Option<String>) -> Settings {
+        // config.proxy_hops(): max(0, int(value)), 0 when it isn't a number
+        let hops = whole(get("QUERYAPIGATE_TRUST_PROXY"));
+        let proxy_hops = match hops {
+            Ok(n) => usize::try_from(n.unwrap_or(0).max(0)).ok(),
+            Err(()) => None,
+        };
+        // config.hsts_max_age(): the digits of a positive number, else none
+        let hsts = get("QUERYAPIGATE_HSTS_MAX_AGE");
+        let hsts_max_age = match &hsts {
+            Some(v) if !v.is_ascii() => Err(()), // isdigit() is true of other scripts' digits too
+            Some(v) if v.trim().bytes().all(|b| b.is_ascii_digit()) => whole(hsts.clone())
+                .and_then(|n| n.map(u64::try_from).transpose().map_err(|_| ()))
+                .map(|n| n.filter(|&n| n > 0)),
+            _ => Ok(None),
+        };
         let forward_everything = if get("QUERYAPIGATE_RATE_LIMIT").is_some() {
-            Some("QUERYAPIGATE_RATE_LIMIT") // limits must hold across both processes: shared counters first
+            Some("QUERYAPIGATE_RATE_LIMIT is set") // limits must hold across both processes: shared counters first
         } else if get("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
-            Some("tracing")
-        } else if get("QUERYAPIGATE_TRUST_PROXY")
-            .is_some_and(|v| v.trim().parse::<i64>().is_ok_and(|n| n > 0))
-        {
-            Some("QUERYAPIGATE_TRUST_PROXY")
+            Some("OTEL_EXPORTER_OTLP_ENDPOINT is set")
+        } else if hops.is_err() || proxy_hops.is_none() {
+            Some("QUERYAPIGATE_TRUST_PROXY is a number only Python reads") // int() may read it otherwise
+        } else if hsts_max_age.is_err() {
+            Some("QUERYAPIGATE_HSTS_MAX_AGE is a number only Python reads")
         } else {
             None
         };
@@ -122,6 +158,8 @@ impl Settings {
         };
         Settings {
             forward_everything,
+            proxy_hops: proxy_hops.unwrap_or(0),
+            hsts_max_age: hsts_max_age.unwrap_or(None),
             admin_key: get("QUERYAPIGATE_API_KEY")
                 .map(|k| k.trim().to_string())
                 .filter(|k| !k.is_empty()),
@@ -472,6 +510,12 @@ impl App {
         if self.settings.forward_everything.is_some() {
             return Forward(None);
         }
+        // The client as Python finds it behind trusted proxies: who allowed_ips, the log and the run name
+        let Some(client) = proxy::client(&parts.headers, peer, self.settings.proxy_hops) else {
+            return Forward(None);
+        };
+        let peer = client.address;
+        let hsts = self.settings.hsts_max_age.filter(|_| client.secure);
         let Some(store) = &self.store else {
             return Forward(None);
         };
@@ -685,6 +729,7 @@ impl App {
             Err(Failure::Timeout) => {
                 let limit_seconds = timeout.unwrap_or(0.0);
                 let (response, message) = respond::timed_out(limit_seconds, &request_id);
+                let response = respond::hsts(response, hsts);
                 let entry =
                     entry(json!({"status": "error", "error": message, "code": "query_timeout"}));
                 self.finish(
@@ -734,6 +779,7 @@ impl App {
             has_more,
             &request_id,
         );
+        let response = respond::hsts(response, hsts);
         let mut fields = json!({
             "status": "success", "rows": rows, "duration_ms": (query_seconds * 1000.0).round() as i64,
             "serialization_ms": (serialization_seconds * 10000.0).round() / 10.0,
@@ -1315,6 +1361,38 @@ mod tests {
         let limited =
             Settings::from(|name| (name == "QUERYAPIGATE_RATE_LIMIT").then(|| "10/minute".into()));
         assert!(limited.forward_everything.is_some());
+    }
+
+    #[test]
+    fn trusted_proxies_and_hsts_as_config_py_reads_them() {
+        let read = |hops: &str, hsts: &str| {
+            let (hops, hsts) = (hops.to_string(), hsts.to_string());
+            let settings = Settings::from(move |name| match name {
+                "QUERYAPIGATE_TRUST_PROXY" => Some(hops.clone()),
+                "QUERYAPIGATE_HSTS_MAX_AGE" => Some(hsts.clone()),
+                _ => None,
+            });
+            (
+                settings.forward_everything.is_some(),
+                settings.proxy_hops,
+                settings.hsts_max_age,
+            )
+        };
+        // max(0, int(value)), 0 when it isn't one; the digits of a positive number, else none
+        assert_eq!(read("2", "600"), (false, 2, Some(600)));
+        assert_eq!(read(" +1 ", " 007 "), (false, 1, Some(7)));
+        assert_eq!(read("-3", "0"), (false, 0, None));
+        assert_eq!(read("", "+5"), (false, 0, None));
+        assert_eq!(read("x", "1.5"), (false, 0, None));
+        // what int() or isdigit() read some other way is left to Python: every call forwarded
+        for (hops, hsts) in [
+            ("1_0", ""),
+            ("٣", ""),
+            ("99999999999999999999999", ""),
+            ("1", "٣"),
+        ] {
+            assert!(read(hops, hsts).0, "{hops:?} {hsts:?}");
+        }
     }
 
     #[test]

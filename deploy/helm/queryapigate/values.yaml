@@ -101,6 +101,21 @@ mcp:
     requests: {cpu: 100m, memory: 192Mi}
     limits: {memory: 1Gi}
 
+# The Rust data plane in front of the API server (ADR 0030, experimental): a second container in each API server pod,
+# from the same image, serving saved-query reads itself and passing everything else to Python on 127.0.0.1:5001 - the
+# Service and the ingress reach it. 3-9x the calls a second per core on the calls it serves (how-to/64). Without the
+# run store (QUERYAPIGATE_RUN_STORE_URL), one Python worker records about 17,000 runs a second: keep the data plane's
+# CPU limit near 2 per pod, and add pods past that. Its settings are config's and the Secret's, as Python's are.
+dataplane:
+  enabled: false
+  # The secret the two share, made in a Secret of its own (<release>-dataplane) and kept across upgrades. Rendering
+  # without the cluster (helm template, Argo CD) can't see the one already made: give your own here, under `key`.
+  existingSecret: ""
+  key: secret
+  resources:
+    requests: {cpu: 250m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
 # 250m suits a small or shared cluster. For throughput, one API server pod uses about 1.1-1.3 cores at full load
 # (one for Python, the rest for its threads' I/O): request 1 CPU and limit 1.5 (or none), and add pods past that - a
 # limit below ~1.2 throttles it. how-to/63-tune-a-deployment-for-throughput.md has the measurements.

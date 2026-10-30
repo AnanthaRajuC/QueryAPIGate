@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from test_forwarding import binary  # noqa: E402
 
-from queryapigate import apikeys, create_app, dataplane, runners, schema  # noqa: E402
+from queryapigate import __version__, apikeys, create_app, dataplane, runners, schema  # noqa: E402
 from tests.helpers import save_query, write_connections  # noqa: E402
 
 SECRET = 'store-test-secret-0123456789'
@@ -60,7 +60,8 @@ class DigestTests:
 
     def plan_and_probe(self, key):
         res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': key, dataplane.SECRET_HEADER: SECRET,
-                                                       dataplane.WANTED_HEADER: '1'})
+                                                       dataplane.WANTED_HEADER: '1',
+                                                       dataplane.VERSION_HEADER: __version__})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         plan = dataplane.decode(res.headers[dataplane.PLAN_HEADER])
         probe = subprocess.run([str(binary()), '--probe-digests', key, 'by_id'], env={**os.environ, **self.env},

@@ -51,9 +51,55 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+
+- **The Rust data plane ships in the image and the Helm chart** (experimental -
+  [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md),
+  [guide 64](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md)). The image
+  has `queryapigate-dataplane` beside Python, for amd64 and arm64, and runs it only when started. The chart's
+  `dataplane.enabled` adds it to each API server pod as a second container from the same image, takes the pod's port
+  with it, moves Python to the pod's loopback, and makes the secret the two share, kept across upgrades. With Docker,
+  it's a second container sharing the first one's network; `deploy/scale-out/docker-compose.dataplane.yml` puts one in
+  front of each instance. Nothing changes unless it's turned on.
+- **`QUERYAPIGATE_BIND`:** where the image's gunicorn listens - `0.0.0.0:5000`, as before, or `127.0.0.1:5001` behind
+  the data plane. The image's command no longer has `--bind`; unset outside the image, gunicorn's own default applies.
+
 ### Changed
 
+- **The data plane serves behind trusted proxies.** With `QUERYAPIGATE_TRUST_PROXY` set it used to forward every call,
+  so it served nothing behind the chart's ingress or the scale-out example's Caddy. It now finds the client's address
+  and scheme as Python's `ProxyFix` does, for the plainly written `X-Forwarded-For` and `X-Forwarded-Proto` a proxy
+  sends, and forwards any other shape for Python to read. It sends HSTS (`QUERYAPIGATE_HSTS_MAX_AGE`) on a call that
+  arrived over HTTPS, as Python does. A key's `allowed_ips` is judged by that address, so the differential test runs
+  again behind two proxies with every shape of those headers, `X-Forwarded-Host` included: no difference in 9,000
+  calls on PostgreSQL and MySQL, over three seeds.
+  Behind Caddy, three data planes served 26 of 30 calls.
+- **The data plane and Python pair only within a release.** The data plane sends its version with its secret, and
+  Python gives no plan and no run store lease to a different one, logging why once: a mismatched pair forwards every
+  call. The crate's version is now the release's (`dataplane/Cargo.toml`, checked by a test).
 - **CI:** the upgrade fixtures from 0.46.0 are added, and the rolling-upgrade and Helm checks now start from 0.46.0.
+  The image's smoke test, on every pull request and release, also runs it as two containers and checks that
+  the data plane serves a call; the Helm chart's kind test turns the data plane on behind the ingress's trusted hop and
+  checks an IP-restricted key is judged by the client the hop names; the data plane's crates are audited against
+  RustSec (`cargo audit`), and its binary is built with `cargo auditable`, so the image's SBOM lists them.
+
+### Fixed
+
+- **The data plane served calls Python refuses for their host.** werkzeug answers 400 to a `Host` it can't encode as
+  IDNA - an empty label, as in `a..b`, or one over 63 characters - and the data plane served them. It now forwards
+  them, and behind trusted proxies checks the `X-Forwarded-Host` Python would take instead. Found by the differential
+  test, which now sends such hosts.
+
+### Security
+
+- **Behind the data plane, gunicorn took a client's forwarding headers as a trusted proxy's.** Every request reaches
+  gunicorn over loopback then, which gunicorn trusts by default to set the scheme (`X-Forwarded-Proto`, `-Ssl`,
+  `-Protocol`) and `SCRIPT_NAME` from headers - and the data plane passed a client's own on. A client could move part
+  of a path out of what Flask routes, past a proxy's rules for that path (the route's own authorization still applied),
+  turn a call into a 400 with contradictory scheme headers, or make Python send HSTS over plain HTTP. With
+  `QUERYAPIGATE_DATAPLANE_SECRET` set, `gunicorn_conf.py` now trusts no peer's (unless `FORWARDED_ALLOW_IPS` says
+  otherwise), and Python reads forwarding headers only through `ProxyFix`, as it does without the data plane. Only a
+  deployment running the experimental data plane, built from the repository, was affected.
 
 ## [0.46.0] - 2026-10-29
 
