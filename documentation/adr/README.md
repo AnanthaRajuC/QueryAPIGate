@@ -38,6 +38,7 @@ one it supersedes.
 | [0027](0027-fewer-round-trips-per-query.md) | Fewer round trips per query, and a read-only mode a query can't undo | Accepted |
 | [0028](0028-rust-data-plane-prototype.md) | A Rust data plane for `/q/`, as a prototype with a go/no-go decision | Accepted; decided: go |
 | [0029](0029-clickhouse-run-store.md) | An optional ClickHouse run store for history, the event log and usage | Accepted; decided: go |
+| [0030](0030-shipping-the-data-plane.md) | Shipping the Rust data plane in the image and the Helm chart | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

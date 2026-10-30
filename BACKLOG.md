@@ -3162,9 +3162,10 @@ reads, rendering - not the database. One gateway core serving several times the 
 traffic, and a p99 that stays in single milliseconds under load.
 
 **Next:**
-- **Shipping it** - the follow-up ADR 0028 promised: the Docker image and the Helm chart, a supervisor for the two
-  processes, and which of what it forwards to move next (rate-limited keys and `QUERYAPIGATE_TRUST_PROXY` first,
-  then other formats and workspaces).
+- **Shipping it** - [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md) (proposed), the follow-up ADR 0028
+  promised: the binary in the image, two containers sharing a pod's network instead of a supervisor, one Python
+  worker per pod, a `dataplane` block in the chart, and `QUERYAPIGATE_TRUST_PROXY` moved out of what it forwards, so
+  it serves behind the chart's ingress. Rate-limited keys next, then other formats and workspaces.
 - **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45 (experimental). Every run recorded at 20,000 a
   second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Without it, the event log needs a bound** at that rate: a row cap or sampling, as history has.
