@@ -127,8 +127,6 @@ def _init(args):
     inactive) now that connections are SQLite-backed - no more db_connections.json/saved_sql/ for a new
     install. On a home whose store already has connections, this is a no-op - "already exists - left
     untouched"."""
-    home = config.home()
-    home.mkdir(parents=True, exist_ok=True)
     if db.connection().execute('SELECT 1 FROM connections LIMIT 1').fetchone() is not None:
         print(f'{db.describe()} already has connections - left untouched')
         return 0
@@ -903,7 +901,7 @@ def build_parser():
     collection_import.add_argument('--dry-run', action='store_true', help='report what would happen; write nothing')
     collection_import.set_defaults(func=_collection_import)
 
-    config_parser = commands.add_parser('config', help="the server's configuration as a file (ADR 0014, experimental): "
+    config_parser = commands.add_parser('config', help="the server's configuration as a file (ADR 0014): "
                                                        'export it, see what applying one would change, apply it')
     config_parser.set_defaults(func=lambda a: config_parser.print_help() or 2)
     config_actions = config_parser.add_subparsers(dest='action')
@@ -1041,6 +1039,8 @@ def main(argv=None):
         os.environ['QUERYAPIGATE_HOME'] = args.home
     if getattr(args, 'server', None) or getattr(args, 'func', None) is _config_new_key:
         return args.func(args)  # nothing of this home's: no store opened, so none made in a CI checkout
+    if getattr(args, 'func', None) is _init:  # the one command that makes a home: the store below opens inside it
+        config.home().mkdir(parents=True, exist_ok=True)
     try:
         config.check_database_url()
         db.init_schema()

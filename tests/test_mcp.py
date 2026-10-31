@@ -275,6 +275,12 @@ class CallToolForTests(McpTestCase):
         result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'by_id', {'id': 3})
         self.assertEqual(result['structuredContent']['rows'], [{'id': 3, 'name': 'row3'}])
 
+    def test_no_rows_is_an_empty_list_not_rest_s_message(self):
+        self.save('by_id', sql='SELECT * FROM t WHERE id = :id')
+        result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'by_id', {'id': 99})
+        self.assertEqual(result['structuredContent'], {'rows': [], 'truncated': False})
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+
     def test_a_connection_grant_violation_is_reported_as_an_error_result(self):
         self.save('q1')
         key = self.create_scoped_key(connections=[])  # no reach to connection 'a' or the query by name
@@ -553,6 +559,7 @@ class EndToEndMcpTests(McpTestCase):
 
     def test_a_real_client_can_list_and_call_a_tool(self):
         self.save('q1')
+        self.save('by_id', sql='SELECT * FROM t WHERE id = :id')
         port = self.start_server()
 
         import asyncio
@@ -568,9 +575,13 @@ class EndToEndMcpTests(McpTestCase):
                     tools = await session.list_tools()
                     names = [t.name for t in tools.tools]
                     result = await session.call_tool('q1', {})
-                    return names, result
+                    # no rows: the SDK checks structuredContent against the outputSchema, which wants a list
+                    empty = await session.call_tool('by_id', {'id': '99'})
+                    return names, result, empty
 
-        names, result = asyncio.run(talk())
+        names, result, empty = asyncio.run(talk())
+        self.assertFalse(empty.isError, empty.content)
+        self.assertEqual(empty.structuredContent, {'rows': [], 'truncated': False})
         self.assertIn('q1', names)
         self.assertIn('list_tables', names)
         self.assertIn('execute_sql', names)

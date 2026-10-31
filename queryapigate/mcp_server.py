@@ -344,7 +344,9 @@ def call_tool_for(flask_app, permission, name, arguments):
             structured = g.agent_write_result
             return {'content': [{'type': 'text', 'text': json.dumps(structured, default=str)}],
                     'structuredContent': structured}
-        structured = {'rows': response.get_json(), 'truncated': response.headers.get('X-Has-More') == 'true'}
+        # REST answers no rows with {"message": "No results returned"}; a tool's rows are a list (its outputSchema)
+        rows = response.get_json() if response.headers.get('X-Row-Count') != '0' else []
+        structured = {'rows': rows, 'truncated': response.headers.get('X-Has-More') == 'true'}
         return _rows_result(structured)
 
 

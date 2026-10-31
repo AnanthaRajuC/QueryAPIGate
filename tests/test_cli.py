@@ -199,5 +199,18 @@ class LegacySettingsTests(unittest.TestCase):
             self.assertEqual(config.api_key(), 'secret')
 
 
+class InitTests(unittest.TestCase):
+    def test_init_makes_a_home_that_doesn_t_exist_yet(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = os.path.join(tmp.name, 'new', 'home')
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}), redirect_stdout(out):
+            self.assertEqual(cli.main(['init']), 0)
+            self.assertTrue(store.read_connections())  # the templates, in the store it made
+        self.assertTrue(os.path.isdir(home))
+        self.assertIn('Created', out.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()
