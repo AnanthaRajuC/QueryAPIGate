@@ -12,7 +12,7 @@ RUN npm run build
 # Stage 2: the Rust data plane (ADR 0030), compiled on the build machine for the image's architecture - cross-compiled,
 # not run under QEMU, where it would take most of an hour. Off unless started (guide 64); only the binary is carried
 # over. The toolchain is the one dataplane/rust-toolchain.toml names (tests/test_dataplane.py checks), on the Debian
-# release the Python image below is on, so the binary links against the same glibc. cargo-auditable records the
+# release the image below is built on, so the binary links against the same glibc. cargo-auditable records the
 # crates in the binary, for the image's SBOM and scanners.
 FROM --platform=$BUILDPLATFORM rust:1.98.1-slim-trixie@sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e35fc8d1d771ab7 AS dataplane
 ARG TARGETARCH
@@ -41,7 +41,36 @@ RUN target="$(cat /target)" \
     && CARGO_PROFILE_RELEASE_STRIP=symbols cargo auditable build --release --locked --target "$target" \
     && cp "target/$target/release/queryapigate-dataplane" /queryapigate-dataplane
 
-FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+# Stage 3: Python (ADR 0031), from python-build-standalone: upstream's own release of CPython, statically linked and
+# optimized (PGO, LTO, BOLT), which runs 27-30% faster than the official python image's build of the same Python.
+# uv installs it and checks the download's hash, and each uv release resolves "3.13" to one exact patch release - so
+# pinning uv by digest pins Python, and Dependabot's bump of uv brings Python's next patch release. Only the
+# installation is carried over, without what the image never runs: its own pip (the virtualenv below gets one from
+# ensurepip), Tk and Tcl with tkinter, IDLE and turtledemo, and libpython3.13.so, which the statically linked
+# interpreter doesn't load.
+FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
+FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS python
+COPY --from=uv /uv /usr/local/bin/uv
+RUN UV_PYTHON_INSTALL_DIR=/tmp/python uv python install 3.13 \
+    && mv /tmp/python/cpython-3.13.* /opt/python \
+    && cd /opt/python \
+    && rm -rf lib/python3.13/site-packages/pip lib/python3.13/site-packages/pip-*.dist-info bin/pip* \
+        lib/libtcl* lib/tcl9* lib/tk9* lib/itcl* lib/thread* lib/python3.13/tkinter lib/python3.13/idlelib \
+        lib/python3.13/turtledemo lib/python3.13/lib-dynload/_tkinter.* bin/idle* lib/libpython3*.so*
+
+# Stage 4: the image, on the Debian release the data plane is built on. ca-certificates, netbase and tzdata are the
+# three packages the official python image adds to this base; Python's ssl reads ca-certificates' /etc/ssl/certs.
+FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates netbase tzdata \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=python /opt/python /opt/python
+# The packages go in a virtualenv, first on PATH, so pip, python and gunicorn below are its. It belongs to root and is
+# only read at runtime (a read-only root filesystem still works).
+RUN /opt/python/bin/python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH \
+    LANG=C.UTF-8
 
 # Build with --build-arg WITH_H2=true to add Java and the H2 driver.
 ARG WITH_H2=false

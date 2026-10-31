@@ -1,0 +1,74 @@
+15:48:39 === block setup
+15:48:48 pgbench -i -s 100: done in 5.75 s (drop tables 0.00 s, create tables 0.00 s, client-side generate 4.17 s, vacuum 0.14 s, primary keys 1.44 s).
+15:48:52 setup done; database at 172.17.0.2
+15:48:52 === block env
+15:48:53 environment recorded
+15:48:53 === block p1
+15:48:53 image qag-bench-image-base (0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f) built in 0 s
+15:49:12 image qag-bench-image (1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf) built in 18 s
+15:49:12 p1: the application between the two refs: unchanged
+15:49:23 p1 floor start: /health 2314 req/s, 65.0 C
+15:50:04 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_plain c=64 q=None r0: 1084 req/s p50 58.80 p99 63.87 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:50:46 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_plain c=64 q=None r0: 1095 req/s p50 58.13 p99 64.40 ok 1.0000 gw 1.12 pg 0.11 store_tx 0.01 runs kept 100%
+15:51:27 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_plain c=64 q=None r1: 1090 req/s p50 58.16 p99 70.09 ok 1.0000 gw 1.11 pg 0.09 store_tx 0.01 runs kept 100%
+15:52:09 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_plain c=64 q=None r1: 1076 req/s p50 59.03 p99 69.79 ok 1.0000 gw 1.11 pg 0.09 store_tx 0.01 runs kept 100%
+15:52:50 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_plain c=64 q=None r2: 1075 req/s p50 59.23 p99 64.91 ok 1.0000 gw 1.12 pg 0.10 store_tx 0.01 runs kept 100%
+15:53:31 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_plain c=64 q=None r2: 1094 req/s p50 58.15 p99 64.21 ok 1.0000 gw 1.12 pg 0.12 store_tx 0.01 runs kept 100%
+15:54:13 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_plain c=64 q=None r3: 1102 req/s p50 57.79 p99 62.92 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:54:54 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_plain c=64 q=None r3: 1078 req/s p50 59.09 p99 64.48 ok 1.0000 gw 1.12 pg 0.10 store_tx 0.01 runs kept 100%
+15:55:36 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_plain c=64 q=None r4: 1078 req/s p50 59.10 p99 64.43 ok 1.0000 gw 1.12 pg 0.11 store_tx 0.01 runs kept 100%
+15:56:17 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_plain c=64 q=None r4: 1094 req/s p50 58.24 p99 63.40 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:56:59 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_gov c=64 q=None r0: 1021 req/s p50 62.48 p99 67.81 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:57:40 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_gov c=64 q=None r0: 1032 req/s p50 61.67 p99 68.31 ok 1.0000 gw 1.11 pg 0.11 store_tx 0.01 runs kept 100%
+15:58:22 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_gov c=64 q=None r1: 1029 req/s p50 61.92 p99 68.08 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:59:03 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_gov c=64 q=None r1: 1019 req/s p50 62.45 p99 69.58 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+15:59:44 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_gov c=64 q=None r2: 1011 req/s p50 63.03 p99 69.97 ok 1.0000 gw 1.12 pg 0.10 store_tx 0.01 runs kept 100%
+16:00:26 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_gov c=64 q=None r2: 1034 req/s p50 61.59 p99 68.30 ok 1.0000 gw 1.12 pg 0.09 store_tx 0.01 runs kept 100%
+16:01:07 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_gov c=64 q=None r3: 1020 req/s p50 62.47 p99 68.94 ok 1.0000 gw 1.11 pg 0.09 store_tx 0.01 runs kept 100%
+16:01:49 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_gov c=64 q=None r3: 1023 req/s p50 62.24 p99 70.17 ok 1.0000 gw 1.11 pg 0.10 store_tx 0.01 runs kept 100%
+16:02:30 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 lookup_gov c=64 q=None r4: 1031 req/s p50 61.81 p99 67.96 ok 1.0000 gw 1.12 pg 0.11 store_tx 0.01 runs kept 100%
+16:03:12 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 lookup_gov c=64 q=None r4: 1037 req/s p50 61.48 p99 66.79 ok 1.0000 gw 1.11 pg 0.09 store_tx 0.01 runs kept 100%
+16:03:53 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 page_plain c=64 q=None r0: 913 req/s p50 69.92 p99 76.55 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:04:34 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 page_plain c=64 q=None r0: 909 req/s p50 70.20 p99 80.44 ok 1.0000 gw 1.12 pg 0.22 store_tx 0.01 runs kept 100%
+16:05:16 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 page_plain c=64 q=None r1: 908 req/s p50 70.37 p99 77.39 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:05:57 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 page_plain c=64 q=None r1: 894 req/s p50 71.42 p99 78.84 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:06:39 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 page_plain c=64 q=None r2: 894 req/s p50 71.21 p99 81.36 ok 1.0000 gw 1.12 pg 0.21 store_tx 0.01 runs kept 100%
+16:07:20 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 page_plain c=64 q=None r2: 923 req/s p50 69.11 p99 79.74 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:08:02 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 page_plain c=64 q=None r3: 925 req/s p50 69.02 p99 75.80 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:08:43 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 page_plain c=64 q=None r3: 908 req/s p50 70.27 p99 76.60 ok 1.0000 gw 1.12 pg 0.21 store_tx 0.01 runs kept 100%
+16:09:24 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+imgpy+cache w1 t8 page_plain c=64 q=None r4: 905 req/s p50 70.52 p99 77.09 ok 1.0000 gw 1.12 pg 0.19 store_tx 0.01 runs kept 100%
+16:10:06 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+imgpy+cache w1 t8 page_plain c=64 q=None r4: 894 req/s p50 71.22 p99 84.76 ok 1.0000 gw 1.12 pg 0.20 store_tx 0.01 runs kept 100%
+16:10:48 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_plain c=64 q=None r0: 27791 req/s p50 2.31 p99 3.62 ok 1.0000 gw 6.86 pg 3.54 store_tx 0.00 runs kept 68%
+16:11:30 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_plain c=64 q=None r0: 28207 req/s p50 2.28 p99 3.49 ok 1.0000 gw 6.97 pg 3.53 store_tx 0.00 runs kept 67%
+16:12:12 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_plain c=64 q=None r1: 28338 req/s p50 2.27 p99 3.39 ok 1.0000 gw 7.00 pg 3.53 store_tx 0.00 runs kept 67%
+16:12:54 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_plain c=64 q=None r1: 27971 req/s p50 2.30 p99 3.65 ok 1.0000 gw 6.89 pg 3.55 store_tx 0.00 runs kept 68%
+16:13:36 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_plain c=64 q=None r2: 27841 req/s p50 2.31 p99 3.65 ok 1.0000 gw 6.89 pg 3.54 store_tx 0.00 runs kept 68%
+16:14:19 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_plain c=64 q=None r2: 28273 req/s p50 2.27 p99 3.53 ok 1.0000 gw 6.96 pg 3.50 store_tx 0.00 runs kept 67%
+16:15:01 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_plain c=64 q=None r3: 27826 req/s p50 2.30 p99 3.47 ok 1.0000 gw 6.98 pg 3.48 store_tx 0.00 runs kept 68%
+16:15:43 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_plain c=64 q=None r3: 27937 req/s p50 2.30 p99 3.59 ok 1.0000 gw 6.88 pg 3.54 store_tx 0.00 runs kept 69%
+16:16:25 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_plain c=64 q=None r4: 28132 req/s p50 2.29 p99 3.48 ok 1.0000 gw 6.97 pg 3.49 store_tx 0.00 runs kept 69%
+16:17:08 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_plain c=64 q=None r4: 28227 req/s p50 2.28 p99 3.52 ok 1.0000 gw 6.98 pg 3.49 store_tx 0.00 runs kept 68%
+16:17:50 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_gov c=64 q=None r0: 26804 req/s p50 2.39 p99 3.78 ok 1.0000 gw 6.83 pg 3.56 store_tx 0.00 runs kept 68%
+16:18:33 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_gov c=64 q=None r0: 27049 req/s p50 2.37 p99 3.71 ok 1.0000 gw 6.88 pg 3.55 store_tx 0.00 runs kept 67%
+16:19:15 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_gov c=64 q=None r1: 27353 req/s p50 2.35 p99 3.55 ok 1.0000 gw 6.96 pg 3.53 store_tx 0.00 runs kept 66%
+16:19:57 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_gov c=64 q=None r1: 26890 req/s p50 2.39 p99 3.72 ok 1.0000 gw 6.84 pg 3.57 store_tx 0.00 runs kept 68%
+16:20:39 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_gov c=64 q=None r2: 26896 req/s p50 2.39 p99 3.79 ok 1.0000 gw 6.85 pg 3.56 store_tx 0.00 runs kept 68%
+16:21:21 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_gov c=64 q=None r2: 27263 req/s p50 2.35 p99 3.66 ok 1.0000 gw 6.95 pg 3.52 store_tx 0.00 runs kept 66%
+16:22:03 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_gov c=64 q=None r3: 27290 req/s p50 2.35 p99 3.64 ok 1.0000 gw 6.94 pg 3.52 store_tx 0.00 runs kept 66%
+16:22:46 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_gov c=64 q=None r3: 26855 req/s p50 2.38 p99 3.82 ok 1.0000 gw 6.80 pg 3.56 store_tx 0.00 runs kept 67%
+16:23:28 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 lookup_gov c=64 q=None r4: 27210 req/s p50 2.36 p99 3.65 ok 1.0000 gw 6.93 pg 3.52 store_tx 0.00 runs kept 67%
+16:24:11 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 lookup_gov c=64 q=None r4: 27316 req/s p50 2.36 p99 3.52 ok 1.0000 gw 6.96 pg 3.54 store_tx 0.00 runs kept 66%
+16:24:53 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 page_plain c=64 q=None r0: 9521 req/s p50 6.72 p99 9.99 ok 1.0000 gw 3.44 pg 3.91 store_tx 0.01 runs kept 100%
+16:25:34 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 page_plain c=64 q=None r0: 9455 req/s p50 6.81 p99 9.91 ok 1.0000 gw 3.37 pg 3.90 store_tx 0.01 runs kept 100%
+16:26:16 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 page_plain c=64 q=None r1: 9587 req/s p50 6.74 p99 9.34 ok 1.0000 gw 3.48 pg 3.91 store_tx 0.01 runs kept 100%
+16:26:58 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 page_plain c=64 q=None r1: 9511 req/s p50 6.71 p99 9.21 ok 1.0000 gw 3.47 pg 3.89 store_tx 0.01 runs kept 100%
+16:27:40 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 page_plain c=64 q=None r2: 9561 req/s p50 6.72 p99 9.81 ok 1.0000 gw 3.45 pg 3.91 store_tx 0.01 runs kept 100%
+16:28:22 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 page_plain c=64 q=None r2: 9614 req/s p50 6.73 p99 9.33 ok 1.0000 gw 3.47 pg 3.90 store_tx 0.01 runs kept 100%
+16:29:04 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 page_plain c=64 q=None r3: 9649 req/s p50 6.69 p99 9.28 ok 1.0000 gw 3.49 pg 3.91 store_tx 0.01 runs kept 100%
+16:29:45 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 page_plain c=64 q=None r3: 9496 req/s p50 6.76 p99 9.88 ok 1.0000 gw 3.42 pg 3.91 store_tx 0.01 runs kept 100%
+16:30:27 p1 0ceb3dfcc04ee9c07b6de9dbbc361fa103701e0f+img+cache w1 t8 page_plain c=64 q=None r4: 9568 req/s p50 6.75 p99 9.36 ok 1.0000 gw 3.49 pg 3.91 store_tx 0.01 runs kept 100%
+16:31:09 p1 1b2e6ffa42a3dbdcfdb3f6e74b1632b0ee9d35bf+img+cache w1 t8 page_plain c=64 q=None r4: 9676 req/s p50 6.67 p99 9.21 ok 1.0000 gw 3.49 pg 3.90 store_tx 0.01 runs kept 100%
+16:31:20 p1 floor end: /health 2359 req/s, 72.0 C
+16:31:20 === block env
+16:31:20 environment recorded
+16:31:21 done

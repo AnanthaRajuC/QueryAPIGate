@@ -155,6 +155,16 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'QUERYAPIGATE_DATAPLANE_SECRET must be set'
 
+      - name: The arm64 image's Python runs (python-build-standalone, ADR 0031)
+        if: steps.meta.outputs.push == 'true'
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+        # Under QEMU: the interpreter uv installed for arm64, its ssl and sqlite3, and the application importing
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint python "$REF" -c \
+            "import platform, ssl, sqlite3, queryapigate.app; print(platform.machine(), platform.python_version(), ssl.OPENSSL_VERSION)" \
+            | tee /dev/stderr | grep -q '^aarch64 3\.13\.'
+
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: steps.meta.outputs.push == 'true'
         with:

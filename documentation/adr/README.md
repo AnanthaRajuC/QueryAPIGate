@@ -39,7 +39,7 @@ one it supersedes.
 | [0028](0028-rust-data-plane-prototype.md) | A Rust data plane for `/q/`, as a prototype with a go/no-go decision | Accepted; decided: go |
 | [0029](0029-clickhouse-run-store.md) | An optional ClickHouse run store for history, the event log and usage | Accepted; decided: go |
 | [0030](0030-shipping-the-data-plane.md) | Shipping the Rust data plane in the image and the Helm chart | Accepted |
-| [0031](0031-the-image-s-python.md) | The image's Python: Debian's own, not the official image's | Proposed |
+| [0031](0031-the-image-s-python.md) | The image's Python: python-build-standalone, not the official image's | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.

@@ -179,11 +179,11 @@ class WhoGetsAPlanTests(PlanTestCase):
             dockerfile = f.read()
         rust = re.search(r'^FROM --platform=\$BUILDPLATFORM rust:([\d.]+)-slim-(\w+)@sha256:\w+ AS dataplane$',
                          dockerfile, re.M)
-        python = re.search(r'^FROM python:[\d.]+-slim@sha256:\w+$', dockerfile, re.M)
+        image = re.search(r'^FROM debian:(\w+)-slim@sha256:\w+$', dockerfile, re.M)  # Debian's Python (ADR 0031)
         self.assertIsNotNone(rust, 'the data plane stage: rust:<channel>-slim-<debian>@sha256:..., by digest')
-        self.assertIsNotNone(python)
+        self.assertIsNotNone(image, 'the image: debian:<release>-slim@sha256:..., by digest')
         self.assertEqual(rust.group(1), channel)
-        self.assertEqual(rust.group(2), 'trixie', 'the Debian release python:3.12-slim is on')
+        self.assertEqual(rust.group(2), image.group(1), 'the data plane is built on the Debian release it runs on')
         self.assertNotIn('COPY dataplane/ ', dockerfile)
         self.assertIn('COPY --from=dataplane /queryapigate-dataplane /usr/local/bin/queryapigate-dataplane',
                       dockerfile)

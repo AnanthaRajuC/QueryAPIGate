@@ -39,6 +39,26 @@ class PinnedTests(unittest.TestCase):
             with self.subTest(image=image):
                 self.assertRegex(image, r'@sha256:[0-9a-f]{64}$')
 
+    def test_every_copy_from_is_a_stage_so_dependabot_sees_its_image(self):
+        # Dependabot updates FROM lines, not COPY --from=<image>: an image copied from directly would never move
+        with open(os.path.join(ROOT, 'Dockerfile')) as f:
+            dockerfile = f.read()
+        stages = set(re.findall(r'^FROM .+ AS (\w+)$', dockerfile, re.M))
+        for source in re.findall(r'^COPY --from=(\S+)', dockerfile, re.M):
+            with self.subTest(source=source):
+                self.assertIn(source, stages)
+
+    def test_python_is_the_release_the_pinned_uv_resolves(self):
+        # ADR 0031: uv installs python-build-standalone and checks its hash; asking for a minor version, the uv
+        # release decides the patch, so the uv stage's digest pins Python and its bump brings the next release
+        with open(os.path.join(ROOT, 'Dockerfile')) as f:
+            dockerfile = f.read()
+        self.assertRegex(dockerfile, re.compile(r'^FROM ghcr\.io/astral-sh/uv:\d+\.\d+\.\d+@sha256:[0-9a-f]{64} AS uv$',
+                                                re.M))
+        self.assertRegex(dockerfile, r'uv python install 3\.\d+ ')
+        self.assertIn('COPY --from=uv /uv /usr/local/bin/uv', dockerfile)
+        self.assertIn('COPY --from=python /opt/python /opt/python', dockerfile)
+
     def test_the_siem_receivers_ci_tests_against_are_pinned_by_digest(self):
         """ADR 0019: rsyslog, syslog-ng and the OpenTelemetry Collector, as siem_receivers.sh runs them."""
         with open(os.path.join(ROOT, '.github', 'scripts', 'siem_receivers.sh')) as f:

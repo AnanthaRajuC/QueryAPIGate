@@ -63,7 +63,8 @@ DATAPLANE_BUILDS = {}  # the head with the Rust data plane in front: outside BUI
 _server = None
 _dataplane = None
 _server_meta = {}
-IMAGE = 'qag-bench-image'  # the head's Docker image, built by the s-blocks (ADR 0030)
+IMAGE = 'qag-bench-image'  # the head's Docker image, built by the s-blocks (ADR 0030) and p1
+IMAGE_BASE = 'qag-bench-image-base'  # the base's, for p1 (ADR 0031)
 PY_CONTAINER, DP_CONTAINER = 'qag-bench-py', 'qag-bench-dp'
 _containers = ()  # the image's two containers, while a +img build runs
 TICK = os.sysconf('SC_CLK_TCK')
@@ -334,8 +335,9 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
     stop()
     ref, extra = BUILDS[build] if build in BUILDS else DATAPLANE_BUILDS[build]
     extra = dict(extra)
-    image = extra.pop('image', False)  # the Docker image's two containers (ADR 0030), not processes from a build
-    dataplane = extra.pop('dataplane', False) or image  # the Rust data plane in front (ADR 0028), on the same cores
+    image = extra.pop('image', None)  # a Docker image's tag: its containers (ADR 0030), not processes from a build
+    # the Rust data plane in front (ADR 0028), on the same cores - for an image, its own, unless the build says not
+    dataplane = extra.pop('dataplane', False) or (image is not None and extra.pop('image_dataplane', True))
     global _run_store
     _run_store = extra.pop('run_store', False)  # runs kept in ClickHouse (ADR 0029)
     # Behind the data plane, 2 Python workers unless a block says: one process's history writer keeps up with about
@@ -383,7 +385,7 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
     # calls a second the data plane's request lines alone are 6.5 GB in 25 minutes
     if image:
         start_image(build, {k: v for k, v in env.items() if k.startswith('QUERYAPIGATE_') and k != 'QUERYAPIGATE_HOME'},
-                    dp_cpus)
+                    dp_cpus, image=image, dataplane=dataplane)
         return
     out = open(os.devnull if discard_logs else OUT / 'server.log', 'a')
     if discard_logs and '--access-logfile' in cmd:
@@ -405,20 +407,27 @@ def start(build, workers=None, access_log=True, access_format=None, profile_to=N
                     'dataplane_threads': threads_dp, 'run_store': _run_store, 'python_env': args.python_env}
 
 
-def start_image(build, settings, dp_cpus=None):
+def start_image(build, settings, dp_cpus=None, image=IMAGE, dataplane=True):
     """The image as the chart runs it (ADR 0030): Python in one container on 127.0.0.1:INNER_PORT, the data plane in
     another on PORT, both on the gateway's cores. Both use the host's network, so they meet on loopback as the
     from-source pair does - in a pod they share one network namespace - and no Docker port proxy sits in the path that
-    isn't the image's. Their logs are written and dropped (--log-driver none), as discard_logs drops the processes'."""
+    isn't the image's. Their logs are written and dropped (--log-driver none), as discard_logs drops the processes'.
+    Without ``dataplane``, Python alone on PORT, as the image runs by default (ADR 0031)."""
     global _containers, _server_meta
     common = ['docker', 'run', '-d', '--network', 'host', '--cpuset-cpus', args.gateway_cpus, '--log-driver', 'none']
     env = [flag for name, value in settings.items() for flag in ('-e', f'{name}={value}')]
-    _containers = (PY_CONTAINER, DP_CONTAINER)
-    sh('docker', 'rm', '-fv', *_containers)
-    started = sh(*common, '--name', PY_CONTAINER, *env, '-e', f'QUERYAPIGATE_BIND=127.0.0.1:{INNER_PORT}', IMAGE)
+    sh('docker', 'rm', '-fv', PY_CONTAINER, DP_CONTAINER)
+    _containers = (PY_CONTAINER, DP_CONTAINER) if dataplane else (PY_CONTAINER,)
+    python_port = INNER_PORT if dataplane else PORT
+    started = sh(*common, '--name', PY_CONTAINER, *env, '-e', f'QUERYAPIGATE_BIND=127.0.0.1:{python_port}', image)
     if started.returncode:
         raise RuntimeError(f'the image\'s Python container: {started.stderr.strip()}')
-    wait_healthy(f'http://127.0.0.1:{INNER_PORT}', f'the image\'s Python for {build}')
+    wait_healthy(f'http://127.0.0.1:{python_port}', f'the image\'s Python for {build}')
+    meta = {'build': build, 'workers': 1, 'access_log': settings.get('QUERYAPIGATE_ACCESS_LOG') == 'on',
+            'threads': 8, 'run_store': _run_store, 'image': image}
+    if not dataplane:
+        _server_meta = {**meta, 'dataplane_threads': None}
+        return
     # Its threads: the gateway's CPUs, as the from-source data plane gets - or, held to dp_cpus, what the container
     # may use, which is what the image does by itself in a pod
     threads_dp = None if dp_cpus else args.dataplane_threads or len(cpu_list(args.gateway_cpus))
@@ -426,12 +435,11 @@ def start_image(build, settings, dp_cpus=None):
                  '-e', f'QUERYAPIGATE_DATAPLANE_LISTEN=127.0.0.1:{PORT}',
                  '-e', f'QUERYAPIGATE_DATAPLANE_UPSTREAM=http://127.0.0.1:{INNER_PORT}',
                  *(['-e', f'QUERYAPIGATE_DATAPLANE_THREADS={threads_dp}'] if threads_dp else []),
-                 IMAGE, 'queryapigate-dataplane')
+                 image, 'queryapigate-dataplane')
     if started.returncode:
         raise RuntimeError(f'the image\'s data plane container: {started.stderr.strip()}')
     wait_healthy(U, f'the image\'s data plane for {build}')
-    _server_meta = {'build': build, 'workers': 1, 'access_log': settings.get('QUERYAPIGATE_ACCESS_LOG') == 'on',
-                    'threads': 8, 'dataplane_threads': threads_dp, 'dp_cpu_limit': dp_cpus, 'run_store': _run_store}
+    _server_meta = {**meta, 'dataplane_threads': threads_dp, 'dp_cpu_limit': dp_cpus}
 
 
 def gateway_cpu_s():
@@ -448,7 +456,7 @@ def python_cpu_s():
 
 def _dataplane_cpu_s():
     if _containers:
-        return pg_cpu_s(DP_CONTAINER)
+        return pg_cpu_s(DP_CONTAINER) if DP_CONTAINER in _containers else 0.0
     return tree_cpu_s(_dataplane.pid) if _dataplane is not None else 0.0
 
 
@@ -916,6 +924,35 @@ def d4():
 # ---------------------------------------------------------------- the image (ADR 0030)
 
 _image_ready = False
+_images_built = {}  # tag -> its identity row, for p1
+
+
+def build_image(ref, tag, source):
+    """``ref`` exported whole into ``source`` (once) and its Dockerfile built as ``tag``: an image is what the ref's
+    Dockerfile makes of the ref, as a release builds it."""
+    if not (source / 'Dockerfile').exists():
+        source.mkdir(parents=True, exist_ok=True)
+        archive = subprocess.run(['git', '-C', str(REPO), 'archive', '--format=tar', ref], capture_output=True)
+        if archive.returncode:
+            sys.exit(f'git archive {ref}: {archive.stderr}')
+        tar = source.parent / f'{source.name}.tar'
+        tar.write_bytes(archive.stdout)
+        with tarfile.open(tar) as t:
+            t.extractall(source, filter='data')
+        tar.unlink()
+    began = time.time()
+    built = sh('docker', 'build', '-t', tag, str(source))
+    if built.returncode:
+        sys.exit(f'docker build {ref}: {built.stderr[-2000:]}')
+    log(f'image {tag} ({ref}) built in {time.time() - began:.0f} s')
+
+
+def image_identity(ref, tag):
+    python = sh('docker', 'run', '--rm', '--entrypoint', 'python', tag, '-VV').stdout.strip()
+    return {'ref': ref, 'commit': sh('git', '-C', str(REPO), 'rev-parse', f'{ref}^{{commit}}').stdout.strip(),
+            'image': sh('docker', 'image', 'inspect', '-f', '{{.Id}}', tag).stdout.strip(),
+            'image_bytes': int(sh('docker', 'image', 'inspect', '-f', '{{.Size}}', tag).stdout.strip() or 0),
+            'python': python, 'ts': time.strftime('%Y-%m-%dT%H:%M:%S')}
 
 
 class image_builds:
@@ -928,22 +965,7 @@ class image_builds:
         source = OUT.parent / 'image-src' if args.smoke else OUT / 'image-src'
         binary = source / 'target' / 'release' / 'queryapigate-dataplane'
         if not _image_ready:
-            if not (source / 'Dockerfile').exists():
-                source.mkdir(parents=True, exist_ok=True)
-                archive = subprocess.run(['git', '-C', str(REPO), 'archive', '--format=tar', args.head],
-                                         capture_output=True)
-                if archive.returncode:
-                    sys.exit(f'git archive {args.head}: {archive.stderr}')
-                tar = OUT / 'image-src.tar'
-                tar.write_bytes(archive.stdout)
-                with tarfile.open(tar) as t:
-                    t.extractall(source, filter='data')
-                tar.unlink()
-            began = time.time()
-            built = sh('docker', 'build', '-t', IMAGE, str(source))
-            if built.returncode:
-                sys.exit(f'docker build: {built.stderr[-2000:]}')
-            log(f'image built in {time.time() - began:.0f} s')
+            build_image(args.head, IMAGE, source)
             built = sh('cargo', 'build', '--release', '--locked', '--manifest-path', str(source / 'dataplane' /
                        'Cargo.toml'), '--target-dir', str(source / 'target'))
             if built.returncode:
@@ -977,6 +999,31 @@ def s1():
                     start(build, workers=1, discard_logs=True)
                     measure('s1', scenario, c=64, secs=30, rnd=r)
         floor('s1', 'end')
+
+
+def p1():
+    """The image's Python (ADR 0031, section 5): the base ref's image against the head's - the official python image
+    under the one, Debian's Python under the other, the application the same (its diff is recorded) - interleaved on
+    the same gateway cores, the metadata cache on, 64 callers, calls a second per gateway core. First Python alone, one
+    worker, as the image runs by default; then the data plane in front of it, Python recording behind."""
+    for ref, tag, name in ((args.base, IMAGE_BASE, 'image-src-base'), (args.head, IMAGE, 'image-src')):
+        if tag not in _images_built:
+            build_image(ref, tag, (OUT.parent if args.smoke else OUT) / name)
+            _images_built[tag] = image_identity(ref, tag)
+            record({'block': 'p1', 'scenario': 'identity', 'tag': tag, **_images_built[tag]})
+    changed = sh('git', '-C', str(REPO), 'diff', '--stat', args.base, args.head, '--', 'queryapigate', 'dataplane',
+                 'pyproject.toml').stdout.strip()
+    record({'block': 'p1', 'scenario': 'application_diff', 'base': args.base, 'head': args.head, 'diff': changed})
+    log(f'p1: the application between the two refs: {changed or "unchanged"}')
+    floor('p1', 'start')
+    for mode in ('+imgpy+cache', '+img+cache'):
+        builds = [args.base_label + mode, args.head_label + mode]
+        for scenario in ['lookup_plain', 'lookup_gov', 'page_plain']:
+            for r, order in rotations(builds, 5):
+                for build in order:
+                    start(build, discard_logs=True)
+                    measure('p1', scenario, c=64, secs=30, rnd=r)
+    floor('p1', 'end')
 
 
 def s2():
@@ -1361,7 +1408,7 @@ BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_p
           'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11,
           'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
           'r-setup': r_setup, 'r-teardown': r_teardown, 'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4, 'r5': r5, 'r6': r6,
-          'r7': r7, 's1': s1, 's2': s2}
+          'r7': r7, 's1': s1, 's2': s2, 'p1': p1}
 ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
@@ -1396,15 +1443,23 @@ def main():
     if args.smoke:
         OUT = OUT / 'smoke'
         OUT.mkdir(exist_ok=True)
-    base_label, args.head_label = args.base.split('/')[-1], args.head.split('/')[-1]
+    args.base_label, args.head_label = args.base.split('/')[-1], args.head.split('/')[-1]
+    base_label = args.base_label
     BUILDS = {base_label: (args.base, {}), args.head_label: (args.head, {}),
               args.head_label + '+cache': (args.head, {'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})}
     DATAPLANE_BUILDS.update({args.head_label + '+dp': (args.head, {'dataplane': True}),
                              args.head_label + '+dp+cache': (args.head, {'dataplane': True,
                                                                          'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
                              args.head_label + '+rs': (args.head, {'run_store': True}),
-                             args.head_label + '+img+cache': (args.head, {'image': True,
+                             args.head_label + '+img+cache': (args.head, {'image': IMAGE,
                                                                           'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
+                             # p1 (ADR 0031): the base's image too, and either with Python alone
+                             base_label + '+img+cache': (args.base, {'image': IMAGE_BASE,
+                                                                     'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
+                             args.head_label + '+imgpy+cache': (args.head, {'image': IMAGE, 'image_dataplane': False,
+                                                                            'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
+                             base_label + '+imgpy+cache': (args.base, {'image': IMAGE_BASE, 'image_dataplane': False,
+                                                                       'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
                              args.head_label + '+dp+cache+rs': (args.head, {'dataplane': True, 'run_store': True,
                                                                             'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
     names = [n for b in args.blocks for n in (ALL if b == 'all' else [b])]
