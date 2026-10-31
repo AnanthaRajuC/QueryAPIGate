@@ -461,11 +461,13 @@ class SwitchTests(StoreTestCase):
             self.assertEqual(self.count('events'), 1)
 
     def test_history_is_copied_once_on_request(self):
+        # 3, 2 and 1 days back, never fixed dates: a copied run keeps its time as stamped_at, and the history table's
+        # TTL (RUN_STORE_HISTORY_DAYS, 30, unless set) drops one older than that - 2026-10-01's, from 2026-10-31
         with db.transaction() as tx:
             tx.executemany('INSERT INTO execution_history (workspace, query_name, version, executed_at, entry_json, '
                            'status, key_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                           [('default', 'q', 1, f'2026-10-0{i} 12:00:00', json.dumps({'i': i}), 'success', 'k')
-                            for i in range(1, 4)])
+                           [('default', 'q', 1, (datetime.now() - timedelta(days=4 - i)).strftime(history.TIME_FORMAT),
+                             json.dumps({'i': i}), 'success', 'k') for i in range(1, 4)])
         self.assertEqual(runstore.copy_history(), 3)
         res = self.client.get('/api/v1/history', headers=self.admin, query_string={'key': 'k'}).get_json()
         self.assertEqual([item['i'] for item in res['items']], [3, 2, 1])
