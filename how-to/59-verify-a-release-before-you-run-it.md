@@ -24,7 +24,7 @@ attestation, the `gh` CLI (or cosign, as shown).
 ## Check a signature
 
 ```bash
-cosign verify ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-d4b295f19b4f \
+cosign verify ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-61cfb4fc727d \
   --certificate-identity https://github.com/AnanthaRajuC/QueryAPIGate/.github/workflows/docker.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -56,7 +56,7 @@ Each release is signed in two forms: the Sigstore bundle (`cosign verify`, the d
 GitHub's attestation names the repository, the workflow, the commit and the run:
 
 ```bash
-cosign verify-attestation ghcr.io/anantharajuc/queryapigate-rehearsal@sha256:726f77fe01212b457e69ba49d745f9ba9bfc0d33815dbc78b8045fea7abe09ce \
+cosign verify-attestation ghcr.io/anantharajuc/queryapigate-rehearsal@sha256:6e4560b1228386bcf637015eea3f729e015f47267aa6b5ad1c88d682bd82bd4f \
   --new-bundle-format --type https://slsa.dev/provenance/v1 \
   --certificate-identity https://github.com/AnanthaRajuC/QueryAPIGate/.github/workflows/docker.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -64,37 +64,49 @@ cosign verify-attestation ghcr.io/anantharajuc/queryapigate-rehearsal@sha256:726
 ```
 predicate https://slsa.dev/provenance/v1
   workflow https://github.com/AnanthaRajuC/QueryAPIGate .github/workflows/docker.yml refs/heads/main
-  commit git+https://github.com/AnanthaRajuC/QueryAPIGate@refs/heads/main {'gitCommit': 'd4b295f19b4fcc45bff2e786bfa382cc2568054e'}
-  run https://github.com/AnanthaRajuC/QueryAPIGate/actions/runs/38352041218/attempts/1
+  commit git+https://github.com/AnanthaRajuC/QueryAPIGate@refs/heads/main {'gitCommit': '61cfb4fc727d64812add0c8f7aef92b36e58ee28'}
+  run https://github.com/AnanthaRajuC/QueryAPIGate/actions/runs/41208623399/attempts/1
 ```
 
 (decoded from the attestation's payload). With the `gh` CLI signed in, `gh attestation verify
 oci://<image> --owner AnanthaRajuC` checks the same. The image's own provenance, from the build, records what it was
-built on - the base images by digest:
+built on - the base images by digest, for `linux/amd64` (the `&platform=` suffix left off):
 
 ```bash
-docker buildx imagetools inspect ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-d4b295f19b4f --format '{{json .Provenance}}'
+docker buildx imagetools inspect ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-61cfb4fc727d --format '{{json .Provenance}}'
 ```
 ```
-pkg:docker/node@22-slim?digest=sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
-pkg:docker/python@3.12-slim?digest=sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+pkg:docker/debian@trixie-slim?digest=sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+pkg:docker/node@22-slim?digest=sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
+pkg:docker/rust@1.98.1-slim-trixie?digest=sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e35fc8d1d771ab7
+pkg:docker/ghcr.io/astral-sh/uv@0.13.6?digest=sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0
 ```
+
+The `uv` image is Python's pin: `uv` installs the image's Python and checks its hash, and each `uv` release resolves
+`3.13` to one patch release - 0.13.6 to 3.13.18 ([ADR 0031](../documentation/adr/0031-the-image-s-python.md)). The
+Rust image is `linux/amd64` for both platforms, because the data plane is cross-compiled
+([ADR 0030](../documentation/adr/0030-shipping-the-data-plane.md)).
 
 ## Read the SBOM
 
 ```bash
-docker buildx imagetools inspect ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-d4b295f19b4f --format '{{json .SBOM}}'
+docker buildx imagetools inspect ghcr.io/anantharajuc/queryapigate-rehearsal:rehearsal-61cfb4fc727d --format '{{json .SBOM}}'
 ```
 
-An SPDX 2.3 document per platform - 179 packages for `linux/amd64`, among them:
+An SPDX 2.3 document per platform - 383 packages for `linux/amd64` (191 of them the data plane's Rust crates), among
+them:
 
 ```
-queryapigate 0.30.0
+queryapigate 0.47.0
+python 3.13.18
 flask 3.1.3
 werkzeug 3.1.9
 cryptography 50.0.2
 openssl 3.5.7-1~deb13u3
 ```
+
+(a rehearsal on `main` carries the last release's version). `python` is the interpreter itself, found at
+`/opt/python/bin/python3.13` and named by CPE, so a scanner reading the SBOM matches Python's own advisories to it.
 
 Feed it to your scanner (Grype, Trivy) to see which advisories apply, without pulling the image.
 
