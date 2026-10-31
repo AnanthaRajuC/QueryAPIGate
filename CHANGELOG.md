@@ -53,9 +53,23 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Changed
 
+- **The Docker image runs Python 3.13 from python-build-standalone, not the official `python:3.12-slim` image's 3.12**
+  (ADR 0031). The official image compiles Python in a way that runs it 27-30% slower per CPU than other builds of it.
+  At the gateway that's 6-9% more calls a second when Python serves them. Behind the data plane, one Python worker
+  past its ceiling now records 60% more runs.
+  - **Python is upstream's 3.13 release, now 3.13.18,** installed by `uv` in a build stage. `uv` is pinned by
+    digest and checks the download's hash, and each `uv` release resolves 3.13 to one exact patch release. Its
+    updates come from Dependabot, as the base images' do.
+  - **The image is `debian:trixie-slim`, pinned by digest,** with the packages in a virtualenv, `/opt/venv`, first
+    on `PATH`.
+  - **Python's own `ssl` now uses the OpenSSL compiled into it** (3.5.9), as psycopg2 and cryptography already use
+    their own.
+  - **The image is 21.5 MB larger.** The `pip` package is unchanged, and still supports Python 3.11-3.14.
 - **CI:** the upgrade fixtures from 0.47.0 are added, and the rolling-upgrade and Helm checks now start from 0.47.0.
 - **CI:** signing the image and the chart retries up to three times. Rekor once answered cosign's own retried upload
   with `409 createLogEntryConflict`, which failed 0.47.0's Docker publish until the job was rerun.
+- **CI:** a release, or a `docker.yml` rehearsal, checks that the arm64 image's Python runs under QEMU. A test checks
+  that every `COPY --from=` in the Dockerfile names one of its stages, so Dependabot sees each image the build uses.
 
 ### Fixed
 

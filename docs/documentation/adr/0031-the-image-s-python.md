@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0031-the-image-s-python.md"

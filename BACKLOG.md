@@ -3207,8 +3207,10 @@ The event log's bound for the SQL stores (#102) is separate and ships either way
 
 ## 104. A faster Python interpreter in the image
 
-**Status: found, not planned (2026-10-30).** Measuring ADR 0030 found the image's Python about 30% slower per CPU than
-the laptop's: 148-152 ms against 115-116 ms for the same workload pinned to one core, and 146 ms against 109 ms for a
+**Status: proposed and measured in [ADR 0031](documentation/adr/0031-the-image-s-python.md) (2026-10-31):
+python-build-standalone's 3.13, installed by a pinned `uv`. At the gateway, Python serves 6-9% more calls a second
+and records 60% more runs past its ceiling.** Found 2026-10-30, when measuring ADR 0030 found the image's Python
+about 30% slower per CPU than the laptop's: 148-152 ms against 115-116 ms for the same workload pinned to one core, and 146 ms against 109 ms for a
 loop with no library in it ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)).
 Not containers - seccomp off made no difference - and not the packages, matched to the image's exact versions: the
 official `python:3.12-slim` image links Python against a shared `libpython3.12.so`, built with PGO and LTO, where
@@ -3218,7 +3220,14 @@ Ubuntu's `/usr/bin/python3.12` is linked statically.
 data plane forwards and records. Behind the data plane it is about 5% of the gateway's CPU on a 100-row page, and 19%
 fewer runs one worker records once it is past its ceiling.
 
-**Next:** measure the candidates the same way, the whole gateway and the interpreter alone, before an ADR: a
-statically linked CPython (python-build-standalone, as `uv` installs it), Debian's own Python on a `debian:trixie-slim`
-base (3.13), or building CPython in the image without `--enable-shared`. Each changes the base image, so each is
-weighed against ADR 0018's pinning, the FIPS job and the image's size.
+**Screened (2026-10-31,
+[results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/python-image-2026-10-31/README.md)):**
+every official image is slow (3.14-slim slower again), and every statically linked interpreter is fast: Debian
+trixie's 3.13.5 at 0.73x, python-build-standalone at 0.73-0.75x. The official recipe, rebuilt, reproduces the image;
+static linking gains 8-16% of it, frame pointers 2-4%, its appended `dpkg-buildflags` another 7-10%.
+
+Debian's `python3` was proposed first, and is as fast. But trixie had 19 CVEs open against its `python3.13`, 5 HIGH,
+which upstream's releases fix, so the ADR chose python-build-standalone.
+
+**Next:** ADR 0031's section 5, items 1 and 5: CI's image job, a `docker.yml` rehearsal (amd64 and arm64), and how-to
+59's example provenance from it.
