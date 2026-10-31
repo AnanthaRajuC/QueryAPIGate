@@ -70,9 +70,12 @@ class SignedTests(unittest.TestCase):
                 self.assertEqual(job['permissions'].get('attestations'), 'write')
                 runs = '\n'.join(step.get('run', '') for step in job['steps'])
                 uses = [step.get('uses', '') for step in job['steps']]
-                self.assertIn('cosign sign --yes "$REF"', runs)
+                # cosign by way of sign(), which tries three times: Rekor once answered cosign's own retried upload
+                # with a 409 and failed a release (0.47.0)
+                self.assertIn('for attempt in 1 2 3; do\n    cosign sign --yes "$@" "$REF" && return', runs)
+                self.assertRegex(runs, re.compile(r'^sign(\s+#.*)?$', re.M))
                 # and the classic .sig too: policy-controller 0.13 finds no signature in a bundle alone (ADR 0018)
-                self.assertIn('cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"', runs)
+                self.assertRegex(runs, re.compile(r'^sign --new-bundle-format=false --use-signing-config=false$', re.M))
                 self.assertIn('--certificate-identity "$IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER"', runs)
                 self.assertIn('for bundle in true false', runs)
                 self.assertIn('gh attestation verify', runs)

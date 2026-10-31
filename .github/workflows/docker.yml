@@ -167,8 +167,15 @@ jobs:
         # Twice: the Sigstore bundle (an OCI referrer) cosign v3 and `gh` read, and the classic `.sig` tag Sigstore's
         # policy-controller and other admission controllers still look for - without it they find no signature at all
         run: |
-          cosign sign --yes "$REF"
-          cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"
+          sign() {   # Rekor can answer 409 to cosign's own retried upload (0.47.0); a new attempt signs with new keys
+            for attempt in 1 2 3; do
+              cosign sign --yes "$@" "$REF" && return
+              [ "$attempt" = 3 ] || sleep $((attempt * 15))
+            done
+            return 1
+          }
+          sign
+          sign --new-bundle-format=false --use-signing-config=false
 
       - name: Attest how it was built (GitHub)
         if: steps.meta.outputs.push == 'true'
@@ -251,8 +258,15 @@ jobs:
           REF: ${{ steps.push.outputs.ref }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
-          cosign sign --yes "$REF"   # both forms, as for the image
-          cosign sign --yes --new-bundle-format=false --use-signing-config=false "$REF"
+          sign() {   # retried, as for the image
+            for attempt in 1 2 3; do
+              cosign sign --yes "$@" "$REF" && return
+              [ "$attempt" = 3 ] || sleep $((attempt * 15))
+            done
+            return 1
+          }
+          sign   # both forms, as for the image
+          sign --new-bundle-format=false --use-signing-config=false
 
       - name: Attest how it was built (GitHub)
         if: steps.push.outputs.push == 'true'
