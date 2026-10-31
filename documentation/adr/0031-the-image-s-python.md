@@ -1,8 +1,8 @@
 # ADR 0031: The image's Python: python-build-standalone, not the official image's
 
-- **Status:** Proposed (2026-10-31), and measured the same day ([*Result*](#result)). Section 5's items 2-4 are met;
-  1 and 5 wait for CI and a `docker.yml` rehearsal. First proposed with Debian's own `python3`: measuring it found
-  trixie's backlog of unfixed `python3.13` CVEs, so python-build-standalone was measured too, and chosen.
+- **Status:** Accepted (2026-10-31): section 5's items are met ([*Result*](#result)). First proposed with Debian's
+  own `python3`: measuring it found trixie's backlog of unfixed `python3.13` CVEs, so python-build-standalone was
+  measured too, and chosen.
 - **Date:** 2026-10-31
 - **Backlog:** #104, *A faster Python interpreter in the image*. [ADR 0030](0030-shipping-the-data-plane.md#result)'s
   measurement found the problem, and the evidence is in
@@ -129,12 +129,14 @@ sections 4-7). The application is the same between the images: `git diff` of `qu
 
 | Criterion | Measured |
 |---|---|
+| 1. CI and the release workflow | On `main` at 61cfb4f: CI's image job, with the data plane in front of Python, and the Helm chart on kind, upgraded under load from 0.47.0's. The `docker.yml` rehearsal (run 41208623399) built both images for amd64 and arm64, then signed, attested and verified them. The arm64 image's Python answered `aarch64 3.13.18 OpenSSL 3.5.9` |
 | 3. Python alone, calls a second per gateway core | Debian's 3.13.5 against today's image: 1.068 on the plain lookup, 1.059 on the governed one, 1.079 on a 100-row page, p99 7% lower. python-build-standalone against Debian's: 1.009-1.014 |
 | 3. The data plane in front | The same calls a second, 27,000-28,000. Past its ceiling, one Python worker recorded 42% of the runs on today's image and 66-68% on either new one, with 5% less CPU. Where every run was recorded, it needed 20% less |
 | 2. The suite inside the image | 2,172 tests OK on SQLite with Redis and on the PostgreSQL store with Redis: Debian's image, the standalone one unpruned and pruned, and the 0.47.0 release as the control |
 | 4. Size | 443.9 MB today; 446.9 MB with Debian's Python; 465.4 MB with python-build-standalone, pruned (514.1 MB before pruning) |
 | 4. Trivy 0.69.3: Debian packages (HIGH) | 166 (44) today; 273 (70) with Debian's Python; 164 (43) with python-build-standalone |
 | 4. Trivy: Python packages (HIGH) | 6 (0) today; 6 (0) with Debian's; 8 (5) with python-build-standalone, all five in the virtualenv's `pip` 26.2.2, read from the versions it vendors |
+| 5. Docs and tests | The changelog, `TECHNOLOGY_STACK.MD` and the Dockerfile's tests with the change; how-to 59's commands and outputs from the rehearsal. Its SBOM, 383 packages for amd64, names `python 3.13.18` by CPE |
 
 The interpreter's 27-30% shrinks to 6-9% at the gateway when Python serves a call itself. Much of a call's CPU isn't
 the interpreter's: psycopg2, the C extensions and the kernel's networking are the same in every image. Recording
@@ -149,7 +151,9 @@ is Python's own loop, and there the difference is large.
 - **Python's security fixes arrive with `uv`'s releases,** which Dependabot proposes weekly. That's a
   python-build-standalone build and a `uv` release after CPython's own, not Debian's backports or the official image's
   rebuilds.
-- **A scanner sees Python no better than today:** it isn't a Debian package in either image. Its `ssl` now uses an
+- **A scanner sees Python as it did before:** it isn't a Debian package in either image, so a scan of the image's
+  Debian packages (Trivy's, by default) doesn't name it. The release's SBOM does, by version and CPE, in both: 3.12.15
+  in 0.47.0's, 3.13.18 now. So a scanner reading the SBOM matches Python's own advisories to it. Its `ssl` now uses an
   OpenSSL compiled in, like psycopg2's and cryptography's; it's fixed by a new release of Python, not of Debian.
 - **The virtualenv's `pip` shows five HIGH findings** for the versions it vendors (msgpack, urllib3, setuptools).
   QueryAPIGate doesn't import them. Removing `pip` after the install would clear them, at the cost of images that
@@ -182,9 +186,10 @@ is Python's own loop, and there the difference is large.
 
 ## Open questions
 
-- **arm64.** `docker.yml` builds it, and on a rehearsal or a release it checks, under QEMU, that the arm64 image's
-  Python runs: the interpreter `uv` installed, its `ssl` and `sqlite3`, and the application importing. It isn't
-  measured: there's no arm64 hardware here, and python-build-standalone's BOLT step is x86-64 only.
+- **arm64's speed.** `docker.yml` checks on every rehearsal and release, under QEMU, that the arm64 image's Python
+  runs: the interpreter `uv` installed, its `ssl` and `sqlite3`, and the application importing. The first rehearsal
+  did. Its speed isn't measured: there's no arm64 hardware here, and python-build-standalone's BOLT step is x86-64
+  only.
 - **Should the image keep `pip`?** It's there so an image built `FROM` this one can add a driver. Its vendored
   copies are what a scanner flags.
 - **Python 3.14.** python-build-standalone's 3.14 was the fastest in the screen's loop (0.64), and isn't measured at

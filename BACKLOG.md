@@ -3207,7 +3207,7 @@ The event log's bound for the SQL stores (#102) is separate and ships either way
 
 ## 104. A faster Python interpreter in the image
 
-**Status: proposed and measured in [ADR 0031](documentation/adr/0031-the-image-s-python.md) (2026-10-31):
+**Status: done, in [ADR 0031](documentation/adr/0031-the-image-s-python.md), Accepted 2026-10-31, shipping in 0.48.0:
 python-build-standalone's 3.13, installed by a pinned `uv`. At the gateway, Python serves 6-9% more calls a second
 and records 60% more runs past its ceiling.** Found 2026-10-30, when measuring ADR 0030 found the image's Python
 about 30% slower per CPU than the laptop's: 148-152 ms against 115-116 ms for the same workload pinned to one core, and 146 ms against 109 ms for a
@@ -3229,5 +3229,5 @@ static linking gains 8-16% of it, frame pointers 2-4%, its appended `dpkg-buildf
 Debian's `python3` was proposed first, and is as fast. But trixie had 19 CVEs open against its `python3.13`, 5 HIGH,
 which upstream's releases fix, so the ADR chose python-build-standalone.
 
-**Next:** ADR 0031's section 5, items 1 and 5: CI's image job, a `docker.yml` rehearsal (amd64 and arm64), and how-to
-59's example provenance from it.
+**Left open (ADR 0031):** whether the image keeps `pip`, whose vendored copies are the five HIGH findings; arm64's speed,
+unmeasured; Python 3.14.
