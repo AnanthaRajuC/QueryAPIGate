@@ -59,6 +59,19 @@ class PinnedTests(unittest.TestCase):
         self.assertIn('COPY --from=uv /uv /usr/local/bin/uv', dockerfile)
         self.assertIn('COPY --from=python /opt/python /opt/python', dockerfile)
 
+    def test_the_image_carries_no_pip(self):
+        # ADR 0031: the virtualenv starts without pip, and pip leaves in the layer it installs the packages in - the
+        # image never runs it, and the old copies it vendors (urllib3, msgpack, setuptools) were scanners' findings
+        with open(os.path.join(ROOT, 'Dockerfile')) as f:
+            dockerfile = f.read()
+        self.assertIn('-m venv --without-pip /opt/venv', dockerfile)
+        image = dockerfile[dockerfile.rindex('\nFROM '):]  # the last stage, the image itself
+        runs = re.findall(r'^RUN (.*?)(?<!\\)$', image, re.M | re.S)
+        with_pip = [run for run in runs if re.search(r'(-m pip|(^|&&|;)\s*pip) ', run)]
+        self.assertEqual(len(with_pip), 1, with_pip)
+        self.assertTrue(with_pip[0].startswith('python -m ensurepip'), with_pip[0])
+        self.assertTrue(with_pip[0].endswith('python -m pip uninstall --yes pip'), with_pip[0])
+
     def test_the_siem_receivers_ci_tests_against_are_pinned_by_digest(self):
         """ADR 0019: rsyslog, syslog-ng and the OpenTelemetry Collector, as siem_receivers.sh runs them."""
         with open(os.path.join(ROOT, '.github', 'scripts', 'siem_receivers.sh')) as f:

@@ -80,7 +80,7 @@ removed once every screen had moved over; `/ui` redirects to `/console`.
 
 | Technology | Used for |
 |---|---|
-| Docker | `Dockerfile` (`debian:trixie-slim` base, with python-build-standalone's Python 3.13, installed by a pinned `uv`, and the packages in `/opt/venv`, ADR 0031) - an optional `WITH_H2=true` build arg adds a JRE and the bundled H2 driver for the image. |
+| Docker | `Dockerfile` (`debian:trixie-slim` base, with python-build-standalone's Python 3.13, installed by a pinned `uv`, and the packages in `/opt/venv` with no `pip` left in the image, ADR 0031) - an optional `WITH_H2=true` build arg adds a JRE and the bundled H2 driver for the image. |
 | GitHub Actions | Five workflows (`.github/workflows/`): `ci.yml` (tests and lint across supported Python versions, PostgreSQL with Redis, the rolling upgrade from the previous release, the Console end to end, the Compose demo), `frontend.yml` (the Console's type check, tests and build), `release.yml` (PyPI publish, gated by `.github/scripts/check_release.py`'s tag/CHANGELOG checks), `docker.yml` (image publish), `docs.yml` (deploys the MkDocs site to GitHub Pages). |
 | GitHub Pages | Hosts the built documentation site (see the `docs` extra above). |
 

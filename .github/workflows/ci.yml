@@ -484,6 +484,10 @@ jobs:
           docker run -d --name s2a -p 5000:5000 queryapigate
           for i in $(seq 1 20); do curl -fs localhost:5000/health && exit 0; sleep 1; done
           docker logs s2a; exit 1
+      - name: No pip in it, and ensurepip brings one back (ADR 0031)
+        run: |
+          if docker run --rm --entrypoint python queryapigate -m pip --version; then echo 'pip is in the image'; exit 1; fi
+          docker run --rm --user root --entrypoint sh queryapigate -c 'python -m ensurepip --default-pip >/dev/null && pip --version'
       - name: The data plane in it, in front of Python (ADR 0030)
         run: .github/scripts/smoke_dataplane.sh queryapigate 5100
 

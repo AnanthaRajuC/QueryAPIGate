@@ -225,6 +225,31 @@ QueryAPIGate imports it. Debian's virtualenv gets Debian's older `pip` 25.1.1, w
 `psycopg2_binary.libs`. `cryptography`'s wheel carries OpenSSL 4.0.3, in all three images. python-build-standalone
 adds one more copy, Python's `ssl`: currently newer than Debian's, and fixed when python-build-standalone releases.
 
+## 8. Without `pip` ([`trivy-qag-nopip.json.gz`](trivy-qag-nopip.json.gz), [`trivy-rehearsal-61cfb4f.json.gz`](trivy-rehearsal-61cfb4f.json.gz))
+
+ADR 0031's amendment: the virtualenv is created without `pip`, and the step that installs the packages brings it in
+with `ensurepip` and uninstalls it at its end. Compared with `main`'s image (61cfb4f, the `docker.yml` rehearsal's
+amd64 image), with Trivy 0.69.3 and one database for both (2026-10-31 07:07 UTC), `--scanners vuln`:
+
+| | `main` (with `pip`) | Without `pip` | Without `pip`, `-h2` |
+|---|---|---|---|
+| Debian packages: findings (HIGH) | 164 (43) | 164 (43) | 170 (43, and 1 CRITICAL), its JRE's |
+| Python packages: findings (HIGH) | 8 (5) | 0 | 0 |
+| Size | 465.4 MB | 454.7 MB | 667.9 MB |
+
+All eight findings on `main` were `pip`'s vendored copies: msgpack 1.1.2 (two HIGH), urllib3 2.7.0 (two HIGH, one
+MEDIUM) and setuptools 70.3.0 (one HIGH, one MEDIUM, one LOW). The image is smaller because no layer holds `pip`
+any more. `ensurepip`'s wheel stays in `/opt/python`, and Trivy doesn't report it.
+
+- **The gateway** starts and answers `/health`, and the `-h2` image imports `jaydebeapi` and the application.
+- **The suite inside the image** ([`in-image-suite.sh`](in-image-suite.sh), which now brings in `pip` when the image
+  has none): 2,175 tests OK on SQLite with Redis (skipped 118), and on the PostgreSQL store with Redis (skipped
+  114).
+- **Extending the image:** `FROM` it, `RUN pip install trino` fails (`pip: not found`, exit 127). With `USER root`
+  and `RUN python -m ensurepip --default-pip && pip install trino`, it builds, and `import trino` works as the `app`
+  user. On `main`'s image, with `pip`, a plain `RUN pip install trino` fails too: `Permission denied` on
+  `/opt/venv`, which is root's. On 0.47.0's image it worked: `pip` installed into `/home/app/.local`.
+
 ## Not measured
 
 - **arm64.** There's no arm64 hardware here, and timings under QEMU mean nothing. python-build-standalone's BOLT is

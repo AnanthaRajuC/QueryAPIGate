@@ -3229,5 +3229,6 @@ static linking gains 8-16% of it, frame pointers 2-4%, its appended `dpkg-buildf
 Debian's `python3` was proposed first, and is as fast. But trixie had 19 CVEs open against its `python3.13`, 5 HIGH,
 which upstream's releases fix, so the ADR chose python-build-standalone.
 
-**Left open (ADR 0031):** whether the image keeps `pip`, whose vendored copies are the five HIGH findings; arm64's speed,
-unmeasured; Python 3.14.
+The image carries no `pip`, which cleared Trivy's eight findings in its vendored copies (five HIGH).
+
+**Left open (ADR 0031):** arm64's speed, unmeasured; Python 3.14.
