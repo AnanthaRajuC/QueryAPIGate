@@ -54,6 +54,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.47.0 are added, and the rolling-upgrade and Helm checks now start from 0.47.0.
+- **CI:** signing the image and the chart retries up to three times. Rekor once answered cosign's own retried upload
+  with `409 createLogEntryConflict`, which failed 0.47.0's Docker publish until the job was rerun.
 
 ### Fixed
 
