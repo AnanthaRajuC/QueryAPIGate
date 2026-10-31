@@ -153,6 +153,17 @@ class IntegrationBase:
         self.assertEqual(len(res.get_json()), 1)
         self.assertEqual(len(self.query('SELECT * FROM queryapigate_it', '?page_size=100').get_json()), 7)
 
+    def test_a_nul_in_a_bound_parameter_is_never_a_500(self):
+        """A NUL in a string parameter: a value the database compares as it is, or - PostgreSQL's text can't hold
+        one, and psycopg2 refuses to send it - the caller's 400 naming the parameter."""
+        res = self.query('SELECT id FROM queryapigate_it WHERE name = :name', params={'name': 'Item\x003'})
+        if self.db == 'postgres':
+            self.assertEqual((res.status_code, res.get_json()['code']), (400, 'param_invalid'))
+            self.assertIn("'name'", res.get_json()['error'])
+        else:
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True))  # and no row: none has a NUL
+            self.assertNotIsInstance(res.get_json(), list)
+
     def test_all_formats(self):
         for fmt in ('json', 'ndjson', 'csv', 'tsv', 'xml', 'yaml', 'xlsx'):
             res = self.query('SELECT * FROM queryapigate_it ORDER BY id', f'?format={fmt}&page_size=2')

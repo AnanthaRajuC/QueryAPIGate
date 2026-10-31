@@ -1499,6 +1499,17 @@ class ParameterTests(ApiTestCase):
         # no parameters: statement is untouched so drivers do not apply % formatting to it
         self.assertEqual(sqltools.bind_parameters("SELECT '50%'", {}, 'format'), ("SELECT '50%'", None))
 
+    def test_a_nul_in_a_string_parameter_is_refused_for_postgresql_only(self):
+        """psycopg2 can't send one (PostgreSQL text can't hold it), so it is the caller's 400, not a failed query's
+        500; the other databases take the value as it is."""
+        with self.assertRaises(ApiError) as caught:
+            sqltools.bind_parameters('SELECT :a, :b', {'a': 'fine', 'b': 'x\x00y'}, 'format', 'postgres')
+        self.assertEqual((caught.exception.status, caught.exception.code), (400, 'param_invalid'))
+        self.assertIn("'b'", caught.exception.message)
+        for dialect in ('mysql', 'duckdb', 'clickhouse', None):
+            self.assertEqual(sqltools.bind_parameters('SELECT :b', {'b': 'x\x00y'}, 'qmark', dialect)[1], ['x\x00y'])
+        self.assertEqual(sqltools.bind_parameters('SELECT :b', {'b': 'x'}, 'format', 'postgres')[1], ['x'])
+
 
 FOREVER = 'WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c'
 

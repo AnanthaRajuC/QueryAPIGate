@@ -270,7 +270,11 @@ def paginate(sql, limit, offset, params=None, dialect=None):
 # Parameters
 # --------------------------------------------------------------------------------------
 
-def _check_value(name, value):
+def _check_value(name, value, dialect=None):
+    if isinstance(value, str) and dialect == 'postgres' and '\x00' in value:
+        # psycopg2 refuses it ("A string literal cannot contain NUL") - the caller's value, not the query, is wrong
+        raise ApiError(f"Parameter '{name}' contains a NUL character, which PostgreSQL text can't hold",
+                       code='param_invalid')
     if value is None or isinstance(value, (bool, str)):
         return
     if isinstance(value, (int, float)) and math.isfinite(value):
@@ -344,7 +348,7 @@ def bind_parameters(sql, params, style, dialect=None):
     if missing:
         raise ApiError(f"No value provided for parameter(s): {', '.join(missing)}", code='param_required')
     for name in set(names):
-        _check_value(name, params[name])
+        _check_value(name, params[name], dialect)
 
     escape = (lambda text: text.replace('%', '%%')) if style in ('format', 'pyformat') else (lambda text: text)
     pieces, position = [], 0

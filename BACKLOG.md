@@ -3175,8 +3175,9 @@ traffic, and a p99 that stays in single milliseconds under load.
   ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)). Rate-limited keys
   next, then other formats and workspaces.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
-  psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answers `query_failed`, where a 400
-  `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Not fixed yet.
+  psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
+  `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400
+  `param_invalid` from `sqltools.bind_parameters`, for PostgreSQL only.
 - **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45 (experimental). Every run recorded at 20,000 a
   second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Without it, the event log needs a bound** at that rate: a row cap or sampling, as history has.
