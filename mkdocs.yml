@@ -70,6 +70,7 @@ nav:
       - 0028 Rust data plane prototype: documentation/adr/0028-rust-data-plane-prototype.md
       - 0029 ClickHouse run store: documentation/adr/0029-clickhouse-run-store.md
       - 0030 Shipping the data plane: documentation/adr/0030-shipping-the-data-plane.md
+      - 0031 The image's Python: documentation/adr/0031-the-image-s-python.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md
