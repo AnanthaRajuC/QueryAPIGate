@@ -55,6 +55,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 - **CI:** the upgrade fixtures from 0.47.0 are added, and the rolling-upgrade and Helm checks now start from 0.47.0.
 
+### Fixed
+
+- **A NUL character in a string parameter was a 500 on PostgreSQL.** PostgreSQL's text can't hold one and psycopg2
+  refuses to send it, so the call failed as `query_failed`. It is now the caller's `400 param_invalid`, naming the
+  parameter, on saved queries, ad-hoc SQL and MCP tools alike; the other databases take the value as before. Found by
+  the data plane's differential test, which forwards such calls to Python.
+
 ## [0.47.0] - 2026-10-30
 
 The Rust data plane ships in the image and the Helm chart - experimental, and off unless started - and two security
