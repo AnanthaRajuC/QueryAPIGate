@@ -415,7 +415,10 @@ class UsageTests(StoreTestCase):
 
 
     def test_whole_minutes_from_the_rollups_and_the_edges_from_events_add_up_exactly(self):
-        base = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=10)
+        # 9 minutes back, not 10: a run's id is stamped when its batch is sent - after this test's first write makes
+        # the run store's tables, seconds later on a CI runner - and a span finds ids up to ten minutes past its end
+        # (_id_span()). From 10, a test starting in a minute's last seconds lost the first edge's run.
+        base = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=9)
         for minutes, second, extra in ((0, 5, {}), (0, 50, {}), (2, 13, {'status': 'error', 'code': 'query_timeout'}),
                                        (3, 0, {'masked': [{'column': 'email'}]}), (5, 59, {}), (7, 31, {}),
                                        (8, 2, {'sql': 'SELECT 9'})):

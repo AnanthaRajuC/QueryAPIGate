@@ -61,6 +61,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   refuses to send it, so the call failed as `query_failed`. It is now the caller's `400 param_invalid`, naming the
   parameter, on saved queries, ad-hoc SQL and MCP tools alike; the other databases take the value as before. Found by
   the data plane's differential test, which forwards such calls to Python.
+- **An MCP tool that found no rows answered with REST's message, not an empty list.** A saved query's tool returned
+  `{"message": "No results returned"}` as `structuredContent.rows`, against its own `outputSchema` (an array): the
+  official MCP SDK's client raised an error for it, so an agent looking for something that isn't there got a failure
+  instead of `[]`. A key with a row quota was also charged one row for each such call. Now `rows` is `[]`. REST's
+  answer is unchanged.
+- **`queryapigate init` failed when `QUERYAPIGATE_HOME` didn't exist yet** (`unable to open database file`): the
+  store was opened before `init` made the folder. It makes it first now, as it always meant to.
+- **`queryapigate --help` called `config` experimental,** and so did the Helm chart's row in DEPLOYMENT.md:
+  configuration as code has been stable, under the compatibility promise, since 0.30.
 
 ## [0.47.0] - 2026-10-30
 

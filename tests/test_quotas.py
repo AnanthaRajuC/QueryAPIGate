@@ -136,6 +136,18 @@ class CountingTests(QuotaTestCase):
         self.assertEqual((refused['isError'], refused['structuredContent']['code']), (True, 'quota_exceeded'))
 
 
+    def test_an_mcp_call_with_no_rows_counts_none(self):
+        res = save_query(self.client, {'author': 'a', 'description': 'd', 'filename': 'none', 'connection_name': 'lite',
+                                       'sql_query': 'SELECT id FROM t WHERE id < 0'}, headers=ADMIN)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        quota = {'rows': 100, 'per': 'day'}
+        permission = apikeys.authenticate(secret_of(create_key(self.client, ADMIN, name='agent', queries=['none'],
+                                                               connections=['lite'], quota=quota)))
+        self.assertFalse(mcp_server.call_as(self.app, permission, 'none', {}).get('isError'))
+        used = quotas.usage('agent', quota)
+        self.assertEqual((used['calls'], used['rows']), (1, 0))  # not 1: REST's "No results returned" isn't a row
+
+
 class StoreTests(QuotaTestCase):
     env = {'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '5'}
 
