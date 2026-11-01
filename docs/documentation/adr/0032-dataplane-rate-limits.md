@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0032-dataplane-rate-limits.md"
