@@ -13,7 +13,7 @@ process - `queryapigate serve`, `queryapigate mcp`, `queryapigate events` - shar
 import ipaddress
 from dataclasses import dataclass
 
-from . import admins, alerts, apikeys, config, jwtauth, metrics
+from . import admins, alerts, apikeys, config, jwtauth, metrics, ratelimit
 
 OPEN_ACCESS_REMOTE = ('This server has no API key set, so it answers only local clients. Set QUERYAPIGATE_API_KEY '
                       'to allow access from other hosts.')
@@ -98,7 +98,7 @@ def check_key_limit(flask_app, permission):
         return None
     count, period = permission.rate_limit
     allowed, remaining, retry_after = flask_app.extensions['queryapigate_key_limiter'].hit(
-        permission.name, count, period)
+        ratelimit.budget_name(permission), count, period)
     if not allowed:
         metrics.inc_rate_limit_rejection()
         alerts.note_rate_limited('key', (getattr(permission, 'workspace', 'default'), permission.name))

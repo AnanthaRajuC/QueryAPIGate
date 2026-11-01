@@ -229,10 +229,11 @@ def acquire(query_timeout=None):
     lease = (query_timeout or LEASE_WITHOUT_TIMEOUT) + LEASE_MARGIN
     token = secrets.token_hex(8)
     store = counter()
-    if not store.acquire(permission.name, maximum, token, lease):
+    name = ratelimit.budget_name(permission)
+    if not store.acquire(name, maximum, token, lease):
         raise ApiError(f'This caller already has {maximum} queries running, its max_concurrent - retry when one '
                        'finishes', 429, code='too_many_concurrent', retry_after=1, max_concurrent=maximum)
-    return Slot(permission.name, token, lease, store)
+    return Slot(name, token, lease, store)
 
 
 def effective(grants):

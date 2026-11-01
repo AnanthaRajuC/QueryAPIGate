@@ -120,6 +120,15 @@ end
 return {allowed, math.floor(tokens), retry}
 """
 _PREFIX = 'qag:ratelimit:'
+
+
+def budget_name(permission):
+    """What a caller's own budgets - its rate limit's bucket, its max_concurrent slots (limits.py) - are counted
+    under: `<workspace>~<name>`, as quotas count theirs. A name is unique only within its workspace, so two workspaces'
+    keys of one name are two callers; no workspace name has a `~`."""
+    return f"{getattr(permission, 'workspace', None) or 'default'}~{permission.name}"
+
+
 _DEGRADED_FOR = 600  # seconds a Redis failure keeps the "limits are per instance right now" alert up
 _degraded_at = None
 _last_warned = 0.0

@@ -102,6 +102,19 @@ class SharedTests(unittest.TestCase):
         self.assertEqual(statuses, [200, 200, 200, 429, 429])
         self.assertEqual(self.call(b, headers).headers['X-RateLimit-Key-Remaining'], '0')
 
+    def test_a_keys_bucket_is_named_by_its_workspace_and_name(self):
+        # what a data plane counting the same buckets must name them (ADR 0032): two workspaces' keys of one name
+        # are two budgets
+        a, = self.instances(1)
+        name = f'k-{uuid.uuid4().hex[:8]}'
+        secret = secret_of(create_key(a, headers=ADMIN, name=name, connections=[], rate_limit='3/minute'))
+        self.call(a, {'X-API-Key': secret})
+        client = redis.Redis.from_url(REDIS_URL)
+        bucket = f'qag:ratelimit:key:3/60:default~{name}'
+        self.addCleanup(client.delete, bucket)
+        self.assertEqual(client.hget(bucket, 'tokens'), b'2')
+        self.assertFalse(client.exists(f'qag:ratelimit:key:3/60:{name}'))
+
     def test_mcp_and_rest_share_a_keys_budget(self):
         from queryapigate import mcp_server
         rest, = self.instances(1)
