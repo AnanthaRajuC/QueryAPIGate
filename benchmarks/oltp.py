@@ -285,8 +285,8 @@ def r_setup():
 
 
 def l_setup():
-    """A pinned Redis for the rate limits (ADR 0032), on the database's cores, on loopback only - and the key with a
-    limit, made once per store."""
+    """A pinned Redis for the rate limits (ADR 0032), on the database's cores, on loopback only. The key with a limit
+    is seed()'s, with the others."""
     sh('docker', 'rm', '-fv', REDIS)
     started = sh('docker', 'run', '-d', '--name', REDIS, '--cpuset-cpus', args.db_cpus,
                  '-p', f'127.0.0.1:{PORT + 3}:6379', REDIS_IMAGE)
@@ -297,14 +297,8 @@ def l_setup():
             break
         time.sleep(1)
     log('redis up:', sh('docker', 'exec', REDIS, 'redis-server', '--version').stdout.strip())
-    keys_file = Path(args.out) / 'keys.json'
-    keys = json.loads(keys_file.read_text())
-    if 'limited' not in keys:
-        start(args.head_label)
-        keys['limited'] = api('POST', '/api/v1/api-keys', {'name': 'limited', 'connections': [],
-                                                           'queries': ['account', 'account_page'],
-                                                           'rate_limit': NEVER_REFUSED})['secret']
-        keys_file.write_text(json.dumps(keys))
+    if 'limited' not in json.loads((Path(args.out) / 'keys.json').read_text()):
+        sys.exit('this store was seeded before the l-blocks had a key: run setup again')
 
 
 def l_teardown():
@@ -514,7 +508,7 @@ def api(method, path, body):
 
 
 def seed():
-    """The connection, the three saved queries and the three keys - once per store. The keys are kept with the store
+    """The connection, the three saved queries and the four keys - once per store. The keys are kept with the store
     they belong to: a --smoke run writes its results under <out>/smoke but seeds the same store, so both read
     <out>/keys.json (seeding a seeded store again would fail on the existing connection)."""
     keys_file = Path(args.out) / 'keys.json'
@@ -542,6 +536,9 @@ def seed():
                       'mask': [{'column': '*.abalance', 'action': 'hash'}]}),
         ('writer', {'name': 'writer', 'connections': [], 'queries': ['deposit'], 'allow_writes': True,
                     'allowed_write_ops': ['update']}),
+        # The l-blocks' (ADR 0032): counted wherever Python counts, in Redis or in memory, and never refused
+        ('limited', {'name': 'limited', 'connections': [], 'queries': ['account', 'account_page'],
+                     'rate_limit': NEVER_REFUSED}),
     ]:
         keys[kind] = api('POST', '/api/v1/api-keys', body)['secret']
     keys_file.write_text(json.dumps(keys))
