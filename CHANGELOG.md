@@ -94,6 +94,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **`queryapigate --help` called `config` experimental,** and so did the Helm chart's row in DEPLOYMENT.md:
   configuration as code has been stable, under the compatibility promise, since 0.30.
 
+### Security
+
+- **Workspaces (experimental): two workspaces' keys of the same name shared one rate limit and one `max_concurrent`.**
+  A key's name is unique only within its workspace, but its rate-limit bucket and its concurrency slots were counted
+  under the name alone. With the same limit on both, `team-b`'s `partner` key could spend `team-a`'s `partner`'s
+  budget, so `team-a`'s calls were refused, and its usage showed in the other key's `X-RateLimit-Key-Remaining`. Both
+  are now counted under the workspace and the name (`<workspace>~<name>`), in process and in Redis, as quotas already
+  were. Since 0.38.0, and only with workspaces. **On upgrade,** each key's rate-limit bucket starts full once. While a
+  rolling upgrade has old and new instances side by side, they count in different buckets, so a key can briefly make
+  up to twice its limit.
+
 ## [0.47.0] - 2026-10-30
 
 The Rust data plane ships in the image and the Helm chart - experimental, and off unless started - and two security

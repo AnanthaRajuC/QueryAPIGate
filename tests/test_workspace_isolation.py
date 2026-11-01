@@ -126,6 +126,30 @@ class KeyTests(IsolationTestCase):
         self.assertEqual(self.code('get', '/q/films', 429, headers=b), 'quota_exceeded')
         self.ok('get', '/q/films', headers={'X-API-Key': self.default_key})  # default's partner: its own count
 
+    def test_rate_limits_count_each_workspaces_key_apart(self):
+        # a bucket named by the key's name alone was one budget for both partners: team-b's calls refused default's
+        for prefix in ('', B):
+            self.ok('patch', f'{prefix}/api/v1/api-keys/partner', json={'rate_limit': '1/minute'})
+        b = {'X-API-Key': self.b_key}
+        self.ok('get', '/q/films', headers=b)
+        self.assertEqual(self.code('get', '/q/films', 429, headers=b), 'rate_limited')
+        res = self.ok('get', '/q/films', headers={'X-API-Key': self.default_key})  # default's partner: its own budget
+        self.assertEqual(res.headers['X-RateLimit-Key-Remaining'], '0')
+
+    def test_concurrency_slots_are_each_workspaces_key_apart(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from queryapigate import limits
+        callers = [SimpleNamespace(name='partner', workspace=w, max_concurrent=1) for w in ('default', 'team-b')]
+        with mock.patch.object(limits, 'caller', return_value=callers[1]):
+            held = limits.acquire()  # team-b's partner has its one query running
+        try:
+            with mock.patch.object(limits, 'caller', return_value=callers[0]):
+                limits.acquire().release()  # and default's partner may still run one
+        finally:
+            held.release()
+
 
 class AdministratorTests(IsolationTestCase):
     def member_of_b(self, role='admin'):
