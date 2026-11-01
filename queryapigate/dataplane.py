@@ -21,6 +21,11 @@ which is slower but answers as Python does.
 
 Saved queries with `{name}` text placeholders never get a plan: their values are part of the SQL text, so the verdict
 can change from one call to the next.
+
+With Redis (QUERYAPIGATE_REDIS_URL), a key's rate limit and the server-wide QUERYAPIGATE_RATE_LIMIT are counted by the
+data plane too, in the same buckets (ADR 0032): the plan carries the key's limit, and the data plane counts a call
+only once it is going to serve it. A call it forwards after counting says so (X-QAG-Rate-Counted), and is not counted
+again here. Its refusals reach /metrics and the alerts with its runs report.
 """
 import base64
 import hmac
@@ -37,6 +42,7 @@ PEER_HEADER = 'X-QAG-Peer'
 WANTED_HEADER = 'X-QAG-Plan-Wanted'
 VERSION_HEADER = 'X-QAG-Dataplane-Version'  # the data plane's release, sent with its secret
 PLAN_HEADER = 'X-QAG-Plan'
+COUNTED_HEADER = 'X-QAG-Rate-Counted'  # the rate-limit buckets a call the data plane forwards was counted in already
 VERSION = 1
 DIALECTS = ('postgres', 'mysql')  # the two the prototype serves - every other connection is forwarded
 _ROWS = ('api_key', 'saved_query', 'connection')  # what a plan names the digests of, one row set each
@@ -47,6 +53,7 @@ PEER_ENVIRON = 'HTTP_X_QAG_PEER'
 # The data plane asks for a plan only when it would keep one: other calls it forwards keep the metadata cache
 WANTED_ENVIRON = 'HTTP_X_QAG_PLAN_WANTED'
 VERSION_ENVIRON = 'HTTP_X_QAG_DATAPLANE_VERSION'
+COUNTED_ENVIRON = 'HTTP_X_QAG_RATE_COUNTED'
 UNPAIRED = ('This data plane is from another release than this server: it gets no plans and no run store lease '
             'until both are the same release')
 _unpaired_seen: set = set()
@@ -80,11 +87,28 @@ def is_address(peer):
 
 def eligible_caller(permission):
     """A caller the data plane may serve: a scoped API key - not an administrator, a signed-in user or an open server -
-    in the default workspace, with none of the limits that keep their own state (rate limit, quota, ADR 0011's)."""
+    in the default workspace, with none of ADR 0011's limits but a rate limit, and that only when Redis holds its
+    bucket, where the data plane counts it too (ADR 0032). Without Redis each process would count its own budget."""
     return (permission is not None and not permission.admin and permission.claims is None and permission.role is None
             and not permission.claim_binding and permission.workspace == 'default'
-            and permission.rate_limit is None and permission.quota is None and permission.max_concurrent is None
+            and (permission.rate_limit is None or config.redis_url() is not None)
+            and permission.quota is None and permission.max_concurrent is None
             and permission.query_timeout is None and permission.max_rows is None)
+
+
+def counted(value):
+    """X-QAG-Rate-Counted (`client=<limit>,<remaining>; key=<limit>,<remaining>`, either or both) as
+    {'client' | 'key': (limit, remaining)}: the buckets the data plane counted this call in before forwarding it, and
+    what they said. {} for a value of any other shape."""
+    found = {}
+    for part in (value or '').split(';'):
+        bucket, _, numbers = part.strip().partition('=')
+        limit, _, remaining = numbers.partition(',')
+        if bucket not in ('client', 'key') or bucket in found or not (limit.isascii() and limit.isdigit()
+                                                                      and remaining.isascii() and remaining.isdigit()):
+            return {}
+        found[bucket] = (int(limit), int(remaining))
+    return found
 
 
 def digests(record):
@@ -161,6 +185,8 @@ def build(record, permission, query_name, number, saved, connection_name, result
             return None
         mask = {'columns': len(masked.traced), 'actions': masked.actions, 'fired': masked.fired}
     return {'v': VERSION, 'rows': rows, 'key': {'workspace': permission.workspace, 'name': permission.name},
+            # (count, period in seconds): counted by the data plane in Redis, in the bucket Python counts it in
+            'rate_limit': list(permission.rate_limit) if permission.rate_limit else None,
             'query': {'name': query_name, 'version': number}, 'connection': {'name': connection_name,
             'dialect': dialect}, 'statement': sent, 'search_path': prepared['search_path'], 'mask': mask,
             'expires_in': expires_in,

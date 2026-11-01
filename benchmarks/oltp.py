@@ -45,6 +45,11 @@ CH_IMAGE = 'clickhouse/clickhouse-server:24.8'
 CH_PORT = PORT + 2
 RUN_STORE = f'http://default:pw@127.0.0.1:{CH_PORT}/qag_bench'
 RUN_STORE_TABLES = ('events', 'history', 'run_minutes', 'run_hours')
+REDIS = 'qag-oltp-redis'  # where rate limits are counted (ADR 0032), for the l-blocks
+REDIS_IMAGE = 'redis:7'
+REDIS_URL = f'redis://127.0.0.1:{PORT + 3}/0'
+# Counts every call and refuses none: the l-blocks measure what counting costs, not refusing
+NEVER_REFUSED = '1000000000/second'
 _run_store = False  # whether the build running now keeps its runs there
 URLS = {
     'lookup': U + r'/q/account\?aid=[1-9][0-9]{0,6}',
@@ -54,7 +59,7 @@ URLS = {
 }
 SCENARIOS = {'lookup_plain': ('lookup', 'plain'), 'lookup_gov': ('lookup', 'governed'),
              'page_plain': ('page', 'plain'), 'write_writer': ('write', 'writer'),
-             'hotwrite_writer': ('hotwrite', 'writer')}
+             'hotwrite_writer': ('hotwrite', 'writer'), 'lookup_limited': ('lookup', 'limited')}
 
 args = None
 OUT = BUILDS = None
@@ -279,6 +284,28 @@ def r_setup():
     log('run store up:', ch('SELECT version()'))
 
 
+def l_setup():
+    """A pinned Redis for the rate limits (ADR 0032), on the database's cores, on loopback only. The key with a limit
+    is seed()'s, with the others."""
+    sh('docker', 'rm', '-fv', REDIS)
+    started = sh('docker', 'run', '-d', '--name', REDIS, '--cpuset-cpus', args.db_cpus,
+                 '-p', f'127.0.0.1:{PORT + 3}:6379', REDIS_IMAGE)
+    if started.returncode:
+        sys.exit(started.stderr)
+    for _ in range(30):
+        if sh('docker', 'exec', REDIS, 'redis-cli', 'ping').stdout.strip() == 'PONG':
+            break
+        time.sleep(1)
+    log('redis up:', sh('docker', 'exec', REDIS, 'redis-server', '--version').stdout.strip())
+    if 'limited' not in json.loads((Path(args.out) / 'keys.json').read_text()):
+        sys.exit('this store was seeded before the l-blocks had a key: run setup again')
+
+
+def l_teardown():
+    sh('docker', 'rm', '-fv', REDIS)
+    log('redis removed')
+
+
 def r_teardown():
     sh('docker', 'rm', '-fv', CH)  # -v: its data too
     log('run store removed')
@@ -481,7 +508,7 @@ def api(method, path, body):
 
 
 def seed():
-    """The connection, the three saved queries and the three keys - once per store. The keys are kept with the store
+    """The connection, the three saved queries and the four keys - once per store. The keys are kept with the store
     they belong to: a --smoke run writes its results under <out>/smoke but seeds the same store, so both read
     <out>/keys.json (seeding a seeded store again would fail on the existing connection)."""
     keys_file = Path(args.out) / 'keys.json'
@@ -509,6 +536,9 @@ def seed():
                       'mask': [{'column': '*.abalance', 'action': 'hash'}]}),
         ('writer', {'name': 'writer', 'connections': [], 'queries': ['deposit'], 'allow_writes': True,
                     'allowed_write_ops': ['update']}),
+        # The l-blocks' (ADR 0032): counted wherever Python counts, in Redis or in memory, and never refused
+        ('limited', {'name': 'limited', 'connections': [], 'queries': ['account', 'account_page'],
+                     'rate_limit': NEVER_REFUSED}),
     ]:
         keys[kind] = api('POST', '/api/v1/api-keys', body)['secret']
     keys_file.write_text(json.dumps(keys))
@@ -557,7 +587,7 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
     if warm:
         time.sleep(2.5)  # the warm-up's runs written before counting: a report interval, then a write interval
     w0 = runs_written()
-    py0, dp0, ch0 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH)
+    py0, dp0, ch0, rd0 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH), pg_cpu_s(REDIS)
     tx0, g0, p0, l0, t0 = store_tx(), gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus), time.time()
     sampler.start()
     r = oha(url, key, c=c, secs=secs, q=q, correction=correction)
@@ -567,7 +597,7 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
         raise RuntimeError(f'{block} {scenario}: {refused} of {r["requests"]} answers were not 200: {r["codes"]}')
     wall = time.time() - t0
     g1, p1, l1 = gateway_cpu_s(), pg_cpu_s(), cpus_busy_s(args.load_cpus)
-    py1, dp1, ch1 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH)
+    py1, dp1, ch1, rd1 = python_cpu_s(), _dataplane_cpu_s(), pg_cpu_s(CH), pg_cpu_s(REDIS)
     time.sleep(2.5)  # a flush interval for the data plane's report, another for Python's write
     tx1 = store_tx()
     kept = runs_kept(runs_written() - w0, r['requests'])
@@ -580,6 +610,7 @@ def measure(block, scenario, c=32, secs=30, q=None, correction=False, warm=True,
            'mhz_gw': round(sum(f for f in freqs if f) / len(freqs)) if any(freqs) else None,
            'pkg_temp_c': pkg_temp(), 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), **kept,
            'py_cores': (py1 - py0) / wall, 'dp_cores': (dp1 - dp0) / wall, 'ch_cores': (ch1 - ch0) / wall,
+           'redis_cores': (rd1 - rd0) / wall,
            **(late_events() if _run_store else {}), **(extra or {})}
     record(row)
     log(f'{block} {row["build"]} w{row["workers"]} t{row["threads"]} {scenario} c={c} q={q} r{rnd}: '
@@ -919,6 +950,44 @@ def d4():
                 start(build, workers=n)
                 measure('d4', scenario, c=64, secs=30, rnd=r)
     floor('d4', 'end')
+
+
+# ---------------------------------------------------------------- rate limits (ADR 0032)
+
+def limit_builds():
+    """The l-blocks' builds, all counting in Redis: Python alone, the data plane in front, and each with the server-wide
+    limit too - two buckets a call - all with the metadata cache."""
+    head = args.head_label
+    return [head + '+redis+cache', head + '+dp+redis+cache', head + '+redis+cache+limit',
+            head + '+dp+redis+cache+limit']
+
+
+def l1():
+    """32 callers (as d1): a limited key's lookups through the data plane, against the same key on Python alone and
+    an unlimited key through the data plane - and with the server-wide limit as well. ADR 0032 is done when the limited
+    key still makes at least 3x Python's calls a second per gateway core."""
+    floor('l1', 'start')
+    head = args.head_label
+    cells = [(build, 'lookup_limited') for build in limit_builds()] + [(head + '+dp+redis+cache', 'lookup_plain')]
+    for r, order in rotations(cells, 5):
+        for build, scenario in order:
+            start(build)
+            measure('l1', scenario, c=32, secs=30, rnd=r)
+    floor('l1', 'end')
+
+
+def l2():
+    """One caller at a time, through the data plane: a limited key against an unlimited one, and with the server-wide
+    limit too - what each Redis round trip adds to a call."""
+    floor('l2', 'start')
+    head = args.head_label
+    cells = [(head + '+dp+redis+cache', 'lookup_plain'), (head + '+dp+redis+cache', 'lookup_limited'),
+             (head + '+dp+redis+cache+limit', 'lookup_limited')]
+    for r, order in rotations(cells, 5):
+        for build, scenario in order:
+            start(build)
+            measure('l2', scenario, c=1, secs=20, rnd=r)
+    floor('l2', 'end')
 
 
 # ---------------------------------------------------------------- the image (ADR 0030)
@@ -1408,7 +1477,7 @@ BLOCKS = {'setup': b_setup, 'teardown': b_teardown, 'env': b_env, 'pgbench': b_p
           'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b9': b9, 'b10': b10, 'b11': b11,
           'd1': d1, 'd2': d2, 'd3': d3, 'd4': d4,
           'r-setup': r_setup, 'r-teardown': r_teardown, 'r1': r1, 'r2': r2, 'r3': r3, 'r4': r4, 'r5': r5, 'r6': r6,
-          'r7': r7, 's1': s1, 's2': s2, 'p1': p1}
+          'r7': r7, 's1': s1, 's2': s2, 'p1': p1, 'l-setup': l_setup, 'l-teardown': l_teardown, 'l1': l1, 'l2': l2}
 ALL = ['env', 'pgbench', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9', 'b10', 'b11', 'env']
 
 
@@ -1462,11 +1531,18 @@ def main():
                                                                        'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}),
                              args.head_label + '+dp+cache+rs': (args.head, {'dataplane': True, 'run_store': True,
                                                                             'QUERYAPIGATE_METADATA_CACHE_TTL': '5'})})
+    # The l-blocks (ADR 0032): rate limits counted in Redis, by Python alone or by the data plane too
+    redis = {'QUERYAPIGATE_REDIS_URL': REDIS_URL, 'QUERYAPIGATE_METADATA_CACHE_TTL': '5'}
+    limit = {**redis, 'QUERYAPIGATE_RATE_LIMIT': NEVER_REFUSED}
+    DATAPLANE_BUILDS.update({args.head_label + '+redis+cache': (args.head, redis),
+                             args.head_label + '+dp+redis+cache': (args.head, {'dataplane': True, **redis}),
+                             args.head_label + '+redis+cache+limit': (args.head, limit),
+                             args.head_label + '+dp+redis+cache+limit': (args.head, {'dataplane': True, **limit})})
     names = [n for b in args.blocks for n in (ALL if b == 'all' else [b])]
     try:
         for name in names:
             log('=== block', name)
-            if name not in ('setup', 'teardown', 'r-setup', 'r-teardown'):
+            if name not in ('setup', 'teardown', 'r-setup', 'r-teardown', 'l-teardown'):
                 seed()
             BLOCKS[name]()
     finally:

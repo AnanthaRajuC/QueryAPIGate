@@ -105,6 +105,19 @@ def check_key_limit(flask_app, permission):
     return Verdict(allowed, count, remaining, retry_after)
 
 
+def note_refused(scope, client_ip, workspace, key, method, elapsed):
+    """429s the data plane answered itself (ADR 0032), one duration each: counted as check_client_limit() and
+    check_key_limit() count their own - the rejections and the alerts - and in the request counters, as the calls they
+    were. `scope` is 'client' (by `client_ip`, before the caller is known: no key label) or 'key'."""
+    if scope == 'client':
+        who, label = client_ip, '-'
+    else:
+        who, label = (workspace or 'default', key), key or '-'
+    metrics.inc_rate_limit_rejection(len(elapsed))
+    alerts.note_rate_limited(scope, who, len(elapsed))
+    metrics.observe_requests(method, 'api.run_named_query', '429', elapsed, label)
+
+
 def observe(method, endpoint, status, elapsed, key):
     """One finished call in /metrics' request counters and latency histograms. REST passes the HTTP method and its
     route's endpoint; MCP passes method 'MCP' and an 'mcp.*' endpoint, so the two can be told apart."""

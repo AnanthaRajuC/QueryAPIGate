@@ -3174,6 +3174,12 @@ traffic, and a p99 that stays in single milliseconds under load.
   and a 2-CPU pod without a run store recorded every one of 9.8 million runs
   ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)). Rate-limited keys
   next, then other formats and workspaces.
+- **Rate-limited keys** - [ADR 0032](documentation/adr/0032-dataplane-rate-limits.md), built (2026-11-01): with
+  Redis, the data plane counts a key's `rate_limit` and `QUERYAPIGATE_RATE_LIMIT` in Python's buckets, with Python's
+  script. The differential gate covers it against real Redis. Accepted on its measurement: per gateway core, a limited
+  key through the data plane served 4.4x Python's calls a second, and 5.0x with the server-wide limit too
+  ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-rate-limits-2026-11-01/README.md)).
+  Then `query_timeout` and `max_rows`, which keep no state.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
   `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400
@@ -3232,3 +3238,18 @@ which upstream's releases fix, so the ADR chose python-build-standalone.
 The image carries no `pip`, which cleared Trivy's eight findings in its vendored copies (five HIGH).
 
 **Left open (ADR 0031):** arm64's speed, unmeasured; Python 3.14.
+
+## 105. CI on Ubuntu 26.04
+
+**Status: open.** Found 2026-11-01, when GitHub moved `ubuntu-latest` from 24.04 to 26.04 between two runs of #141.
+Three jobs broke on it, and are pinned to `ubuntu-24.04` until they're fixed:
+
+- **Tests (PostgreSQL metadata store), Tests (oldest supported dependencies):** 26.04's `postgresql-client` is 18.
+  Its `pg_restore` sends `SET transaction_timeout`, which the PostgreSQL 16 service refuses, so
+  `test_pg_dump_drop_pg_restore` fails with "errors ignored on restore: 1". Either install the client that matches
+  the server, or test with a newer server as well.
+- **Helm chart on kind:** `kind load` (v0.33.0) fails to import the previous release's image
+  (`ghcr.io/anantharajuc/queryapigate:0.47.0`): `ctr images import --all-platforms` exits 1. Not yet diagnosed;
+  possibly the newer Docker's image store, which keeps only the pulled platform of a multi-platform image.
+
+The other jobs passed on 26.04 unchanged.

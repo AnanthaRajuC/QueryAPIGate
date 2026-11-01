@@ -178,7 +178,8 @@ class _CapturePeer:
     secret names the client's own socket address in X-QAG-Peer, and that address is taken as the real one - so this
     server sees the request as if the client had connected directly, ProxyFix and QUERYAPIGATE_TRUST_PROXY included.
     A peer that isn't an IP address counts as remote, as a Unix socket does. A data plane from another release
-    (X-QAG-Dataplane-Version) is still the data plane, but is given no plan (dataplane.paired()). Its headers are
+    (X-QAG-Dataplane-Version) is still the data plane, but is given no plan (dataplane.paired()). The rate-limit buckets
+    it counted a call in before forwarding it (X-QAG-Rate-Counted, ADR 0032) are taken from it alone. Its headers are
     removed here, so nothing after this layer reads, logs or passes on the secret."""
 
     def __init__(self, app):
@@ -189,10 +190,13 @@ class _CapturePeer:
         peer = environ.pop(dataplane.PEER_ENVIRON, None)
         wanted = environ.pop(dataplane.WANTED_ENVIRON, None)
         version = environ.pop(dataplane.VERSION_ENVIRON, None)
+        rate_counted = environ.pop(dataplane.COUNTED_ENVIRON, None)
         if supplied is not None and dataplane.matches(supplied):
             is_paired = dataplane.paired(version)
             environ['queryapigate.dataplane'] = 'plan' if wanted == '1' and is_paired else True
             environ['queryapigate.dataplane_paired'] = is_paired
+            if rate_counted is not None and is_paired:
+                environ['queryapigate.rate_counted'] = dataplane.counted(rate_counted)
             environ['REMOTE_ADDR'] = peer if dataplane.is_address(peer) else ''
         environ['queryapigate.peer_addr'] = environ.get('REMOTE_ADDR')
         return self.app(environ, start_response)
@@ -475,6 +479,10 @@ def check_rate_limit():
     """Count this request against its client's quota (governance.py); returns a 429 response when it is over."""
     if request.method == 'OPTIONS' or request.endpoint in RATE_LIMIT_EXEMPT:
         return None
+    counted = request.environ.get('queryapigate.rate_counted', {}).get('client')
+    if counted is not None and config.rate_limit() is not None:  # by the data plane, which then forwarded the call
+        g.rate_limit = counted
+        return None
     verdict = governance.check_client_limit(current_app, request.remote_addr)
     if verdict is None:
         return None
@@ -487,6 +495,10 @@ def check_key_rate_limit():
     the server-wide, IP-based limit, never instead of it. Runs after g.permission is resolved, since there is no
     per-key identity to limit by before then; a no-op for the admin key and the open/no-key case."""
     if request.method == 'OPTIONS' or request.endpoint in RATE_LIMIT_EXEMPT:
+        return None
+    counted = request.environ.get('queryapigate.rate_counted', {}).get('key')
+    if counted is not None and getattr(g.get('permission'), 'rate_limit', None) is not None:  # as the client's, above
+        g.key_rate_limit = counted
         return None
     verdict = governance.check_key_limit(current_app, g.get('permission'))
     if verdict is None:
@@ -1236,9 +1248,15 @@ def dataplane_runs():
 
     Each run comes with its history entry already JSON (`entry`), and the labels and timings /metrics counts it by: at
     the data plane's rates Python's own work per run - encoding it, and its labels - is what it can't keep up with, so
-    a batch is queued at once (history.record_reported()) and counted once per set of labels."""
+    a batch is queued at once (history.record_reported()) and counted once per set of labels.
+
+    `rate_limited`: the calls it refused itself with a 429 (ADR 0032) - by bucket, caller and method, one duration
+    each - counted as gate()'s own refusals are: in the rejections, the alerts and the request counters. Not runs."""
     report = request.get_json(silent=True) or {}
     runs = report.get('runs') or []
+    for refused in report.get('rate_limited') or []:
+        governance.note_refused(refused['scope'], refused.get('client'), refused.get('workspace'), refused.get('key'),
+                                refused['method'], refused['seconds'])
     broadcaster = current_app.extensions['queryapigate_broadcaster']
     with scope.using(scope.current()):  # resolved once, not by each of a busy batch's few thousand label lookups
         if report.get('recorded'):  # in the run store already: written by the data plane itself (ADR 0029 §4)

@@ -51,6 +51,27 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+
+- **The Rust data plane (experimental) serves rate-limited keys, and servers with `QUERYAPIGATE_RATE_LIMIT`, when
+  Redis is set** (ADR 0032). Before, it forwarded every call such a key made, and every call on such a server. It
+  counts them in Python's own buckets in Redis, with Python's script, so a key has one budget whichever process takes
+  its call. It counts a call only when it is going to serve it. A call it forwards after counting says so, and
+  Python doesn't count it again.
+  - **Its 429s are Python's,** body and headers alike. They count in `queryapigate_rate_limit_rejections_total`,
+    the request counters and the rate-limit alerts, as Python's own do.
+  - **Without Redis,** limited calls are still forwarded: each process would count its own budget.
+  - **If Redis fails,** it forwards limited calls for 5 seconds at a time, and Python counts them as it does now.
+  - **Its Redis user can be limited to counting:** `EVALSHA`, `SCRIPT LOAD` and the script's own commands, on
+    `qag:ratelimit:*` (guide 64).
+  - **Measured:** per gateway core, a limited key through the data plane served 4.4x Python's calls a second, and
+    5.0x with the server-wide limit too. Each limit counted adds a Redis round trip to the call, about 50 µs on
+    loopback (`benchmarks/results/dataplane-rate-limits-2026-11-01`).
+  - **The data plane gains a dependency, the `redis` crate.** Quotas and `max_concurrent` are still forwarded.
+- **CI:** the data plane's differential gate runs against real Redis. A rate-limited key, the server-wide limit (by
+  IPv4 and IPv6 address), one budget spent through both processes, a call forwarded after counting, and Redis cut
+  mid-sequence must each answer as Python alone does.
+
 ### Changed
 
 - **The Docker image runs Python 3.13 from python-build-standalone, not the official `python:3.12-slim` image's 3.12**

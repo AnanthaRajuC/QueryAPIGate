@@ -205,7 +205,9 @@ jobs:
     # beside the pydantic pip installs with it, psycopg2-binary 2.9.5 the first with wheels for Python 3.11.
     # tests/test_dependency_floors.py keeps these pins equal to pyproject.toml's minimums.
     name: Tests (oldest supported dependencies)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest (BACKLOG #105): on 26.04 the PostgreSQL client is 18, whose pg_restore sets
+    # transaction_timeout, which the PostgreSQL 16 server refuses
+    runs-on: ubuntu-24.04
     services:
       mongo:  # pymongo's floor, against a real server
         image: mongo:7.0  # not 8.0 for now: see the integration job
@@ -251,7 +253,9 @@ jobs:
     # The whole suite again, with the metadata store (connections, saved queries, keys, roles, history, audit
     # log) on PostgreSQL instead of SQLite - tests/__init__.py gives every test its own schema.
     name: Tests (PostgreSQL metadata store)
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest (BACKLOG #105): on 26.04 the PostgreSQL client is 18, whose pg_restore sets
+    # transaction_timeout, which the PostgreSQL 16 server refuses
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -286,7 +290,8 @@ jobs:
 
   dataplane:
     # The Rust data plane in front of /q/ (ADR 0028): its own checks, then its tests and the differential gate - the
-    # same calls sent to Python directly and through the data plane, compared whole, against real PostgreSQL and MySQL.
+    # same calls sent to Python directly and through the data plane, compared whole, against real PostgreSQL and MySQL,
+    # and for rate-limited keys against real Redis too (ADR 0032).
     name: Data plane (Rust, and the differential gate)
     runs-on: ubuntu-latest
     services:
@@ -315,8 +320,14 @@ jobs:
         options: >-
           --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
           --health-retries 20
+      redis:  # rate-limited keys (ADR 0032): the data plane counts them in Redis, in Python's buckets
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       QUERYAPIGATE_DATAPLANE_TEST_POSTGRES: 127.0.0.1:5432:postgres:pw:postgres
+      QUERYAPIGATE_DATAPLANE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
       QUERYAPIGATE_DATAPLANE_TEST_RUN_STORE_URL: http://default:pw@127.0.0.1:8123
       QUERYAPIGATE_DATAPLANE_TEST_MYSQL: 127.0.0.1:3306:root:pw:shop
       QUERYAPIGATE_DATAPLANE_TEST_STORE_URL: postgresql://postgres:pw@127.0.0.1:5432/postgres
@@ -519,7 +530,8 @@ jobs:
     # The chart on a real cluster: both shapes, and an upgrade from the previous release - its published chart once
     # there is one - to this commit's image while a pod keeps calling it. No request may fail.
     name: Helm chart on kind
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest (BACKLOG #105): on 26.04, kind can't import the previous release's image
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: kind, kubectl and Helm, checked against their checksums
