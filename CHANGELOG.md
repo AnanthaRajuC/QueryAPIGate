@@ -64,6 +64,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   - **If Redis fails,** it forwards limited calls for 5 seconds at a time, and Python counts them as it does now.
   - **Its Redis user can be limited to counting:** `EVALSHA`, `SCRIPT LOAD` and the script's own commands, on
     `qag:ratelimit:*` (guide 64).
+  - **Measured:** per gateway core, a limited key through the data plane served 4.4x Python's calls a second, and
+    5.0x with the server-wide limit too. Each limit counted adds a Redis round trip to the call, about 50 µs on
+    loopback (`benchmarks/results/dataplane-rate-limits-2026-11-01`).
   - **The data plane gains a dependency, the `redis` crate.** Quotas and `max_concurrent` are still forwarded.
 - **CI:** the data plane's differential gate runs against real Redis. A rate-limited key, the server-wide limit (by
   IPv4 and IPv6 address), one budget spent through both processes, a call forwarded after counting, and Redis cut

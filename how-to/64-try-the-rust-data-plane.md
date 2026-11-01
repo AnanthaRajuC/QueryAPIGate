@@ -50,6 +50,9 @@ Python's do.
   `ACL SETUSER dataplane on >secret ~qag:ratelimit:* +evalsha +script|load +time +hmget +hset +expire`, and `+select`
   if the URL names a database other than 0. Python's user needs more: it also keeps the response cache, quotas and
   concurrency slots there.
+- **Each limit counted is one Redis round trip a call:** about 50 µs on loopback, measured, plus the network's own
+  round trip to Redis. A limited key still served 4.4 times Python's calls a second per core
+  ([measured](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-rate-limits-2026-11-01/README.md)).
 
 ## 1. With the Helm chart
 

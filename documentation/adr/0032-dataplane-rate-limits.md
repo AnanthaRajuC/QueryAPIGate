@@ -1,6 +1,7 @@
 # ADR 0032: The data plane serves rate-limited keys, counting in Redis with Python
 
-- **Status:** Proposed (2026-10-31).
+- **Status:** Accepted (2026-11-01): section 8's items are met. Through the data plane, a limited key served 4.4x
+  Python's calls a second per gateway core, and 5.0x with the server-wide limit as well. First proposed 2026-10-31.
 - **Date:** 2026-10-31
 - **Backlog:** #102, *Next*: "Rate-limited keys next, then other formats and workspaces"
   ([ADR 0030](0030-shipping-the-data-plane.md), section 5's follow-up). It moves two rows out of
@@ -179,9 +180,7 @@ with its alert, as it does now. After a failure the data plane leaves Redis alon
 
 ### 8. Done when
 
-*Status (2026-11-01):* 1, 2, 4 and 5 are done (below). 3 waits on the benchmark laptop: `benchmarks/oltp.py` has
-`l-setup`, `l1` (calls a second per gateway core) and `l2` (one caller), with a limit that counts every call and
-refuses none.
+*Status (2026-11-01):* all five are done (below).
 
 It's Accepted when:
 
@@ -214,6 +213,16 @@ It's Accepted when:
      second reads.
    - During a Redis cut, Python's in-memory buckets start full: a key gets a fresh budget for the outage, as it
      always has.
+3. `benchmarks/oltp.py` blocks `l1` (32 callers) and `l2` (one caller), at `797b2a8`, with a limit that counts every
+   call and refuses none
+   ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-rate-limits-2026-11-01/README.md)).
+   Per gateway core, the limited key made 3,560 calls a second through the data plane against 809 on Python alone
+   (**4.4x**). With the server-wide limit too, it made 3,616 against 728 (**5.0x**). The unlimited key through the
+   data plane made 3,820, so counting costs at most 7% per core. The Redis round trip:
+   - at one caller, it adds 51 µs to a call's p50 (0.110 to 0.161 ms), and the second bucket 32 µs more;
+   - at 32 callers, calls a second drop 15% with one bucket and 29% with two, while the gateway's CPU drops too. The
+     calls wait on Redis's one thread, not on the gateway;
+   - Redis spends 17-25 µs of CPU per call on the script.
 4. `tests/test_dataplane.py`: a report's `rate_limited` moves the rejections, the request counters and the alert.
    The gate shows the data plane's 429s in Python's `/metrics` and in the `key_rate_limited` alert.
 5. The docs listed, and in `SECURITY.md` the ACL's one line (Consequences: the script's own commands need
@@ -229,8 +238,8 @@ It's Accepted when:
   `~qag:ratelimit:* +evalsha +script|load +time +hmget +hset +expire`, and `+select` for a database other than 0.
   Checked against Redis 7: the data plane served and refused on that user alone. `CLIENT SETINFO` on connecting is
   refused and ignored.
-- **Each served limited call costs one or two Redis round trips,** a few hundred microseconds on a local network.
-  That's measured (section 8), not assumed.
+- **Each served limited call costs one or two Redis round trips:** measured on loopback at about 50 µs for the first
+  and 32 µs for the second (section 8), plus the network's own round trip where Redis is on another host.
 - **One more header crosses from the data plane to Python** (`X-QAG-Rate-Counted`). It's trusted only with the secret
   that already guards the plan and the runs endpoint.
 - **Without Redis nothing changes:** limited calls are forwarded, as now.
@@ -254,7 +263,9 @@ It's Accepted when:
 
 ## Open questions
 
-- **Both buckets in one round trip** (above), if the measurement shows the second round trip matters.
+- **Both buckets in one round trip** (above). Measured (section 8): the second round trip costs 32 µs at one caller
+  and 16% of the calls a second at 32 callers, with the same calls a second per gateway core. It's a latency and
+  throughput cost, not a CPU one; whether that's worth a second script is still open.
 - **Redis Cluster.** Python's script touches one key per call, so it works on a cluster as it is. A combined script
   would need both keys in one hash slot.
 - **Should a failed Redis also stop Python's plans for limited keys?** That would spare the data plane its 5 s of

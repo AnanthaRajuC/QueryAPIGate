@@ -1,0 +1,49 @@
+12:36:25 === block l1
+12:36:35 l1 floor start: /health 2137 req/s, 70.0 C
+12:37:17 l1 dataplane-rate-limits+redis+cache w1 t8 lookup_limited c=32 q=None r0: 924 req/s p50 34.42 p99 40.26 ok 1.0000 gw 1.14 pg 0.10 store_tx 0.01 runs kept 100%
+12:37:59 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=32 q=None r0: 31020 req/s p50 0.94 p99 2.87 ok 1.0000 gw 5.98 pg 3.09 store_tx 0.00 runs kept 100%
+12:38:42 l1 dataplane-rate-limits+redis+cache+limit w1 t8 lookup_limited c=32 q=None r0: 839 req/s p50 37.91 p99 44.62 ok 1.0000 gw 1.15 pg 0.08 store_tx 0.01 runs kept 100%
+12:39:24 l1 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=32 q=None r0: 17913 req/s p50 1.72 p99 3.38 ok 1.0000 gw 4.89 pg 2.52 store_tx 0.00 runs kept 100%
+12:40:08 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=32 q=None r0: 26817 req/s p50 1.15 p99 2.23 ok 1.0000 gw 6.88 pg 3.34 store_tx 0.00 runs kept 68%
+12:40:51 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=32 q=None r1: 21678 req/s p50 1.39 p99 3.56 ok 1.0000 gw 6.09 pg 3.11 store_tx 0.00 runs kept 97%
+12:41:35 l1 dataplane-rate-limits+redis+cache+limit w1 t8 lookup_limited c=32 q=None r1: 843 req/s p50 37.75 p99 44.22 ok 1.0000 gw 1.15 pg 0.07 store_tx 0.01 runs kept 100%
+12:42:17 l1 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=32 q=None r1: 18257 req/s p50 1.70 p99 3.20 ok 1.0000 gw 5.05 pg 2.59 store_tx 0.00 runs kept 100%
+12:43:00 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=32 q=None r1: 25162 req/s p50 1.22 p99 2.57 ok 1.0000 gw 6.61 pg 3.47 store_tx 0.00 runs kept 100%
+12:43:43 l1 dataplane-rate-limits+redis+cache w1 t8 lookup_limited c=32 q=None r1: 924 req/s p50 34.37 p99 40.83 ok 1.0000 gw 1.14 pg 0.08 store_tx 0.01 runs kept 100%
+12:44:24 l1 dataplane-rate-limits+redis+cache+limit w1 t8 lookup_limited c=32 q=None r2: 831 req/s p50 38.23 p99 45.71 ok 1.0000 gw 1.15 pg 0.07 store_tx 0.01 runs kept 100%
+12:45:06 l1 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=32 q=None r2: 18127 req/s p50 1.71 p99 3.34 ok 1.0000 gw 4.99 pg 2.56 store_tx 0.00 runs kept 100%
+12:45:49 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=32 q=None r2: 25133 req/s p50 1.21 p99 2.61 ok 1.0000 gw 6.63 pg 3.46 store_tx 0.00 runs kept 100%
+12:46:32 l1 dataplane-rate-limits+redis+cache w1 t8 lookup_limited c=32 q=None r2: 922 req/s p50 34.48 p99 40.60 ok 1.0000 gw 1.14 pg 0.09 store_tx 0.01 runs kept 100%
+12:47:14 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=32 q=None r2: 21245 req/s p50 1.42 p99 3.63 ok 1.0000 gw 6.02 pg 3.14 store_tx 0.00 runs kept 100%
+12:47:57 l1 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=32 q=None r3: 18111 req/s p50 1.71 p99 3.32 ok 1.0000 gw 5.01 pg 2.55 store_tx 0.00 runs kept 100%
+12:48:41 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=32 q=None r3: 28121 req/s p50 1.10 p99 2.00 ok 1.0000 gw 7.09 pg 3.19 store_tx 0.00 runs kept 55%
+12:49:23 l1 dataplane-rate-limits+redis+cache w1 t8 lookup_limited c=32 q=None r3: 923 req/s p50 34.46 p99 39.95 ok 1.0000 gw 1.14 pg 0.09 store_tx 0.01 runs kept 100%
+12:50:05 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=32 q=None r3: 21955 req/s p50 1.38 p99 3.44 ok 1.0000 gw 6.13 pg 3.11 store_tx 0.00 runs kept 93%
+12:50:48 l1 dataplane-rate-limits+redis+cache+limit w1 t8 lookup_limited c=32 q=None r3: 840 req/s p50 37.88 p99 44.27 ok 1.0000 gw 1.15 pg 0.07 store_tx 0.01 runs kept 100%
+12:51:30 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=32 q=None r4: 25406 req/s p50 1.20 p99 2.56 ok 1.0000 gw 6.65 pg 3.45 store_tx 0.00 runs kept 95%
+12:52:12 l1 dataplane-rate-limits+redis+cache w1 t8 lookup_limited c=32 q=None r4: 918 req/s p50 34.62 p99 40.53 ok 1.0000 gw 1.14 pg 0.10 store_tx 0.01 runs kept 100%
+12:52:55 l1 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=32 q=None r4: 21551 req/s p50 1.40 p99 3.64 ok 1.0000 gw 6.07 pg 3.10 store_tx 0.00 runs kept 100%
+12:53:37 l1 dataplane-rate-limits+redis+cache+limit w1 t8 lookup_limited c=32 q=None r4: 834 req/s p50 38.12 p99 44.98 ok 1.0000 gw 1.15 pg 0.07 store_tx 0.01 runs kept 100%
+12:54:19 l1 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=32 q=None r4: 18122 req/s p50 1.72 p99 3.28 ok 1.0000 gw 5.02 pg 2.57 store_tx 0.00 runs kept 100%
+12:54:31 l1 floor end: /health 2107 req/s, 77.0 C
+12:54:31 === block l2
+12:54:42 l2 floor start: /health 2123 req/s, 85.0 C
+12:55:14 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=1 q=None r0: 8023 req/s p50 0.11 p99 0.28 ok 1.0000 gw 0.76 pg 0.55 store_tx 0.00 runs kept 100%
+12:55:46 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=1 q=None r0: 5820 req/s p50 0.16 p99 0.31 ok 1.0000 gw 0.67 pg 0.41 store_tx 0.00 runs kept 100%
+12:56:19 l2 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=1 q=None r0: 4856 req/s p50 0.19 p99 0.38 ok 1.0000 gw 0.61 pg 0.34 store_tx 0.00 runs kept 100%
+12:56:52 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=1 q=None r1: 5712 req/s p50 0.16 p99 0.37 ok 1.0000 gw 0.65 pg 0.41 store_tx 0.00 runs kept 100%
+12:57:25 l2 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=1 q=None r1: 4753 req/s p50 0.19 p99 0.42 ok 1.0000 gw 0.60 pg 0.35 store_tx 0.00 runs kept 100%
+12:57:58 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=1 q=None r1: 8490 req/s p50 0.11 p99 0.26 ok 1.0000 gw 0.80 pg 0.55 store_tx 0.00 runs kept 100%
+12:58:31 l2 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=1 q=None r2: 4839 req/s p50 0.19 p99 0.37 ok 1.0000 gw 0.60 pg 0.35 store_tx 0.00 runs kept 100%
+12:59:04 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=1 q=None r2: 8153 req/s p50 0.11 p99 0.27 ok 1.0000 gw 0.78 pg 0.56 store_tx 0.00 runs kept 100%
+12:59:37 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=1 q=None r2: 5757 req/s p50 0.16 p99 0.32 ok 1.0000 gw 0.66 pg 0.42 store_tx 0.00 runs kept 100%
+13:00:09 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=1 q=None r3: 7943 req/s p50 0.11 p99 0.23 ok 1.0000 gw 0.76 pg 0.57 store_tx 0.00 runs kept 100%
+13:00:42 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=1 q=None r3: 5693 req/s p50 0.16 p99 0.36 ok 1.0000 gw 0.65 pg 0.42 store_tx 0.00 runs kept 100%
+13:01:15 l2 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=1 q=None r3: 4836 req/s p50 0.19 p99 0.38 ok 1.0000 gw 0.61 pg 0.37 store_tx 0.01 runs kept 100%
+13:01:48 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_limited c=1 q=None r4: 5720 req/s p50 0.16 p99 0.34 ok 1.0000 gw 0.66 pg 0.41 store_tx 0.00 runs kept 100%
+13:02:21 l2 dataplane-rate-limits+dp+redis+cache+limit w2 t8 lookup_limited c=1 q=None r4: 4799 req/s p50 0.19 p99 0.41 ok 1.0000 gw 0.60 pg 0.34 store_tx 0.01 runs kept 100%
+13:02:54 l2 dataplane-rate-limits+dp+redis+cache w2 t8 lookup_plain c=1 q=None r4: 8132 req/s p50 0.11 p99 0.27 ok 1.0000 gw 0.77 pg 0.52 store_tx 0.00 runs kept 100%
+13:03:06 l2 floor end: /health 2321 req/s, 83.0 C
+13:03:06 done
+
+[exited with code 0]

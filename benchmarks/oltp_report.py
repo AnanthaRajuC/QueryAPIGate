@@ -307,5 +307,34 @@ def dataplane_tables(db_cores, keyed):
 
 dataplane_tables('pg_cores', False)
 
+
+def limit_tables():
+    """The l-blocks (ADR 0032): rate limits counted in Redis. Each data-plane cell against Python alone with the same
+    limits, per gateway core; Redis runs on the database's cores, so its CPU is shown beside, per call."""
+    for block in sorted({r['block'] for r in rows if str(r.get('block', '')).startswith('l') and r.get('build')}):
+        cells = collections.defaultdict(list)
+        for r in sel(block=block):
+            if r.get('build') and r.get('scenario') != 'health_floor':
+                cells[(r['scenario'], r['c'], r['build'])].append(r)
+        emit('', f'## {block}: rate limits counted in Redis', '')
+        table('| scenario | c | build | n | req/s | p50 ms | p99 ms | gateway cores | Python cores | '
+              'data plane cores | Redis cores | Redis CPU µs per call | req/s per gateway core | MHz | '
+              'runs kept, lowest | per core vs Python, same limits |')
+        per_core = {k: stat([r['rps'] / r['gw_cores'] for r in v if r.get('gw_cores')]) for k, v in cells.items()}
+        for k in sorted(cells, key=lambda k: (k[1], '+dp' in k[2], k[2], k[0])):
+            sc, c, build = k
+            rs = cells[k]
+            python = per_core.get((sc, c, build.replace('+dp', '')))
+            kept = [r['runs_written_share'] for r in rs if r.get('runs_written_share') is not None]
+            redis_us = stat([r['redis_cores'] / r['rps'] * 1e6 for r in rs if r.get('redis_cores') is not None])
+            multiple = f'{per_core[k][0] / python[0]:.1f}x' if python and '+dp' in build else ''
+            emit(f"| {sc} | {c} | {build} | {len(rs)} | {fmt(stat([r['rps'] for r in rs]))} | {col(rs, 'p50', 3)} | "
+                 f"{col(rs, 'p99', 2)} | {med(rs, 'gw_cores')} | {med(rs, 'py_cores')} | {med(rs, 'dp_cores')} | "
+                 f"{med(rs, 'redis_cores', 3)} | {fmt(redis_us, 1)} | {fmt(per_core[k])} | {med(rs, 'mhz_gw', 0)} | "
+                 f"{f'{min(kept) * 100:.0f}%' if kept else '-'} | {multiple} |")
+
+
+limit_tables()
+
 SRC.with_suffix('.md').write_text('\n'.join(out) + '\n')
 print('\n'.join(out))
