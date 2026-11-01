@@ -127,11 +127,25 @@ class WhoGetsAPlanTests(PlanTestCase):
 
     def test_never_for_the_limits_that_keep_their_own_state_with_redis_or_without(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_REDIS_URL': 'redis://127.0.0.1:1/0'}):
-            for name, grants in (('quota', {'quota': {'calls': 100, 'per': 'day'}}), ('slots', {'max_concurrent': 2}),
-                                 ('timeout', {'query_timeout': 5}), ('rows', {'max_rows': 10})):
+            for name, grants in (('quota', {'quota': {'calls': 100, 'per': 'day'}}), ('slots', {'max_concurrent': 2})):
                 with self.subTest(name):
                     key = apikeys.create_key(name, connections=['pg'], **grants)
                     self.assertIsNone(self.call('/q/by_id?id=1', key)[1])
+
+    def test_a_key_s_own_time_and_row_limits_travel_in_its_plan(self):
+        # They keep no state: the data plane applies each as limits.py does. A whole-number timeout stays an int,
+        # as Python's min() keeps it (its 504 says 5, not 5.0)
+        for name, grants, expected in (('timeout', {'query_timeout': 5}, (5, None)),
+                                       ('fraction', {'query_timeout': 0.5}, (0.5, None)),
+                                       ('rows', {'max_rows': 10}, (None, 10)),
+                                       ('both', {'query_timeout': 2, 'max_rows': 3}, (2, 3))):
+            with self.subTest(name):
+                key = apikeys.create_key(name, connections=['pg'], **grants)
+                plan = self.call('/q/by_id?id=1', key)[1]
+                self.assertEqual((plan['query_timeout'], plan['max_rows']), expected)
+                self.assertIs(type(plan['query_timeout']), type(expected[0]))
+        plain = self.call('/q/by_id?id=1', self.plain)[1]
+        self.assertEqual((plain['query_timeout'], plain['max_rows']), (None, None))
 
     def test_never_on_a_connection_the_prototype_does_not_serve(self):
         self.assertIsNone(self.call('/q/lite_by_id?id=1', self.plain)[1])

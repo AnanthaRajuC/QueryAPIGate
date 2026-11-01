@@ -4,9 +4,9 @@ fails it, a refusal included.
 
 One gunicorn serves both: the direct call and the call the data plane forwards or serves meet the same store, the
 same caches and the same databases, so the only thing that can differ is the data plane. Keys of every kind (plain,
-masked, table-restricted, both, by name, IP-restricted, rotated, expired) call saved queries shaped like the
-benchmarks' and many others, with valid, invalid and hostile parameters, paging and timeouts; partway through, grants
-change, a key is revoked and a query gets a new version.
+masked, table-restricted, both, by name, IP-restricted, rotated, expired, with their own row and time limits) call
+saved queries shaped like the benchmarks' and many others, with valid, invalid and hostile parameters, paging and
+timeouts; partway through, grants and limits change, a key is revoked and a query gets a new version.
 
 The proxied run does it all again behind two trusted proxies (QUERYAPIGATE_TRUST_PROXY=2) with HSTS on, each call with
 X-Forwarded-For and X-Forwarded-Proto of every shape - plain, IPv6, quoted, empty items, ports, too few values - so
@@ -193,6 +193,9 @@ KEYS = {  # name -> grants
     'expired': {'connections': ['shop'], 'expires_at': '2020-01-01'},
     'rotated': {'connections': ['shop']},
     'v6': {'connections': ['shop'], 'allowed_ips': ['2001:db8::/32']},
+    # a key's own limits (ADR 0011): served with the plan's, the rows changed partway through
+    'capped': {'connections': ['shop'], 'max_rows': 3},
+    'timed': {'connections': ['shop'], 'query_timeout': 2},
 }
 # Behind two proxies the client is the second value from the right: plainly written ones, mostly, and every shape
 # Python could read some other way (the data plane forwards those)
@@ -292,7 +295,7 @@ class DifferentialTests(unittest.TestCase):
             args.append(('format', rng.choice(['csv', 'JSON', 'json', 'xml'])))
         if rng.random() < 0.05:
             args.append(('timeout', rng.choice(['5', '0.5', 'x', '-1'])))
-        key = rng.choices(list(KEYS) + ['wrong'], weights=[30, 20, 15, 10, 8, 4, 2, 2, 5, 3, 2])[0]
+        key = rng.choices(list(KEYS) + ['wrong'], weights=[30, 20, 15, 10, 8, 4, 2, 2, 5, 3, 8, 6, 2])[0]
         secret = self.secrets.get(key, 'not-a-key')
         headers = {'X-API-Key': secret, **(self.forwarding(rng) if self.proxied else {})}
         if rng.random() < 0.04:
@@ -330,7 +333,7 @@ class DifferentialTests(unittest.TestCase):
     def mutate(self, step):
         """Partway through: change what calls see - each seen by both at once, or, with the metadata cache on, once
         its TTL has passed: the data plane is another instance, which metacache.py lets see a change that much later."""
-        if step in (CALLS // 4, CALLS // 2, 2 * CALLS // 3, 3 * CALLS // 4):
+        if step in (CALLS // 4, CALLS // 3, CALLS // 2, 2 * CALLS // 3, 3 * CALLS // 4):
             self.change(step)
             time.sleep(float(os.environ.get('QUERYAPIGATE_METADATA_CACHE_TTL') or 0))
 
@@ -338,6 +341,8 @@ class DifferentialTests(unittest.TestCase):
         if step == CALLS // 4:
             self.api('PATCH', '/api/v1/api-keys/masked', {'mask': [{'column': 'customer.email', 'action': 'null'},
                                                                    {'column': 'customer.last', 'action': 'mask'}]})
+        elif step == CALLS // 3:
+            self.api('PATCH', '/api/v1/api-keys/capped', {'max_rows': 7})
         elif step == CALLS // 2:
             self.api('PATCH', '/api/v1/api-keys/restricted', {'allowed_tables': ['customer']})
         elif step == 2 * CALLS // 3:

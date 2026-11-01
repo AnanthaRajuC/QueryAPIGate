@@ -125,7 +125,10 @@ Each of these matches what Python does today, and the differential test checks e
    filled in as a quoted literal client-side, as psycopg2 and mysql-connector do for the runner's `%s` markers. Also
    ADR 0027's prefix and read-only mode, the effective timeout (`?timeout`
    may lower the server's, never raise it), and paging: `page`, `page_size`, `QUERYAPIGATE_MAX_PAGE_SIZE` and the
-   caller's `max_rows`.
+   caller's `max_rows`. *As built, until 2026-11-01:* a key with its own `query_timeout` or `max_rows` (ADR 0011) was
+   forwarded. *Since then (0.48):* the plan carries both, and the data plane applies them as `limits.timeout()` and
+   `limits.rows()` do: the smaller time limit, an int if the key's is, and pages cut to the key's rows once
+   `page_size` is within the server's. A quota and `max_concurrent`, which keep state, are still forwarded.
 6. **Masking**, applied by column position from the plan: `hash` with the same key and output, plus `mask`, `null`
    and `drop`.
 7. **The response:** byte-identical JSON for every column type both drivers return (numbers and decimals, dates and

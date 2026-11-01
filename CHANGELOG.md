@@ -68,6 +68,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
     5.0x with the server-wide limit too. Each limit counted adds a Redis round trip to the call, about 50 µs on
     loopback (`benchmarks/results/dataplane-rate-limits-2026-11-01`).
   - **The data plane gains a dependency, the `redis` crate.** Quotas and `max_concurrent` are still forwarded.
+- **The Rust data plane (experimental) serves keys with their own `query_timeout` and `max_rows`.** Before, it forwarded
+  every call such a key made. It applies them as Python does: the smaller of `?timeout=`, the server's limit and the
+  key's, and pages cut to the key's `max_rows` once `page_size` is within the server's. A 504 says the time limit as
+  Python does, `5` for a key's whole-number limit. The differential gate covers both, with a key's `max_rows` changed
+  partway through.
 - **CI:** the data plane's differential gate runs against real Redis. A rate-limited key, the server-wide limit (by
   IPv4 and IPv6 address), one budget spent through both processes, a call forwarded after counting, and Redis cut
   mid-sequence must each answer as Python alone does.

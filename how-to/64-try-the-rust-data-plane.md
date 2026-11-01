@@ -18,8 +18,9 @@ cryptography isn't a validated module.
 when all of these hold, and forwards it to Python, unchanged, when any doesn't:
 
 - a `GET` or `POST` to `/q/<name>`, answered as JSON (no `?format=`, no streaming);
-- with a **scoped API key** in the `default` workspace, with no quota, concurrency, time or row limit of its own, and a
-  rate limit only with Redis (below). Administrators, signed-in users, MCP and other workspaces always go to Python;
+- with a **scoped API key** in the `default` workspace, with no quota or `max_concurrent` of its own, and a rate limit
+  only with Redis (below). Its own `query_timeout` and `max_rows` are applied as Python applies them. Administrators,
+  signed-in users, MCP and other workspaces always go to Python;
 - on a **PostgreSQL or MySQL** connection, for a read-only saved query with bound parameters (no `{name}` text
   placeholders, no `embed` parameters, no response cache of its own);
 - behind trusted proxies (`QUERYAPIGATE_TRUST_PROXY`), with `X-Forwarded-For` and `X-Forwarded-Proto` it reads exactly
