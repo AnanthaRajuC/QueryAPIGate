@@ -3179,7 +3179,9 @@ traffic, and a p99 that stays in single milliseconds under load.
   script. The differential gate covers it against real Redis. Accepted on its measurement: per gateway core, a limited
   key through the data plane served 4.4x Python's calls a second, and 5.0x with the server-wide limit too
   ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-rate-limits-2026-11-01/README.md)).
-  Then `query_timeout` and `max_rows`, which keep no state.
+- **A key's own `query_timeout` and `max_rows`** - built (2026-11-01, for 0.48): they keep no state, so the plan
+  carries both and the data plane applies them as `limits.py` does. Quotas and `max_concurrent` are still forwarded.
+  Then other formats and workspaces.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
   `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400

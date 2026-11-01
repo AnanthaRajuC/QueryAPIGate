@@ -152,15 +152,15 @@ pub fn too_many(
 }
 
 /// runners._timed_out(), as handle_api_error() answers it: error_body()'s keys in its order.
-pub fn timed_out(timeout: f64, request_id: &str) -> (Response<Body>, String) {
+pub fn timed_out(timeout: pyfmt::Seconds, request_id: &str) -> (Response<Body>, String) {
     let message = format!(
         "The query exceeded the time limit of {} seconds and was cancelled",
-        pyfmt::general(timeout)
+        pyfmt::general(timeout.value)
     );
     let mut body = String::from("{\"error\":");
     json_string(&message, &mut body);
     body.push_str(",\"code\":\"query_timeout\",\"timeout\":");
-    body.push_str(&pyfmt::repr(timeout));
+    body.push_str(&timeout.repr());
     body.push_str(",\"request_id\":");
     json_string(request_id, &mut body);
     body.push_str("}\n");
@@ -192,16 +192,21 @@ mod tests {
 
     #[test]
     fn a_timeout_as_python_answers_it() {
-        let (response, _) = timed_out(0.5, "rid");
+        let (response, _) = timed_out(pyfmt::Seconds::float(0.5), "rid");
         assert_eq!(response.status(), 504);
         // jsonify(error_body('The query exceeded ...', 504, {'timeout': 0.5}, 'query_timeout')) in Python
         let python = "{\"error\":\"The query exceeded the time limit of 0.5 seconds and was cancelled\",\
                       \"code\":\"query_timeout\",\"timeout\":0.5,\"request_id\":\"rid\"}\n";
         let body = futures_body(response);
         assert_eq!(body, python);
-        let (thirty, _) = timed_out(30.0, "rid");
+        let (thirty, _) = timed_out(pyfmt::Seconds::float(30.0), "rid");
         assert!(futures_body(thirty).contains(
             "limit of 30 seconds and was cancelled\",\"code\":\"query_timeout\",\"timeout\":30.0,"
+        ));
+        // A key's own whole-number query_timeout, an int in Python
+        let whole = pyfmt::Seconds::from_json(&serde_json::Number::from(2)).unwrap();
+        assert!(futures_body(timed_out(whole, "rid").0).contains(
+            "limit of 2 seconds and was cancelled\",\"code\":\"query_timeout\",\"timeout\":2,"
         ));
     }
 

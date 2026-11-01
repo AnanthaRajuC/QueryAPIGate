@@ -87,13 +87,14 @@ def is_address(peer):
 
 def eligible_caller(permission):
     """A caller the data plane may serve: a scoped API key - not an administrator, a signed-in user or an open server -
-    in the default workspace, with none of ADR 0011's limits but a rate limit, and that only when Redis holds its
-    bucket, where the data plane counts it too (ADR 0032). Without Redis each process would count its own budget."""
+    in the default workspace, without the limits that keep state: no quota or max_concurrent, and a rate limit only
+    when Redis holds its bucket, where the data plane counts it too (ADR 0032). Without Redis each process would count
+    its own budget. A query_timeout and max_rows keep none: the plan carries them, and the data plane applies each as
+    limits.py does."""
     return (permission is not None and not permission.admin and permission.claims is None and permission.role is None
             and not permission.claim_binding and permission.workspace == 'default'
             and (permission.rate_limit is None or config.redis_url() is not None)
-            and permission.quota is None and permission.max_concurrent is None
-            and permission.query_timeout is None and permission.max_rows is None)
+            and permission.quota is None and permission.max_concurrent is None)
 
 
 def counted(value):
@@ -187,6 +188,9 @@ def build(record, permission, query_name, number, saved, connection_name, result
     return {'v': VERSION, 'rows': rows, 'key': {'workspace': permission.workspace, 'name': permission.name},
             # (count, period in seconds): counted by the data plane in Redis, in the bucket Python counts it in
             'rate_limit': list(permission.rate_limit) if permission.rate_limit else None,
+            # the key's own limits (ADR 0011), applied as limits.timeout() and limits.rows() apply them; an int
+            # query_timeout stays one, as min() keeps it
+            'query_timeout': permission.query_timeout, 'max_rows': permission.max_rows,
             'query': {'name': query_name, 'version': number}, 'connection': {'name': connection_name,
             'dialect': dialect}, 'statement': sent, 'search_path': prepared['search_path'], 'mask': mask,
             'expires_in': expires_in,

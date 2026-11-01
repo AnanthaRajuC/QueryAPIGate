@@ -64,7 +64,10 @@ class ServingTests(unittest.TestCase):
         cls.keys = {}
         for name, grants in (('plain', {}), ('masked', {'mask': [{'column': 'dp_customers.email', 'action': 'hash'},
                                                                  {'column': 'dp_customers.name', 'action': 'mask'}]}),
-                             ('restricted', {'allowed_tables': ['dp_customers']}), ('doomed', {})):
+                             ('restricted', {'allowed_tables': ['dp_customers']}), ('doomed', {}),
+                             # a key's own limits (ADR 0011): pages of 4 rows; 1 second, an int; 0.4 seconds
+                             ('capped', {'max_rows': 4}), ('timed', {'query_timeout': 1}),
+                             ('quick', {'query_timeout': 0.4})):
             status, _h, body = request(*cls.python, 'POST', '/api/v1/api-keys', admin,
                                        {'name': name, 'connections': ['shop'], **grants})
             assert status == 201, body
@@ -118,6 +121,23 @@ class ServingTests(unittest.TestCase):
         # A plan comes from a call that succeeds: a quick one first, then the same query, too slow
         status, _body = self.assertServedAsPython('/q/sleepy?s=2&timeout=0.3', self.keys['plain'], warm='/q/sleepy?s=0')
         self.assertEqual(status, 504)
+
+    def test_a_key_s_own_max_rows_pages_as_python_pages(self):
+        # page_size is checked against the server's first, then cut to the key's 4 - and the offset follows it
+        for path in ('/q/everyone', '/q/everyone?page_size=10', '/q/everyone?page=3&page_size=10',
+                     '/q/everyone?page=7', '/q/everyone?page=8', '/q/everyone?page_size=2&page=2'):
+            with self.subTest(path=path):
+                _status, body = self.assertServedAsPython(path, self.keys['capped'])
+                self.assertLessEqual(len(json.loads(body)), 4)
+
+    def test_a_key_s_own_time_limit_ends_in_python_s_504(self):
+        # The smaller of ?timeout= and the key's own: a whole-number one is an int in Python's body, and in ours
+        for path, key, limit in (('/q/sleepy?s=2', 'timed', '1'), ('/q/sleepy?s=2&timeout=5', 'timed', '1'),
+                                 ('/q/sleepy?s=2&timeout=0.3', 'timed', '0.3'), ('/q/sleepy?s=2', 'quick', '0.4')):
+            with self.subTest(path=path, key=key):
+                status, body = self.assertServedAsPython(path, self.keys[key], warm='/q/sleepy?s=0')
+                self.assertEqual(status, 504)
+                self.assertIn(f'"timeout":{limit},', body.decode())
 
     def test_one_call_s_own_values_leave_the_plan_as_it_was(self):
         """A value the data plane can't send as the driver does (a NUL) forwards that call alone: the next ordinary

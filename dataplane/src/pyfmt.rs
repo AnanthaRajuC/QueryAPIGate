@@ -77,6 +77,60 @@ pub fn general(value: f64) -> String {
     }
 }
 
+/// A time limit in seconds as Python holds it: a float, as the server's and `?timeout=` are, or an int - a key's own
+/// whole-number `query_timeout` (ADR 0011), which `min()` hands back as it is. Python writes the two differently,
+/// `5` and `5.0`, in a 504's body and in the log.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seconds {
+    pub value: f64,
+    pub whole: bool,
+}
+
+impl Seconds {
+    pub fn float(value: f64) -> Self {
+        Seconds {
+            value,
+            whole: false,
+        }
+    }
+
+    /// A key's `query_timeout` as the plan carries it: an int stays one
+    pub fn from_json(number: &serde_json::Number) -> Option<Self> {
+        let value = number.as_f64().filter(|v| v.is_finite() && *v > 0.0)?;
+        Some(Seconds {
+            value,
+            whole: number.is_i64() || number.is_u64(),
+        })
+    }
+
+    /// `min(self, other)` as Python's: `self` unless `other` is smaller
+    pub fn min(self, other: Self) -> Self {
+        if other.value < self.value {
+            other
+        } else {
+            self
+        }
+    }
+
+    /// `repr()` of it
+    pub fn repr(self) -> String {
+        if self.whole {
+            format!("{}", self.value as i64)
+        } else {
+            repr(self.value)
+        }
+    }
+
+    /// `json.dumps()` of it
+    pub fn json(self) -> serde_json::Value {
+        if self.whole {
+            serde_json::json!(self.value as i64)
+        } else {
+            serde_json::json!(self.value)
+        }
+    }
+}
+
 /// `json.dumps(value)` as Python writes it - `", "` and `": "`, ASCII only, floats as `repr()` - for a run's history
 /// entry, which Python stores as this text (ADR 0028).
 pub fn dumps(value: &serde_json::Value) -> String {
@@ -174,6 +228,25 @@ mod tests {
             (12.3456789, "12.3457"),
         ] {
             assert_eq!(general(value), python, "{value}");
+        }
+    }
+
+    #[test]
+    fn a_key_s_whole_timeout_stays_whole_as_python_s_min_keeps_it() {
+        let number = |text: &str| serde_json::from_str::<serde_json::Number>(text).unwrap();
+        let five = Seconds::from_json(&number("5")).unwrap();
+        let thirty = Seconds::float(30.0);
+        // min(30.0, 5) is 5 and min(5.0, 5) is 5.0 in Python: the first unless the second is smaller
+        assert_eq!(thirty.min(five).repr(), "5");
+        assert_eq!(thirty.min(five).json().to_string(), "5");
+        assert_eq!(Seconds::float(5.0).min(five).repr(), "5.0");
+        assert_eq!(Seconds::float(0.3).min(five).repr(), "0.3");
+        let quarter = Seconds::from_json(&number("0.25")).unwrap();
+        assert_eq!(thirty.min(quarter).repr(), "0.25");
+        assert_eq!(thirty.min(quarter).json().to_string(), "0.25");
+        assert_eq!(Seconds::float(30.0).json().to_string(), "30.0");
+        for refused in ["0", "-1", "0.0"] {
+            assert_eq!(Seconds::from_json(&number(refused)), None, "{refused}");
         }
     }
 }

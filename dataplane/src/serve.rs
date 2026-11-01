@@ -41,6 +41,7 @@ use crate::forward::{self, Body, Forwarder, PLAN_HEADER};
 use crate::log::{self, Logger};
 use crate::params::{self, Supplied};
 use crate::proxy;
+use crate::pyfmt;
 use crate::ratelimit::{self, Limit, Limiter};
 use crate::render::{self, Action};
 use crate::respond;
@@ -275,6 +276,12 @@ struct Plan {
     /// The key's own rate limit, `[count, period]`: counted here, in Redis
     #[serde(default)]
     rate_limit: Option<(u64, u64)>,
+    /// The key's own time limit in seconds (ADR 0011), an int or a float as Python holds it
+    #[serde(default)]
+    query_timeout: Option<serde_json::Number>,
+    /// The key's own row limit (ADR 0011): pages of that size, if smaller
+    #[serde(default)]
+    max_rows: Option<i64>,
 }
 
 struct Ready {
@@ -283,6 +290,7 @@ struct Ready {
     actions: Option<Vec<Option<Action>>>,
     used: BTreeSet<String>,
     rate_limit: Option<Limit>,
+    query_timeout: Option<pyfmt::Seconds>,
 }
 
 enum Held {
@@ -545,6 +553,16 @@ impl App {
                 None => return false,
             },
         };
+        let query_timeout = match &plan.query_timeout {
+            None => None,
+            Some(number) => match pyfmt::Seconds::from_json(number) {
+                Some(seconds) => Some(seconds),
+                None => return false,
+            },
+        };
+        if plan.max_rows.is_some_and(|rows| rows < 1) {
+            return false;
+        }
         let used = plan.used.iter().cloned().collect();
         let ready = Arc::new(Ready {
             plan,
@@ -552,6 +570,7 @@ impl App {
             actions,
             used,
             rate_limit,
+            query_timeout,
         });
         let mut plans = self.plans.lock().expect("plans");
         if plans.len() >= MAX_PLANS {
@@ -790,12 +809,24 @@ impl App {
             (None, server) => server,
             (Some(asked), None) => Some(asked),
             (Some(asked), Some(server)) => Some(asked.min(server)),
+        }
+        .map(pyfmt::Seconds::float);
+        // The key's own time limit, within that (limits.timeout()): min(requested, own), an int if the key's is
+        let timeout = match (timeout, ready.query_timeout) {
+            (timeout, None) => timeout,
+            (None, own) => own,
+            (Some(asked), Some(own)) => Some(asked.min(own)),
+        };
+        // The key's own max_rows (limits.rows()), once page_size is within the server's: pages of that size
+        let page_size = match plan.max_rows {
+            Some(own) => request.page_size.min(own),
+            None => request.page_size,
         };
         // Python's offset is unbounded, and the database refuses one this large: forward it, and Python answers
-        let Some(offset) = (request.page - 1).checked_mul(request.page_size) else {
+        let Some(offset) = (request.page - 1).checked_mul(page_size) else {
             return Forward(None);
         };
-        let limit = request.page_size;
+        let limit = page_size;
         let request_id = respond::request_id(request.request_id.as_deref());
 
         // The rate limits, now that nothing before the query forwards the call: the client's, then the key's, as
@@ -875,7 +906,7 @@ impl App {
             &values,
             limit,
             offset,
-            timeout,
+            timeout.map(|t| t.value),
             plan.search_path.as_deref(),
         )
         .await;
@@ -903,7 +934,7 @@ impl App {
         let output = match output {
             Ok(output) => output,
             Err(Failure::Timeout) => {
-                let limit_seconds = timeout.unwrap_or(0.0);
+                let limit_seconds = timeout.unwrap_or(pyfmt::Seconds::float(0.0));
                 let (response, message) = respond::timed_out(limit_seconds, &request_id);
                 let response =
                     respond::rate_limits(respond::hsts(response, hsts), counted.headers());
@@ -948,14 +979,7 @@ impl App {
             return counted.forward();
         };
         let serialization_seconds = serialize_started.elapsed().as_secs_f64();
-        let response = respond::page(
-            body,
-            request.page,
-            request.page_size,
-            rows,
-            has_more,
-            &request_id,
-        );
+        let response = respond::page(body, request.page, page_size, rows, has_more, &request_id);
         let response = respond::rate_limits(respond::hsts(response, hsts), counted.headers());
         let mut fields = json!({
             "status": "success", "rows": rows, "duration_ms": (query_seconds * 1000.0).round() as i64,
@@ -993,11 +1017,11 @@ impl App {
         dialect: &str,
         limit: i64,
         offset: i64,
-        timeout: Option<f64>,
+        timeout: Option<pyfmt::Seconds>,
         sql: &str,
     ) {
         let timeout_text = timeout
-            .map(crate::pyfmt::repr)
+            .map(pyfmt::Seconds::repr)
             .unwrap_or_else(|| "None".into());
         let logged = self.logged_sql(sql);
         let mut extra = Map::new();
@@ -1007,7 +1031,7 @@ impl App {
         extra.insert("offset".into(), json!(offset));
         extra.insert(
             "timeout".into(),
-            timeout.map(|t| json!(t)).unwrap_or(Json::Null),
+            timeout.map(pyfmt::Seconds::json).unwrap_or(Json::Null),
         );
         extra.insert("sql_hash".into(), json!(sql_hash(sql)));
         self.logger.line("INFO", rid, key, &format!(
@@ -1071,7 +1095,7 @@ impl App {
         // The entry as Python stores it (json.dumps), and what /metrics counts the run by: Python only queues it
         let field = |name: &str| entry.get(name).cloned().unwrap_or(Json::Null);
         let run = json!({
-            "query": plan.query.name, "version": plan.query.version, "entry": crate::pyfmt::dumps(&entry),
+            "query": plan.query.name, "version": plan.query.version, "entry": pyfmt::dumps(&entry),
             "executed_at": field("executed_at"), "status": field("status"), "key": field("key_name"),
             "connection": field("connection_name"), "transport": field("transport"), "rows": field("rows"),
             "dialect": dialect, "method": parts.method.as_str(), "http_status": status, "seconds": seconds,
