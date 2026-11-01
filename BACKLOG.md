@@ -3238,3 +3238,18 @@ which upstream's releases fix, so the ADR chose python-build-standalone.
 The image carries no `pip`, which cleared Trivy's eight findings in its vendored copies (five HIGH).
 
 **Left open (ADR 0031):** arm64's speed, unmeasured; Python 3.14.
+
+## 105. CI on Ubuntu 26.04
+
+**Status: open.** Found 2026-11-01, when GitHub moved `ubuntu-latest` from 24.04 to 26.04 between two runs of #141.
+Three jobs broke on it, and are pinned to `ubuntu-24.04` until they're fixed:
+
+- **Tests (PostgreSQL metadata store), Tests (oldest supported dependencies):** 26.04's `postgresql-client` is 18.
+  Its `pg_restore` sends `SET transaction_timeout`, which the PostgreSQL 16 service refuses, so
+  `test_pg_dump_drop_pg_restore` fails with "errors ignored on restore: 1". Either install the client that matches
+  the server, or test with a newer server as well.
+- **Helm chart on kind:** `kind load` (v0.33.0) fails to import the previous release's image
+  (`ghcr.io/anantharajuc/queryapigate:0.47.0`): `ctr images import --all-platforms` exits 1. Not yet diagnosed;
+  possibly the newer Docker's image store, which keeps only the pulled platform of a multi-platform image.
+
+The other jobs passed on 26.04 unchanged.
