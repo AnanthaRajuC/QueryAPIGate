@@ -45,8 +45,8 @@ RUN target="$(cat /target)" \
 # optimized (PGO, LTO, BOLT), which runs 27-30% faster than the official python image's build of the same Python.
 # uv installs it and checks the download's hash, and each uv release resolves "3.13" to one exact patch release - so
 # pinning uv by digest pins Python, and Dependabot's bump of uv brings Python's next patch release. Only the
-# installation is carried over, without what the image never runs: its own pip (the virtualenv below gets one from
-# ensurepip), Tk and Tcl with tkinter, IDLE and turtledemo, and libpython3.13.so, which the statically linked
+# installation is carried over, without what the image never runs: its own pip (ensurepip's wheel stays, for the
+# install below), Tk and Tcl with tkinter, IDLE and turtledemo, and libpython3.13.so, which the statically linked
 # interpreter doesn't load.
 FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 AS python
@@ -66,9 +66,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates netbase tzdata \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python /opt/python /opt/python
-# The packages go in a virtualenv, first on PATH, so pip, python and gunicorn below are its. It belongs to root and is
+# The packages go in a virtualenv, first on PATH, so python and gunicorn below are its. It belongs to root and is
 # only read at runtime (a read-only root filesystem still works).
-RUN /opt/python/bin/python3 -m venv /opt/venv
+RUN /opt/python/bin/python3 -m venv --without-pip /opt/venv
 ENV PATH=/opt/venv/bin:$PATH \
     LANG=C.UTF-8
 
@@ -101,9 +101,15 @@ COPY .github/scripts/fetch_h2_jar.py /tmp/fetch_h2_jar.py
 RUN python /tmp/fetch_h2_jar.py --dest ./queryapigate/lib && rm /tmp/fetch_h2_jar.py
 # Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
 # tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment
-# turns on with an environment variable or a second command - none of them should need a custom image.
-RUN pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,aws,server]" "gunicorn>=26" \
-    && if [ "$WITH_H2" = "true" ]; then pip install ".[h2]"; fi
+# turns on with an environment variable or a second command - none of them should need a custom image. pip installs
+# them and leaves in the same layer: the image never runs it, and the old copies of urllib3, msgpack and setuptools it
+# vendors are what scanners flagged (ADR 0031). An image built FROM this one gets it back with
+# `python -m ensurepip --default-pip`.
+RUN python -m ensurepip \
+    && python -m pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,aws,server]" \
+        "gunicorn>=26" \
+    && if [ "$WITH_H2" = "true" ]; then python -m pip install ".[h2]"; fi \
+    && python -m pip uninstall --yes pip
 
 RUN useradd --create-home app && mkdir /data && chown app /data
 USER app

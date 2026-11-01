@@ -64,12 +64,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
     on `PATH`.
   - **Python's own `ssl` now uses the OpenSSL compiled into it** (3.5.9), as psycopg2 and cryptography already use
     their own.
-  - **The image is 21.5 MB larger.** The `pip` package is unchanged, and still supports Python 3.11-3.14.
+  - **The image carries no `pip`.** It never ran it, and the old copies of urllib3, msgpack and setuptools that
+    `pip` vendors were the image's only HIGH findings among its Python packages: Trivy now finds none there. **If you
+    build an image `FROM` this one and `pip install` into it,** add `USER root` and
+    `RUN python -m ensurepip --default-pip` first (and `USER app` after). Running the image, with Docker, Compose or
+    the Helm chart, needs no change.
+  - **The image is 10.8 MB larger.** The PyPI package is unchanged, and still supports Python 3.11-3.14.
 - **CI:** the upgrade fixtures from 0.47.0 are added, and the rolling-upgrade and Helm checks now start from 0.47.0.
 - **CI:** signing the image and the chart retries up to three times. Rekor once answered cosign's own retried upload
   with `409 createLogEntryConflict`, which failed 0.47.0's Docker publish until the job was rerun.
 - **CI:** a release, or a `docker.yml` rehearsal, checks that the arm64 image's Python runs under QEMU. A test checks
   that every `COPY --from=` in the Dockerfile names one of its stages, so Dependabot sees each image the build uses.
+- **CI:** the Docker image job checks that the image has no `pip`, and that `python -m ensurepip --default-pip`
+  brings one back. A test checks the Dockerfile installs with `pip` and uninstalls it in one step.
 
 ### Fixed
 

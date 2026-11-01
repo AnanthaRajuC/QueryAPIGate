@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (2026-10-31): section 5's items are met ([*Result*](#result)). First proposed with Debian's
   own `python3`: measuring it found trixie's backlog of unfixed `python3.13` CVEs, so python-build-standalone was
-  measured too, and chosen.
+  measured too, and chosen. Amended the same day: the image carries no `pip` ([section 2](#2-debiantrixie-slim-and-a-virtualenv)).
 - **Date:** 2026-10-31
 - **Backlog:** #104, *A faster Python interpreter in the image*. [ADR 0030](0030-shipping-the-data-plane.md#result)'s
   measurement found the problem, and the evidence is in
@@ -69,7 +69,7 @@ pin is the Python pin.** Dependabot's bump of `uv` brings the next Python patch 
 hash, and a test checks the shape. Python-build-standalone publishes both architectures, so nothing is compiled.
 
 Only the installation is carried into the image. It leaves out what the image never runs:
-- its own `pip` (the virtualenv gets one from `ensurepip`);
+- its own `pip` (`ensurepip`'s wheel stays, for the install below);
 - Tk and Tcl with tkinter, IDLE and turtledemo;
 - `libpython3.13.so`, which the statically linked interpreter doesn't load.
 
@@ -81,8 +81,14 @@ step installs the three packages the official image adds to the same base:
 - `netbase` (`/etc/services`, `/etc/protocols`);
 - `tzdata`.
 
-The packages go in a virtualenv, `/opt/venv`, created by the installed Python and first on `PATH`. `pip install`,
+The packages go in a virtualenv, `/opt/venv`, created by the installed Python without `pip` and first on `PATH`.
 `python` (the health check, the H2 fetch, DuckDB's `httpfs`) and `gunicorn` (the command) then work as they do now.
+
+**The image carries no `pip`.** The step that installs the packages brings `pip` in with `ensurepip` and uninstalls it
+at its end, in the same layer, so no layer holds it. The image never runs `pip`, and the old copies of urllib3,
+msgpack and setuptools it vendors were the image's only HIGH findings among its Python packages. An image built
+`FROM` this one gets it back as root, with `python -m ensurepip --default-pip`. A test checks the Dockerfile's shape,
+and CI checks the built image: no `pip`, and `ensurepip` restores one.
 The virtualenv belongs to root and is only read at runtime, so the read-only root filesystem the chart sets
 (ADR 0013) still holds. The `-h2` variant installs its JRE with `apt-get` as it does now.
 
@@ -135,7 +141,8 @@ sections 4-7). The application is the same between the images: `git diff` of `qu
 | 2. The suite inside the image | 2,172 tests OK on SQLite with Redis and on the PostgreSQL store with Redis: Debian's image, the standalone one unpruned and pruned, and the 0.47.0 release as the control |
 | 4. Size | 443.9 MB today; 446.9 MB with Debian's Python; 465.4 MB with python-build-standalone, pruned (514.1 MB before pruning) |
 | 4. Trivy 0.69.3: Debian packages (HIGH) | 166 (44) today; 273 (70) with Debian's Python; 164 (43) with python-build-standalone |
-| 4. Trivy: Python packages (HIGH) | 6 (0) today; 6 (0) with Debian's; 8 (5) with python-build-standalone, all five in the virtualenv's `pip` 26.2.2, read from the versions it vendors |
+| 4. Trivy: Python packages (HIGH) | 6 (0) today; 6 (0) with Debian's; 8 (5) with python-build-standalone, all eight in the virtualenv's `pip` 26.2.2, read from the versions it vendors. Without `pip` (section 2's amendment): 0, and Debian's packages unchanged at 164 (43), the same database for both |
+| 4. Size, without `pip` | 454.7 MB, 10.7 MB less than with it; 667.9 MB for `-h2` |
 | 5. Docs and tests | The changelog, `TECHNOLOGY_STACK.MD` and the Dockerfile's tests with the change; how-to 59's commands and outputs from the rehearsal. Its SBOM, 383 packages for amd64, names `python 3.13.18` by CPE |
 
 The interpreter's 27-30% shrinks to 6-9% at the gateway when Python serves a call itself. Much of a call's CPU isn't
@@ -155,10 +162,10 @@ is Python's own loop, and there the difference is large.
   Debian packages (Trivy's, by default) doesn't name it. The release's SBOM does, by version and CPE, in both: 3.12.15
   in 0.47.0's, 3.13.18 now. So a scanner reading the SBOM matches Python's own advisories to it. Its `ssl` now uses an
   OpenSSL compiled in, like psycopg2's and cryptography's; it's fixed by a new release of Python, not of Debian.
-- **The virtualenv's `pip` shows five HIGH findings** for the versions it vendors (msgpack, urllib3, setuptools).
-  QueryAPIGate doesn't import them. Removing `pip` after the install would clear them, at the cost of images that
-  extend this one with `pip install`.
-- **The image is 21.5 MB larger,** and its frame pointers stay: python-build-standalone keeps them, so `perf` sees
+- **An image that extends this one with `pip install` needs two lines first:** `USER root`, because the virtualenv
+  is root's (0.47.0's `pip` installed into the `app` user's home folder instead), and
+  `python -m ensurepip --default-pip`. Running the image needs neither.
+- **The image is 10.8 MB larger** (454.7 MB, against 443.9 MB), and its frame pointers stay: python-build-standalone keeps them, so `perf` sees
   Python as well as before.
 - **Going back is two stages:** `FROM python:3.12-slim@sha256:...` and no virtualenv, as now.
 
@@ -190,7 +197,5 @@ is Python's own loop, and there the difference is large.
   runs: the interpreter `uv` installed, its `ssl` and `sqlite3`, and the application importing. The first rehearsal
   did. Its speed isn't measured: there's no arm64 hardware here, and python-build-standalone's BOLT step is x86-64
   only.
-- **Should the image keep `pip`?** It's there so an image built `FROM` this one can add a driver. Its vendored
-  copies are what a scanner flags.
 - **Python 3.14.** python-build-standalone's 3.14 was the fastest in the screen's loop (0.64), and isn't measured at
   the gateway.
