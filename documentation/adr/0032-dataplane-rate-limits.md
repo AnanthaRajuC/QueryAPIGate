@@ -2,6 +2,7 @@
 
 - **Status:** Accepted (2026-11-01): section 8's items are met. Through the data plane, a limited key served 4.4x
   Python's calls a second per gateway core, and 5.0x with the server-wide limit as well. First proposed 2026-10-31.
+  Shipped in 0.48.0.
 - **Date:** 2026-10-31
 - **Backlog:** #102, *Next*: "Rate-limited keys next, then other formats and workspaces"
   ([ADR 0030](0030-shipping-the-data-plane.md), section 5's follow-up). It moves two rows out of
