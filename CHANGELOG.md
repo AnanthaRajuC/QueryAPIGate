@@ -51,6 +51,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.48.0 are added, and the rolling-upgrade and Helm checks now start from 0.48.0.
+
 ## [0.48.0] - 2026-11-01
 
 The Rust data plane serves more of what it used to forward, and the image's Python is faster. With Redis, the data
