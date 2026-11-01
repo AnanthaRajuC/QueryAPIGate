@@ -27,6 +27,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Sent only with a call whose plan the data plane would keep: Python reads that call's rows past its metadata cache
 /// to digest them, and every other forwarded call keeps the cache.
 pub const WANTED_HEADER: HeaderName = HeaderName::from_static("x-qag-plan-wanted");
+/// On a call forwarded after its rate limits were counted here: which buckets, and what they said (ADR 0032) - Python
+/// doesn't count them again, and takes it only beside the secret.
+pub const COUNTED_HEADER: HeaderName = HeaderName::from_static("x-qag-rate-counted");
 
 /// Headers that describe one connection, not the message: never passed on (RFC 9110, 7.6.1), nor any the
 /// `Connection` header names.
@@ -70,13 +73,15 @@ impl Forwarder {
     }
 
     /// Send a request on to Python as the client sent it - its body streamed through, or already read - with the
-    /// secret and the client's address. Python's answer comes back as it is: `relay()` it to the client.
+    /// secret and the client's address, and the rate limits it was `counted` in here, if any. Python's answer comes
+    /// back as it is: `relay()` it to the client.
     pub async fn send(
         &self,
         mut parts: hyper::http::request::Parts,
         body: Body,
         peer: IpAddr,
         want_plan: bool,
+        counted: Option<HeaderValue>,
     ) -> Result<Response<Incoming>, Box<Response<Body>>> {
         let path = parts
             .uri
@@ -104,6 +109,9 @@ impl Forwarder {
             parts
                 .headers
                 .insert(WANTED_HEADER, HeaderValue::from_static("1"));
+        }
+        if let Some(counted) = counted {
+            parts.headers.insert(COUNTED_HEADER, counted);
         }
         parts.headers.insert(
             PEER_HEADER,
@@ -179,12 +187,13 @@ pub fn peer_text(peer: IpAddr) -> String {
 
 /// The headers only the data plane and Python say to each other: removed from what a client sends, so only this
 /// process can speak for itself, and from what Python answers. Python's own `X-QAG-CSRF` passes, as any other.
-const OURS: [HeaderName; 5] = [
+const OURS: [HeaderName; 6] = [
     SECRET_HEADER,
     PEER_HEADER,
     PLAN_HEADER,
     WANTED_HEADER,
     VERSION_HEADER,
+    COUNTED_HEADER,
 ];
 
 /// Remove hop-by-hop headers, and the data plane's own (`OURS`).

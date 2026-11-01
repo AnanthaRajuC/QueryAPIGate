@@ -44,13 +44,13 @@ _lock = threading.Lock()
 _refusals: dict[tuple, deque] = {}  # ('key' | 'client', who) -> monotonic times of rate-limit refusals
 
 
-def note_rate_limited(kind, who):
-    """One rate-limit refusal, for the 'keeps hitting its limit' alert: kind 'key' (a key's own rate_limit) or
-    'client' (QUERYAPIGATE_RATE_LIMIT, by address - checked before the caller is known)."""
+def note_rate_limited(kind, who, count=1):
+    """A rate-limit refusal (`count` of them, now), for the 'keeps hitting its limit' alert: kind 'key' (a key's own
+    rate_limit) or 'client' (QUERYAPIGATE_RATE_LIMIT, by address - checked before the caller is known)."""
     now = time.monotonic()
     with _lock:
         times = _refusals.setdefault((kind, who or 'unknown'), deque(maxlen=1000))
-        times.append(now)
+        times.extend([now] * min(count, 1000))
 
 
 # Every kind of alert, the one list: the OpenAPI enum is built from it and tests/test_alerts.py checks API.md's table.

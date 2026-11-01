@@ -78,6 +78,10 @@ documented way to Level 3; it isn't done yet.
 - Set `QUERYAPIGATE_RATE_LIMIT` on anything reachable beyond a trusted network; it also throttles API key guessing.
 - Behind a reverse proxy, set `QUERYAPIGATE_TRUST_PROXY` to the number of proxies so limits apply per real client - and
   leave it at `0` when clients connect directly, otherwise they can forge `X-Forwarded-For` to evade the limit.
+- With the Rust data plane and Redis, give the data plane its own Redis user that may only count rate limits:
+  `+evalsha +script|load +time +hmget +hset +expire` on `~qag:ratelimit:*`
+  ([guide 64](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md)). Anyone
+  who can write those keys can reset a caller's budget.
 - Only enable `QUERYAPIGATE_CORS_ORIGINS` for sites you control, and never `*` without an API key.
 - Keep the query time limit (`QUERYAPIGATE_QUERY_TIMEOUT`, 30 seconds by default) and `QUERYAPIGATE_MAX_PAGE_SIZE` so one
   expensive request cannot monopolise the service; setting the timeout to `0` removes that protection.

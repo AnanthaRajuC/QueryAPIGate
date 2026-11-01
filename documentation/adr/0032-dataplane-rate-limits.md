@@ -82,6 +82,14 @@ without a Redis connection forwards any call whose plan has a limit, and, as now
 The server-wide limit is read from the environment, as Python reads it: the same grammar, with `period` in seconds.
 A value the data plane can't read forwards everything, as now.
 
+*Built (2026-11-01):* `eligible_caller()` lets a rate limit through when `config.redis_url()` is set, and
+`dataplane.build()` adds `rate_limit: [count, period]`. The data plane keeps a plan only for a limit Python could have
+made: a count of at least 1, and a period of 1, 60, 3600 or 86400. `ratelimit::parse()` reads
+`QUERYAPIGATE_RATE_LIMIT` only in ASCII, with spaces and tabs, and a count that fits in a u64. Anything else that
+Python's regex reads, such as other scripts' digits or a newline between the parts, forwards everything. A Redis URL
+counts only with `redis://`, `rediss://` or `unix://` and no query string or fragment: their options are each
+client's own. With any other URL, limited calls are forwarded.
+
 ### 3. The same buckets, counted by the same script
 
 The data plane runs Python's `_TOKEN_BUCKET` script, byte for byte, against the same Redis keys: `EVALSHA` with the
@@ -95,6 +103,14 @@ The client is the address Python would see: the peer, or the hop that `QUERYAPIG
 
 The connection is the `redis` crate with Tokio, `rediss://` over rustls and `unix://`, multiplexed. It has Python's
 timeouts: 0.5 s to connect and 0.5 s to answer.
+
+*Built (2026-11-01):* `ratelimit.rs`. `redis` 1.7.1, with `tokio-rustls-comp`, `connection-manager` and `script`. Its
+rustls has default features off, so ring stays the only crypto provider, and its roots are the system's, as Python's
+`ssl` reads them. A lazy `ConnectionManager` means startup never waits on Redis. It makes no reconnect attempts
+within a call, and each count has a 1 s bound. `redis::Script` sends `EVALSHA`, then `SCRIPT LOAD` on `NOSCRIPT`, as
+redis-py's `register_script()` does, so neither client sends `EVAL`. A test checks that `TOKEN_BUCKET` is
+`_TOKEN_BUCKET`'s text. The client is `forward::peer_text()` of the address `proxy::client` found, which is the text
+`X-QAG-Peer` gives Python. The key's bucket is `default~<name>`.
 
 ### 4. Counted once, when the data plane is going to serve
 
@@ -114,6 +130,13 @@ rows, must not be counted twice. The forwarded request carries what was counted,
 plane's secret (`X-QAG-Dataplane`, checked with `hmac.compare_digest`, as the plan request is). Python then skips
 those buckets and sends those numbers in its headers. Without the secret, the header is ignored.
 
+*Built (2026-11-01):* the data plane counts after the mask key, the time limit and the page's offset: the last checks
+that forward. A Redis failure on the key's bucket, after the client's counted, forwards with `client=` alone, and
+Python counts the key's. `X-QAG-Rate-Counted` is one of the data plane's own headers, so it is removed from whatever
+a client sends. Python reads it in `_CapturePeer`, only beside the secret and from a data plane of its release
+(`dataplane.counted()`: anything not in that shape counts as nothing counted). `check_rate_limit()` and
+`check_key_rate_limit()` then use its numbers, for a limit that still applies.
+
 ### 5. What a limited caller gets, byte for byte
 
 A 200 the data plane serves carries the four `X-RateLimit-*` headers Python would send, with the bucket's
@@ -132,6 +155,12 @@ key)`. From that, Python increments `queryapigate_rate_limit_rejections_total`, 
 the 429s to its request counters, as if it had refused them itself. The alerts then see one gateway, whichever process
 refused.
 
+*Built (2026-11-01):* `respond::too_many()` and `respond::rate_limits()`, also on the 200 and the 504. A 429 is logged
+as Python logs one: with key `-` for the client's bucket, which Python checks before the caller is known. A batch's
+`rate_limited` entries are `{scope, client | workspace + key, method, seconds}`, one duration per 429.
+`governance.note_refused()` counts them under endpoint `api.run_named_query`. The 429s since the last report are
+gathered in memory, so a flood of them costs a report per flush interval, not a queue entry each.
+
 ### 6. When Redis fails
 
 A Redis error or timeout during a call forwards it uncounted. Python then counts it, in Redis or in its own memory
@@ -149,6 +178,10 @@ with its alert, as it does now. After a failure the data plane leaves Redis alon
 - **MCP and the events server.**
 
 ### 8. Done when
+
+*Status (2026-11-01):* 1, 2, 4 and 5 are done (below). 3 waits on the benchmark laptop: `benchmarks/oltp.py` has
+`l-setup`, `l1` (calls a second per gateway core) and `l2` (one caller), with a limit that counts every call and
+refuses none.
 
 It's Accepted when:
 
@@ -171,13 +204,31 @@ It's Accepted when:
 5. **Docs:** ADR 0028's table, how-to 64 (what it serves), how-to 17 (one budget with the data plane, and Redis
    needed for that), the changelog, and `SECURITY.md` if the Redis ACL below is recommended.
 
+*Built (2026-11-01):*
+1. Section 1 shipped as #139.
+2. `dataplane/tests/test_rate_limits.py`, in CI's data plane job with a Redis service. Both processes reach Redis
+   through a TCP relay the test cuts. It covers a key at 2/second across the refill boundary and at 3/minute, the
+   server-wide limit with a key's, IPv4 and IPv6 clients, an invalid parameter (forwarded before counting) and a
+   query failing in the database. All agree call by call. Two findings:
+   - A new key's first two calls go to Python. The first records the key's use, which changes the digest the
+     second reads.
+   - During a Redis cut, Python's in-memory buckets start full: a key gets a fresh budget for the outage, as it
+     always has.
+4. `tests/test_dataplane.py`: a report's `rate_limited` moves the rejections, the request counters and the alert.
+   The gate shows the data plane's 429s in Python's `/metrics` and in the `key_rate_limited` alert.
+5. The docs listed, and in `SECURITY.md` the ACL's one line (Consequences: the script's own commands need
+   granting too).
+
 ## Consequences
 
 - **Rate-limited keys and servers with a server-wide limit get the data plane's speed,** with Redis. These are the
   deployments that face partners and agents.
 - **The data plane gains a dependency, the `redis` crate,** and a connection to Redis per pod. Its Redis user needs
-  only `EVALSHA`, `EVAL` and `SCRIPT LOAD` on `qag:ratelimit:*`. A Redis ACL can say exactly that, and the docs can
-  recommend it.
+  only `EVALSHA` and `SCRIPT LOAD` on `qag:ratelimit:*`, plus the commands the script runs: Redis checks a script's
+  calls against the user too. A Redis ACL can say exactly that, and the docs recommend it:
+  `~qag:ratelimit:* +evalsha +script|load +time +hmget +hset +expire`, and `+select` for a database other than 0.
+  Checked against Redis 7: the data plane served and refused on that user alone. `CLIENT SETINFO` on connecting is
+  refused and ignored.
 - **Each served limited call costs one or two Redis round trips,** a few hundred microseconds on a local network.
   That's measured (section 8), not assumed.
 - **One more header crosses from the data plane to Python** (`X-QAG-Rate-Counted`). It's trusted only with the secret

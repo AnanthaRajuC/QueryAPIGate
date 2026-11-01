@@ -13,13 +13,13 @@ cryptography isn't a validated module.
 
 ## What it serves, and what it leaves to Python
 
-**On a server with `QUERYAPIGATE_RATE_LIMIT` or OpenTelemetry tracing (`OTEL_EXPORTER_OTLP_ENDPOINT`) set, it serves
-nothing:** it forwards every call, since those need state it doesn't share yet. Otherwise it serves a call itself when
-all of these hold, and forwards it to Python, unchanged, when any doesn't:
+**On a server with OpenTelemetry tracing (`OTEL_EXPORTER_OTLP_ENDPOINT`) set, it serves nothing,** and none with
+`QUERYAPIGATE_RATE_LIMIT` unless Redis is set too (below): it forwards every call. Otherwise it serves a call itself
+when all of these hold, and forwards it to Python, unchanged, when any doesn't:
 
 - a `GET` or `POST` to `/q/<name>`, answered as JSON (no `?format=`, no streaming);
-- with a **scoped API key** in the `default` workspace, with no rate limit, quota, concurrency, time or row limit of its
-  own. Administrators, signed-in users, MCP and other workspaces always go to Python;
+- with a **scoped API key** in the `default` workspace, with no quota, concurrency, time or row limit of its own, and a
+  rate limit only with Redis (below). Administrators, signed-in users, MCP and other workspaces always go to Python;
 - on a **PostgreSQL or MySQL** connection, for a read-only saved query with bound parameters (no `{name}` text
   placeholders, no `embed` parameters, no response cache of its own);
 - behind trusted proxies (`QUERYAPIGATE_TRUST_PROXY`), with `X-Forwarded-For` and `X-Forwarded-Proto` it reads exactly
@@ -31,6 +31,25 @@ all of these hold, and forwards it to Python, unchanged, when any doesn't:
 Everything else - the Console, the Management API, writes, MCP, `/events`, `/metrics` - passes through to Python as if
 the data plane weren't there. Every run the data plane serves is still recorded in run history, the event log and
 `/metrics`.
+
+### Rate limits, with Redis
+
+With `QUERYAPIGATE_REDIS_URL` set, the data plane serves keys with a `rate_limit` and servers with
+`QUERYAPIGATE_RATE_LIMIT` too ([ADR 0032](../documentation/adr/0032-dataplane-rate-limits.md)). It counts them in
+Python's own buckets in Redis, with Python's script, so a key has one budget whichever process takes its call, across
+every pod. Its 429s are Python's, header for header, and they count in `/metrics` and the rate-limit alerts as
+Python's do.
+
+- **Without Redis, limited calls stay Python's.** Each process would otherwise count its own budget.
+- **If Redis fails,** the data plane forwards limited calls to Python for 5 seconds at a time. Python counts them
+  in Redis, or in its own memory with its *Rate limits are counted per instance* alert. A limit is never lifted.
+- **It reads `redis://`, `rediss://` and `unix://` URLs without a query string or fragment.** For any other, limited
+  calls stay Python's. It verifies a `rediss://` server's certificate and host name against the system's CAs.
+- **Its Redis user can be one that only counts rate limits:** the script, and the commands the script runs, on
+  `qag:ratelimit:*`. For example:
+  `ACL SETUSER dataplane on >secret ~qag:ratelimit:* +evalsha +script|load +time +hmget +hset +expire`, and `+select`
+  if the URL names a database other than 0. Python's user needs more: it also keeps the response cache, quotas and
+  concurrency slots there.
 
 ## 1. With the Helm chart
 
@@ -92,7 +111,7 @@ and calls go on reaching Python until it has recorded the key's use, within one 
 live feed within a flush interval, and `/metrics` counts them as Python would.
 
 If a call you expect to be served keeps going to Python, check it against the list above: an administrator's key, a
-key with a rate limit, `?format=csv` or a text placeholder are the usual reasons. A data plane from another release
+key with a rate limit on a server without Redis, `?format=csv` or a text placeholder are the usual reasons. A data plane from another release
 than Python's serves nothing, and Python logs why once: in the image, both come from one build.
 
 ## Its settings
@@ -110,7 +129,8 @@ It also reads Python's own settings that change an answer or a log line, and app
 `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_SECRET_KEY`, `QUERYAPIGATE_MASK_KEY`, `QUERYAPIGATE_QUERY_TIMEOUT`,
 `QUERYAPIGATE_MAX_PAGE_SIZE`, `QUERYAPIGATE_METADATA_CACHE_TTL`, `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL`,
 `QUERYAPIGATE_LOG_REQUESTS`, `QUERYAPIGATE_ACCESS_LOG`, `QUERYAPIGATE_JSON_LOGS`, `QUERYAPIGATE_SLOW_QUERY_THRESHOLD`,
-`QUERYAPIGATE_HISTORY_ADHOC_SQL`, `QUERYAPIGATE_TRUST_PROXY` and `QUERYAPIGATE_HSTS_MAX_AGE`. The metadata cache is
+`QUERYAPIGATE_HISTORY_ADHOC_SQL`, `QUERYAPIGATE_TRUST_PROXY`, `QUERYAPIGATE_HSTS_MAX_AGE`,
+`QUERYAPIGATE_RATE_LIMIT` and `QUERYAPIGATE_REDIS_URL`. The metadata cache is
 where much of its speed comes from: with `QUERYAPIGATE_METADATA_CACHE_TTL=5`, a call reuses the key, query and
 connection rows it read in the last 5 seconds instead of reading the store, and a revoked key keeps working for up to 5
 seconds, as it does on Python alone. With several pods, each caches on its own.

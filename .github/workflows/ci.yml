@@ -286,7 +286,8 @@ jobs:
 
   dataplane:
     # The Rust data plane in front of /q/ (ADR 0028): its own checks, then its tests and the differential gate - the
-    # same calls sent to Python directly and through the data plane, compared whole, against real PostgreSQL and MySQL.
+    # same calls sent to Python directly and through the data plane, compared whole, against real PostgreSQL and MySQL,
+    # and for rate-limited keys against real Redis too (ADR 0032).
     name: Data plane (Rust, and the differential gate)
     runs-on: ubuntu-latest
     services:
@@ -315,8 +316,14 @@ jobs:
         options: >-
           --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
           --health-retries 20
+      redis:  # rate-limited keys (ADR 0032): the data plane counts them in Redis, in Python's buckets
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       QUERYAPIGATE_DATAPLANE_TEST_POSTGRES: 127.0.0.1:5432:postgres:pw:postgres
+      QUERYAPIGATE_DATAPLANE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
       QUERYAPIGATE_DATAPLANE_TEST_RUN_STORE_URL: http://default:pw@127.0.0.1:8123
       QUERYAPIGATE_DATAPLANE_TEST_MYSQL: 127.0.0.1:3306:root:pw:shop
       QUERYAPIGATE_DATAPLANE_TEST_STORE_URL: postgresql://postgres:pw@127.0.0.1:5432/postgres

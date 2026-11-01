@@ -150,7 +150,7 @@ Each of these matches what Python does today, and the differential test checks e
 | Other connection types: SQLite, DuckDB, ClickHouse, Trino, MongoDB, H2, JDBC | Prove the idea on the two benchmarked databases first |
 | `?stream=true`, and formats other than JSON | JSON is what the benchmarks serve; the others are renderers to port later |
 | Queries with `cache_ttl` | The response cache, local or Redis, keeps its own state |
-| Keys with a rate limit or usage quota; any server with `QUERYAPIGATE_RATE_LIMIT` set | Limits must hold across both processes. Without Redis they are per process, so they need shared counters first |
+| Keys with a rate limit or usage quota; any server with `QUERYAPIGATE_RATE_LIMIT` set | Limits must hold across both processes. Without Redis they are per process, so they need shared counters first. *Since [ADR 0032](0032-dataplane-rate-limits.md): with Redis, a rate limit and `QUERYAPIGATE_RATE_LIMIT` are counted by the data plane too; quotas are still forwarded* |
 | MCP, agent writes, `embed` parameters, JWT claim binding | Not on the hot path being measured |
 | Writes (a key or query that may write) | Reads first; write limits and `allowed_write_ops` come after |
 | Workspace paths; tracing (`OTEL_EXPORTER_OTLP_ENDPOINT` set) | Default workspace and no tracing in the prototype |

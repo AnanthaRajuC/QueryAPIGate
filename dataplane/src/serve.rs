@@ -2,13 +2,18 @@
 //!
 //! A call is served here only when every one of these holds; otherwise it is forwarded, unchanged, and Python
 //! answers it as it always has:
-//! - nothing about the server or the request is outside what the prototype does (a rate limit, tracing, an Origin,
-//!   a bearer token, a stream, another format, a version or connection chosen per call), and behind trusted proxies
-//!   their headers read plainly (proxy.rs);
+//! - nothing about the server or the request is outside what the prototype does (tracing, an Origin, a bearer token,
+//!   a stream, another format, a version or connection chosen per call), and behind trusted proxies their headers
+//!   read plainly (proxy.rs);
 //! - the X-API-Key is a scoped key that authenticates (auth.rs), and its use was recorded within the last minute;
 //! - a plan is held for exactly the rows read for this call - the key, the saved query, the connection - by digest;
 //! - the parameters resolve as Python would resolve them (params.rs), the query runs (db.rs), and every value in the
 //!   page renders as Python would render it (render.rs).
+//!
+//! With Redis, a key's rate limit and the server-wide one are counted here, in Python's buckets (ratelimit.rs,
+//! ADR 0032): once every check that could forward the call before the query has passed, so a call is counted by one
+//! process only. One forwarded after that says what it was counted in (X-QAG-Rate-Counted), and Python counts it no
+//! more. A refusal is Python's 429, reported with the runs for /metrics and the alerts.
 //!
 //! A plan arrives on the response to a forwarded call: Python makes one for a call the data plane could serve
 //! (dataplane.py) and this keeps it, by the digests of the rows it read, until it expires. Served runs are reported
@@ -36,6 +41,7 @@ use crate::forward::{self, Body, Forwarder, PLAN_HEADER};
 use crate::log::{self, Logger};
 use crate::params::{self, Supplied};
 use crate::proxy;
+use crate::ratelimit::{self, Limit, Limiter};
 use crate::render::{self, Action};
 use crate::respond;
 use crate::runstore::{self, RunStore};
@@ -66,6 +72,10 @@ const RESERVED: [&str; 7] = [
 pub struct Settings {
     /// Why every call is forwarded, if one is
     pub forward_everything: Option<&'static str>,
+    /// QUERYAPIGATE_RATE_LIMIT: counted here when Redis is set, else every call is forwarded
+    pub client_limit: Option<Limit>,
+    /// QUERYAPIGATE_REDIS_URL, when it is one this reads as Python does: where the rate limits are counted
+    pub redis_url: Option<String>,
     /// QUERYAPIGATE_TRUST_PROXY: the client is found behind this many proxies (proxy.rs)
     pub proxy_hops: usize,
     /// QUERYAPIGATE_HSTS_MAX_AGE: sent on a call that arrived over HTTPS, as secheaders.apply() sends it
@@ -137,8 +147,18 @@ impl Settings {
                 .map(|n| n.filter(|&n| n > 0)),
             _ => Ok(None),
         };
-        let forward_everything = if get("QUERYAPIGATE_RATE_LIMIT").is_some() {
-            Some("QUERYAPIGATE_RATE_LIMIT is set") // limits must hold across both processes: shared counters first
+        // config.rate_limit(), and where it is counted: one budget for both processes, so only in Redis (ADR 0032)
+        let client_limit = get("QUERYAPIGATE_RATE_LIMIT").map(|v| ratelimit::parse(v.trim()));
+        let redis_url = get("QUERYAPIGATE_REDIS_URL")
+            .map(|v| v.trim().to_string())
+            .filter(|url| ratelimit::readable(url));
+        let forward_everything = if client_limit.is_some_and(|limit| limit.is_none()) {
+            Some("QUERYAPIGATE_RATE_LIMIT is a limit only Python reads")
+        } else if client_limit.is_some() && redis_url.is_none() {
+            // without Redis each process counts its own: Python counts them all
+            Some(
+                "QUERYAPIGATE_RATE_LIMIT is set without a QUERYAPIGATE_REDIS_URL the data plane reads",
+            )
         } else if get("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
             Some("OTEL_EXPORTER_OTLP_ENDPOINT is set")
         } else if hops.is_err() || proxy_hops.is_none() {
@@ -158,6 +178,8 @@ impl Settings {
         };
         Settings {
             forward_everything,
+            client_limit: client_limit.flatten(),
+            redis_url,
             proxy_hops: proxy_hops.unwrap_or(0),
             hsts_max_age: hsts_max_age.unwrap_or(None),
             admin_key: get("QUERYAPIGATE_API_KEY")
@@ -250,6 +272,9 @@ struct Plan {
     expires_in: Option<f64>,
     used: Vec<String>,
     sql: String,
+    /// The key's own rate limit, `[count, period]`: counted here, in Redis
+    #[serde(default)]
+    rate_limit: Option<(u64, u64)>,
 }
 
 struct Ready {
@@ -257,6 +282,7 @@ struct Ready {
     dialect: Dialect,
     actions: Option<Vec<Option<Action>>>,
     used: BTreeSet<String>,
+    rate_limit: Option<Limit>,
 }
 
 enum Held {
@@ -281,9 +307,65 @@ type Reused = (Instant, Arc<Rows>);
 enum Outcome {
     Served(Response<Body>),
     Forward(Option<Capture>),
+    /// Forwarded after its rate limits were counted here: Python mustn't count them again
+    Recounted(Counted),
 }
 
 use Outcome::{Forward, Served};
+
+/// The rate-limit buckets a call was counted in here, as `(limit, remaining)`: what its answer's X-RateLimit-*
+/// headers say, Python's or this process's.
+#[derive(Default, Clone, Copy)]
+struct Counted {
+    client: Option<(u64, i64)>,
+    key: Option<(u64, i64)>,
+}
+
+impl Counted {
+    /// The call forwarded: saying what it was counted in, if anything.
+    fn forward(self) -> Outcome {
+        if self.client.is_none() && self.key.is_none() {
+            Forward(None)
+        } else {
+            Outcome::Recounted(self)
+        }
+    }
+
+    /// X-QAG-Rate-Counted: `client=<limit>,<remaining>; key=<limit>,<remaining>`, dataplane.counted()'s reading.
+    fn header(&self) -> hyper::header::HeaderValue {
+        let parts: Vec<String> = [("client", self.client), ("key", self.key)]
+            .into_iter()
+            .filter_map(|(bucket, counted)| {
+                counted.map(|(limit, remaining)| format!("{bucket}={limit},{remaining}"))
+            })
+            .collect();
+        hyper::header::HeaderValue::from_str(&parts.join("; ")).expect("digits")
+    }
+
+    /// after_request's X-RateLimit-* headers, as respond::rate_limits() adds them.
+    fn headers(&self) -> respond::RateLimits {
+        respond::RateLimits {
+            client: self.client,
+            key: self.key,
+        }
+    }
+}
+
+/// A 429 answered here, for its runs report: which bucket refused, whose, and the call's method.
+#[derive(PartialEq, Eq, Hash)]
+struct Refusal {
+    scope: &'static str,
+    /// The client's address for the server-wide limit, the key's name for its own
+    who: String,
+    method: String,
+}
+
+/// What the data plane queues for its reports to Python.
+enum Queued {
+    Run(Json),
+    /// A 429 was noted (App::refused): the report it waits for is sent
+    Refused,
+}
 
 // --------------------------------------------------------------------------------------
 // The data plane
@@ -298,7 +380,11 @@ pub struct App {
     plans: Mutex<HashMap<Digests, Held>>,
     used: Mutex<HashMap<(String, String, bool), Instant>>,
     store_mask_key: Mutex<Option<Vec<u8>>>,
-    runs: mpsc::Sender<Json>,
+    runs: mpsc::Sender<Queued>,
+    /// With Redis: where rate limits are counted (ADR 0032)
+    limiter: Option<Limiter>,
+    /// The 429s answered since the last report: the seconds each took, by refusal
+    refused: Mutex<HashMap<Refusal, Vec<f64>>>,
     /// Runs served but not queued for Python (the queue was full): sent with the next report, for its /metrics
     dropped: AtomicU64,
     /// Reports being sent, at most REPORTS_IN_FLIGHT: all of its permits free means none is.
@@ -320,6 +406,18 @@ impl App {
         let logger = Logger {
             json: settings.json_logs,
         };
+        let limiter = settings
+            .redis_url
+            .as_deref()
+            .and_then(|url| match Limiter::new(url) {
+                Ok(limiter) => Some(limiter),
+                Err(error) => {
+                    eprintln!(
+                        "queryapigate-dataplane: rate-limited calls are forwarded - Redis: {error}"
+                    );
+                    None
+                }
+            });
         let app = Arc::new(App {
             forward,
             settings,
@@ -330,6 +428,8 @@ impl App {
             used: Mutex::new(HashMap::new()),
             store_mask_key: Mutex::new(None),
             runs,
+            limiter,
+            refused: Mutex::new(HashMap::new()),
             dropped: AtomicU64::new(0),
             in_flight: Arc::new(Semaphore::new(REPORTS_IN_FLIGHT)),
             rows: Mutex::new(HashMap::new()),
@@ -348,7 +448,7 @@ impl App {
             let (parts, body) = request.into_parts();
             return forward::relay(
                 self.forward
-                    .send(parts, body.boxed(), peer.ip(), false)
+                    .send(parts, body.boxed(), peer.ip(), false, None)
                     .await,
             );
         }
@@ -366,11 +466,19 @@ impl App {
         let outcome = self.serve(&parts, &body, peer.ip(), started).await;
         match outcome {
             Served(response) => response,
+            Outcome::Recounted(counted) => {
+                let full = Full::new(body).map_err(|never| match never {}).boxed();
+                forward::relay(
+                    self.forward
+                        .send(parts, full, peer.ip(), false, Some(counted.header()))
+                        .await,
+                )
+            }
             Forward(capture) => {
                 let full = Full::new(body).map_err(|never| match never {}).boxed();
                 let response = self
                     .forward
-                    .send(parts, full, peer.ip(), capture.is_some())
+                    .send(parts, full, peer.ip(), capture.is_some(), None)
                     .await;
                 if let (Some(capture), Ok(response)) = (capture, &response) {
                     let digests = capture.digests.clone();
@@ -430,12 +538,20 @@ impl App {
             (Some(_), None) => return false,
             (None, _) => UNMASKED_PLAN_TTL,
         };
+        let rate_limit = match plan.rate_limit {
+            None => None,
+            Some(pair) => match Limit::from_plan(pair) {
+                Some(limit) => Some(limit),
+                None => return false,
+            },
+        };
         let used = plan.used.iter().cloned().collect();
         let ready = Arc::new(Ready {
             plan,
             dialect,
             actions,
             used,
+            rate_limit,
         });
         let mut plans = self.plans.lock().expect("plans");
         if plans.len() >= MAX_PLANS {
@@ -626,6 +742,10 @@ impl App {
         {
             return Forward(Some(capture));
         }
+        // A limited key's budget is Redis's: without a connection to it here, Python's to count
+        if ready.rate_limit.is_some() && self.limiter.is_none() {
+            return Forward(None);
+        }
 
         // Parameters, as Python would resolve them; a `from_claim` one is Python's (app.bind_claims())
         let declared = fields.get("query_parameters");
@@ -676,8 +796,64 @@ impl App {
             return Forward(None);
         };
         let limit = request.page_size;
-        let executed_at = clock.stored.clone();
         let request_id = respond::request_id(request.request_id.as_deref());
+
+        // The rate limits, now that nothing before the query forwards the call: the client's, then the key's, as
+        // Python checks them - so a refusal by the client's leaves the key's bucket alone, as in Python
+        let mut counted = Counted::default();
+        for (scope, limit) in [
+            ("client", self.settings.client_limit),
+            ("key", ready.rate_limit),
+        ] {
+            let (Some(limit), Some(limiter)) = (limit, &self.limiter) else {
+                continue;
+            };
+            let bucket = if scope == "client" {
+                forward::peer_text(peer)
+            } else {
+                format!("default~{}", caller.name) // ratelimit.budget_name()
+            };
+            let Some(verdict) = limiter.hit(scope, limit, &bucket).await else {
+                return counted.forward(); // Redis failed: what wasn't counted here, Python counts
+            };
+            let mine = Some((limit.count, verdict.remaining));
+            if scope == "client" {
+                counted.client = mine;
+            } else {
+                counted.key = mine;
+            }
+            if !verdict.allowed {
+                let (message, logged_key, who) = if scope == "client" {
+                    ("Rate limit exceeded", "-", bucket)
+                } else {
+                    (
+                        "Rate limit exceeded for this API key",
+                        caller.name.as_str(),
+                        caller.name.clone(),
+                    )
+                };
+                let response =
+                    respond::too_many(message, verdict.retry_after, &request_id, counted.headers());
+                let response = respond::hsts(response, hsts);
+                let refusal = Refusal {
+                    scope,
+                    who,
+                    method: parts.method.to_string(),
+                };
+                self.refuse(
+                    parts,
+                    refusal,
+                    &request_id,
+                    logged_key,
+                    started,
+                    &response,
+                    peer,
+                );
+                return Served(response);
+            }
+        }
+
+        let executed_at = clock.stored.clone();
         if self.settings.log_requests {
             self.executing(
                 &request_id,
@@ -729,7 +905,8 @@ impl App {
             Err(Failure::Timeout) => {
                 let limit_seconds = timeout.unwrap_or(0.0);
                 let (response, message) = respond::timed_out(limit_seconds, &request_id);
-                let response = respond::hsts(response, hsts);
+                let response =
+                    respond::rate_limits(respond::hsts(response, hsts), counted.headers());
                 let entry =
                     entry(json!({"status": "error", "error": message, "code": "query_timeout"}));
                 self.finish(
@@ -750,10 +927,10 @@ impl App {
             }
             Err(Failure::Decline) => {
                 self.python_only(&digests);
-                return Forward(None);
+                return counted.forward();
             }
-            Err(Failure::Unsent) => return Forward(None), // this call's values only: the plan stays
-            Err(Failure::Database(_)) => return Forward(None), // Python runs it again, and answers as it does
+            Err(Failure::Unsent) => return counted.forward(), // this call's values only: the plan stays
+            Err(Failure::Database(_)) => return counted.forward(), // Python runs it again, and answers as it does
         };
 
         // The page
@@ -768,7 +945,7 @@ impl App {
         let Ok(body) = render::body(ready.dialect, &output, rows, actions, mask_key.as_deref())
         else {
             self.python_only(&digests);
-            return Forward(None);
+            return counted.forward();
         };
         let serialization_seconds = serialize_started.elapsed().as_secs_f64();
         let response = respond::page(
@@ -779,7 +956,7 @@ impl App {
             has_more,
             &request_id,
         );
-        let response = respond::hsts(response, hsts);
+        let response = respond::rate_limits(respond::hsts(response, hsts), counted.headers());
         let mut fields = json!({
             "status": "success", "rows": rows, "duration_ms": (query_seconds * 1000.0).round() as i64,
             "serialization_ms": (serialization_seconds * 10000.0).round() / 10.0,
@@ -901,10 +1078,62 @@ impl App {
             "query_seconds": query_seconds, "serialization_seconds": serialization_seconds,
             "code": field("code"), "masked": entry.get("masked").and_then(Json::as_array).is_some_and(|m| !m.is_empty()),
         });
-        if self.runs.try_send(run).is_err() {
+        if self.runs.try_send(Queued::Run(run)).is_err() {
             // full: dropped, as Python's own history queue drops when it can't keep up - and counted the same way
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+        self.logged(
+            parts,
+            rid,
+            key,
+            status,
+            seconds,
+            Some(serialization_seconds),
+            response,
+            peer,
+        );
+    }
+
+    /// A 429 this answered (ADR 0032): noted for the next runs report - Python counts it in /metrics and the alerts,
+    /// as one of its own - and logged as Python logs one. It isn't a run.
+    #[allow(clippy::too_many_arguments)]
+    fn refuse(
+        &self,
+        parts: &hyper::http::request::Parts,
+        refusal: Refusal,
+        rid: &str,
+        key: &str,
+        started: Instant,
+        response: &Response<Body>,
+        peer: IpAddr,
+    ) {
+        let seconds = started.elapsed().as_secs_f64();
+        let first = {
+            let mut refused = self.refused.lock().expect("refused");
+            let first = refused.is_empty();
+            refused.entry(refusal).or_default().push(seconds);
+            first
+        };
+        if first {
+            // The report that takes it: when the queue is full, one is coming anyway
+            let _ = self.runs.try_send(Queued::Refused);
+        }
+        self.logged(parts, rid, key, 429, seconds, None, response, peer);
+    }
+
+    /// A call's request log line and access log line, as Python's after_request and gunicorn write them.
+    #[allow(clippy::too_many_arguments)]
+    fn logged(
+        &self,
+        parts: &hyper::http::request::Parts,
+        rid: &str,
+        key: &str,
+        status: u16,
+        seconds: f64,
+        serialization_seconds: Option<f64>,
+        response: &Response<Body>,
+        peer: IpAddr,
+    ) {
         let path = percent_encoding::percent_decode_str(parts.uri.path())
             .decode_utf8_lossy()
             .into_owned();
@@ -917,7 +1146,7 @@ impl App {
                 "duration_ms".into(),
                 json!((seconds * 10000.0).round() / 10.0),
             );
-            if status == 200 {
+            if let Some(serialization_seconds) = serialization_seconds.filter(|_| status == 200) {
                 extra.insert(
                     "serialization_ms".into(),
                     json!((serialization_seconds * 10000.0).round() / 10.0),
@@ -1001,7 +1230,7 @@ impl App {
 /// Sends served runs to Python in batches, every QUERYAPIGATE_HISTORY_FLUSH_INTERVAL (each at once for 0), up to
 /// REPORTS_IN_FLIGHT at once, each with how many runs were dropped since the one before - a report Python didn't
 /// take included.
-async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
+async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Queued>) {
     let every = app.settings.flush_every;
     // A run store wants few, large inserts: each is a part ClickHouse later merges, through three views
     let most = if app.run_store.is_some() {
@@ -1013,15 +1242,37 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
         let Some(first) = queue.recv().await else {
             return;
         };
-        let mut batch = vec![first];
+        let mut batch = Vec::new();
+        if let Queued::Run(run) = first {
+            batch.push(run);
+        }
         if !every.is_zero() {
             let deadline = tokio::time::Instant::now() + every;
             while batch.len() < most {
                 match tokio::time::timeout_at(deadline, queue.recv()).await {
-                    Ok(Some(run)) => batch.push(run),
+                    Ok(Some(Queued::Run(run))) => batch.push(run),
+                    Ok(Some(Queued::Refused)) => {}
                     Ok(None) | Err(_) => break,
                 }
             }
+        }
+        // The 429s since the last report, each set with its calls' seconds: governance.note_refused()'s
+        let rate_limited: Vec<Json> = std::mem::take(&mut *app.refused.lock().expect("refused"))
+            .into_iter()
+            .map(|(refusal, seconds)| {
+                let mut refused =
+                    json!({"scope": refusal.scope, "method": refusal.method, "seconds": seconds});
+                if refusal.scope == "client" {
+                    refused["client"] = json!(refusal.who);
+                } else {
+                    refused["workspace"] = json!("default");
+                    refused["key"] = json!(refusal.who);
+                }
+                refused
+            })
+            .collect();
+        if batch.is_empty() && rate_limited.is_empty() {
+            continue;
         }
         let Ok(permit) = app.in_flight.clone().acquire_owned().await else {
             return;
@@ -1030,23 +1281,30 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Json>) {
         tokio::spawn(async move {
             // With a run store this process writes the runs itself; Python is told only to count them
             let recorded = match &app.run_store {
-                Some(run_store) => Some(record(run_store, &batch).await),
-                None => None,
+                Some(run_store) if !batch.is_empty() => Some(record(run_store, &batch).await),
+                _ => None,
             };
             let carried = app.dropped.swap(0, Ordering::Relaxed);
             let mut dropped = carried;
             let in_store = matches!(recorded, Some(Ok(_)));
-            let body = match recorded {
-                Some(Ok((kept, sampled_out))) => json!({"runs": batch, "dropped": dropped, "recorded": true,
-                                                        "kept": kept, "sampled_out": sampled_out}),
+            let mut body = match recorded {
+                Some(Ok((kept, sampled_out))) => {
+                    json!({"runs": batch, "dropped": dropped, "recorded": true,
+                                                        "kept": kept, "sampled_out": sampled_out})
+                }
                 Some(Err(error)) => {
-                    eprintln!("queryapigate-dataplane: writing {count} runs to the run store failed: {error}");
+                    eprintln!(
+                        "queryapigate-dataplane: writing {count} runs to the run store failed: {error}"
+                    );
                     dropped += count as u64;
                     json!({"runs": batch, "dropped": dropped, "recorded": true, "kept": 0, "sampled_out": 0})
                 }
                 None => json!({"runs": batch, "dropped": dropped}),
+            };
+            if !rate_limited.is_empty() {
+                body["rate_limited"] = json!(rate_limited);
             }
-            .to_string();
+            let body = body.to_string();
             let failed = match app.forward.post("/internal/dataplane/runs", body).await {
                 Ok(status) if status.as_u16() == 204 => None,
                 Ok(status) => Some(format!("got {status}")),
@@ -1361,6 +1619,48 @@ mod tests {
         let limited =
             Settings::from(|name| (name == "QUERYAPIGATE_RATE_LIMIT").then(|| "10/minute".into()));
         assert!(limited.forward_everything.is_some());
+    }
+
+    #[test]
+    fn a_server_wide_limit_is_counted_here_only_with_redis() {
+        let read = |limit: Option<&str>, redis: Option<&str>| {
+            let (limit, redis) = (limit.map(str::to_string), redis.map(str::to_string));
+            Settings::from(move |name| match name {
+                "QUERYAPIGATE_RATE_LIMIT" => limit.clone(),
+                "QUERYAPIGATE_REDIS_URL" => redis.clone(),
+                _ => None,
+            })
+        };
+        let redis = Some("redis://127.0.0.1:6379/0");
+        let counted = read(Some(" 10 / minute "), redis);
+        assert!(counted.forward_everything.is_none());
+        assert_eq!(
+            counted.client_limit,
+            Some(Limit {
+                count: 10,
+                period: 60
+            })
+        );
+        assert_eq!(counted.redis_url.as_deref(), redis);
+        // Redis without a server-wide limit: keys' own limits are counted, nothing else changes
+        let keys_only = read(None, redis);
+        assert!(keys_only.forward_everything.is_none() && keys_only.client_limit.is_none());
+        assert!(keys_only.redis_url.is_some());
+        // Python's to count: no Redis, a URL with options only redis-py reads, a limit only Python reads
+        for (limit, redis) in [
+            (Some("10/minute"), None),
+            (
+                Some("10/minute"),
+                Some("redis://127.0.0.1:6379/0?socket_timeout=2"),
+            ),
+            (Some("10/fortnight"), redis),
+            (Some("١٠/minute"), redis),
+        ] {
+            assert!(
+                read(limit, redis).forward_everything.is_some(),
+                "{limit:?} {redis:?}"
+            );
+        }
     }
 
     #[test]

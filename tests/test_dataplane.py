@@ -115,8 +115,23 @@ class WhoGetsAPlanTests(PlanTestCase):
                                                          **PAIRED})
         self.assertIsNone(res.headers.get(dataplane.PLAN_HEADER))
 
-    def test_never_for_a_key_with_a_rate_limit(self):
+    def test_never_for_a_key_with_a_rate_limit_without_redis(self):
         self.assertIsNone(self.call('/q/by_id?id=1', self.limited)[1])
+
+    def test_with_redis_a_rate_limited_key_gets_one_that_carries_its_limit(self):
+        # Its bucket is in Redis, where the data plane counts it too (ADR 0032): the plan says what the limit is
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_REDIS_URL': 'redis://127.0.0.1:1/0'}):
+            plan = self.call('/q/by_id?id=1', self.limited)[1]
+            self.assertEqual(plan['rate_limit'], [100, 60])
+            self.assertIsNone(self.call('/q/by_id?id=1', self.plain)[1]['rate_limit'])
+
+    def test_never_for_the_limits_that_keep_their_own_state_with_redis_or_without(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_REDIS_URL': 'redis://127.0.0.1:1/0'}):
+            for name, grants in (('quota', {'quota': {'calls': 100, 'per': 'day'}}), ('slots', {'max_concurrent': 2}),
+                                 ('timeout', {'query_timeout': 5}), ('rows', {'max_rows': 10})):
+                with self.subTest(name):
+                    key = apikeys.create_key(name, connections=['pg'], **grants)
+                    self.assertIsNone(self.call('/q/by_id?id=1', key)[1])
 
     def test_never_on_a_connection_the_prototype_does_not_serve(self):
         self.assertIsNone(self.call('/q/lite_by_id?id=1', self.plain)[1])
@@ -398,6 +413,57 @@ class ClientAddressTests(unittest.TestCase):
         self.assertEqual(self.get('/catalog', peer='192.0.2.1', **{'X-API-Key': key}).status_code, 401)
 
 
+class CountedByTheDataPlaneTests(PlanTestCase):
+    """A call the data plane forwards after counting it (ADR 0032, section 4): X-QAG-Rate-Counted names the buckets
+    and what they said, and Python counts them no more - but only beside the data plane's secret."""
+
+    def get(self, key, counted, secret=SECRET):
+        headers = {'X-API-Key': key, dataplane.COUNTED_HEADER: counted}
+        if secret:
+            headers.update({dataplane.SECRET_HEADER: secret, **PAIRED})
+        return self.client.get('/q/by_id?id=1', headers=headers)
+
+    def test_the_header_as_the_data_plane_writes_it(self):
+        self.assertEqual(dataplane.counted('client=5,3; key=100,42'), {'client': (5, 3), 'key': (100, 42)})
+        self.assertEqual(dataplane.counted('key=100,0'), {'key': (100, 0)})
+        for odd in ('', 'key=100', 'key=-1,2', 'key=1,2; key=1,2', 'other=1,2', 'key=١,2', 'key=1,2;', None):
+            with self.subTest(odd):
+                self.assertEqual(dataplane.counted(odd), {})
+
+    def test_a_key_s_bucket_counted_by_the_data_plane_is_not_counted_again(self):
+        res = self.get(self.limited, 'key=100,42')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual((res.headers['X-RateLimit-Key-Limit'], res.headers['X-RateLimit-Key-Remaining']),
+                         ('100', '42'))
+        res = self.get(self.limited, None, secret=None)
+        self.assertEqual(res.headers['X-RateLimit-Key-Remaining'], '99')  # Python's own bucket: one call, this one
+
+    def test_nor_the_client_s(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_RATE_LIMIT': '5/minute'}):
+            res = self.get(self.limited, 'client=5,0; key=100,7')
+            self.assertEqual(res.status_code, 200)
+            names = ('Limit', 'Remaining', 'Key-Limit', 'Key-Remaining')
+            self.assertEqual([res.headers[f'X-RateLimit-{name}'] for name in names], ['5', '0', '100', '7'])
+            # Only the client's counted there (Redis failed for the key's): Python counts the key's
+            res = self.get(self.limited, 'client=5,4')
+            self.assertEqual((res.headers['X-RateLimit-Remaining'], res.headers['X-RateLimit-Key-Remaining']),
+                             ('4', '99'))
+
+    def test_without_the_secret_python_counts_as_ever(self):
+        remaining = [self.get(self.limited, 'key=100,42', secret=secret).headers['X-RateLimit-Key-Remaining']
+                     for secret in (None, 'wrong')]
+        self.assertEqual(remaining, ['99', '98'])
+
+    def test_never_from_a_data_plane_of_another_release(self):
+        res = self.client.get('/q/by_id?id=1', headers={'X-API-Key': self.limited, dataplane.SECRET_HEADER: SECRET,
+                                                         dataplane.COUNTED_HEADER: 'key=100,50'})
+        self.assertEqual(res.headers['X-RateLimit-Key-Remaining'], '99')
+
+    def test_a_key_without_a_limit_gets_no_limit_headers_from_it(self):
+        res = self.get(self.plain, 'key=100,42')
+        self.assertNotIn('X-RateLimit-Key-Limit', res.headers)
+
+
 class RunReportTests(PlanTestCase):
     """The data plane reports the runs it served (POST /internal/dataplane/runs): each recorded as run_saved() records
     one, and counted in /metrics - and nothing without its secret."""
@@ -409,6 +475,11 @@ class RunReportTests(PlanTestCase):
            'status': 'success', 'key': 'plain', 'connection': 'pg', 'transport': 'rest', 'rows': 3,
            'dialect': 'postgres', 'method': 'GET', 'http_status': 200, 'seconds': 0.002, 'query_seconds': 0.001,
            'serialization_seconds': 0.0001}
+
+    def setUp(self):
+        super().setUp()
+        from queryapigate import alerts
+        self.addCleanup(alerts._refusals.clear)  # the refusals reported here are the process's, for its alerts
 
     def report(self, secret=SECRET):
         headers = {dataplane.SECRET_HEADER: secret} if secret else {}
@@ -452,6 +523,46 @@ class RunReportTests(PlanTestCase):
         self.assertEqual(res.status_code, 204)
         self.assertEqual(metrics.history_counts().get('dropped', 0) - before, 7)
         self.assertEqual(self.history(), [self.ENTRY])
+
+    def test_the_429s_it_answered_are_counted_as_python_s_own(self):
+        # ADR 0032, section 5: in the rejections, the alerts and the request counters - and none is a run
+        from queryapigate import alerts
+
+        def counts():
+            text = self.client.get('/metrics', headers=ADMIN).get_data(as_text=True)
+            found = []
+            for name in ('queryapigate_rate_limit_rejections_total',
+                         'queryapigate_requests_total{method="GET",endpoint="api.run_named_query",status="429",'
+                         'key="limited"}',
+                         'queryapigate_requests_total{method="POST",endpoint="api.run_named_query",status="429",'
+                         'key="-"}'):
+                match = re.search(re.escape(name) + r' (\d+)', text)
+                found.append(int(match.group(1)) if match else 0)
+            return found
+
+        def refusals(who):
+            with alerts._lock:
+                return len(alerts._refusals.get(who, ()))
+        before, key, client = counts(), refusals(('key', ('default', 'limited'))), refusals(('client', '203.0.113.9'))
+        res = self.client.post('/internal/dataplane/runs', headers={dataplane.SECRET_HEADER: SECRET}, json={
+            'runs': [], 'dropped': 0, 'rate_limited': [
+                {'scope': 'key', 'workspace': 'default', 'key': 'limited', 'method': 'GET', 'seconds': [0.001, 0.002]},
+                {'scope': 'client', 'client': '203.0.113.9', 'method': 'POST', 'seconds': [0.001]}]})
+        self.assertEqual(res.status_code, 204)
+        self.assertEqual([after - was for after, was in zip(counts(), before, strict=True)], [3, 2, 1])
+        self.assertEqual(refusals(('key', ('default', 'limited'))) - key, 2)
+        self.assertEqual(refusals(('client', '203.0.113.9')) - client, 1)
+        self.assertEqual(self.history(), [])
+
+    def test_a_key_that_keeps_getting_them_raises_its_alert(self):
+        from queryapigate import alerts
+        seconds = [0.001] * alerts.RATE_LIMITED_PER_HOUR
+        self.client.post('/internal/dataplane/runs', headers={dataplane.SECRET_HEADER: SECRET}, json={
+            'runs': [], 'rate_limited': [{'scope': 'key', 'workspace': 'default', 'key': 'limited', 'method': 'GET',
+                                          'seconds': seconds}]})
+        raised = [a for a in self.client.get('/api/v1/alerts', headers=ADMIN).get_json()['items']
+                  if a['kind'] == 'key_rate_limited']
+        self.assertEqual([a['id'] for a in raised], ['key_rate_limited:limited'])
 
     def test_its_event_is_the_one_python_writes(self):
         from queryapigate import events

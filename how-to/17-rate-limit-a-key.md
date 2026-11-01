@@ -101,7 +101,9 @@ behind a load balancer each count separately, so the effective limit is multipli
 **With `QUERYAPIGATE_REDIS_URL` set, the limits are shared**: every instance, and `queryapigate mcp` and `events`,
 counts against one budget per client address and per key, kept in Redis. If Redis goes down, each process counts on
 its own until it's back - limits stay enforced, just per process - and **Alerts** shows *Rate limits are counted per
-instance*.
+instance*. Behind the Rust data plane ([guide 64](64-try-the-rust-data-plane.md)), Redis is also what lets it serve a
+limited key: it counts in the same buckets, so the key keeps one budget. Without Redis, the data plane leaves limited
+keys to Python.
 
 Either way this protects the server from a runaway client; it isn't billing-grade metering.
 

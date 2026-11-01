@@ -3174,6 +3174,11 @@ traffic, and a p99 that stays in single milliseconds under load.
   and a 2-CPU pod without a run store recorded every one of 9.8 million runs
   ([results](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/dataplane-image-2026-10-30/README.md)). Rate-limited keys
   next, then other formats and workspaces.
+- **Rate-limited keys** - [ADR 0032](documentation/adr/0032-dataplane-rate-limits.md), built (2026-11-01): with
+  Redis, the data plane counts a key's `rate_limit` and `QUERYAPIGATE_RATE_LIMIT` in Python's buckets, with Python's
+  script. The differential gate covers it against real Redis. It stays Proposed until `benchmarks/oltp.py l1 l2`
+  measures it on the benchmark laptop (at least 3x Python's calls a second per gateway core). Then `query_timeout` and
+  `max_rows`, which keep no state.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
   `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400

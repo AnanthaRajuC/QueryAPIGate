@@ -180,10 +180,10 @@ def dec_active_query():
         _active_queries -= 1
 
 
-def inc_rate_limit_rejection():
+def inc_rate_limit_rejection(count=1):
     global _rate_limit_rejections
     with _lock:
-        _rate_limit_rejections += 1
+        _rate_limit_rejections += count
 
 
 def inc_rate_limit_fallback():

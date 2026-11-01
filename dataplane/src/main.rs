@@ -18,6 +18,7 @@ mod log;
 mod params;
 mod proxy;
 mod pyfmt;
+mod ratelimit;
 mod render;
 mod respond;
 mod runstore;

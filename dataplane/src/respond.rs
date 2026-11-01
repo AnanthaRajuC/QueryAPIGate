@@ -102,6 +102,55 @@ pub fn hsts(mut response: Response<Body>, max_age: Option<u64>) -> Response<Body
     response
 }
 
+/// The rate-limit buckets a call was counted in, `(limit, remaining)` each: what after_request's X-RateLimit-*
+/// headers say (ADR 0032).
+#[derive(Default, Clone, Copy)]
+pub struct RateLimits {
+    /// QUERYAPIGATE_RATE_LIMIT's, by client address
+    pub client: Option<(u64, i64)>,
+    /// The key's own
+    pub key: Option<(u64, i64)>,
+}
+
+/// after_request's X-RateLimit-Limit and -Remaining (the server's limit) and X-RateLimit-Key-Limit and -Remaining (the
+/// key's), for the buckets the call was counted in.
+pub fn rate_limits(mut response: Response<Body>, counted: RateLimits) -> Response<Body> {
+    let headers = response.headers_mut();
+    let number = |n: String| HeaderValue::from_str(&n).expect("digits");
+    if let Some((limit, remaining)) = counted.client {
+        headers.insert("x-ratelimit-limit", number(limit.to_string()));
+        headers.insert("x-ratelimit-remaining", number(remaining.to_string()));
+    }
+    if let Some((limit, remaining)) = counted.key {
+        headers.insert("x-ratelimit-key-limit", number(limit.to_string()));
+        headers.insert("x-ratelimit-key-remaining", number(remaining.to_string()));
+    }
+    response
+}
+
+/// app._too_many(): a 429 with Retry-After, the body error_body() gives it - its keys in that order - and the limit
+/// headers of the buckets counted.
+pub fn too_many(
+    message: &str,
+    retry_after: i64,
+    request_id: &str,
+    counted: RateLimits,
+) -> Response<Body> {
+    let mut body = String::from("{\"error\":");
+    json_string(message, &mut body);
+    body.push_str(",\"code\":\"rate_limited\",\"retry_after\":");
+    body.push_str(&retry_after.to_string());
+    body.push_str(",\"request_id\":");
+    json_string(request_id, &mut body);
+    body.push_str("}\n");
+    let mut response = with_headers(StatusCode::TOO_MANY_REQUESTS, body, request_id);
+    response.headers_mut().insert(
+        header::RETRY_AFTER,
+        HeaderValue::from_str(&retry_after.to_string()).expect("digits"),
+    );
+    rate_limits(response, counted)
+}
+
 /// runners._timed_out(), as handle_api_error() answers it: error_body()'s keys in its order.
 pub fn timed_out(timeout: f64, request_id: &str) -> (Response<Body>, String) {
     let message = format!(
@@ -165,6 +214,40 @@ mod tests {
             .unwrap()
             .to_bytes();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn a_429_as_python_answers_it() {
+        let counted = RateLimits {
+            client: Some((100, 7)),
+            key: Some((3, 0)),
+        };
+        let response = too_many("Rate limit exceeded for this API key", 20, "rid", counted);
+        assert_eq!(response.status(), 429);
+        let headers = response.headers().clone();
+        assert_eq!(headers["retry-after"], "20");
+        assert_eq!(headers["x-ratelimit-limit"], "100");
+        assert_eq!(headers["x-ratelimit-remaining"], "7");
+        assert_eq!(headers["x-ratelimit-key-limit"], "3");
+        assert_eq!(headers["x-ratelimit-key-remaining"], "0");
+        assert_eq!(headers["x-request-id"], "rid");
+        // jsonify(error_body('Rate limit exceeded for this API key', 429, {'retry_after': 20})) in Python
+        assert_eq!(
+            futures_body(response),
+            "{\"error\":\"Rate limit exceeded for this API key\",\"code\":\"rate_limited\",\"retry_after\":20,\
+             \"request_id\":\"rid\"}\n"
+        );
+        let client = too_many(
+            "Rate limit exceeded",
+            1,
+            "rid",
+            RateLimits {
+                client: Some((5, 0)),
+                key: None,
+            },
+        );
+        assert!(!client.headers().contains_key("x-ratelimit-key-limit"));
+        assert_eq!(client.headers()["x-ratelimit-remaining"], "0");
     }
 
     #[test]
