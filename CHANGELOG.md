@@ -51,6 +51,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-01
+
+The Rust data plane serves more of what it used to forward, and the image's Python is faster. With Redis, the data
+plane now serves rate-limited keys and servers with `QUERYAPIGATE_RATE_LIMIT`, counting in Python's own buckets, and it
+serves keys with their own `query_timeout` and `max_rows`, with or without Redis. The image runs Python 3.13 from
+python-build-standalone and carries no `pip`. **If you build an image `FROM` this one and `pip install` into it,** see
+*Changed*. One security fix, for workspaces only: two workspaces' keys of the same name shared a rate limit. On upgrade,
+each key's rate-limit bucket starts full once.
+
 ### Added
 
 - **The Rust data plane (experimental) serves rate-limited keys, and servers with `QUERYAPIGATE_RATE_LIMIT`, when
@@ -3273,7 +3282,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...HEAD
+[0.48.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.44.0...v0.45.0

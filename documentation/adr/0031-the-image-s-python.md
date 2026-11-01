@@ -3,6 +3,7 @@
 - **Status:** Accepted (2026-10-31): section 5's items are met ([*Result*](#result)). First proposed with Debian's
   own `python3`: measuring it found trixie's backlog of unfixed `python3.13` CVEs, so python-build-standalone was
   measured too, and chosen. Amended the same day: the image carries no `pip` ([section 2](#2-debiantrixie-slim-and-a-virtualenv)).
+  Shipped in 0.48.0.
 - **Date:** 2026-10-31
 - **Backlog:** #104, *A faster Python interpreter in the image*. [ADR 0030](0030-shipping-the-data-plane.md#result)'s
   measurement found the problem, and the evidence is in

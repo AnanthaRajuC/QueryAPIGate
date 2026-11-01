@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "queryapigate-dataplane"
-version = "0.47.0"
+version = "0.48.0"
 dependencies = [
  "base64 0.23.1",
  "bytes",

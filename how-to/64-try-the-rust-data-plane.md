@@ -70,7 +70,7 @@ dataplane:
 
 ```bash
 helm upgrade --install qag oci://ghcr.io/anantharajuc/charts/queryapigate -f values.yaml
-kubectl logs deploy/qag-queryapigate -c dataplane   # queryapigate-dataplane 0.47.0: listening on 0.0.0.0:5000, ...
+kubectl logs deploy/qag-queryapigate -c dataplane   # queryapigate-dataplane 0.48.0: listening on 0.0.0.0:5000, ...
 ```
 
 Behind the chart's ingress it serves as above: the chart sets `QUERYAPIGATE_TRUST_PROXY=1`, and the data plane reads
@@ -84,7 +84,7 @@ plane on port 5000. Both need the same secret, settings and store.
 
 ```bash
 export QUERYAPIGATE_DATAPLANE_SECRET="$(openssl rand -hex 32)"   # at least 16 characters; the same for both
-IMAGE=ghcr.io/anantharajuc/queryapigate:0.47.0
+IMAGE=ghcr.io/anantharajuc/queryapigate:0.48.0
 docker run -d --name qag -p 5000:5000 -v qag-data:/data --env-file qag.env \
     -e QUERYAPIGATE_DATAPLANE_SECRET -e QUERYAPIGATE_BIND=127.0.0.1:5001 "$IMAGE"
 docker run -d --name qag-dataplane --network container:qag -v qag-data:/data --env-file qag.env \

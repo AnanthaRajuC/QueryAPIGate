@@ -150,9 +150,14 @@ documentation. #99 workspaces only if asked for.
     [ADR 0030](documentation/adr/0030-shipping-the-data-plane.md)) - one image with both, a second container sharing
     the pod's network, behind trusted proxies, paired within a release; the image's data plane measured as fast as the
     from-source one. And the MCP server refuses remote clients in open-access mode, as REST does. (0.47.0, 2026-10-30.)
-36. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+36. **0.48: The data plane serves limited keys** (experimental) - with Redis, rate-limited keys and
+    `QUERYAPIGATE_RATE_LIMIT`, counted in Python's own buckets, 4.4x Python's calls a second per core
+    ([ADR 0032](documentation/adr/0032-dataplane-rate-limits.md)); and a key's own `query_timeout` and `max_rows`. The
+    image's Python is python-build-standalone's 3.13, with no `pip`: 6-9% more calls a second where Python serves them
+    ([ADR 0031](documentation/adr/0031-the-image-s-python.md)). (0.48.0, 2026-11-01.)
+37. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-37. **1.0.0.**
+38. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3155,7 +3160,8 @@ and test that nothing breaks there (Fernet's AES-128-CBC and HMAC-SHA256 are FIP
 
 ## 102. A Rust data plane for `/q/`
 
-**Status: decided go (0.44); in the image and the chart (ADR 0030, 0.47.0), experimental.**
+**Status: decided go (0.44); in the image and the chart (ADR 0030, 0.47.0), experimental; limited keys served
+(ADR 0032 and a key's own time and row limits, 0.48.0).**
 [ADR 0028](documentation/adr/0028-rust-data-plane-prototype.md): `dataplane/`,
 a Rust process on the public port that serves saved-query reads from the plans Python computes and forwards
 everything else; runs it serves are reported to Python and recorded there. Gated by a differential test against
@@ -3206,7 +3212,8 @@ the 64-caller peak (0.44's store kept 52-54% there), -11% gateway cores, 13 byte
 path, and the event log can hold a day at 20,000 events a second, about 22 GB. Usage reports become exact whatever
 history's sample rate.
 
-**Next:** to graduate (ADR 0017): a release unchanged, counted from 0.46.0 - 0.47.0 leaves it unchanged. The
+**Next:** to graduate (ADR 0017): a release unchanged, counted from 0.46.0 - 0.47.0 and 0.48.0 leave it unchanged
+(in 0.48.0 the data plane only stops sending it empty batches). The
 security review is done (2026-10-28): six findings, fixed in the run store's schema version 2 (ADR 0029 section 7,
 0.46.0); and 250 million runs measured (2026-10-29), every criterion met once a replay finds its ids in batches (ADR
 0029 section 9, 0.46.0).
@@ -3215,7 +3222,7 @@ The event log's bound for the SQL stores (#102) is separate and ships either way
 
 ## 104. A faster Python interpreter in the image
 
-**Status: done, in [ADR 0031](documentation/adr/0031-the-image-s-python.md), Accepted 2026-10-31, shipping in 0.48.0:
+**Status: done, in [ADR 0031](documentation/adr/0031-the-image-s-python.md), Accepted 2026-10-31, shipped in 0.48.0:
 python-build-standalone's 3.13, installed by a pinned `uv`. At the gateway, Python serves 6-9% more calls a second
 and records 60% more runs past its ceiling.** Found 2026-10-30, when measuring ADR 0030 found the image's Python
 about 30% slower per CPU than the laptop's: 148-152 ms against 115-116 ms for the same workload pinned to one core, and 146 ms against 109 ms for a
