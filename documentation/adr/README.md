@@ -40,6 +40,7 @@ one it supersedes.
 | [0029](0029-clickhouse-run-store.md) | An optional ClickHouse run store for history, the event log and usage | Accepted; decided: go |
 | [0030](0030-shipping-the-data-plane.md) | Shipping the Rust data plane in the image and the Helm chart | Accepted |
 | [0031](0031-the-image-s-python.md) | The image's Python: python-build-standalone, not the official image's | Accepted |
+| [0032](0032-dataplane-rate-limits.md) | The data plane serves rate-limited keys, counting in Redis with Python | Proposed |
 
 Statuses: **Proposed** (under discussion) → **Accepted** (in effect) → optionally **Superseded by NNNN** or
 **Deprecated**.
