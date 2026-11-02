@@ -14,7 +14,7 @@ RUN npm run build
 # over. The toolchain is the one dataplane/rust-toolchain.toml names (tests/test_dataplane.py checks), on the Debian
 # release the image below is built on, so the binary links against the same glibc. cargo-auditable records the
 # crates in the binary, for the image's SBOM and scanners.
-FROM --platform=$BUILDPLATFORM rust:1.98.1-slim-trixie@sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e35fc8d1d771ab7 AS dataplane
+FROM --platform=$BUILDPLATFORM rust:1.99.1-slim-trixie@sha256:b8e062b1c3a80183df83d9ba187cadd2b5ab84bc78d453dbfeb2fccd5f982247 AS dataplane
 ARG TARGETARCH
 ARG BUILDARCH
 RUN case "$TARGETARCH" in \
