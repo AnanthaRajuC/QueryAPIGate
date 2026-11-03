@@ -182,6 +182,7 @@ KEYS = {  # name -> grants
                                                  {'column': 'customer.phone', 'action': 'mask'},
                                                  {'column': 'customer.secret', 'action': 'drop'},
                                                  {'column': 'customer.balance', 'action': 'hash'},
+                                                 {'column': 'customer.photo', 'action': 'hash'},  # bytea, varbinary
                                                  {'column': '*.notes', 'action': 'null'}]},
     'restricted': {'connections': ['shop'], 'allowed_tables': ['customer', 'orders']},
     'both': {'connections': ['shop'], 'allowed_tables': ['customer', 'orders', 'order_line', 'item',
@@ -340,7 +341,8 @@ class DifferentialTests(unittest.TestCase):
     def change(self, step):
         if step == CALLS // 4:
             self.api('PATCH', '/api/v1/api-keys/masked', {'mask': [{'column': 'customer.email', 'action': 'null'},
-                                                                   {'column': 'customer.last', 'action': 'mask'}]})
+                                                                   {'column': 'customer.last', 'action': 'mask'},
+                                                                   {'column': 'customer.photo', 'action': 'hash'}]})
         elif step == CALLS // 3:
             self.api('PATCH', '/api/v1/api-keys/capped', {'max_rows': 7})
         elif step == CALLS // 2:

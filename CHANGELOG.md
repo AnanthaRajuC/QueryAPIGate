@@ -51,6 +51,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Fixed
+
+- **Masking's `hash` on a PostgreSQL `bytea` column hashed a memory address, not the value.** psycopg2 hands bytea
+  over as a `memoryview`, and `hash` took `str()` of it (`<memory at 0x7f...>`), so the code changed from call to call
+  and equal values got different codes: not the stable pseudonym `hash` promises. No value leaked. It now hashes the
+  value, as it always did MySQL's `BLOB` and `VARBINARY`. **The codes for bytea columns change once, on upgrade**, to
+  codes that then stay the same. The Rust data plane (experimental), which forwarded these calls, now serves them.
+
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.48.0 are added, and the rolling-upgrade and Helm checks now start from 0.48.0.
