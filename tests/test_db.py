@@ -15,7 +15,7 @@ from unittest import mock
 
 from queryapigate import config, db, events, history
 from queryapigate.store import now as store_now
-from tests import TEST_DATABASE_URL
+from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 
 sqlite_only = unittest.skipIf(TEST_DATABASE_URL, 'inspects the SQLite file itself')
@@ -316,6 +316,7 @@ class PostgresDbTests(unittest.TestCase):
         self.assertIs(db.connection(), parent)
         self.assertEqual(parent.execute('SELECT 1').fetchone()[0], 1)  # the parent's is still usable
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, 'a run store keeps history by time, not by count')
     def test_concurrent_history_writes_are_all_recorded_then_trimmed(self):
         """Runs recorded from many threads at once (queued, then batched by history.py, whose writes skip the
         store-wide lock on Postgres) must all land, and the per-version cap must still hold afterwards."""
@@ -456,6 +457,7 @@ class MigrateToPostgresTests(unittest.TestCase):
             db.close()
         return snapshot
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "the SQLite store's runs are in the run store, which the copy leaves there")
     def test_copies_everything_and_the_api_sees_the_same_store(self):
         before = os.path.getmtime(self.sqlite_path), os.path.getsize(self.sqlite_path)
         copied = db.migrate_sqlite_to_postgres(self.sqlite_path)
@@ -467,6 +469,7 @@ class MigrateToPostgresTests(unittest.TestCase):
         self.assertEqual((os.path.getmtime(self.sqlite_path), os.path.getsize(self.sqlite_path)), before)
         self.assertEqual(copied['events'], 3)
 
+    @unittest.skipIf(TEST_RUN_STORE_URL, "the SQLite store's events are in the run store, which the copy leaves there")
     def test_event_ids_and_their_sequence_come_across(self):
         """An id handed out and since swept is not handed out again: the sequence is SQLite's, not MAX(id)."""
         source = sqlite3.connect(self.sqlite_path)

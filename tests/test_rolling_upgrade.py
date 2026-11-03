@@ -7,7 +7,9 @@ What it can't do is start: a release refuses a store a newer one has upgraded (d
 restarts mid-upgrade must come back on the new version.
 
 This runs the real previous release, installed from PyPI - QUERYAPIGATE_TEST_OLD_BIN is its `queryapigate` - beside
-the current code, on one store. Runs when that and QUERYAPIGATE_TEST_DATABASE_URL are set (CI's PostgreSQL job).
+the current code, on one store. Runs when that and QUERYAPIGATE_TEST_DATABASE_URL are set (CI's PostgreSQL job). With
+QUERYAPIGATE_TEST_RUN_STORE_URL set too (CI's run store job on PostgreSQL), both keep their runs in one ClickHouse run
+store (ADR 0029): each node's runs land there, with ids of its own, whichever release it is.
 
 The one exception: 0.38's store change (schema 17, workspaces - ADR 0023) isn't additive, so a 0.37 instance can't
 write to a store 0.38 has upgraded, and that upgrade stops every instance first (CHANGELOG). Against a previous release
@@ -23,6 +25,7 @@ import uuid
 from tests.test_multinode import ADMIN, call, eventually
 
 DATABASE_URL = os.environ.get('QUERYAPIGATE_TEST_DATABASE_URL')
+RUN_STORE_URL = os.environ.get('QUERYAPIGATE_TEST_RUN_STORE_URL', '').strip() or None
 OLD_BIN = os.environ.get('QUERYAPIGATE_TEST_OLD_BIN')
 NOT_ADDITIVE_UNTIL = (0, 38, 0)  # the release whose store change wasn't additive: one before it can't serve beside it
 
@@ -58,8 +61,10 @@ class RollingUpgradeTests(unittest.TestCase):
         separator = '&' if '?' in DATABASE_URL else '?'
         self.env = {**os.environ, 'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0.1',
                     'QUERYAPIGATE_DATABASE_URL': f'{DATABASE_URL}{separator}options=-csearch_path%3D{self.schema}'}
-        for name in ('QUERYAPIGATE_TEST_DATABASE_URL', 'QUERYAPIGATE_REDIS_URL'):
+        for name in ('QUERYAPIGATE_TEST_DATABASE_URL', 'QUERYAPIGATE_TEST_RUN_STORE_URL', 'QUERYAPIGATE_REDIS_URL'):
             self.env.pop(name, None)
+        if RUN_STORE_URL:  # a database of its own, named as the schema is
+            self.env['QUERYAPIGATE_RUN_STORE_URL'] = f'{RUN_STORE_URL.rstrip("/")}/{self.schema}'
         self.processes = []
         self.data = os.path.join(self.tmp.name, 'data.db')
         import sqlite3
@@ -82,6 +87,9 @@ class RollingUpgradeTests(unittest.TestCase):
         conn.autocommit = True
         conn.cursor().execute(f'DROP SCHEMA IF EXISTS {self.schema} CASCADE')
         conn.close()
+        if RUN_STORE_URL:
+            from queryapigate import runstore
+            runstore.execute(f'DROP DATABASE IF EXISTS {self.schema} SYNC', db_name='default')
         self.tmp.cleanup()
 
     def start(self, command, name):
@@ -146,6 +154,15 @@ class RollingUpgradeTests(unittest.TestCase):
         self.assertEqual(status, 201, body)
         self.assertEqual(call(old, 'GET', '/q/total', key=body['secret'])[1], [{'s': 30}])
         self.assertTrue(eventually(lambda: len(call(new, 'GET', '/api/v1/history?query=total')[1]['items']) >= 3))
+        if RUN_STORE_URL:
+            from queryapigate import runstore
+            self.assertEqual(runstore.query('SELECT max(version) AS v FROM run_store_schema', db_name=self.schema),
+                             [{'v': runstore._SCHEMA_VERSION}])
+            [runs] = runstore.query("SELECT count() AS n, uniqExact(id) AS ids, groupUniqArray(key_name) AS keys "
+                                    "FROM events WHERE query_name = 'total'", db_name=self.schema)
+            self.assertGreaterEqual(runs['n'], 3)
+            self.assertEqual(runs['ids'], runs['n'])  # the two releases' minters never handed out one id twice
+            self.assertEqual(sorted(runs['keys']), ['admin', 'made-by-new', 'made-by-old'])
 
         # A node that restarts mid-upgrade comes back on the old release only while the store is still at that
         # release's schema; once the new code has moved it on, the old release refuses, saying why. (Right after a

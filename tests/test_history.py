@@ -239,6 +239,7 @@ class RetentionTests(HistoryTestCase):
             self.assertEqual(self.stored(), 2)
 
     @unittest.skipUnless(TEST_DATABASE_URL, 'several instances only share a PostgreSQL store')
+    @unittest.skipIf(TEST_RUN_STORE_URL, "a run store's TTL, not a sweep, keeps its retention")
     def test_while_another_instance_sweeps_this_one_skips(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_HISTORY_RETENTION_DAYS': '7'}):
             now = datetime(2026, 3, 1, 12, 0, 0)

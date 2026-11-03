@@ -1,4 +1,4 @@
-# How to keep run history and the event log in ClickHouse (a prototype)
+# How to keep run history and the event log in ClickHouse
 
 **Time:** 20 minutes, with a ClickHouse server. **You'll end up with:** every run recorded in ClickHouse instead of the
 metadata store - history, the event log and usage rollups - written in batches by the Python server and by the Rust
@@ -7,8 +7,10 @@ data plane, if you run one.
 The metadata store (SQLite or PostgreSQL) records two rows per run: one in history and one in the event log. At a few
 hundred calls a second that's fine. At the data plane's rates, 20,000 or more a second, it's 1.7 billion events a day.
 A ClickHouse run store keeps them in about 13 bytes a run, expires them by partition, and counts usage from all of them.
-It is a **prototype** ([ADR 0029](../documentation/adr/0029-clickhouse-run-store.md), measured and decided go): its
-tables, its event ids and how it's switched on may change before it graduates. Try it on a test deployment first.
+It is **stable** since 0.49 ([ADR 0029](../documentation/adr/0029-clickhouse-run-store.md)): its tables are upgraded
+at startup, like the metadata store's. Its limits - one server or ClickHouse Cloud, not a self-managed replicated
+cluster, among them - are in
+[DEPLOYMENT.md](../documentation/DEPLOYMENT.md#a-clickhouse-run-store).
 
 Keys, queries, connections and the audit log stay in the metadata store. `/metrics` doesn't change.
 

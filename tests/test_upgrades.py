@@ -9,10 +9,17 @@ A new release adds its fixture; this test then covers it with no change here.
 Releases with the PostgreSQL store (0.12.0 on) also have <version>.postgres.tar.gz: the same estate in a PostgreSQL
 schema, dumped as plain SQL. When the suite runs against PostgreSQL, each is restored into the test's own schema and
 checked the same way - which is also a test of restoring a pg_dump (BACKLOG #71).
+
+Releases with the ClickHouse run store (0.45.0 on, ADR 0029) also have <version>.runstore.tar.gz: the home, whose
+metadata store says its runs are in ClickHouse, and runstore/, those tables and their rows. When the suite runs with
+a run store, each is loaded into the test's own ClickHouse database and checked the same way, and its tables must be
+at this code's run store schema: 0.45.0's are at version 1, so this tests that migration on a real release's tables.
 """
 import glob
+import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
@@ -20,7 +27,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from queryapigate import create_app, db, events, history
+from queryapigate import create_app, db, events, history, runstore
 from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import needs_sqlite_335
 
@@ -52,6 +59,34 @@ def restore_postgres(sql):
         conn.close()
 
 
+def restore_run_store(home):
+    """Load a fixture's run store (runstore/ in its home) into this test's own ClickHouse database: the tables, their
+    rows, then the views that write to them, so no row is counted twice. TTL merges stay stopped on it: the fixture's
+    events are older than the event log keeps, and ClickHouse would drop them partway through a test. The metadata
+    store's marker names the ClickHouse the fixture was made on; it's pointed at this one, as the connection is
+    pointed at this home's data.db."""
+    name = runstore.database()
+    runstore.execute(f'DROP DATABASE IF EXISTS {name} SYNC', db_name='default')
+    runstore.execute(f'CREATE DATABASE {name}', db_name='default')
+    with open(os.path.join(home, 'runstore', 'tables.json')) as f:
+        tables = json.load(f)
+    for table in tables:
+        ddl = table['ddl'].replace('qag_fixture.', name + '.')
+        runstore.execute(re.sub(r'DEFINER = \S+', 'DEFINER = CURRENT_USER', ddl), db_name=name)
+        if table['engine'].endswith('MergeTree'):
+            runstore.execute(f'SYSTEM STOP TTL MERGES {name}.{table["name"]}', db_name=name)
+        rows = os.path.join(home, 'runstore', f'{table["name"]}.native')
+        if os.path.exists(rows):
+            with open(rows, 'rb') as f:
+                runstore._client().request({'database': name, 'query': f'INSERT INTO {table["name"]} FORMAT Native'},
+                                           f.read())
+    conn = sqlite3.connect(os.path.join(home, 'queryapigate.db'))
+    conn.execute('UPDATE run_store SET location = ?', (runstore.location(),))
+    conn.commit()
+    conn.close()
+    return name
+
+
 class FixtureTestCase(unittest.TestCase):
     def open_home(self, version, kind=''):
         """A fresh home holding that version's store, with the test's QUERYAPIGATE_HOME pointed at it."""
@@ -69,8 +104,21 @@ class FixtureTestCase(unittest.TestCase):
 
 
 class StoreChecks(FixtureTestCase):
-    """What every fixture must read back, whichever store it is in - run by the two classes below."""
+    """What every fixture must read back, whichever store it is in - run by the three classes below."""
     kind = ''
+
+    def restore(self, home):
+        """Put a fixture's PostgreSQL dump or run store where this run's settings look for them."""
+        if self.kind == '.postgres':
+            with open(os.path.join(home, 'store.sql')) as f:
+                restore_postgres(f.read())
+        elif self.kind == '.runstore':
+            name = restore_run_store(home)
+
+            def drop():
+                history.flush()  # this test's last runs first, or they'd be written to a database just dropped
+                runstore.execute(f'DROP DATABASE IF EXISTS {name} SYNC', db_name='default')
+            self.addCleanup(drop)
 
     def check_every_release(self):
         for version in fixture_versions(self.kind):
@@ -91,9 +139,7 @@ class StoreChecks(FixtureTestCase):
                 create_app()
             return
         self.assertEqual(expected['skipped'], [])
-        if self.kind == '.postgres':
-            with open(os.path.join(home, 'store.sql')) as f:
-                restore_postgres(f.read())
+        self.restore(home)
         client = create_app().test_client()
 
         connection = self.get(client, '/api/v1/connections/films')
@@ -121,16 +167,36 @@ class StoreChecks(FixtureTestCase):
         self.assertEqual([row['title'] for row in res.get_json()], ['Alpha', 'Gamma'])
 
         self.assertTrue(self.get(client, '/api/v1/audit')['items'])
+        if self.kind == '.runstore':
+            self.check_run_store(client, expected)
+
+    def check_run_store(self, client, expected):
+        """A run store's tables at this code's schema, whichever release made them, and nothing lost on the way."""
+        history.flush()
+        self.assertEqual(runstore.query('SELECT max(version) AS v FROM run_store_schema')[0]['v'],
+                         runstore._SCHEMA_VERSION)
+        # The ad-hoc run's statement, in the hourly rollups as its hash whether the release kept the text (0.45) or not
+        sql = "SELECT title FROM film WHERE rating = 'R'"
+        self.assertEqual([row['statement'] for row in runstore.query(
+            'SELECT DISTINCT statement FROM run_hours WHERE query_name IS NULL')],
+            ['sha:' + hashlib.sha256(sql.encode()).hexdigest()])
+        self.assertEqual(sum(row['runs'] for row in runstore.query('SELECT runs FROM run_hours')),
+                         expected['run_store']['rows']['events'] + 1)
+        runs = self.get(client, '/api/v1/history')['items']
+        self.assertEqual(sorted(r['kind'] for r in runs), ['adhoc', 'saved', 'saved'])  # and the run just made
+        self.assertEqual([r['sql'] for r in runs if r['kind'] == 'adhoc'], [sql])
 
     def check_event_ids(self, version):
         """ADR 0002 §3, ADR 0020 §4: the run's history row id was its event id, and stays so. A client holding the id
         before it resumes with the run; the next event's id is above every id the old release could have sent."""
         home, _ = self.open_home(version, self.kind)
-        if self.kind == '.postgres':
-            with open(os.path.join(home, 'store.sql')) as f:
-                restore_postgres(f.read())
-        newest = db.connection().execute('SELECT MAX(rowid) FROM execution_history').fetchone()[0]
-        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '1000000'}):  # however old the run
+        self.restore(home)
+        if self.kind == '.runstore':
+            newest = runstore.query('SELECT max(id) AS id FROM events')[0]['id']
+        else:
+            newest = db.connection().execute('SELECT MAX(rowid) FROM execution_history').fetchone()[0]
+        # However old the run: eleven years, within ClickHouse's DateTime, which ends in 2106
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_EVENTS_RETENTION_HOURS': '100000'}):
             client = create_app().test_client()
         [(event_id, payload_json)] = events._replay_page(newest - 1, None, {})
         payload = json.loads(payload_json)
@@ -140,7 +206,11 @@ class StoreChecks(FixtureTestCase):
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(client.get('/q/films_by_rating?rating=PG', headers=ADMIN).status_code, 200)
         history.flush()
-        self.assertEqual([row[0] for row in events._replay_page(newest, None, {})], [newest + 1])
+        if self.kind == '.runstore':  # a run store's ids are minted from the clock: above the old one, not next to it
+            [(after, _)] = events._replay_page(newest, None, {}, upto=runstore.MAX_ID)
+            self.assertGreater(after, newest)
+        else:
+            self.assertEqual([row[0] for row in events._replay_page(newest, None, {})], [newest + 1])
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'the SQLite stores and JSON homes')
@@ -165,6 +235,23 @@ class PostgresUpgradeTests(StoreChecks):
 
     def test_there_is_a_fixture_for_every_release_with_the_postgres_store(self):
         self.assertLessEqual({'0.12.0', '0.13.0', '0.14.0', '0.15.0'}, set(fixture_versions('.postgres')))
+
+    def test_every_release_store_starts_with_its_data_intact(self):
+        self.check_every_release()
+
+    def test_every_release_store_keeps_its_event_ids(self):
+        for version in fixture_versions(self.kind):
+            with self.subTest(version=version):
+                self.check_event_ids(version)
+
+
+@unittest.skipIf(TEST_DATABASE_URL, "the fixtures' metadata stores are SQLite")
+@unittest.skipUnless(TEST_RUN_STORE_URL, 'set QUERYAPIGATE_TEST_RUN_STORE_URL to run')
+class RunStoreUpgradeTests(StoreChecks):
+    kind = '.runstore'
+
+    def test_there_is_a_fixture_for_every_release_with_the_run_store(self):
+        self.assertLessEqual({'0.45.0', '0.46.0', '0.47.0', '0.48.0'}, set(fixture_versions(self.kind)))
 
     def test_every_release_store_starts_with_its_data_intact(self):
         self.check_every_release()

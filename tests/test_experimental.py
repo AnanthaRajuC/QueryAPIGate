@@ -80,7 +80,8 @@ class MarkedEverywhereTests(unittest.TestCase):
                                      ('documentation/MCP.md', 'Sign-in for AI clients (OAuth)', '0.30'),
                                      ('documentation/MCP.md', 'Write tools: agents that write, approved by a person',
                                       '0.30'),
-                                     ('documentation/DEPLOYMENT.md', 'Kubernetes (Helm)', '0.30')):
+                                     ('documentation/DEPLOYMENT.md', 'Kubernetes (Helm)', '0.30'),
+                                     ('documentation/DEPLOYMENT.md', 'A ClickHouse run store', '0.49')):
             with self.subTest(heading=heading):
                 text = read(path)
                 match = re.search(rf'^#+ {re.escape(heading)}\n+(.+)', text, re.M)

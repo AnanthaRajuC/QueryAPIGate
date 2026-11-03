@@ -1,4 +1,4 @@
-//! The run store (ADR 0029, a prototype): with QUERYAPIGATE_RUN_STORE_URL set, the runs this serves go straight into
+//! The run store (ADR 0029): with QUERYAPIGATE_RUN_STORE_URL set, the runs this serves go straight into
 //! ClickHouse's `events` table - Python no longer queues them, only counts them for /metrics - and ClickHouse fills
 //! history and the usage rollups from it, as it does for Python's own runs (runstore.py).
 //!

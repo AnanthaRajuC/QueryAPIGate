@@ -462,11 +462,18 @@ keep a pod's data plane near 2 CPUs and scale out with pods. It isn't for FIPS 1
 a validated module. To turn it on, and see which calls it serves:
 [Try the Rust data plane](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/64-try-the-rust-data-plane.md).
 
-## A ClickHouse run store (prototype)
+## A ClickHouse run store
 
-> **Experimental** - outside the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
-> a prototype ([ADR 0029](adr/0029-clickhouse-run-store.md), measured and decided go). Its tables, its event ids and
-> how it's switched on may change before it graduates.
+> **Stable** since 0.49, under the compatibility promise ([what that means](../CHANGELOG.md#versioning-and-compatibility)):
+> its setting, its tables and what each column means, its event ids, its per-minute and per-hour rollups, and the
+> `queryapigate runs` commands ([ADR 0029](adr/0029-clickhouse-run-store.md)). Its tables are upgraded at startup, as
+> the metadata store's are, and every release since 0.45 is tested that way: its own runs in ClickHouse, read back by
+> the current code. Tables, columns, rollup grains, settings and commands may still be added; none is removed or
+> renamed except through the deprecation process. Limits: one ClickHouse server, or ClickHouse Cloud - not a
+> self-managed replicated cluster, where a read from a replica behind the one that took an insert could miss the
+> settle window; one `queryapigate events` process delivers about 10,000 events a second per stream, so above that,
+> run several behind a load balancer; alerts read history's newest runs, which `QUERYAPIGATE_HISTORY_SAMPLE_RATE` may
+> sample, while usage reports count every run; ClickHouse 24.8 or later.
 
 With `QUERYAPIGATE_RUN_STORE_URL=https://user:password@host:8443/database` set on every instance, run history, the
 event log and per-minute and per-hour usage rollups are kept in ClickHouse (24.8 or later) instead of the metadata
@@ -502,6 +509,8 @@ primary keys, so stop every 0.37 instance before the first 0.38 one starts - see
 some instances run the new release and have upgraded the store, the ones still on the previous release keep working
 against it. `tests/test_rolling_upgrade.py` checks exactly that on every CI run: the previous release from PyPI keeps
 serving, writing and recording runs on a store the current code has just upgraded, and each sees the other's changes.
+The same rule covers a [ClickHouse run store](#a-clickhouse-run-store)'s tables, and the same test runs with one: both
+releases' runs land in it, with ids that never collide.
 
 1. Back up the store.
 2. Start one instance on the new version - it upgrades the store on its first start - and check its `/health`.
