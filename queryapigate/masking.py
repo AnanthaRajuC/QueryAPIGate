@@ -404,7 +404,10 @@ def _store_hash_key():
 def _hash(value, key):
     if value is None:
         return None
-    text = value.decode('utf-8', 'replace') if isinstance(value, (bytes, bytearray)) else str(value)
+    # Binary values as their text, as JSON shows them - a memoryview too, which psycopg2 hands over for bytea: str() of
+    # one is its address, not its value
+    text = bytes(value).decode('utf-8', 'replace') if isinstance(value, (bytes, bytearray, memoryview)) \
+        else str(value)
     return hmac.new(key, text.encode('utf-8'), hashlib.sha256).hexdigest()[:16]
 
 

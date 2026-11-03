@@ -160,7 +160,7 @@ Each of these matches what Python does today, and the differential test checks e
 | Any server with `QUERYAPIGATE_TRUST_PROXY` above 0 | Reading `X-Forwarded-For` as ProxyFix does comes later |
 | Requests with `Origin` or `Authorization`, several `X-API-Key`s, `?version=`, `?connection_name=`, `?stream=` | Python's rules for each |
 | Connections with a `${...}` reference, a credential source or TLS settings; a PostgreSQL server that requires TLS | Encrypted passwords (Fernet) are served; the rest come later |
-| Types and values the renderer doesn't reproduce: PostgreSQL arrays, an interval with years or months, MySQL `BIT`, `hash` on `bytea` | Forwarded once the query has run, and that plan left to Python for five minutes |
+| Types and values the renderer doesn't reproduce: PostgreSQL arrays, an interval with years or months, MySQL `BIT` | Forwarded once the query has run, and that plan left to Python for five minutes. *`hash` on `bytea` was here until 0.49: Python hashed the memoryview's address, not its value; it now hashes the value, and so does the data plane* |
 | A key's first call each minute | So Python records its `last_used_at` |
 | Any call whose query fails in the database | Python runs it again and answers as it does; a timeout is the exception, answered here with Python's 504 |
 

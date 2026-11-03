@@ -221,6 +221,17 @@ class ApplyTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MASK_KEY': 'k2'}):
             self.assertNotEqual(hashed('jane@example.com'), before)
 
+    def test_binary_values_hash_by_their_value_whatever_the_driver_hands_over(self):
+        # psycopg2 gives a memoryview for bytea, mysql-connector bytes for a BLOB: the same value, the same hash -
+        # and two memoryviews of one value too, which str() would have told apart by their addresses
+        def hashed(value):
+            return list(masking.apply(['v'], [(value,)], ['hash'])[1])[0][0]
+        value = b'\x48\x65\x6c\x6c\x6f'
+        self.assertEqual(hashed(memoryview(value)), hashed(value))
+        self.assertEqual(hashed(memoryview(value)), hashed(memoryview(bytes(value))))
+        self.assertEqual(hashed(bytearray(value)), hashed('Hello'))
+        self.assertNotEqual(hashed(memoryview(b'Hello')), hashed(memoryview(b'World')))
+
     def test_mask(self):
         for value, expected in (('jane@example.com', 'j***@example.com'), ('@x.org', '***@x.org'), ('Bo', 'B***'),
                                 ('', None), (12345, None), (None, None)):

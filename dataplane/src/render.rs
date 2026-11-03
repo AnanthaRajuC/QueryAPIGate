@@ -48,10 +48,9 @@ enum Py {
     /// A Decimal: the float formats._cell() turns it into, and str() of it (decimal_str()), what `hash` takes
     Decimal(f64, String),
     Str(String),
+    /// Bytes, or PostgreSQL bytea, which psycopg2 hands over as a memoryview: JSON and masking._hash() both decode it
+    /// as bytes, and `mask` nulls it
     Bytes(Vec<u8>),
-    /// PostgreSQL bytea, which psycopg2 hands over as a memoryview: JSON decodes it as bytes, `mask` nulls it, and
-    /// masking._hash() takes str() of the memoryview - its address, not the value - which can't be reproduced
-    View(Vec<u8>),
     /// A date or time: its isoformat(), what both str() and JSON give
     Iso(String),
     /// A datetime: JSON's '%Y-%m-%d %H:%M:%S' (str() is longer, so it can't be hashed)
@@ -446,7 +445,7 @@ fn value(dialect: Dialect, kind: &str, bytes: &[u8]) -> Out<Py> {
             "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET"
             | "JSON",
         ) => Py::Str(text(bytes)?.to_string()),
-        (Postgres, "BYTEA") => Py::View(bytea(text(bytes)?)?),
+        (Postgres, "BYTEA") => Py::Bytes(bytea(text(bytes)?)?),
         (Mysql, "VARBINARY" | "BINARY" | "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB") => {
             Py::Bytes(bytes.to_vec())
         }
@@ -508,7 +507,7 @@ fn python_str(value: &Py) -> Out<String> {
         }
         Py::Float(f) => pyfmt::repr(*f),
         Py::Decimal(_, text) => text.clone(),
-        Py::None | Py::DateTime(_) | Py::Dumped(_) | Py::View(_) => return Err(Decline),
+        Py::None | Py::DateTime(_) | Py::Dumped(_) => return Err(Decline),
     })
 }
 
@@ -556,7 +555,7 @@ fn write(value: &Py, out: &mut String) {
         Py::Str(s) | Py::Iso(s) | Py::DateTime(s) | Py::Delta(s) | Py::Dumped(s) => {
             json_string(s, out)
         }
-        Py::Bytes(b) | Py::View(b) => json_string(&String::from_utf8_lossy(b), out),
+        Py::Bytes(b) => json_string(&String::from_utf8_lossy(b), out),
     }
 }
 
@@ -698,8 +697,8 @@ mod tests {
             }
         }
         eprintln!("same as Python: {same}; declined: {declined:?}");
-        assert!(same >= 185, "only {same} rendered");
-        assert!(declined.len() <= 3, "declined {declined:?}");
+        assert!(same >= 225, "only {same} rendered");
+        assert!(declined.len() <= 2, "declined {declined:?}");
     }
 
     #[test]

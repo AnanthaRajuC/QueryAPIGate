@@ -1413,7 +1413,9 @@ hides the values of named **source** columns in everything that caller receives
 
 - `column` is `table.column` or `schema.table.column`, with `*` wildcards.
 - `action`: `hash` (HMAC-SHA256, 16 hex characters - equal values give equal codes; keyed with
-  `QUERYAPIGATE_MASK_KEY`, or a key the store makes once), `mask` (text keeps its first character, an email its
+  `QUERYAPIGATE_MASK_KEY`, or a key the store makes once; a binary value, PostgreSQL `bytea` or MySQL `BLOB`, is hashed
+  as the text JSON shows for it, so bytes that aren't UTF-8 count as one replacement character and two values differing
+  only there get one code), `mask` (text keeps its first character, an email its
   domain: `j***@example.com`; other values become null), `null`, `drop` (the column is removed), or `keep` (left as is
   on purpose - for a view, below). The strictest that applies wins.
 
