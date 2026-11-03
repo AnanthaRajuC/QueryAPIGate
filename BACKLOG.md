@@ -3192,14 +3192,16 @@ traffic, and a p99 that stays in single milliseconds under load.
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
   `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400
   `param_invalid` from `sqltools.bind_parameters`, for PostgreSQL only.
-- **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45 (experimental). Every run recorded at 20,000 a
+- **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45, stable since 0.49. Every run recorded at 20,000 a
   second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
 - **Without it, the event log needs a bound** at that rate: a row cap or sampling, as history has.
 - **Plans before the first call** (ADR 0028's open question): computed when a query is published or a key changes.
 
 ## 103. An optional ClickHouse run store
 
-**Status: shipped in 0.45.0 (experimental): a prototype, measured, decided go (2026-10-28).** [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
+**Status: shipped in 0.45.0 (experimental): a prototype, measured, decided go (2026-10-28). Graduated in 0.49
+(unreleased),** with upgrade fixtures from 0.45.0 to 0.48.0, a rolling upgrade with it on, and its limits written
+down. [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
 with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
 ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.
 The data plane writes its own runs, with ids from a block Python leases it. Event ids are time-ordered, below 2^53,

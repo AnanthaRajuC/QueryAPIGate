@@ -247,6 +247,7 @@ class DeliveryTests(EventServerTestCase):
         self.assertTrue(stream.nothing_more())
 
     @unittest.skipUnless(TEST_DATABASE_URL, 'set QUERYAPIGATE_TEST_DATABASE_URL to run')
+    @unittest.skipIf(TEST_RUN_STORE_URL, "the metadata store's NOTIFY: with a run store, the events server tails it")
     def test_postgres_notify_delivers_without_waiting_for_the_poll(self):
         self.start_server(poll_interval=30)  # only a NOTIFY can wake this one in time
         stream = self.open('admin')

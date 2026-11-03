@@ -22,9 +22,8 @@ release still never breaks them), and every such change is noted here. Each is m
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
 connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), the Rust data plane in front of /q/
-(`QUERYAPIGATE_DATAPLANE_SECRET`), and a ClickHouse run store for history, the event log and usage
-(`QUERYAPIGATE_RUN_STORE_URL`). The list is `queryapigate/experimental.py`.
+(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -51,6 +50,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **The ClickHouse run store graduates: it's stable** ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)),
+  under the compatibility promise from this release. That covers `QUERYAPIGATE_RUN_STORE_URL`, its tables and what
+  each column means, its event ids, its per-minute and per-hour rollups and the `queryapigate runs` commands. Its
+  tables are upgraded at startup like the metadata store's. Every release since 0.45 is now tested that way, and a
+  rolling upgrade with it on. Nothing about it changes on upgrade, and it no longer logs a warning at startup. Its
+  limits are now written down
+  ([DEPLOYMENT.md](documentation/DEPLOYMENT.md#a-clickhouse-run-store)): one server or ClickHouse Cloud, not a
+  self-managed replicated cluster; about 10,000 events a second per stream from one `queryapigate events` process;
+  alerts read history's sample, where usage reports count every run.
+
 ### Fixed
 
 - **Masking's `hash` on a PostgreSQL `bytea` column hashed a memory address, not the value.** psycopg2 hands bytea
@@ -62,6 +73,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.48.0 are added, and the rolling-upgrade and Helm checks now start from 0.48.0.
+- **CI: upgrade fixtures for the run store,** from 0.45.0 to 0.48.0, made by the published packages
+  (`generate.py --run-store`). They're loaded into ClickHouse 24.8 and 26.8, and must read back as the SQLite and
+  PostgreSQL fixtures do, at this code's run store schema. A new job runs the whole suite on the PostgreSQL metadata
+  store with a run store, and with it the rolling upgrade.
 
 ## [0.48.0] - 2026-11-01
 

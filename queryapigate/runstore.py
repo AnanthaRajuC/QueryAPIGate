@@ -1,4 +1,4 @@
-"""The run store (ADR 0029, experimental): run history, the event log and usage rollups in ClickHouse.
+"""The run store (ADR 0029): run history, the event log and usage rollups in ClickHouse.
 
 With QUERYAPIGATE_RUN_STORE_URL set, history.py's writer thread sends its batches here instead of to the metadata
 store, and everything that reads runs or events - GET /api/v1/history, the Console's runs per version, usage

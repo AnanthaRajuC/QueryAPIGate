@@ -12,7 +12,8 @@ added - when it meets every one of GRADUATION. Alerts, remote files through Duck
 Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart; the audit log streamed to a SIEM in 0.32, once
 tested against real receivers (ADR 0019); live events, and secrets from files and Vault, in 0.34 (ADR 0021) - AWS's
 stay, until tested against AWS. The connection types have their own terms (databases.GRADUATION): MongoDB met them
-in 0.37, with streaming exports (ADR 0022).
+in 0.37, with streaming exports (ADR 0022). The ClickHouse run store graduated in 0.49 (ADR 0029), once upgrades from
+each release that had it were tested.
 """
 from typing import Any
 
@@ -74,13 +75,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                'settings and its headers may change before it graduates',
         'settings': ('QUERYAPIGATE_DATAPLANE_SECRET',),
         'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/'),
-    },
-    'run_store': {
-        'name': 'A ClickHouse run store for history, the event log and usage',
-        'why': 'a prototype (ADR 0029, decided go): its tables, its event ids and how it is switched on may change '
-               'before it graduates',
-        'settings': ('QUERYAPIGATE_RUN_STORE_URL',),
-        'docs': ('documentation/DEPLOYMENT.md', 'A ClickHouse run store (prototype)'),
     },
 }
 

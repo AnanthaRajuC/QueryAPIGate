@@ -207,6 +207,8 @@ mkdocs serve
    python tests/fixtures/stores/generate.py /tmp/qag-X.Y.Z/bin/queryapigate
    python tests/fixtures/stores/generate.py --postgres postgresql://postgres:pw@localhost:5432/postgres \
      /tmp/qag-X.Y.Z/bin/queryapigate   # a scratch database; needs pg_dump on PATH
+   python tests/fixtures/stores/generate.py --run-store http://default:pw@localhost:8123 \
+     /tmp/qag-X.Y.Z/bin/queryapigate   # a scratch ClickHouse 24.8, the oldest CI tests
    ~~~
 4. Point the upgrade tests at it: set `PREVIOUS_RELEASE: "X.Y.Z"` in `.github/workflows/ci.yml`, so the next version is
    tested serving beside this one on an upgraded store, and its Helm chart upgraded from this one's on a cluster.

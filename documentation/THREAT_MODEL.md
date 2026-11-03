@@ -490,7 +490,7 @@ vulnerability, and the image's binary is built with `cargo auditable`, so the im
 Its cryptography (ring, RustCrypto) isn't a FIPS-validated module: a deployment that needs FIPS 140 leaves the data
 plane off.
 
-### The ClickHouse run store (ADR 0029, a prototype)
+### The ClickHouse run store (ADR 0029)
 
 With `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and usage rollups are kept in ClickHouse rather than
 the metadata store ([ADR 0029](adr/0029-clickhouse-run-store.md)). Keys, queries, connections and the audit log stay
@@ -524,8 +524,8 @@ in the metadata store, so the run store never decides who may do what. Where it 
   (`queryapigate_events_late_total`).
 
 *Reviewed* on 2026-10-28, part of what it needs to graduate (ADR 0017): six findings, fixed in schema version 2 of
-its tables ([ADR 0029 section 7](adr/0029-clickhouse-run-store.md#reviewed-2026-10-28-and-what-changed)). It stays
-experimental until a release unchanged (the 250-million-run measurement is done).
+its tables ([ADR 0029 section 7](adr/0029-clickhouse-run-store.md#reviewed-2026-10-28-and-what-changed)). It
+graduated in 0.49, with the protections above.
 
 ### Secrets at rest
 

@@ -8,7 +8,8 @@
   250-million-run measurement. **Security review: done (2026-10-28),** its findings fixed in section 7's
   *Reviewed*; schema version 2 of the run store's tables. **250 million runs: measured (2026-10-29),** every
   criterion met with the replay reading its ids in batches (section 9, *At 250 million runs*). Both shipped in 0.46.0.
-  What's left to graduate: a release unchanged after 0.46.0.
+  **Graduated in 0.49.0,** after 0.47.0 and 0.48.0 left it unchanged and its upgrades from every release that had it
+  were tested (section 9, *Graduated*).
 - **Date:** 2026-10-28
 - **Backlog:** #103. The second condition of [ADR 0028](0028-rust-data-plane-prototype.md#result-go)'s go decision:
   a store built for runs at the data plane's rate. Keeps [ADR 0002](0002-event-ids.md)'s event-id rule and
@@ -90,7 +91,8 @@ QUERYAPIGATE_RUN_STORE_URL=https://queryapigate:password@clickhouse.internal:844
   `QUERYAPIGATE_DATABASE_URL`: it can be read from a file named by `QUERYAPIGATE_RUN_STORE_URL_FILE` (ADR 0015).
 - **Versions:** ClickHouse 24.8 LTS or later, tested in CI against 24.8 and the newest LTS. One server, or
   ClickHouse Cloud. Self-managed replicated clusters are an open question.
-- **Experimental** (`queryapigate/experimental.py`) until section 9's measurements and a release unchanged.
+- **Experimental** (`queryapigate/experimental.py`) until section 9's measurements and a release unchanged. Stable
+  since 0.49 (section 9, *Graduated*).
 
 ### 2. Event ids: time-ordered, below 2^53, continuing the sequence
 
@@ -353,6 +355,27 @@ a time (section 5): on the same runs, 12.0 s to 6.2 s for a key's, 9.1 to 5.7 s 
 most events match. The soak again recorded every run with none late, and its resuming clients missed and repeated
 nothing; the id check schema 2 adds to each insert cost nothing measurable.
 
+#### Graduated in 0.49 (decided 2026-11-01)
+
+ADR 0017's terms (`experimental.GRADUATION`), and what meets each:
+
+1. **Tested for real in CI.** The whole suite runs with the run store on ClickHouse 24.8 and 26.8, and again with the
+   PostgreSQL metadata store beside it, with the differential against a metadata store. The upgrade fixtures now
+   include each release's run store: 0.45.0 to 0.48.0, made by the published packages on ClickHouse 24.8 and
+   loaded into both versions by `tests/test_upgrades.py`. 0.45.0's tables are at version 1, so the migration to
+   version 2 runs on a real release's tables. `tests/test_rolling_upgrade.py` runs the previous release beside this
+   code on one PostgreSQL store and one run store: both write runs there, with no id minted twice.
+2. **A security review:** 2026-10-28, its findings fixed in 0.46.0 (section 7, *Reviewed*).
+3. **Its shape unchanged for a release:** 0.47.0 left it as it was, and 0.48.0 changed only the data plane, which
+   stopped sending empty batches. No change is planned: today's grains, by minute for the event log's retention and
+   by hour for 400 days, are the 1.0 shape. Other grains may be added beside them.
+4. **Gaps closed or written down as limits:** in DEPLOYMENT.md's section. Self-managed replicated clusters aren't
+   supported. One events process delivers about 10,000 events a second per stream. Alerts read history's sample.
+5. **The dependency versions it allows are tested:** ClickHouse 24.8, the oldest it allows, and 26.8, the newest
+   LTS. It adds no Python dependency.
+6. **What may still be added:** tables, columns, rollup grains, settings and `queryapigate runs` commands, in the
+   same section.
+
 ## Alternatives considered
 
 - **Partitioned PostgreSQL** (hourly partitions dropped for retention, `COPY` ingestion, BRIN indexes). No new
@@ -403,7 +426,8 @@ nothing; the id check schema 2 adds to each insert cost nothing measurable.
 - **Should the main server's `GET /events` tail the store** too, instead of its in-process broadcaster?
 - **Time-ordered ids for the SQL stores**, replacing the 1,000-id look-back (section 8).
 - **The rollups' grains and defaults** (by minute for the event log's retention, by hour for 400 days), once real
-  traffic's combinations per minute are known.
+  traffic's combinations per minute are known. *Settled for 1.0 (2026-11-01):* these two stay as they are, and others
+  may be added beside them.
 - **The events server's ceiling:** about 10,000 events a second per stream from one process, below what a data plane
   serves. Several processes behind a load balancer each tail the store already; whether one process should serve
   more is a separate measurement.
