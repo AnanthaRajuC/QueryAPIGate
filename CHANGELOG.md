@@ -50,6 +50,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.49.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
+  rolling-upgrade and Helm checks now start from 0.49.0.
+
 ## [0.49.0] - 2026-11-04
 
 The ClickHouse run store graduates: it's stable, under the compatibility promise, with its upgrades from every release
