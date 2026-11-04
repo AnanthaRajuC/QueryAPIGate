@@ -155,9 +155,12 @@ documentation. #99 workspaces only if asked for.
     ([ADR 0032](documentation/adr/0032-dataplane-rate-limits.md)); and a key's own `query_timeout` and `max_rows`. The
     image's Python is python-build-standalone's 3.13, with no `pip`: 6-9% more calls a second where Python serves them
     ([ADR 0031](documentation/adr/0031-the-image-s-python.md)). (0.48.0, 2026-11-01.)
-37. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+37. **0.49: The run store graduates** ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)) - stable, with
+    upgrade fixtures from 0.45.0 to 0.48.0, a rolling upgrade with it on and its limits written down; and masking's
+    `hash` on PostgreSQL `bytea` hashes the value, not a memory address. (0.49.0, 2026-11-04.)
+38. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-38. **1.0.0.**
+39. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3190,7 +3193,7 @@ traffic, and a p99 that stays in single milliseconds under load.
   Then other formats and workspaces.
 - **A NUL byte in a string parameter is a 500 on PostgreSQL** (found by the proxied differential run, 2026-10-30):
   psycopg2 refuses it (`A string literal cannot contain NUL`) and Python answered `query_failed`, where a 400
-  `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed (unreleased): a 400
+  `param_invalid` is the answer. The data plane forwards such calls, so the two agree. Fixed in 0.48.0: a 400
   `param_invalid` from `sqltools.bind_parameters`, for PostgreSQL only.
 - **A store for runs at its rate** - #103, ADR 0029: shipped in 0.45, stable since 0.49. Every run recorded at 20,000 a
   second is 1.7 billion rows a day, more than SQLite or the PostgreSQL store should hold.
@@ -3199,8 +3202,8 @@ traffic, and a p99 that stays in single milliseconds under load.
 
 ## 103. An optional ClickHouse run store
 
-**Status: shipped in 0.45.0 (experimental): a prototype, measured, decided go (2026-10-28). Graduated in 0.49
-(unreleased),** with upgrade fixtures from 0.45.0 to 0.48.0, a rolling upgrade with it on, and its limits written
+**Status: shipped in 0.45.0 (experimental): a prototype, measured, decided go (2026-10-28). Graduated in 0.49.0
+(2026-11-04),** with upgrade fixtures from 0.45.0 to 0.48.0, a rolling upgrade with it on, and its limits written
 down. [ADR 0029](documentation/adr/0029-clickhouse-run-store.md):
 with `QUERYAPIGATE_RUN_STORE_URL` set, run history, the event log and per-minute and per-hour usage rollups go to
 ClickHouse. One insert per batch into `events`; materialized views fill `history`, `history_counts` and the rollups.

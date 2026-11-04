@@ -50,6 +50,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-04
+
+The ClickHouse run store graduates: it's stable, under the compatibility promise, with its upgrades from every release
+since 0.45 tested and its limits written down. Nothing about it changes on upgrade. One fix: masking's `hash` on a
+PostgreSQL `bytea` column now hashes the value. **If you hash a bytea column,** its codes change once on upgrade, to
+codes that then stay the same (see *Fixed*).
+
 ### Changed
 
 - **The ClickHouse run store graduates: it's stable** ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)),
@@ -62,6 +69,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   self-managed replicated cluster; about 10,000 events a second per stream from one `queryapigate events` process;
   alerts read history's sample, where usage reports count every run.
 
+- **CI:** the upgrade fixtures from 0.48.0 are added, and the rolling-upgrade and Helm checks now start from 0.48.0.
+- **CI: upgrade fixtures for the run store,** from 0.45.0 to 0.48.0, made by the published packages
+  (`generate.py --run-store`). They're loaded into ClickHouse 24.8 and 26.8, and must read back as the SQLite and
+  PostgreSQL fixtures do, at this code's run store schema. A new job runs the whole suite on the PostgreSQL metadata
+  store with a run store, and with it the rolling upgrade.
+
 ### Fixed
 
 - **Masking's `hash` on a PostgreSQL `bytea` column hashed a memory address, not the value.** psycopg2 hands bytea
@@ -69,14 +82,6 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   and equal values got different codes: not the stable pseudonym `hash` promises. No value leaked. It now hashes the
   value, as it always did MySQL's `BLOB` and `VARBINARY`. **The codes for bytea columns change once, on upgrade**, to
   codes that then stay the same. The Rust data plane (experimental), which forwarded these calls, now serves them.
-
-### Changed
-
-- **CI:** the upgrade fixtures from 0.48.0 are added, and the rolling-upgrade and Helm checks now start from 0.48.0.
-- **CI: upgrade fixtures for the run store,** from 0.45.0 to 0.48.0, made by the published packages
-  (`generate.py --run-store`). They're loaded into ClickHouse 24.8 and 26.8, and must read back as the SQLite and
-  PostgreSQL fixtures do, at this code's run store schema. A new job runs the whole suite on the PostgreSQL metadata
-  store with a run store, and with it the rolling upgrade.
 
 ## [0.48.0] - 2026-11-01
 
@@ -3309,7 +3314,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...HEAD
+[0.49.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.45.0...v0.46.0
