@@ -54,6 +54,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 - **CI:** the upgrade fixtures from 0.49.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.49.0.
+- **CI:** a crash in native code during the tests now prints every thread's Python stack (`PYTHONFAULTHANDLER`),
+  not only exit code 139. The ClickHouse run store and PostgreSQL job segfaulted once with no trace on #151.
 
 ## [0.49.0] - 2026-11-04
 
