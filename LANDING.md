@@ -1,6 +1,6 @@
 # QueryAPIGate
 
-### Turn SQL into secure, governed REST APIs - and MCP tools for AI agents.
+### Turn SQL into governed data access: REST APIs for your apps, MCP tools for your AI agents.
 
 <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;max-width:100%;margin-bottom:1.2em">
 <iframe src="https://www.youtube-nocookie.com/embed/WWImFj4m95o" title="QueryAPIGate: demo" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe>

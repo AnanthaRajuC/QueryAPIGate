@@ -9,7 +9,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/AnanthaRajuC/QueryAPIGate/badge)](https://scorecard.dev/viewer/?uri=github.com/AnanthaRajuC/QueryAPIGate)
 [![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/SECURITY.md#slsa-level)
 
-### Turn SQL into secure, governed REST APIs - and MCP tools for AI agents.
+### Turn SQL into governed data access: REST APIs for your apps, MCP tools for your AI agents.
 
 [**Full documentation**](https://AnanthaRajuC.github.io/QueryAPIGate/)
 
@@ -39,13 +39,21 @@
   <sub>One path for REST, MCP, events and exports. A stage that fails stops the call with a typed error code - except recording, which never blocks the response.</sub>
 </p>
 
-**QueryAPIGate** is a self-hosted service that runs SQL against your databases - and against Parquet, CSV and JSON files
-on disk, S3, GCS or the web, through DuckDB - and returns the results as JSON, NDJSON, XML, YAML, CSV, TSV, Excel or
-Parquet. Save a query once and it becomes a versioned endpoint with typed,
-injection-safe parameters and run history - without writing a controller, a repository layer, pagination, auth or
-serialization boilerplate for it.
+**QueryAPIGate** is a self-hosted gateway between your databases and everything that asks them for data. Save a SQL
+query once, and it is both:
 
-Write SQL. Configure the query. Apply access controls. Get an API.
+- **a REST endpoint** for apps, partners and pipelines: versioned, with typed, injection-safe parameters, returned as
+  JSON, NDJSON, XML, YAML, CSV, TSV, Excel or Parquet;
+- **an MCP tool** for AI agents: self-describing, with the same parameters, so an agent calls your query instead of
+  getting a database connection.
+
+Both go through one governed core: the same keys and grants, column masking, rate limits and audit log. An agent's
+call is checked exactly like an app's, and the limits live in the gateway, where no prompt can talk its way around
+them. It queries PostgreSQL, MySQL, SQLite, DuckDB, ClickHouse and MongoDB, and Parquet, CSV and JSON files on disk,
+S3, GCS or the web through DuckDB - with no controller, repository layer, pagination, auth or serialization code to
+write.
+
+Write SQL. Configure the query. Apply access controls. Get an API - and an MCP tool.
 
 ~~~bash
 $ curl 'http://127.0.0.1:5000/q/example_film_search?text=Harbor&page_size=2' -H 'X-API-Key: demo-key'
@@ -55,6 +63,18 @@ $ curl 'http://127.0.0.1:5000/q/example_top_films?top_n=2&category=Comedy&format
 title,category,rating,rentals,rank
 Electric Signal,Comedy,PG,977,1
 Crimson Garden,Comedy,PG-13,631,2
+~~~
+
+The same saved query, called by an AI agent over MCP with the official MCP Python SDK
+([the whole script](how-to/24-let-an-agent-call-your-queries-via-mcp.md)):
+
+~~~python
+async with streamablehttp_client('http://127.0.0.1:5001/mcp', headers={'X-API-Key': 'demo-key'}) as (r, w, _):
+    async with ClientSession(r, w) as session:
+        await session.initialize()
+        result = await session.call_tool('example_film_search', {'text': 'Harbor', 'page_size': 2})
+        print(result.structuredContent['rows'])
+# [{'film_id': 48, 'title': 'Broken Harbor', 'category': 'Action', 'rating': 'PG-13'}, {'film_id': 44, 'title': 'Electric Harbor', 'category': 'Documentary', 'rating': 'G'}]
 ~~~
 
 <p align="center">
@@ -74,7 +94,8 @@ map - screen by screen: [**a tour of the Console**](https://github.com/AnanthaRa
 
 - [Why QueryAPIGate](#why-queryapigate)
 - [Features](#features)
-- [Install](#install) · [Quick start](#quick-start) · [Saving a query as an endpoint](#saving-a-query-as-an-endpoint)
+- [Install](#install) · [Quick start](#quick-start) · [Saving a query as an endpoint](#saving-a-query-as-an-endpoint) ·
+  [Giving it to an AI agent](#giving-it-to-an-ai-agent)
 - [Try it with Docker](#try-it-with-docker)
 - [Documentation](#documentation)
 - [Contributing](#contributing) · [Security](#security) · [License](#license) · [Contact](#contact)
@@ -83,15 +104,19 @@ map - screen by screen: [**a tour of the Console**](https://github.com/AnanthaRa
 
 ## Why QueryAPIGate
 
-Valuable SQL sits in reports, dashboards, ETL jobs and application code, with no way to a REST endpoint except a
-backend service written around each query. QueryAPIGate makes the query itself the API: write the SQL once, and it is
-a versioned endpoint with typed parameters, governed by who may call it, how often and what they may see - and the same
-query is an MCP tool for AI agents, a live event stream and a scheduled export.
+Two problems, one answer.
 
-That MCP surface is a reason in itself: it's how you let an AI agent query production data without handing it a
-database connection. The agent sees only governed tools, ad-hoc SQL over MCP is always read-only, writes wait for a
-person's approval, and the same masking, limits and audit apply - the limits live in the gateway, where no prompt can
-talk its way around them. One governed core, two front doors that matter most: REST for your apps, MCP for your agents.
+**Apps.** Valuable SQL sits in reports, dashboards, ETL jobs and application code, with no way to a REST endpoint
+except a backend service written around each query. QueryAPIGate makes the query itself the API: a versioned endpoint
+with typed parameters, governed by who may call it, how often and what they may see - and the same query is also a
+live event stream and a scheduled export.
+
+**AI agents.** An agent that needs production data usually gets a database connection, and with it every table and
+every write the connection allows, limited only by what its prompt tells it. QueryAPIGate gives the agent governed
+tools instead: the saved queries its key may call, read-only ad-hoc SQL, and writes that wait for a person's approval.
+None of that is the agent's to change - it is enforced in the gateway, not asked of the model.
+
+One governed core, two surfaces: REST for your apps, MCP for your agents.
 
 It doesn't replace an application backend; it removes the boilerplate when the requirement is "expose this query
 safely". Use cases, how it compares to PostgREST, Hasura and others, and the thinking behind it:
@@ -101,11 +126,11 @@ safely". Use cases, how it compares to PostgREST, Hasura and others, and the thi
 
 - **[Saved, versioned queries as endpoints](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#save-a-query)** - `GET /q/<name>`, typed and
   injection-safe parameters, drafts and publishing, run history.
-- **[Scoped API keys, roles and collections](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#authentication-and-permissions)** - per
-  connection, per query or per collection; expiry, IP allow-lists, rate limits, quotas, table allow-lists.
 - **[A governed MCP server for AI agents](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/MCP.md)** - saved queries as self-describing tools,
   read-only ad-hoc SQL, masking-aware schema discovery, OAuth sign-in, and write tools that wait for a person's
   approval - the same grants, masking and audit as every other caller.
+- **[Scoped API keys, roles and collections](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#authentication-and-permissions)** - per
+  connection, per query or per collection; expiry, IP allow-lists, rate limits, quotas, table allow-lists.
 - **[Named administrators and SSO](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#administrators-and-admin-roles)** - admin roles and
   tokens, Console sign-in through your identity provider, signed-in users' JWTs.
 - **[Workspaces](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/API.md#workspaces)** (experimental) - several teams on one server,
@@ -202,6 +227,29 @@ Rules: `type` (`int`, `float`, `str`, `bool`), `default`, `required`, `enum`, `m
 Add `"cache_ttl": 60` to cache a response for that many seconds (`X-Cache: HIT`/`MISS`, `ETag`, `Cache-Control`) -
 opt-in, and never used for a query that writes. See
 [Response caching](documentation/API.md#response-caching).
+
+## Giving it to an AI agent
+
+The query you just saved is already an MCP tool. Start the MCP server beside the REST one - the same home, keys and
+history:
+
+~~~bash
+pip install "queryapigate[mcp]"
+QUERYAPIGATE_API_KEY=demo-key queryapigate mcp               # http://127.0.0.1:5001/mcp
+~~~
+
+Point any MCP client that speaks Streamable HTTP at `http://127.0.0.1:5001/mcp`, with an `X-API-Key` header. Give the
+agent a scoped key of its own, not the admin one. It sees `film_by_id` as a tool, plus `list_tables`, `describe_table`
+and `execute_sql` if its key may reach the `examples` connection. What it can and can't do:
+
+- ad-hoc SQL over MCP is always read-only, whatever the key may do over REST;
+- a query that writes is a tool only if its author allowed agents to write with it, and a person approves each write;
+- masking, rate limits, quotas and the audit log apply exactly as they do over REST;
+- `"mcp": false` on a saved query keeps it away from agents while it still serves REST;
+- hosted AI clients can sign their users in with OAuth instead of holding a key.
+
+Step by step: [let an agent call your saved queries](how-to/24-let-an-agent-call-your-queries-via-mcp.md). Every tool,
+setting and limit: [the MCP server](documentation/MCP.md).
 
 ## Try it with Docker
 
