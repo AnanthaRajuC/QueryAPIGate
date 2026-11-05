@@ -43,8 +43,10 @@ class ConfigFileTests(IsolationTestCase):
             self.ok('put', f'/api/v1/workspaces/team-b/members/{name}', json={'role': role})
         lead = {'X-API-Key': admins.issue_token('lead')[1]}
         dev = {'X-API-Key': admins.issue_token('dev')[1]}
-        self.ok('post', f'{B}/api/v1/config/apply', headers=lead, json=self.doc)
-        self.assertEqual(self.code('post', f'{B}/api/v1/config/apply', 403, headers=dev, json=self.doc),
+        doc = {**self.doc, 'connections': [{'name': 'warehouse', 'db': 'postgres', 'host': 'db.internal',
+                                            'active': False}]}  # a file on the server is a server-wide role's
+        self.ok('post', f'{B}/api/v1/config/apply', headers=lead, json=doc)
+        self.assertEqual(self.code('post', f'{B}/api/v1/config/apply', 403, headers=dev, json=doc),
                          'role_forbidden')
 
 
