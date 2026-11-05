@@ -9,12 +9,56 @@ import hashlib
 import json
 import re
 
+from flask import g, has_request_context
+
 from .. import config, duckfiles, engine, masking, metrics, pool, schema, store
 from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
 _SERVER_FIELDS = ('name', 'created_at', 'updated_at', 'usage', 'example')
 _NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$')
+# What may change on an H2 or JDBC connection without choosing what it opens: everything else - a URL, a jar, a
+# driver option - can name a file, or code, on this server.
+_NOT_OPENING = ('active', 'password', 'created_at', 'updated_at', 'example')
+
+
+def _local_files(details):
+    """What decides which files on this server a connection opens, comparable between two versions of it - or None
+    for one that opens none: a server database, or DuckDB in memory reading only remote storage."""
+    if not isinstance(details, dict):
+        return None
+    db = details.get('db')
+    if db in store.SERVER_DB_TYPES:
+        return None
+    if db == 'sqlite':
+        return json.dumps([db, details.get('database')], default=str)
+    if db == 'duckdb':
+        database = details.get('database') or ':memory:'
+        local = sorted(str(p) for p in details.get('allowed_paths') or ()
+                       if not (isinstance(p, str) and p.startswith(duckfiles.REMOTE_SCHEMES)))
+        if database == ':memory:' and not local:
+            return None
+        return json.dumps([db, database, local], default=str)
+    # H2, JDBC, and a type this list doesn't know: all of it but what can't name a file
+    return json.dumps({k: v for k, v in details.items() if k not in _NOT_OPENING}, sort_keys=True, default=str)
+
+
+def refuse_local_files(after, before=None):
+    """Setting up or changing what a connection opens on this server's disk - a SQLite, H2 or JDBC connection, a
+    DuckDB file or local `allowed_paths` - takes a server-wide role. Whoever chooses the path reads any file the
+    server can: another workspace's database, a secret's file. A role from a workspace membership still runs these
+    connections, and changes what doesn't choose a file (its name in queries, `active`, a password); outside a
+    request - the CLI, startup - it is the server's own doing."""
+    opens = _local_files(after)
+    if opens is None or (before is not None and opens == _local_files(before)) or not has_request_context():
+        return
+    permission = getattr(g, 'permission', None)
+    if permission is None or getattr(permission, 'server_wide', True):
+        return
+    raise ApiError('A connection that opens files on this server - SQLite, H2, JDBC, a DuckDB file or local '
+                   'allowed_paths - is set up by a server-wide role: a role in a workspace could otherwise read any '
+                   "file the server can. Ask a server administrator, or use remote storage (s3://, https://...)",
+                   403, code='role_forbidden', capability='connections.write', role=permission.role)
 
 
 def audit_changes(before, after):
@@ -100,6 +144,7 @@ def create(data, actor):
     if 'db' not in fields:
         raise ApiError(f"db is required - one of: {', '.join(config.SUPPORTED_DB_TYPES)}", code='invalid_body')
     fields.setdefault('active', True)
+    refuse_local_files(fields)
     store.update_connections({name: fields})
     after = store.read_connections()[name]
     store.record_audit(actor, 'create_connection', name, _masked(name, after))
@@ -121,6 +166,7 @@ def update(name, data, actor):
             merged[key] = value
     if 'password' not in fields and 'password' in before:
         merged['password'] = config.PASSWORD_MASK  # keep the stored (possibly encrypted) value as it is
+    refuse_local_files(merged, before)
     store.update_connections({name: merged})
     after = store.read_connections()[name]
     changes = audit_changes(before, after)
@@ -152,6 +198,7 @@ def _probe_details(data):
         raise ApiError(f"db must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}", code='invalid_body')
     if fields.get('password') == config.PASSWORD_MASK:
         fields['password'] = store.read_connections().get(name or '', {}).get('password', '')
+    refuse_local_files(fields, store.read_connections().get(name) if name else None)  # a probe opens it too
     return store.resolve_ad_hoc(fields), None
 
 

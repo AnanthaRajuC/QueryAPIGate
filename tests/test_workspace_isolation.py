@@ -163,8 +163,8 @@ class AdministratorTests(IsolationTestCase):
         names = [q['name'] for q in self.ok('get', f'{B}/api/v1/queries', headers=bea).get_json()['items']]
         self.assertEqual(names, ['films'])
         self.assertEqual(self.titles(f'{B}/q/films', headers=bea), ['Bravo', 'Bolero', 'Brazil'])
-        self.ok('post', f'{B}/api/v1/connections', status=201, headers=bea,
-                json={'name': 'more', 'db': 'sqlite', 'database': self.b_db, 'active': True})
+        self.ok('post', f'{B}/api/v1/connections', status=201, headers=bea,  # not a file: a server-wide role's
+                json={'name': 'more', 'db': 'postgres', 'host': 'db.internal', 'database': 'b', 'active': False})
         self.assertEqual(self.code('get', '/api/v1/queries', 403, headers=bea), 'workspace_required')
         self.assertEqual(self.code('get', '/w/default/api/v1/queries', 404, headers=bea), 'workspace_not_found')
         self.assertEqual(self.code('get', '/w/default/q/films', 404, headers=bea), 'workspace_not_found')

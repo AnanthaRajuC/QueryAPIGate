@@ -1090,8 +1090,10 @@ see everything. It protects teams from each other's mistakes and reach, not from
 - also answers under `/w/<workspace>/...`, in that workspace: `/w/team-a/q/orders`, `/w/team-a/api/v1/queries`.
 
 - **An API key** belongs to the workspace it was created in, and every call it makes is there - with or without the
-  prefix. A signed-in user's role is found by name in the workspace the path names (`default` without one), so the
-  users of another workspace call `/w/<workspace>/...`. MCP: a key's tools are its workspace's queries.
+  prefix. MCP: a key's tools are its workspace's queries.
+- **A signed-in user** (a JWT) belongs to the workspace their token's `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` claim names,
+  or `default` when that setting is unset; their role is found by name there. Like a key, they call with or without
+  the prefix, and a prefix naming another workspace is `404`.
 - **An administrator** acts in the workspace the path names, or `default`. One whose roles are all memberships names
   their workspace; unprefixed, they get `403 workspace_required`.
 - **Naming a workspace you aren't in** - or one that doesn't exist - is `404 workspace_not_found`, either way, so a
@@ -1099,6 +1101,11 @@ see everything. It protects teams from each other's mistakes and reach, not from
 - **Kept apart** in each workspace: its run history, usage quotas (two workspaces' keys of one name are two
   callers), cached responses and the cache's management, write requests, descriptions and configuration-file records.
   A local-folder destination is only in `default`: the folders exports may write under are the server's.
+- **Files on the server are a server-wide role's.** Saving, testing or repointing a connection that opens local files -
+  SQLite, H2, JDBC, a DuckDB file or local `allowed_paths` - takes a server-wide role (`403 role_forbidden`
+  otherwise), since whoever chooses the path could read any file the server can. A workspace's own owner runs the ones
+  a server administrator set up there, switches them on and off and changes their password, and sets up DuckDB over
+  remote storage (`s3://`, `gs://`, `https://`...) and server databases themselves.
 - **The Console**: once there is a second workspace, a switcher under the wordmark picks the one the tab works in -
   every screen then reads and changes that workspace's things - and the **Workspaces** screen lists them, creates and
   removes them (owners), and manages each one's members. An administrator whose roles are all in workspaces starts

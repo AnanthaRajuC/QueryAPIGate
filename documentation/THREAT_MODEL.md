@@ -219,6 +219,14 @@ not between a hosted service's tenants. What it holds against, and how:
   what only a server-wide role does (`adminroles.SERVER_ONLY`): administrators, settings, re-keying, erasing a
   person, creating workspaces, `/metrics` and the instance list. A member naming a workspace they aren't in gets
   `404`.
+- **A file on the server is a server-wide role's to open.** Whoever chooses a connection's path reads any file the
+  server process can - another workspace's SQLite or DuckDB database, a secret's file, a key file. So saving, testing
+  or repointing a connection that opens local files - SQLite, H2, JDBC, a DuckDB file or local `allowed_paths` -
+  takes a server-wide role, in every workspace, through the API and configuration files alike
+  (`services/connections.refuse_local_files()`). A role from a membership still runs the ones a server administrator
+  set up for its workspace, switches them on and off and changes their password, and sets up DuckDB over remote
+  storage (`s3://`, `https://`...) itself. Before 0.50 a workspace owner could set any path (found in a review of the
+  boundary on 2026-11-05, and confirmed by reading another workspace's database and a key file).
 - **What happened is per workspace**: audit entries carry their workspace inside the hash chain, so rewriting whose
   an entry was breaks the chain; a member reads only their workspace's. Events reach only their workspace's
   subscribers; the response cache, and its management, are per workspace.
@@ -230,10 +238,10 @@ What it doesn't protect against - stated in the documentation's first paragraph 
   A bug outside the lookups above - in the process, or in a driver - is a bug for every workspace. No per-workspace
   resource limits yet: one workspace can exhaust the shared connection pool, event-stream slots or database load for
   the others (each key's own rate limits and quotas still apply).
-- **The JVM, for a workspace owner.** Creating a connection is a workspace owner's to do (`connections.write` isn't
-  server-only), and an experimental H2 or JDBC connection is opened read-write on one shared JVM with only the SQL
-  guard as its lock - so the H2/JDBC process-level risk above now reaches any workspace's owner, where before it took
-  a server administrator. Leave H2/JDBC off (they are experimental) where workspace owners aren't fully trusted.
+- **The JVM, for what a server administrator set up.** An experimental H2 or JDBC connection is opened read-write on
+  one shared JVM with only the SQL guard as its lock. Setting one up, or changing anything but its `active` flag and
+  password, is a server-wide role's (above), so a workspace's owner can't choose its URL or jar - but one a server
+  administrator sets up in a workspace carries the H2/JDBC process-level risk above to whoever runs SQL on it there.
 - **The databases themselves.** Two workspaces can each have a connection to the same database host; what a
   workspace's connection can read is its database account's grants, as it always was.
 - **Folders.** A local-folder destination is allowed only in `default`: `QUERYAPIGATE_EXPORT_DIRS` is the server's,

@@ -57,6 +57,21 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **CI:** a crash in native code during the tests now prints every thread's Python stack (`PYTHONFAULTHANDLER`),
   not only exit code 139. The ClickHouse run store and PostgreSQL job segfaulted once with no trace on #151.
 
+### Security
+
+- **Workspaces (experimental): a workspace's owner could read any file on the server through a connection.** Only the
+  metadata store's own file was guarded. A role from a workspace membership, with no server-wide role, could save a
+  SQLite connection to another workspace's database file and read it, or a DuckDB connection whose `allowed_paths`
+  covered any folder and read any file the server process could: another team's data, a secret's file, a key file.
+  Saving, testing or repointing a connection that opens local files - SQLite, H2, JDBC, a DuckDB file or local
+  `allowed_paths` - now takes a server-wide role (`403 role_forbidden`), through the API and configuration files
+  alike. A workspace's owner still runs the ones a server administrator set up there, switches them on and off and
+  changes their password, and sets up DuckDB over remote storage and server databases. This also means a workspace's
+  owner can no longer choose an H2 or JDBC connection's URL or jar. Since 0.38.0, and only with workspaces. **On
+  upgrade,** connections a workspace's owner already made keep working: a server administrator can list each
+  workspace's (`GET /w/<workspace>/api/v1/connections`), and the audit log's `create_connection` entries say who
+  made each.
+
 ## [0.49.0] - 2026-11-04
 
 The ClickHouse run store graduates: it's stable, under the compatibility promise, with its upgrades from every release
