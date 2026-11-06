@@ -158,9 +158,13 @@ documentation. #99 workspaces only if asked for.
 37. **0.49: The run store graduates** ([ADR 0029](documentation/adr/0029-clickhouse-run-store.md)) - stable, with
     upgrade fixtures from 0.45.0 to 0.48.0, a rolling upgrade with it on and its limits written down; and masking's
     `hash` on PostgreSQL `bytea` hashes the value, not a memory address. (0.49.0, 2026-11-04.)
-38. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+38. **0.50: Tracing graduates, and Trino reaches the image** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md))
+    - tracing stable, its database spans named as OpenTelemetry's conventions say; the `trino` client in the Docker
+    image and a lakehouse example (#76); and a workspace's owner no longer opens files on the server through a
+    connection. (0.50.0, 2026-11-06.)
+39. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-39. **1.0.0.**
+40. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -3012,7 +3016,7 @@ drift from the old one's, and run history and audit split across two names.
 
 ## 92. Distributed tracing (OpenTelemetry)
 
-**Status: shipped (0.23, experimental). Graduated in 0.50 (decided 2026-11-05),** with its spans tested against a
+**Status: shipped (0.23, experimental). Graduated in 0.50.0 (2026-11-06),** with its spans tested against a
 real OpenTelemetry Collector, its 1.27 floor tested, and database span names following the now-stable conventions.
 [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md):
 `tracing.py` (the `otel` extra, the standard `OTEL_*` variables, a provider started lazily per process), spans on

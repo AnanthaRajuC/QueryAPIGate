@@ -49,6 +49,14 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-06
+
+A security fix for workspaces, tracing graduates, and Trino reaches the Docker image with a working lakehouse to try
+it on. **If you use workspaces,** upgrade: a workspace's owner could read any file on the server through a SQLite or
+DuckDB connection, and now only a server-wide role sets up a connection that opens local files (see *Security*).
+**If you trace,** the database spans have new names once, following OpenTelemetry's now-stable database conventions
+(`SELECT sales`, not `SELECT warehouse`); tracing is stable from here (see *Changed*).
+
 ### Added
 
 - **A lakehouse example: Iceberg tables served through Trino, to apps and AI agents** (`deploy/lakehouse`, how-to
@@ -77,6 +85,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   attribute. A MongoDB span's `db.operation.name` keeps the command's own case (`find`, not `FIND`), and the
   collection is set when the span starts, as `db.collection.name`. If a dashboard or alert matches span names, it
   needs the new ones once.
+- **Docs:** the README's opening puts MCP beside REST - one governed core, two surfaces: REST for apps, MCP for AI
+  agents - with an agent calling the same saved query, and a new *Giving it to an AI agent* section. The architecture
+  diagram is redrawn.
 - **CI:** the upgrade fixtures from 0.49.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.49.0.
 - **CI:** a crash in native code during the tests now prints every thread's Python stack (`PYTHONFAULTHANDLER`),
@@ -3361,7 +3372,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.0...HEAD
+[0.50.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.46.0...v0.47.0
