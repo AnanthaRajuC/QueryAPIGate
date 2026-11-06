@@ -24,7 +24,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 }'
 ```
 
-Needs `pip install "queryapigate[trino]"`. The fields that are specific to Trino:
+Needs `pip install "queryapigate[trino]"` - the Docker image has it from 0.50. A whole lakehouse to try it on, in
+Docker Compose: [guide 66](66-serve-a-lakehouse-through-trino.md). The fields that are specific to Trino:
 
 - **`database` is the Trino *catalog*** (here `tpch`, a catalog every Trino ships with). This is the one field that
   reads differently from the SQL dialects, where `database` is a database on the server.

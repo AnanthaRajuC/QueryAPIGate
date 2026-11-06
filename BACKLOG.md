@@ -2630,7 +2630,13 @@ history - with no database to run. Teams with a data lake but no serving layer a
 
 ## 76. Trino / Presto as a native connection type
 
-**Status: open.**
+**Status: shipped in 0.41.0 (experimental)** - [ADR 0026](documentation/adr/0026-trino-connections.md): the `trino`
+type, `database` as the catalog, `allowed_tables` matched fully qualified, the time limit by cancelling the query, a
+real Trino in CI and a security review of the federation boundary. In the Docker image, and a lakehouse example
+(Iceberg on S3-compatible storage, joined with PostgreSQL - `deploy/lakehouse`, how-to 66), in 0.50. Before it
+graduates: `databases.GRADUATION`'s terms are met but one - descriptions from Trino's own table and column comments,
+the support matrix's one gap that is QueryAPIGate's rather than Trino's - and ADR 0026 section 6 also asks for use in a
+real deployment.
 
 **Impact:** one Trino connection reaches every catalog Trino can - Hive, Iceberg, Delta, Kafka, other databases -
 so each becomes a source QueryAPIGate can publish, through a single, well-understood engine. Reachable today only

@@ -49,6 +49,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+
+- **A lakehouse example: Iceberg tables served through Trino, to apps and AI agents** (`deploy/lakehouse`, how-to
+  66). One `docker compose up` starts S3-compatible storage, an Iceberg catalog on PostgreSQL, Trino and QueryAPIGate,
+  configured from a file. The example serves three saved queries, as REST endpoints and MCP tools, including one
+  that joins the Iceberg tables with a PostgreSQL database. An agent's key gets three tables (`allowed_tables`,
+  matched in full) and hashed emails; a partner's key gets one query. `cache_ttl` answers a repeat in about 2 ms,
+  where a call to Trino takes 100 to 280 ms. A new CI job, *Lakehouse example*, starts it as a user would and checks
+  each thing the how-to says.
+- **The Docker image includes the Trino client** (`trino`), like every other extra the documentation relies on.
+  Before, a Trino connection (experimental, 0.41) needed a custom image, in Docker and with the Helm chart alike.
+
 ### Changed
 
 - **Tracing with OpenTelemetry is stable** (ADR 0010): its spans, their names and attributes, and what never goes

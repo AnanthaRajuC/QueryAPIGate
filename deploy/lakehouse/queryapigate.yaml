@@ -1,0 +1,76 @@
+# What the lakehouse example serves, applied when QueryAPIGate starts (QUERYAPIGATE_CONFIG_FILE, ADR 0014): one
+# Trino connection, three saved queries - each a REST endpoint and an MCP tool - and two scoped keys.
+format: queryapigate-config
+format_version: 1
+
+connections:
+  - name: lakehouse
+    db: trino
+    host: trino
+    port: 8080
+    user: queryapigate
+    database: iceberg            # the Trino catalog; `crm` and the others are reached as catalog.schema.table
+    options:
+      schema: sales
+      http_scheme: http
+
+queries:
+  - name: revenue_by_month
+    connection_name: lakehouse
+    cache_ttl: 60                # seconds: a repeat is answered without asking Trino
+    description: Orders and revenue per month of one year, from the Iceberg orders table
+    sql: >-
+      SELECT date_trunc('month', orderdate) AS month, count(*) AS orders, round(sum(totalprice), 2) AS revenue
+      FROM orders WHERE year(orderdate) = :year GROUP BY 1 ORDER BY 1
+    parameters:
+      year: {type: int, min: 1992, max: 1998, default: 1995, description: "Order year, 1992 to 1998"}
+
+  - name: top_accounts
+    connection_name: lakehouse
+    cache_ttl: 60
+    description: >-
+      The customers with the most revenue in a year, with their account manager from the CRM - the lakehouse and
+      PostgreSQL joined in one query
+    sql: >-
+      SELECT c.name AS customer, c.nation, a.account_manager, a.tier, a.contact_email, count(*) AS orders,
+      round(sum(o.totalprice), 2) AS revenue
+      FROM orders o JOIN customers c ON o.custkey = c.custkey JOIN crm.public.accounts a ON a.custkey = o.custkey
+      WHERE year(o.orderdate) = :year
+      GROUP BY c.name, c.nation, a.account_manager, a.tier, a.contact_email ORDER BY revenue DESC
+    parameters:
+      year: {type: int, min: 1992, max: 1998, default: 1995, description: "Order year, 1992 to 1998"}
+
+  - name: revenue_by_region
+    connection_name: lakehouse
+    cache_ttl: 60
+    description: Revenue per region and market segment, across every year
+    sql: >-
+      SELECT c.region, c.mktsegment, count(*) AS orders, round(sum(o.totalprice), 2) AS revenue
+      FROM orders o JOIN customers c ON o.custkey = c.custkey GROUP BY 1, 2 ORDER BY 1, 2
+
+roles:
+  # An AI agent: the saved queries, and read-only ad-hoc SQL - on these three tables only, every contact email hashed
+  - name: analyst-agent
+    connections: [lakehouse]
+    allowed_tables: [sales.orders, sales.customers, crm.public.accounts]
+    mask:
+      - {column: "*.contact_email", action: hash}
+    rate_limit: 60/minute
+  # A partner's app: one saved query, nothing else
+  - name: partner
+    connections: []
+    queries: [revenue_by_month]
+    rate_limit: 30/minute
+
+api_keys:
+  # Their secrets are lakehouse-agent-key and lakehouse-partner-key - published here, so for trying this out only.
+  # A real key's file holds only its hash: `queryapigate config new-key` makes one.
+  - {name: analyst-agent, role: analyst-agent,
+     secret_sha256: ed2aee261178af7b95f9e67805d782ee4a1386a048d44cb98aaaebdbe0a52b7c}
+  - {name: partner-app, role: partner,
+     secret_sha256: 6c0b5a9267dc46b00146236e78b5d4c5600cc8b34c074bc19608e7c800ea874d}
+
+descriptions:
+  lakehouse:
+    - {table: orders, description: "One row per order (TPC-H), an Iceberg table partitioned by month of orderdate"}
+    - {table: customers, description: "One row per customer, with its nation, region and market segment"}

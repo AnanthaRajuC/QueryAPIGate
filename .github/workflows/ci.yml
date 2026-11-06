@@ -601,3 +601,22 @@ jobs:
         env:
           IMAGE: queryapigate:chart-test
           PREVIOUS_IMAGE: ghcr.io/anantharajuc/queryapigate:${{ env.PREVIOUS_RELEASE }}
+
+  lakehouse-example:
+    # deploy/lakehouse (how-to 66) as a user starts it - Iceberg on S3-compatible storage through Trino, joined with
+    # PostgreSQL, served over REST and MCP - and each thing the how-to says about it, checked.
+    name: Lakehouse example (Trino, Iceberg, PostgreSQL)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install "mcp>=1.21.1,<2"
+      - name: Start the example
+        run: docker compose -f deploy/lakehouse/docker-compose.yml up --build -d --wait --wait-timeout 900
+      - name: It behaves as how-to 66 says
+        run: python .github/scripts/lakehouse_smoke.py
+      - name: The services' logs, when it doesn't
+        if: failure()
+        run: docker compose -f deploy/lakehouse/docker-compose.yml logs --no-color --tail 200

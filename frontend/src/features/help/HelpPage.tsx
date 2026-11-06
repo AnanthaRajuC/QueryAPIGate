@@ -423,6 +423,12 @@ const DOCS = [
     path: 'how-to/65-keep-runs-in-clickhouse.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-66',
+    title: 'Serve a lakehouse through Trino',
+    path: 'how-to/66-serve-a-lakehouse-through-trino.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];
