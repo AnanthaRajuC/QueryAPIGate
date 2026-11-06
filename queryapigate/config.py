@@ -1527,7 +1527,7 @@ def describe_settings():
                 'QUERYAPIGATE_CORS_ORIGINS',
                 'off' if cors is None else '*' if cors == '*' else ', '.join(sorted(cors)))]},
         {'id': 'tracing', 'title': 'Tracing (OpenTelemetry)',
-         'description': 'Spans to your tracing backend through an OpenTelemetry collector - experimental. On when an '
+         'description': 'Spans to your tracing backend through an OpenTelemetry collector. On when an '
              'OTLP endpoint is set, with `pip install "queryapigate[otel]"`; every other OTEL_* variable works as '
              'for any service. Spans never hold parameter values, rows, statements or credentials.', 'rows': [
             row('OTLP endpoint', 'Where spans are sent (OTLP over HTTP). Unset: no tracing.',

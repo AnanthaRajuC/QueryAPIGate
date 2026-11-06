@@ -13,7 +13,8 @@ Console sign-in through SSO in 0.30 (ADR 0017), with the Helm chart; the audit l
 tested against real receivers (ADR 0019); live events, and secrets from files and Vault, in 0.34 (ADR 0021) - AWS's
 stay, until tested against AWS. The connection types have their own terms (databases.GRADUATION): MongoDB met them
 in 0.37, with streaming exports (ADR 0022). The ClickHouse run store graduated in 0.49 (ADR 0029), once upgrades from
-each release that had it were tested.
+each release that had it were tested; tracing in 0.50 (ADR 0010), once OpenTelemetry's database conventions were
+stable and its spans were tested against a real Collector.
 """
 from typing import Any
 
@@ -47,13 +48,6 @@ FEATURES: dict[str, dict[str, Any]] = {
                        ('put', '/api/v1/workspaces/{name}/members/{admin}'),
                        ('delete', '/api/v1/workspaces/{name}/members/{admin}')),
         'docs': ('documentation/API.md', 'Workspaces'),
-    },
-    'tracing': {
-        'name': 'Tracing with OpenTelemetry',
-        'why': 'new in 0.23 - span names and attributes may change as the OpenTelemetry conventions for databases and '
-               'AI agents settle (ADR 0010); what never goes into a span will not',
-        'settings': ('OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'),
-        'docs': ('documentation/API.md', 'Tracing (OpenTelemetry)'),
     },
     'embeddings': {
         'name': 'Semantic search (embed parameters)',

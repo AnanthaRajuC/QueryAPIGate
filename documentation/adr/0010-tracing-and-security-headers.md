@@ -1,6 +1,6 @@
 # ADR 0010: Distributed tracing with OpenTelemetry, and security headers on every response
 
-- **Status:** Accepted
+- **Status:** Accepted; tracing graduated in 0.50 (section 5)
 - **Date:** 2026-10-11
 - **Backlog:** #92 (distributed tracing) and #93 (security headers on every response, not only the Console's).
 
@@ -50,7 +50,7 @@ query strings with parameter values, statement text, headers. Our own spans reco
 |---|---|---|
 | `GET /q/{name}` (the route rule, never the path with values) | server | `http.request.method`, `http.route`, `http.response.status_code`, `url.scheme`, `client.address`, `queryapigate.request_id`, `queryapigate.caller` (key, administrator or `jwt:<subject>`, as in run history), `error.type` (the error `code`) |
 | `query {name}` | internal | `queryapigate.query`, `queryapigate.version`, `queryapigate.connection`, `queryapigate.rows`, `queryapigate.masked`, `queryapigate.cache` (`hit`, `miss`) |
-| `{SELECT,INSERT,...} {connection}` | client | `db.system.name`, `db.operation.name`, `db.namespace` (the database), `server.address`, `server.port`, `db.response.returned_rows` |
+| `{SELECT,INSERT,...} {target}` (from 0.50, section 5; `{connection}` before) | client | `db.system.name`, `db.operation.name`, `db.namespace` (the database), `server.address`, `server.port`, `db.response.returned_rows` |
 | `serialize {format}` | internal | `queryapigate.format`, `queryapigate.bytes` when known |
 | `tools/call {tool}` (MCP) | server | `gen_ai.tool.name`, `queryapigate.caller`, `queryapigate.agent_write` (`approval`, `insert`) |
 | `export {name}` | internal (root, or the parent from `TRACEPARENT`) | `queryapigate.export`, `queryapigate.destination`, `queryapigate.rows`, `queryapigate.format` |
@@ -106,6 +106,28 @@ ends at the proxy.
 - **Tracing is experimental** in 0.23: span names and attributes may still change as the OpenTelemetry semantic
   conventions for databases and GenAI settle. The rule about what never goes into a span is not experimental.
 - **The headers are stable.** They add to responses and remove nothing a client reads.
+
+#### Graduated in 0.50 (decided 2026-11-05)
+
+Tracing met `experimental.GRADUATION`:
+
+- **Tested for real in CI:** the integration job sends a saved query's spans to the real OpenTelemetry Collector it
+  already runs for the audit stream (ADR 0019). The test reads what the Collector decoded: the names, kinds,
+  attributes, the caller's trace continued, and no parameter, row, statement, password or key in any of it.
+- **A security review:** what never goes into a span is in the threat model, and a test fails if any of it does.
+- **Its shape:** unchanged from 0.23 to 0.49, apart from the one change below, made before the freeze.
+- **Its limits** are written where it is documented (API.md, *Tracing*): with an endpoint set the data plane forwards
+  every call, a streamed result's span ends at its first row, and export is OTLP/HTTP only.
+- **Its floor:** `opentelemetry-sdk` 1.27 is now in the oldest-dependencies job. Testing it found that one test
+  emptied the exporter for the tests after it on 1.27 (`patch.dict(sys.modules)`); the product was unaffected.
+- **What may still be added:** spans, attributes and resource attributes.
+
+The conventions it waited for: OpenTelemetry's database span conventions are stable upstream. So the database span is
+now named the way they say, `{db.operation.name} {target}`: the collection, else the database, else the server, and
+`SELECT` alone for a SQLite or DuckDB file. It was `{operation} {connection}` before. The connection stays as
+`queryapigate.connection`, and MongoDB's `db.operation.name` keeps the command's case (`find`). Two things are still
+in development upstream, so they are the documented exception, following OpenTelemetry until it marks them stable:
+`db.response.returned_rows` and `db.response.affected_rows`, and the MCP span (`tools/call {tool}`, `gen_ai.*`).
 
 ## Consequences
 

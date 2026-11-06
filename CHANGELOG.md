@@ -21,8 +21,7 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
-connections, workspaces, tracing with OpenTelemetry (`OTEL_EXPORTER_OTLP_ENDPOINT`), secrets and credentials from AWS
-(`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
+connections, workspaces, secrets and credentials from AWS (`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
 (`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
@@ -52,6 +51,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Changed
 
+- **Tracing with OpenTelemetry is stable** (ADR 0010): its spans, their names and attributes, and what never goes
+  into a span, are under the compatibility promise. It now meets every graduation term: OpenTelemetry's database
+  conventions are stable upstream, its spans are tested against a real OpenTelemetry Collector in CI, and its
+  floor, `opentelemetry-sdk` 1.27, is tested in the oldest-dependencies job. **Two things are left out of the
+  promise,** because upstream still marks them as in development: `db.response.returned_rows` and
+  `db.response.affected_rows`, and the MCP tool call's span (its name and its `gen_ai.*` attributes). Those follow
+  OpenTelemetry until it marks them stable, and each change is noted here.
+- **Tracing: a database span's name follows OpenTelemetry's database conventions.** It is now
+  `{operation} {target}`, where the target is the collection, else the database, else the server: `SELECT sales`,
+  `find orders`, `SELECT db.internal:5432`. A SQLite or DuckDB file is no target, so its span is just `SELECT`.
+  Before, the target was the connection's name (`SELECT warehouse`), which is still the `queryapigate.connection`
+  attribute. A MongoDB span's `db.operation.name` keeps the command's own case (`find`, not `FIND`), and the
+  collection is set when the span starts, as `db.collection.name`. If a dashboard or alert matches span names, it
+  needs the new ones once.
 - **CI:** the upgrade fixtures from 0.49.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.49.0.
 - **CI:** a crash in native code during the tests now prints every thread's Python stack (`PYTHONFAULTHANDLER`),

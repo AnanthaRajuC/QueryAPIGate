@@ -73,9 +73,8 @@ def _search_path(details, allowed_tables):
 def _db_span(details, sql, connection_name):
     """The client span around a database call (tracing.py): which statement kind, on which database - never the
     statement itself."""
-    kind = first_keyword(sql, details['db'])
-    return tracing.span(f'{kind.upper() or "SQL"} {connection_name}', 'client',
-                        tracing.db_attributes(details, kind, connection_name))
+    attributes = tracing.db_attributes(details, first_keyword(sql, details['db']), connection_name)
+    return tracing.span(tracing.db_span_name(attributes), 'client', attributes)
 
 
 def logged_sql(sql):
@@ -198,11 +197,10 @@ def execute_mongo(collection, filter_doc, connection_name, limit, offset, params
     status = 'error'
     metrics.inc_active_query()
     try:
-        with limits.acquire(timeout), tracing.span(f'find {connection_name}', 'client',
-                                                   tracing.db_attributes(details, 'find', connection_name)) as span:
+        attributes = tracing.db_attributes(details, 'find', connection_name, collection)
+        with limits.acquire(timeout), tracing.span(tracing.db_span_name(attributes), 'client', attributes) as span:
             docs = mongo_find(details, collection, filter_doc, projection, sort, limit, offset, timeout, get_pool())
-            tracing.set_attributes(span, db__collection__name=collection,
-                                   db__response__returned_rows=min(len(docs), limit))
+            tracing.set_attributes(span, db__response__returned_rows=min(len(docs), limit))
         status = 'success'
     except ApiError:
         raise
@@ -498,9 +496,8 @@ def stream_mongo(collection, filter_doc, connection_name, params=None, timeout=N
     status = 'error'
     metrics.inc_active_query()
     try:
-        with tracing.span(f'find {connection_name}', 'client',
-                          tracing.db_attributes(details, 'find', connection_name)) as span:
-            tracing.set_attributes(span, db__collection__name=collection)
+        attributes = tracing.db_attributes(details, 'find', connection_name, collection)
+        with tracing.span(tracing.db_span_name(attributes), 'client', attributes):
             stream = mongo_stream(details, collection, filter_doc, projection, sort, timeout, get_pool())
             next(stream)  # the first batch: a failure here is an error response, not a stream cut short
         status = 'success'

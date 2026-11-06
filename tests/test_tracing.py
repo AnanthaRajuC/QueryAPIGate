@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -75,7 +76,7 @@ class SpanTests(TracingTestCase):
         res = self.client.get(f'/q/people_named?name={PARAM}', headers={'X-API-Key': self.secret})
         self.assertEqual(res.status_code, 200)
         server, query = self.named('GET /q/<name>'), self.named('query people_named')
-        db_call, serialize = self.named('SELECT lite'), self.named('serialize json')
+        db_call, serialize = self.named('SELECT'), self.named('serialize json')
         self.assertEqual(server.kind, SpanKind.SERVER)
         self.assertEqual(db_call.kind, SpanKind.CLIENT)
         self.assertEqual(query.parent.span_id, server.context.span_id)
@@ -123,7 +124,7 @@ class SpanTests(TracingTestCase):
         with mock.patch.dict(runners.RUNNERS, {'sqlite': mock.Mock(side_effect=RuntimeError(f'boom {ROW}'))}):
             res = self.client.get(f'/q/people_named?name={PARAM}', headers=ADMIN)
         self.assertEqual(res.status_code, 500)
-        db_call, server = self.named('SELECT lite'), self.named('GET /q/<name>')
+        db_call, server = self.named('SELECT'), self.named('GET /q/<name>')
         self.assertEqual((db_call.status.status_code, db_call.attributes['error.type']),
                          (StatusCode.ERROR, 'RuntimeError'))
         self.assertEqual(server.status.status_code, StatusCode.ERROR)
@@ -152,7 +153,29 @@ class SpanTests(TracingTestCase):
             self.assertEqual(cli.main(['export', 'people_named', '--param', f'name={PARAM}', '--out', out]), 0)
         export = self.named('export people_named')
         self.assertEqual(format(export.context.trace_id, '032x'), TRACE_ID)
-        self.assertEqual(self.named('SELECT lite').parent.span_id, export.context.span_id)
+        self.assertEqual(self.named('SELECT').parent.span_id, export.context.span_id)
+
+
+class DbSpanNameTests(unittest.TestCase):
+    """A database span is named as OpenTelemetry's (stable) database conventions say: `{operation} {target}`."""
+
+    def name(self, details, kind='select', collection=None):
+        return tracing.db_span_name(tracing.db_attributes(details, kind, 'conn', collection))
+
+    def test_the_target_is_the_collection_else_the_database_else_the_server(self):
+        self.assertEqual(self.name({'db': 'postgres', 'host': 'db.internal', 'port': 5432, 'database': 'sales'}),
+                         'SELECT sales')
+        self.assertEqual(self.name({'db': 'clickhouse', 'host': 'ch.internal', 'port': 8123}),
+                         'SELECT ch.internal:8123')
+        self.assertEqual(self.name({'db': 'mysql', 'host': 'db.internal'}), 'SELECT db.internal')
+        mongo = {'db': 'mongo', 'host': 'mongo.internal', 'database': 'shop'}
+        self.assertEqual(self.name(mongo, 'find', 'orders'), 'find orders')
+        self.assertEqual(tracing.db_attributes(mongo, 'find', 'conn', 'orders')['db.operation.name'], 'find')
+
+    def test_a_file_is_no_target_and_no_operation_names_the_system(self):
+        self.assertEqual(self.name({'db': 'sqlite', 'database': '/srv/data.db'}), 'SELECT')
+        self.assertEqual(self.name({'db': 'duckdb', 'database': ':memory:'}, kind=''), 'duckdb')
+        self.assertEqual(self.name({'db': 'postgres', 'host': 'db.internal', 'database': 'sales'}, kind=''), 'sales')
 
 
 class NeverInASpanTests(TracingTestCase):
@@ -189,6 +212,9 @@ class OffTests(TracingTestCase):
         self.assertEqual(tracing.ids(), (None, None))
 
     def test_an_endpoint_without_the_packages_stops_the_server(self):
+        # Imported first: leaving patch.dict drops every module imported inside it, and an exporter half-dropped that
+        # way exports nothing for the tests after this one (seen on opentelemetry 1.27, the floor).
+        import opentelemetry.exporter.otlp.proto.http.trace_exporter  # noqa: F401
         with mock.patch.dict(os.environ, {'OTEL_EXPORTER_OTLP_ENDPOINT': 'http://collector:4318'}), \
                 mock.patch.dict(sys.modules, {'opentelemetry.sdk.trace': None}), \
                 self.assertRaisesRegex(ValueError, r'pip install "queryapigate\[otel\]"'):
@@ -229,6 +255,65 @@ class OtlpExportTests(TracingTestCase):
             self.assertIn(expected, body)
         for secret in (PARAM, ROW, IN_SQL, 'admin-key'):
             self.assertNotIn(secret.encode(), b''.join(b for _, b in _Collector.received))
+
+
+SIEM = os.environ.get('QUERYAPIGATE_TEST_SIEM')
+
+
+def _collector():
+    """The OpenTelemetry Collector .github/scripts/siem_receivers.sh started: its OTLP/HTTP URL, and its traces file."""
+    with open(os.path.join(SIEM, 'receivers.json')) as f:
+        return json.load(f)['otelcol']
+
+
+def _attributes(pairs):
+    """OTLP/JSON's [{key, value: {stringValue | intValue | ...}}] as {key: value}, every value as a string."""
+    return {pair['key']: str(next(iter(pair['value'].values()), '')) for pair in pairs}
+
+
+@unittest.skipUnless(SIEM, 'set QUERYAPIGATE_TEST_SIEM to the directory .github/scripts/siem_receivers.sh started')
+class RealCollectorTests(TracingTestCase):
+    """The spans as a real OpenTelemetry Collector decoded them - not the bytes we sent - in CI's integration job."""
+
+    def spans(self, trace_id, wanted):
+        """Every span of `trace_id` the collector has written, once there are at least `wanted` of them."""
+        found = []
+        for _ in range(100):
+            found = []
+            if os.path.exists(_collector()['traces']):
+                with open(_collector()['traces']) as f:
+                    for line in f:
+                        for resource in json.loads(line).get('resourceSpans', []):
+                            attributes = _attributes(resource.get('resource', {}).get('attributes', []))
+                            for scope in resource.get('scopeSpans', []):
+                                found += [{**span, 'resource': attributes} for span in scope.get('spans', [])
+                                          if span.get('traceId') == trace_id]
+            if len(found) >= wanted:
+                return found
+            time.sleep(0.1)
+        self.fail(f'{len(found)} of {wanted} spans of trace {trace_id} reached the collector')
+
+    def test_a_saved_query_arrives_as_the_documented_spans(self):
+        trace_id = os.urandom(16).hex()  # the collector's file is shared between tests and runs: this trace is ours
+        tracing.use(None)
+        with mock.patch.dict(os.environ, {'OTEL_EXPORTER_OTLP_ENDPOINT': _collector()['url']}):
+            res = self.client.get(f'/q/people_named?name={PARAM}', headers={
+                **ADMIN, 'traceparent': f'00-{trace_id}-{PARENT_ID}-01'})
+            self.assertEqual(res.status_code, 200)
+            tracing.flush()
+        spans = {span['name']: span for span in self.spans(trace_id, 4)}
+        self.assertEqual(set(spans), {'GET /q/<name>', 'query people_named', 'SELECT', 'serialize json'})
+        server, client = spans['GET /q/<name>'], spans['SELECT']
+        self.assertEqual(server['parentSpanId'], PARENT_ID)  # the caller's trace, continued
+        self.assertEqual((server['kind'], client['kind']), (2, 3))  # SERVER, CLIENT
+        self.assertEqual(server['resource']['service.name'], 'queryapigate')
+        self.assertEqual(_attributes(server['attributes'])['http.response.status_code'], '200')
+        db = _attributes(client['attributes'])
+        self.assertEqual((db['db.system.name'], db['db.operation.name']), ('sqlite', 'SELECT'))
+        self.assertEqual(_attributes(spans['query people_named']['attributes'])['queryapigate.rows'], '1')
+        written = json.dumps(list(spans.values()))
+        for secret in (PARAM, ROW, IN_SQL, PASSWORD, 'admin-key'):
+            self.assertNotIn(secret, written)
 
 
 if __name__ == '__main__':
