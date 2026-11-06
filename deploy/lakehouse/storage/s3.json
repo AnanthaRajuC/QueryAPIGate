@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "trino",
+      "credentials": [{"accessKey": "lakehouse", "secretKey": "lakehouse-secret"}],
+      "actions": ["Read", "Write", "List", "Tagging", "Admin"]
+    }
+  ]
+}

@@ -16,6 +16,9 @@ guide covers one scenario end to end, and every command and response in it was r
    and whole results streamed as NDJSON, CSV or Parquet.
 61. [**Connect to Trino**](61-connect-to-trino.md) (experimental) - one connection federating many catalogs, with
    fully-qualified `allowed_tables`, masking and a schema browser.
+66. [**Serve a lakehouse through Trino, to apps and AI agents**](66-serve-a-lakehouse-through-trino.md)
+   (experimental) - Iceberg on S3-compatible storage joined with PostgreSQL, in Docker Compose: REST endpoints, MCP
+   tools, masking, qualified `allowed_tables` and caching.
 5. [**Try it without any setup, using the built-in example APIs**](05-try-the-built-in-example-apis.md) -
    `queryapigate examples load`, what it installs, and how to explore it in the Console.
 

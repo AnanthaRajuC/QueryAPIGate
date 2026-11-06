@@ -1,0 +1,104 @@
+# A lakehouse behind QueryAPIGate: Iceberg tables on S3-compatible storage, read through Trino, served as governed REST
+# endpoints and MCP tools - joined with a PostgreSQL database in the same query. how-to/66 walks through it.
+#
+#   docker compose -f deploy/lakehouse/docker-compose.yml up --build -d --wait
+#   curl -H 'X-API-Key: lakehouse-admin' 'http://127.0.0.1:5000/q/revenue_by_month?year=1995'
+#
+# Everything here is for trying it on one machine: the passwords are in the open and every port is bound to 127.0.0.1.
+# Stop and clean up with:  docker compose -f deploy/lakehouse/docker-compose.yml down -v
+name: queryapigate-lakehouse
+
+services:
+  # S3-compatible object storage (SeaweedFS, as CI uses): the bucket the Iceberg tables' Parquet files live in
+  storage:
+    image: chrislusf/seaweedfs:4.48
+    command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
+    volumes:
+      - ./storage/s3.json:/etc/seaweedfs/s3.json:ro
+      - storage-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "echo 's3.bucket.list' | weed shell -master=localhost:9333 >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  bucket:  # one-shot: the `lakehouse` bucket, unless an earlier `up` made it
+    image: chrislusf/seaweedfs:4.48
+    depends_on:
+      storage:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "echo 's3.bucket.list' | weed shell -master=storage:9333 | grep -q lakehouse
+      || echo 's3.bucket.create -name lakehouse' | weed shell -master=storage:9333 | grep 'created bucket'"]
+
+  # PostgreSQL, twice over: the Iceberg catalog (which tables exist, where their metadata is) and `crm`, an
+  # operational database Trino joins the lakehouse with
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: lakehouse
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  trino:
+    image: trinodb/trino:484
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bucket:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${TRINO_PORT:-8085}:8080"   # Trino's own UI, to watch the queries QueryAPIGate sends
+    volumes:  # beside the image's own catalogs (tpch, tpcds, memory...), not instead of them
+      - ./trino/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+      - ./trino/crm.properties:/etc/trino/catalog/crm.properties:ro
+    # the image's own HEALTHCHECK: healthy once Trino has finished starting
+
+  seed:  # one-shot: the Iceberg tables, written from Trino's built-in TPC-H data
+    image: trinodb/trino:484
+    depends_on:
+      trino:
+        condition: service_healthy
+    volumes:
+      - ./seed/lakehouse.sql:/seed/lakehouse.sql:ro
+    entrypoint: ["trino", "--server", "http://trino:8080", "--user", "seed", "-f", "/seed/lakehouse.sql"]
+
+  queryapigate:
+    build: ../..
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${QUERYAPIGATE_PORT:-5000}:5000"
+    environment:
+      QUERYAPIGATE_API_KEY: lakehouse-admin            # the admin key; agents and apps get scoped ones (the file)
+      QUERYAPIGATE_CONFIG_FILE: /config/queryapigate.yaml  # the connection, saved queries and keys, applied at start
+    volumes:
+      - ./queryapigate.yaml:/config/queryapigate.yaml:ro
+      - queryapigate-data:/data
+
+  mcp:  # the same saved queries as MCP tools, for AI agents - the same store, keys and history
+    build: ../..
+    depends_on:
+      queryapigate:
+        condition: service_healthy
+    command: ["queryapigate", "mcp", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${QUERYAPIGATE_MCP_PORT:-5001}:5001"
+    environment:
+      QUERYAPIGATE_API_KEY: lakehouse-admin
+    volumes:
+      - queryapigate-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 5001), 3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  storage-data:
+  queryapigate-data:

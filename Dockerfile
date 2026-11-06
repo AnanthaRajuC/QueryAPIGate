@@ -100,13 +100,14 @@ COPY --from=dataplane /queryapigate-dataplane /usr/local/bin/queryapigate-datapl
 COPY .github/scripts/fetch_h2_jar.py /tmp/fetch_h2_jar.py
 RUN python /tmp/fetch_h2_jar.py --dest ./queryapigate/lib && rm /tmp/fetch_h2_jar.py
 # Every optional extra the documentation relies on, except H2 (its Java runtime is the -h2 variant's): DuckDB is a
-# tier 1 database, sqlglot enforces allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment
-# turns on with an environment variable or a second command - none of them should need a custom image. pip installs
+# tier 1 database, Trino's client is all a Trino connection needs (no JVM here: Trino is a server), sqlglot enforces
+# allowed_tables, and redis, mcp, encryption, jwt and otel back features a deployment turns on with an environment
+# variable or a second command - none of them should need a custom image. pip installs
 # them and leaves in the same layer: the image never runs it, and the old copies of urllib3, msgpack and setuptools it
 # vendors are what scanners flagged (ADR 0031). An image built FROM this one gets it back with
 # `python -m ensurepip --default-pip`.
 RUN python -m ensurepip \
-    && python -m pip install ".[mysql,postgres,clickhouse,duckdb,mongo,flow,encryption,jwt,redis,mcp,otel,aws,server]" \
+    && python -m pip install ".[mysql,postgres,clickhouse,duckdb,mongo,trino,flow,encryption,jwt,redis,mcp,otel,aws,server]" \
         "gunicorn>=26" \
     && if [ "$WITH_H2" = "true" ]; then python -m pip install ".[h2]"; fi \
     && python -m pip uninstall --yes pip

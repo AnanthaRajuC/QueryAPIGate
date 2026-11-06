@@ -320,7 +320,9 @@ read-only and read-write connections separately would trip constantly):
 
 > Experimental (ADR 0026). `trino` turns the [Trino](https://trino.io/) distributed SQL engine - which federates
 > many catalogs (Hive, Iceberg, Delta, Kafka, object stores, other databases) behind one endpoint - into a governed
-> source. Install with `pip install "queryapigate[trino]"`.
+> source. Install with `pip install "queryapigate[trino]"` (the Docker image has it from 0.50). A lakehouse to try it
+> on - Iceberg on S3-compatible storage, joined with PostgreSQL, in Docker Compose:
+> [how-to 66](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/66-serve-a-lakehouse-through-trino.md).
 
 ```json
 {
