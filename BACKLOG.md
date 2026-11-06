@@ -3006,7 +3006,9 @@ drift from the old one's, and run history and audit split across two names.
 
 ## 92. Distributed tracing (OpenTelemetry)
 
-**Status: shipped (0.23, experimental).** [ADR 0010](documentation/adr/0010-tracing-and-security-headers.md):
+**Status: shipped (0.23, experimental). Graduated in 0.50 (decided 2026-11-05),** with its spans tested against a
+real OpenTelemetry Collector, its 1.27 floor tested, and database span names following the now-stable conventions.
+[ADR 0010](documentation/adr/0010-tracing-and-security-headers.md):
 `tracing.py` (the `otel` extra, the standard `OTEL_*` variables, a provider started lazily per process), spans on
 REST, saved queries, database calls, serialisation, MCP, live streams and exports, `traceparent` continued
 (`TRACEPARENT` for exports), `trace_id` in run history, error bodies and JSON logs. Guide 51, with the overhead

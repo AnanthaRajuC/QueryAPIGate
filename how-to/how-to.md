@@ -123,7 +123,7 @@ guide covers one scenario end to end, and every command and response in it was r
     logs, slow queries.
 62. [**See what's being used, from the Console**](62-see-whats-being-used-from-the-console.md) - the 30-day activity
     sparklines, a key's usage history, quotas, the Metrics and Agents screens, and the run log behind them all.
-51. [**See QueryAPIGate in your traces**](51-see-queryapigate-in-your-traces.md) (experimental) - OpenTelemetry: one
+51. [**See QueryAPIGate in your traces**](51-see-queryapigate-in-your-traces.md) - OpenTelemetry: one
     trace from your app through QueryAPIGate to the database, in Jaeger; what it costs.
 37. [**Diagnose and tune the connection pool**](37-tune-the-connection-pool.md) - measured, with symptoms and fixes.
 63. [**Tune a deployment for throughput**](63-tune-a-deployment-for-throughput.md) - threads, CPU per container,

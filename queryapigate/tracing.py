@@ -202,13 +202,30 @@ def ids():
     return format(context.trace_id, '032x'), format(context.span_id, '016x')
 
 
-def db_attributes(details, statement_kind, connection_name):
-    """A database call's attributes - the system, the database and the server - never its statement."""
+def db_attributes(details, statement_kind, connection_name, collection=None):
+    """A database call's attributes - the system, the database and the server - never its statement. A SQL
+    statement's kind is upper case (`SELECT`); MongoDB's command keeps its own name (`find`), as the conventions do."""
     database = details.get('database')
+    mongo = details.get('db') == 'mongo'
     return _clean({'db.system.name': DB_SYSTEMS.get(details.get('db'), 'other_sql'),
-                   'db.operation.name': statement_kind.upper() or None,
+                   'db.operation.name': (statement_kind if mongo else statement_kind.upper()) or None,
+                   'db.collection.name': collection,
                    # a network database's name - not SQLite's or DuckDB's, which is a file path on this server
                    'db.namespace': database if details.get('host') and isinstance(database, str) else None,
                    'server.address': details.get('host') or None,
                    'server.port': int(details['port']) if str(details.get('port') or '').isdigit() else None,
                    'queryapigate.connection': connection_name})
+
+
+def db_span_name(attributes):
+    """A database span's name, as OpenTelemetry's database conventions build it: `{operation} {target}`, the target
+    the collection, else the database, else the server - `SELECT sales`, `find orders`, `SELECT db.internal:5432`.
+    Without a target the operation alone (`SELECT`, as for SQLite's file), and without either the system."""
+    target = attributes.get('db.collection.name') or attributes.get('db.namespace')
+    if not target and attributes.get('server.address'):
+        port = attributes.get('server.port')
+        target = f"{attributes['server.address']}:{port}" if port else attributes['server.address']
+    operation = attributes.get('db.operation.name')
+    if operation:
+        return f'{operation} {target}' if target else operation
+    return target or attributes['db.system.name']

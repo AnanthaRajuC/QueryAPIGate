@@ -4,8 +4,10 @@
 Jaeger here, or any backend that takes OpenTelemetry (Tempo, Honeycomb, Datadog, Grafana Cloud) - showing where the
 time went.
 
-> **Experimental** - tracing is new in 0.23 and its span names and attributes may change in any minor release, always
-> noted in the changelog ([what that means](../CHANGELOG.md#versioning-and-compatibility)).
+> **Stable** since 0.50 ([what that means](../CHANGELOG.md#versioning-and-compatibility)): span names and attributes
+> stay as they are, and more may be added. The exceptions, which follow OpenTelemetry until it marks them stable:
+> `db.response.returned_rows`/`affected_rows` and the MCP span. The span list and its limits:
+> [Tracing](../documentation/API.md#tracing-opentelemetry).
 
 Every command and result below was run against a real server (gunicorn, one worker, 8 threads), a PostgreSQL 16
 `orders` table of 3,000 rows behind the saved query `orders_by_customer`, and Jaeger 2.5 as the collector.
@@ -28,8 +30,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=queryapigate
   gunicorn --bind 127.0.0.1:5000 --workers 1 --worker-class gthread --threads 8 "queryapigate.app:create_app()"
 ```
 
-The log says it's on - *Experimental: Tracing with OpenTelemetry (OTEL_EXPORTER_OTLP_ENDPOINT) - may change in any
-minor release* - and **Settings → Tracing** shows the endpoint, the service name and the sampler. Every other
+**Settings → Tracing** shows the endpoint, the service name and the sampler. Every other
 OpenTelemetry variable works as it does for any service (`OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_HEADERS` for
 a backend's token, ...). Without the extra installed, setting the endpoint stops the server: *An OTLP endpoint is set
 ... run `pip install "queryapigate[otel]"`*.
@@ -56,12 +57,14 @@ spans inside it:
 shop-backend: GET /customers/{id}/orders   39.4 ms
   queryapigate: GET /q/<name>              12.8 ms   http.route=/q/<name>  status 200  caller=shop-backend
     queryapigate: query orders_by_customer 11.7 ms   queryapigate.rows=10
-      queryapigate: SELECT shop            10.1 ms   db.system.name=postgresql  db.namespace=postgres
+      queryapigate: SELECT postgres        10.1 ms   db.system.name=postgresql  db.namespace=postgres
                                                      server.address=localhost  db.response.returned_rows=10
       queryapigate: serialize json          0.1 ms   queryapigate.format=json  queryapigate.bytes=226
 ```
 
-So of 12.8 ms in QueryAPIGate, 10.1 went to PostgreSQL. Each span records only what [the list](../documentation/API.md#tracing-opentelemetry)
+So of 12.8 ms in QueryAPIGate, 10.1 went to PostgreSQL. The database span is named as OpenTelemetry's database
+conventions say - the statement's kind and the database, `SELECT postgres` - and the connection (`shop`) is its
+`queryapigate.connection` attribute. Each span records only what [the list](../documentation/API.md#tracing-opentelemetry)
 says. The parameter (`acme`), the statement, the API key and the database password appear nowhere in the stored trace
 (checked by searching it), and that holds for every span: tests fail if one ever does.
 

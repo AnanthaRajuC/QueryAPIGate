@@ -10,12 +10,12 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Each package whose floor CI tests, and the extra that declares it - None for a core dependency. Every core
-# dependency is here, and every extra a stable feature needs (ADR 0017); the experimental features' extras (otel,
-# aws, h2) join when they graduate - mongo's already has, tested against a real server.
+# dependency is here, and every extra a stable feature needs (ADR 0017); the experimental features' extras (aws, h2)
+# join when they graduate - mongo's and otel's already have.
 FLOORS = {'Flask': None, 'Werkzeug': None, 'PyYAML': None, 'openpyxl': None,
           'duckdb': 'duckdb', 'sqlglot': 'flow', 'mcp': 'mcp', 'PyJWT': 'jwt', 'redis': 'redis',
           'psycopg2-binary': 'postgres',  # the PostgreSQL store, and live events' notifications (ADR 0021)
-          'pymongo': 'mongo'}
+          'pymongo': 'mongo', 'opentelemetry-sdk': 'otel', 'opentelemetry-exporter-otlp-proto-http': 'otel'}
 
 
 def _project():

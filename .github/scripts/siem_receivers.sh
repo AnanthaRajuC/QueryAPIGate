@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Real SIEM receivers for tests/test_audit_siem.py (ADR 0019): rsyslog and syslog-ng taking RFC 5425 syslog over TLS,
-# each requiring a client certificate from the test CA, and an OpenTelemetry Collector taking OTLP/HTTP logs - each
-# writing what it parsed to a file the tests read. CI's integration job runs it; so can you:
+# each requiring a client certificate from the test CA, and an OpenTelemetry Collector taking OTLP/HTTP logs - and
+# traces, for tests/test_tracing.py (ADR 0010) - each writing what it parsed to a file the tests read. CI's
+# integration job runs it; so can you:
 #
 #   .github/scripts/siem_receivers.sh start /tmp/qag-siem    # then QUERYAPIGATE_TEST_SIEM=/tmp/qag-siem
 #   .github/scripts/siem_receivers.sh stop /tmp/qag-siem
@@ -70,7 +71,7 @@ destination d_file { file("/out/syslog-ng.log" perm(0644) template("${PROGRAM}\t
 log { source(s_tls); destination(d_file); };
 EOF
 
-# The OpenTelemetry Collector: OTLP/HTTP in, a file out
+# The OpenTelemetry Collector: OTLP/HTTP in, a file out - the audit stream's logs, and tracing's spans (ADR 0010)
 cat > "$dir/conf/otelcol.yaml" <<'EOF'
 receivers:
   otlp:
@@ -80,11 +81,17 @@ receivers:
 exporters:
   file:
     path: /out/otlp.jsonl
+  file/traces:
+    path: /out/traces.jsonl
+    flush_interval: 100ms
 service:
   pipelines:
     logs:
       receivers: [otlp]
       exporters: [file]
+    traces:
+      receivers: [otlp]
+      exporters: [file/traces]
 EOF
 chmod 644 "$dir"/conf/*
 
@@ -103,7 +110,8 @@ done
 cat > "$dir/receivers.json" <<EOF
 {"rsyslog": {"url": "tls://localhost:16514", "out": "$dir/out/rsyslog.log", "container": "qag-siem-rsyslog"},
  "syslog-ng": {"url": "tls://localhost:26514", "out": "$dir/out/syslog-ng.log", "container": "qag-siem-syslog-ng"},
- "otelcol": {"url": "http://localhost:14318", "out": "$dir/out/otlp.jsonl", "container": "qag-siem-otelcol"},
+ "otelcol": {"url": "http://localhost:14318", "out": "$dir/out/otlp.jsonl", "container": "qag-siem-otelcol",
+             "traces": "$dir/out/traces.jsonl"},
  "certs": "$dir/certs"}
 EOF
 echo "receivers up: $dir/receivers.json"
