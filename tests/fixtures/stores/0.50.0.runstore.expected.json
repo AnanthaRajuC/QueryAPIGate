@@ -1,0 +1,25 @@
+{
+  "created": {
+    "ad-hoc run": true,
+    "connection": true,
+    "key": true,
+    "query v1": true,
+    "query v2": true,
+    "role": true,
+    "run": true
+  },
+  "data_db_path": "/tmp/qag-fixture-0.50.0-8eqxw2hr/data.db",
+  "run_store": {
+    "rows": {
+      "events": 2,
+      "history": 2,
+      "history_counts": 2,
+      "run_hours": 2,
+      "run_minutes": 2,
+      "run_store_schema": 1
+    },
+    "schema_version": 2
+  },
+  "skipped": [],
+  "version": "0.50.0"
+}
