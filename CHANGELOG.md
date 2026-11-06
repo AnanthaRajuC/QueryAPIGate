@@ -53,6 +53,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 - **CI:** the upgrade fixtures from 0.50.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.50.0.
+- **Docs:** the how-to guides show the Console where they use it - 24 guides, from the New connection form and API
+  Designer to a key's limits, the Agents screen and a write waiting for approval, each taken as the guide's step has
+  it (`npm run screenshots` retakes them with the rest, all now on 0.50.0). Guide 01's step 4 says how to run a query
+  with a parameter (the Designer's Bound parameters) - before, it promised a result grid that an unbound `:rating`
+  doesn't give.
 
 ## [0.50.0] - 2026-11-06
 

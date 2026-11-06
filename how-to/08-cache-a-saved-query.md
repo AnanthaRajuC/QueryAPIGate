@@ -114,6 +114,10 @@ The admin UI's **Caching** tab (under **Data**) shows the same thing - every liv
 it (the exact response body, if you want to inspect it), and how long until it expires - plus the current
 backend (in-process or Redis) under **Settings**.
 
+[![The Caching screen: the response cache backend, entry count, hit rate, hits and misses, and the saved queries with a cache_ttl set, each with a 30-day activity sparkline](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/caching.png)
+
+*The Caching screen.*
+
 ## When it's actually worth it
 
 Good fit: a query that's expensive or slow relative to how often the underlying data really changes - a

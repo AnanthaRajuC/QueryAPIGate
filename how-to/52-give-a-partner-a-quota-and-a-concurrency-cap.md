@@ -36,6 +36,10 @@ curl -X POST http://127.0.0.1:5091/api/v1/api-keys -H "X-API-Key: $TOKEN" -H 'Co
 the Console: **API keys → New** (or Edit) → **Queries at once**, **Time limit**, **Rows per call**, and **Quota**.
 A role takes the same fields; for signed-in users each gets the role's quota as their own.
 
+[![The limits in the New API key form: Queries at once 2, Time limit 30 seconds, Rows per call 5000, Quota calls 10000 per month, with Quota rows left blank](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-52-key-limits.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-52-key-limits.png)
+
+*A key's limits: two queries at once, 30 seconds each, 5,000 rows a call, 10,000 calls a month.*
+
 ## Step 2: Two queries at once - and no more
 
 Three slow reports at once, the third on the other instance:

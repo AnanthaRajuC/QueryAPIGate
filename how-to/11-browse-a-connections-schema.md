@@ -18,6 +18,10 @@ next to **Recent Queries** and **Settings**. It has two sub-tabs:
 `SELECT * FROM orders WHERE ` and the cursor at the end, clicking `customer_id` in the Columns list turned
 it into `SELECT * FROM orders WHERE customer_id` - no copy-pasting column names by hand.
 
+[![API Designer with the examples connection picked and SELECT title, rating FROM film WHERE in the editor; on the right, the Schema tab's Columns view for film: film_id INTEGER with a PK badge, title, category, rating, length and rental_rate with their types](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-11-schema-columns.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-11-schema-columns.png)
+
+*The Schema tab's Columns view for `film` - click a name to insert it at the cursor.*
+
 ## The same thing over the API
 
 ```bash

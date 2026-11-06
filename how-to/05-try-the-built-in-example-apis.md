@@ -107,12 +107,20 @@ Open **<http://127.0.0.1:5000/console>**. Two things worth noticing right away:
   numbers - total runs, success rate, average duration, a requests-per-day bar chart - from the seeded
   history above, with no need to call it yourself first.
 
+[![API Repository with the example APIs loaded: the banner saying 11 queries in 4 collections, 5 roles and an examples connection are loaded, with a Remove examples button; the examples-reporting collection open on the left, and example_top_films on the right with its total runs, success rate, durations and a requests-per-day chart](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)
+
+*API Repository with the examples loaded - the banner with Remove examples, and a query already showing its seeded runs.*
+
 From there, the same tabs work as they would for a query you wrote yourself: **SQL** (the query text),
 **History** (every run, seeded or real), **Curl**/**CLI** (copy-pasteable commands), **API Keys**/**Roles**
 (which of the five keys can reach this specific query), **Access**, **Cache** (for the dashboard scenario's
 `cache_ttl=30` queries), **Metrics**. Visit **Access map** (under **Access** in the sidebar) to see all
 five keys and every query they reach laid out at once - the fastest way to build intuition for how
 `connections`/`queries`/`collections` grants actually compose, before designing your own.
+
+[![The Access map: saved queries as rows and API keys and roles as columns, each cell marked with how that key reaches that query](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png)
+
+*The Access map - every query against every key and role.*
 
 ## Removing them
 

@@ -52,6 +52,10 @@ curl 'http://127.0.0.1:5098/q/orders_by_customer?customer=acme' -H "X-API-Key: $
 In the Console: **API keys → Edit** (the pencil) → **Secret**: choose how long to keep the old secret working, then
 **Rotate secret**. The new secret is shown once, and the key gets a *rotating* tag in the list.
 
+[![The Edit API key form for finance-team, at its Secret field: Keep the old secret working, set to for 1 hour, and a Rotate secret button](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-50-rotate-key.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-50-rotate-key.png)
+
+*Secret in the Edit form - how long the old secret keeps working, then Rotate secret.*
+
 ## Step 3: See whether they've switched
 
 ```bash

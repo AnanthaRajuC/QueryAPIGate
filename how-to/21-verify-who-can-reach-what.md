@@ -23,6 +23,10 @@ The one surprise to remember: **a key created without `connections` gets every c
 **Access → Access map** puts every saved query (rows) against every API key and role (columns). Each cell says how
 that key reaches that query:
 
+[![The Access map: saved queries as rows, API keys and roles as columns, cells lettered Q, C or W for how each key reaches each query](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/access-map.png)
+
+*The Access map - Q by name, C through a collection, W through a whole connection.*
+
 - **Q** - by name (`queries`)
 - **C** - through its collection (`collections`)
 - **W** - through a whole connection (`connections`)
@@ -67,6 +71,10 @@ In the Console, **Access → API keys → (the key) → Details** is the key-cen
 reach and how each is granted, the connections and tables behind them, its limits and masking, and its full run
 history - clicking a query there opens its SQL. Each key on the list also carries a 30-day activity sparkline (and so
 does each API, connection, cached query and MCP tool), so "granted but never used" shows at a glance.
+
+[![The Details page of the key acme-corp: created from role example-partner, its status, expiry, rate limit and limits; the two APIs it can reach through the examples-partner collection with activity sparklines; the examples connection, reached by saved query only; no table allow-list; and its usage history](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-21-key-details.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-21-key-details.png)
+
+*A key's Details - what it reaches, how, and what it did.*
 
 Ask as the key itself over the API. `GET /catalog` lists exactly the saved queries this caller can run through
 `/q/<name>`, and the terms it runs them on - verified with the `example-executive` key:

@@ -23,6 +23,10 @@ accepted - `"31/12/2026"` gets `400`: *expires_at must be a date in YYYY-MM-DD f
 In the Console, the API key form has an **Expires** date field. A key created from a [role](15-create-a-role.md) can
 have its own expiry too: `{"name": "acme", "role": "partner", "expires_at": "2026-12-31"}`.
 
+[![The New API key form scrolled to its last fields - quota, rate limit and allowed IPs above - and the Expires date field filled in, with the hint: valid through the end of this date, leave blank for no expiry](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-19-new-api-key.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-19-new-api-key.png)
+
+*The Expires field at the end of the new-key form.*
+
 ## What an expired key gets
 
 Verified with a key that expired yesterday:

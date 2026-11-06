@@ -36,6 +36,10 @@ A rule names a **source column** - `table.column`, or `schema.table.column`, wit
 The strictest rule that applies wins (`drop` > `null` > `mask` > `hash`). In the Console: **API keys → New API key →
 Column masking**; keys and roles with rules carry a **masked** tag, in their tables and on the Access map.
 
+[![The Column masking section of the New API key form: a rule masking customer.email, with an Add a masking rule button](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-45-column-masking.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-45-column-masking.png)
+
+*A masking rule on a new key: `customer.email`, masked.*
+
 ## Step 2: See it
 
 The same saved query, for the admin and for the partner:

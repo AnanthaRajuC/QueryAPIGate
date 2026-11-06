@@ -17,6 +17,10 @@ queryapigate export 'example_rentals_since' \
 
 **Copy command** puts it on the clipboard.
 
+[![example_rentals_since in API Repository with its CLI tab open: queryapigate export 'example_rentals_since' --param 'since=2000-01-01' --format csv --out '/exports/example_rentals_since_{date}.csv'](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)
+
+*The CLI tab of `example_rentals_since`.*
+
 How each line is built:
 
 - **`--param`** - one per parameter a caller supplies. A parameter with a `default` shows that default (`since`

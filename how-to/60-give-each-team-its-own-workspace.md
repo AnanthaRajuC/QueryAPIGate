@@ -30,6 +30,10 @@ curl -X POST http://127.0.0.1:5000/api/v1/workspaces -H 'X-API-Key: demo-key' -H
 
 Or in the Console: **Access → Workspaces → New workspace**.
 
+[![The Workspaces screen: the payments and catalogue workspaces, payments open with its members - bea as owner, dmitri as developer](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/workspaces.png)
+
+*Access → Workspaces, with payments open.*
+
 ## Step 2: Give the team's lead a role in it - and only there
 
 Bea leads payments. She gets no role on the server itself (`"role": null` - say so: leaving `role` out is refused, so

@@ -23,6 +23,10 @@ and a schema browser: [Connect to Trino](61-connect-to-trino.md) (experimental).
 **Admin UI**: open **<http://127.0.0.1:5000/console>**, go to **Connections** (under **Data** in the sidebar),
 click **New connection**, fill in the form, **Test** it, then **Save**.
 
+[![The New connection form open beside the Connections list: name orders, database type postgres, host orders-db.internal, port 5432, user reporting, a password field, default database orders, a Load databases button, an Active checkbox, Test connection, and Cancel and Create buttons](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-02-new-connection.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-02-new-connection.png)
+
+*New connection, filled in for a PostgreSQL database - Test connection before Create.*
+
 **API directly** (what this guide's examples use, since it's copy-pasteable and identical for every
 dialect):
 

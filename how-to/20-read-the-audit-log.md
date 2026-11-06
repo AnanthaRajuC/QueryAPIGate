@@ -13,6 +13,10 @@ runs - those are the [run history](../documentation/API.md#run-history).
 In the Console: **Observability → Audit log** - newest first, with an action filter and a search box over actor,
 target and time. **Export** downloads what's shown as JSON.
 
+[![The Audit log: newest first, each row with its time, actor, action and target, an action filter and a search box above](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/audit-log.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/audit-log.png)
+
+*Observability → Audit log.*
+
 Over the API (admin key only), filtered by what changed:
 
 ```bash

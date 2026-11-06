@@ -8,6 +8,10 @@ on its own. The **MCP** screen in the sidebar asks on request - and lists the to
 
 ## What the MCP screen shows
 
+[![The MCP server screen: the Connect a client snippet for Claude Desktop, Reachability with a Check now button, and the Tools a client sees - each saved query with its kind, parameters, description and MCP activity](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/mcp.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/mcp.png)
+
+*The MCP screen: the connect snippet, Check now, and the tools.*
+
 **Connect a client** - the config an MCP client needs: the server's URL and a scoped API key as the `X-API-Key`
 header - the same one-entry snippet you paste into Claude Desktop's config.
 
