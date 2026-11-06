@@ -159,6 +159,10 @@ curl 'http://127.0.0.1:5000/api/v1/usage/agents?hours=1' -H 'X-API-Key: demo-key
 
 In the Console: **Observability → Agents**, busiest first, a row opening to the agent's queries and statements.
 
+[![The Agents screen: the agent rentals-assistant with 8 calls, 34 rows, none failed or masked, opened to its saved queries (example_film_lookup 3 times, example_top_films twice) and its most frequent ad-hoc statements](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-47-agents.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-47-agents.png)
+
+*Observability → Agents, one agent opened.*
+
 ## Step 6: Be told when one reads far more than usual
 
 `agent_unusual_volume` fires when an agent reads at least `QUERYAPIGATE_ALERT_AGENT_ROWS` rows (default 10,000) in

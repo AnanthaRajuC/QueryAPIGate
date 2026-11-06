@@ -27,10 +27,18 @@ A drawn line means traffic; a **flat baseline means "granted but never used in 3
 thing on the screen, because it points at access you can take away. Hover any sparkline for the totals (for example
 *"example-reporting: 28 runs over 30 days · 3 failed · peak 3/day"*).
 
+[![The Connections screen: each connection with its type, host, database, status, usage and a 30-day activity sparkline](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/connections.png)
+
+*Data → Connections - one sparkline per connection.*
+
 ## 2. A key in full: the Details screen
 
 On **Access → API keys**, each row has a **Details** link. It opens a page built entirely from that key's own
 activity:
+
+[![A key's Details page: its limits, the APIs and connections it reaches with their sparklines, and its usage history](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-21-key-details.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-21-key-details.png)
+
+*A key's Details.*
 
 - the saved queries (APIs) it can reach, and how each is granted;
 - the connections and tables behind them, its limits and masking;
@@ -66,6 +74,10 @@ started**, and a restart resets them. That's why a freshly restarted server show
 connection tables even when the 30-day sparklines are full: the sparklines read the durable run log, the Usage column
 reads these live counters.
 
+[![The Metrics screen: stat tiles for requests, error rate, active queries, pool and rate limiting, and bars for requests by status and queries by connection - counted since this process started](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)
+
+*Observability → Metrics.*
+
 For dashboards and alerting over time, scrape `/metrics` - [Wire up Prometheus and
 Grafana](35-wire-up-prometheus-and-grafana.md).
 
@@ -73,6 +85,10 @@ Grafana](35-wire-up-prometheus-and-grafana.md).
 
 **Observability → Agents** is the usage view for AI clients: what each agent called over MCP, in the recent window.
 `GET /api/v1/usage/agents` backs it:
+
+[![The Agents screen: an agent with its calls, rows, failures and masked calls, opened to its saved queries and ad-hoc statements](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-47-agents.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-47-agents.png)
+
+*Observability → Agents.*
 
 ```bash
 curl http://127.0.0.1:5000/api/v1/usage/agents -H 'X-API-Key: demo-key'

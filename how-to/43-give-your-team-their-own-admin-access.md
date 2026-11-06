@@ -49,6 +49,10 @@ curl http://127.0.0.1:5000/api/v1/me -H 'X-API-Key: qagadm_9-2f...'
 In the Console: **Access → Administrators → New administrator**. Their first token, valid for 90 days, is shown
 once - hand it over the way you'd hand over a password. Or with the API:
 
+[![The Administrators screen: alice (Owner), bob (Developer) and carol (Auditor), each with an email, when they were last seen, a token count, and Tokens, edit and delete actions, with a New administrator button](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-43-administrators.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-43-administrators.png)
+
+*Access → Administrators - a role each, and their own tokens.*
+
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/administrators -H 'X-API-Key: qagadm_9-2f...' \
   -H 'Content-Type: application/json' -d '{"name": "bob", "role": "developer", "email": "bob@corp.com"}'

@@ -6,6 +6,10 @@ dashboard showing traffic, errors, latency and per-connection load, and a few al
 QueryAPIGate serves Prometheus metrics at `/metrics` - no key needed - and ships a Grafana dashboard built on them.
 The Console's **Metrics** screen shows the same numbers as a snapshot; Prometheus adds history, trends and alerting.
 
+[![The Metrics screen: stat tiles for requests, error rate, active queries, pool and rate limiting, bars for requests by status and queries by connection, and a per-connection latency table](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)
+
+*The Console's Metrics screen - a snapshot of the numbers `/metrics` serves.*
+
 Everything below was run for real: Prometheus scraping a server, the dashboard imported into Grafana, and every one of
 its panel queries returning data.
 

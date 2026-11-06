@@ -25,6 +25,10 @@ curl -X POST http://127.0.0.1:5000/api/v1/roles -H 'X-API-Key: demo-key' -H 'Con
 
 In the Console: **Access → Roles → New role**.
 
+[![The Roles screen: each role's scope, access, rate limit, the keys created from it and a 30-day activity sparkline, with a New key from this action per row](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/roles.png)
+
+*Access → Roles.*
+
 ## Step 2: Create keys from it
 
 ```bash

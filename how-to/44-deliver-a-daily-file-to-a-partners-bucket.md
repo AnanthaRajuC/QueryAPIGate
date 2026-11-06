@@ -99,6 +99,14 @@ Three new rentals later, the next run delivers exactly those:
 
 In the Console: **Delivery → Exports → Run now**, and **Runs** for its history.
 
+[![The Exports screen: the export acme-rentals, its query example_rentals_since, where it writes (acme:rentals/{date}/rentals_{run}.csv), its format, and Run now, Runs, edit and delete](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-44-exports.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-44-exports.png)
+
+*Delivery → Exports.*
+
+[![An export's Runs: a successful run with its time, 20000 rows, the file it wrote and who ran it](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-44-export-runs.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-44-export-runs.png)
+
+*Runs - each one's rows and the file it wrote.*
+
 ## Step 5: Put it on a schedule
 
 QueryAPIGate doesn't keep a clock; your scheduler calls it. From the server's own host - no server needed, it reads

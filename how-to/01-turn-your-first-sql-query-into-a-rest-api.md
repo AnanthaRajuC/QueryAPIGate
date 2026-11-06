@@ -37,10 +37,23 @@ Open **<http://127.0.0.1:5000/console>**. The first time, it asks for an API key
 In the left sidebar, under **API**, click **API Designer**. This is the "write and run SQL, then save it as
 an endpoint" screen - distinct from **API Repository**, which lists endpoints you've already saved.
 
+[![API Designer: the Connection dropdown set to examples, the SQL editor holding this guide's query with its :rating parameter highlighted, the Save as New API, Explain and Run buttons above it, and the Schema tab on the right listing the example tables - address, category, customer, film, payment, rental, staff and store](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-01-api-designer.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-01-api-designer.png)
+
+*API Designer, with the connection picked in step 3 and the query from step 4 typed in.*
+
 ## Step 3: Pick a connection and look at what's there
 
-At the top of API Designer, the **Connection** dropdown lists every database connection this server knows
-about. Select **examples**.
+A **connection** is a database this server can query. Every connection is listed on the **Connections** screen
+(in the sidebar, under **Data**). Right after `examples load` there's one, `examples`: the SQLite file that
+step 1 created, marked with an `example` badge. Your own databases join it there once you
+[connect them](02-connect-a-database.md).
+
+[![The Connections screen with one connection, examples: type sqlite, database examples.db, status Active, with a New connection button at the top right](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-01-connections.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-01-connections.png)
+
+*The Connections screen, right after `examples load`.*
+
+Back in API Designer, the **Connection** dropdown at the top lists the same connections - every active one.
+Select **examples**.
 
 Click the **Schema** tab on the right side of the screen. It lists every table (`film`, `customer`,
 `rental`, `payment`, `category`, ...) - click one to see its columns. This is the same schema QueryAPIGate
@@ -57,19 +70,24 @@ WHERE rating = :rating
 ORDER BY title
 ```
 
-Click **Run**. You should see a real result grid - films with a `G` rating won't show yet, because
-`:rating` has no value bound to it. That's expected: `:rating` is a **bound parameter**, resolved at request
-time - the same mechanism [documentation/API.md](../documentation/API.md#parameter-rules) uses everywhere,
-never string-substituted into the SQL.
+Click **Run** (or press `Ctrl`+`Enter`). It stops with `No value provided for parameter(s): rating` - and
+that's expected. `:rating` is a **bound parameter**: its value arrives with each request, separately from the
+SQL, and is never pasted into it. That's the same mechanism
+[documentation/API.md](../documentation/API.md#parameter-rules) describes everywhere.
 
-(If you want to see it actually run with a real value first: temporarily replace `:rating` with `'PG'`,
-click Run, see real rows come back, then put `:rating` back before continuing - this step isn't required,
-just reassuring the first time.)
+To run it with a value, open the **Settings** tab on the right, put this in **Bound parameters**:
+
+```json
+{"rating": "PG"}
+```
+
+and click **Run** again. The result grid fills with the `PG` films. That value is only for this run; nothing
+here is saved yet.
 
 ## Step 5: Save it as a new API
 
-Click **Save as New API**, right below the editor. A form opens on the same screen - no navigation, your
-query stays exactly as you wrote it. Fill in:
+Click **Save as New API**, in the toolbar beside **Run**. A form opens below the editor, on the same screen -
+no navigation, and your query stays exactly as you wrote it. Fill in:
 
 | Field | Value for this guide |
 |---|---|
@@ -79,6 +97,9 @@ query stays exactly as you wrote it. Fill in:
 | Collection | leave blank |
 | Tags | leave blank |
 | `query_parameters` | `{"rating": {"type": "str", "enum": ["G", "PG", "PG-13", "R", "NC-17"], "description": "MPAA rating"}}` |
+
+`query_parameters` starts out holding `{"rating": {}}` - one entry for each parameter in your SQL, with no
+rules yet. Replace it with the line above.
 
 That last field is what turns `:rating` from "any text someone sends" into a validated, documented
 parameter - a request with a rating outside that list gets rejected with a clear error before your SQL ever
@@ -100,7 +121,7 @@ configured actually enforced:
 ```bash
 curl 'http://127.0.0.1:5000/q/films_by_rating?rating=NOT-A-RATING' -H 'X-API-Key: demo-key'
 # {"error": "Invalid parameters: rating must be one of: G, PG, PG-13, R, NC-17",
-#  "errors": {"rating": "must be one of: G, PG, PG-13, R, NC-17"}}
+#  "code": "param_invalid", "errors": {"rating": "must be one of: G, PG, PG-13, R, NC-17"}, "request_id": "..."}
 ```
 
 Other formats work the same way, no extra code:

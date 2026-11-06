@@ -93,6 +93,10 @@ Only set it when there really is a proxy that overwrites `X-Forwarded-For`. With
   refused 10 or more times in the last hour, with what to do about it.
 - `/metrics` counts every refusal in `queryapigate_rate_limit_rejections_total`; the Metrics screen shows it too.
 
+[![The Alerts screen: a critical alert for a failing connection, and warnings for an expiring key, a key that keeps hitting its rate limit, a failing query and a write waiting for approval, each with a button to the screen that fixes it](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/alerts.png)
+
+*Alerts - here, API key 'internal-analyst' keeps hitting its rate limit, among the others.*
+
 ## Limits of the limits
 
 Without Redis, the counters live in each server process's memory: they reset on restart, and several instances

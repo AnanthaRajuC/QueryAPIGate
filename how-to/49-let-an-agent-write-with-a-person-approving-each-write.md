@@ -94,6 +94,10 @@ curl -X POST http://localhost:5098/api/v1/write-requests/wr_4cfa357ce998/approve
 # {"id": "wr_4cfa357ce998", "status": "approved", "decided_by": "maria", "decided_via": "token", ...}
 ```
 
+[![The Approvals screen with a write request open: support-bot asked to run close_ticket (version 1) on helpdesk, changing at most 1 row; the SQL UPDATE tickets SET status = 'closed' WHERE id = :id; exactly these arguments: id 2; when it was asked and when it expires; a Reason box, and Approve, Reject and Close](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-49-approval.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-49-approval.png)
+
+*The write waiting on the Approvals screen - the SQL, the exact arguments, Approve or Reject.*
+
 ## Step 5: It runs - that write, once
 
 ```
