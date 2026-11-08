@@ -372,10 +372,18 @@ Docker image; elsewhere it's downloaded on first use, or install it ahead with
 | `storage` | `s3` (default, also any S3-compatible service), `gcs` (HMAC keys) or `r2` |
 | `region`, `endpoint`, `url_style`, `use_ssl` | as DuckDB's S3 settings: `endpoint` and `url_style: "path"` for an S3-compatible service such as MinIO; `account_id` for R2 |
 
+**TLS.** Web files and buckets over HTTPS are verified against the system's CA bundle (`/etc/ssl/certs/ca-certificates.crt`
+and the other places DuckDB looks), which a connection that reads remote files is therefore also allowed to read - it
+holds public certificates only. For a store with certificates from a private CA, set `SSL_CERT_FILE` in the server's
+environment to that CA's bundle: QueryAPIGate makes it DuckDB's `ca_cert_file` (DuckDB doesn't read `SSL_CERT_FILE`
+itself). As everywhere `SSL_CERT_FILE` is used, it replaces the system bundle rather than adding to it, so if the same
+server also reads public HTTPS files or cloud buckets, make it the system bundle with your CA appended. `"use_ssl": false` is for a store that only speaks plain HTTP, such as a test MinIO.
+
 **A bucket prefix is a second lock, not the first.** DuckDB refuses anything outside the listed prefixes, but an
 S3-compatible server might itself resolve `..` in an object key, so give the connection credentials that can read only
 what it should - a bucket policy or IAM role scoped to those prefixes. Tested against an S3-compatible server
-(SeaweedFS) and a plain web server; Google Cloud Storage and R2 use the same mechanism but weren't tested here.
+(SeaweedFS), a plain web server and an HTTPS one with its own CA; Google Cloud Storage and R2 use the same mechanism
+but weren't tested here.
 
 Any caller with the connection in its `connections` grant can read every listed path with its own SQL; the key ID and
 endpoint are visible to it through DuckDB's `duckdb_secrets()` (the secret itself is always redacted). For partners,
