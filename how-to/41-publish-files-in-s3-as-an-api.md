@@ -125,6 +125,9 @@ stop `https://data.example.com/public/../private/...`.
 
 - **Local files and folders** work the same way, with absolute paths: `"allowed_paths": ["/data/sales/"]`. A DuckDB
   connection with no `allowed_paths` reads no files at all.
+- **HTTPS and private CAs.** Buckets and web files over HTTPS are checked against the server's CA bundle, as a browser
+  would. If your S3-compatible store uses certificates from your own CA, set `SSL_CERT_FILE` on the server to that
+  CA's bundle ([TLS](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#files-on-s3-gcs-r2-and-the-web)).
 - **Credentials are visible in part.** Anyone who can run SQL on the connection can see its key ID and endpoint through
   DuckDB's `duckdb_secrets()` - never the secret. Another reason to give partners saved queries, not SQL.
 - **Costs**: on a cloud bucket, each read is requests and egress you pay for. Cache, rate-limit, and prefer Parquet -

@@ -49,6 +49,17 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Fixed
+
+- **DuckDB connections couldn't read anything over TLS with DuckDB 2.0 - every `https://` file, and real S3, GCS and
+  R2 buckets.** DuckDB 2.0 reads the CA bundle that verifies a server through the same file-access rules each
+  connection is locked with, so the read failed (`Cannot read a CA certificate bundle`) and an automatic view of such a
+  file was skipped with a warning in the log. The Docker image has shipped DuckDB 2.0 since at least 0.46.0; DuckDB
+  1.x wasn't affected. CI hadn't caught it: its bucket and web server spoke plain HTTP. A connection that reads remote
+  files now may also read the system's CA bundle - public certificates, nothing else - and, when `SSL_CERT_FILE` names
+  a private CA's bundle (an S3-compatible store with its own certificates), DuckDB verifies against that file. Bucket
+  exports had the same failure and the same fix. CI now reads files over verified TLS, from a server with its own CA.
+
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.50.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the

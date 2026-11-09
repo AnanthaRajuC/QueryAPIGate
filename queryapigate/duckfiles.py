@@ -9,7 +9,9 @@ SQL for every way DuckDB has of reading a file, each connection is locked as it 
   reachable, and extensions can't be installed or loaded;
 - `lock_configuration` stops a query from changing any of it back.
 
-With no `allowed_paths`, a connection reads no files at all: only its own database.
+With no `allowed_paths`, a connection reads no files at all: only its own database. A connection that reads remote
+files may also read the CA bundle that verifies their servers (CA_BUNDLES, and SSL_CERT_FILE's): DuckDB 2.0 reads it
+under the same rules, and without it no TLS read succeeds.
 
 HTTP(S) entries must name files, never prefixes: a web server resolves `..` in a URL path, and DuckDB compares the
 URL as written, so `https://host/public/../private/x` would pass a `https://host/public/` prefix. Object storage
@@ -186,16 +188,39 @@ def require_supported_duckdb():
                        code='driver_missing')
 
 
+# DuckDB 2.0 reads the CA bundle that verifies an HTTPS server - a web file's, and S3's, GCS's and R2's alike - through
+# the same file-access rules the lock-down below restricts, so a locked connection could reach no TLS server at all
+# ("Cannot read a CA certificate bundle"). These are the places DuckDB looks, in its order; the ones that exist are
+# allowed to a connection that reads remote files. Earlier DuckDBs read the bundle regardless, and don't mind.
+CA_BUNDLES = ('/etc/ssl/certs/ca-certificates.crt', '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem',
+              '/etc/pki/tls/certs/ca-bundle.crt', '/etc/ssl/ca-bundle.pem', '/etc/ssl/cert.pem')
+
+
+def _ca_files(conn):
+    """The certificate files a connection reading remote files must be able to read: the system's CA bundle and, when
+    SSL_CERT_FILE names one - a private CA's, for an S3-compatible store inside the network - that file, made DuckDB's
+    ca_cert_file (DuckDB ignores SSL_CERT_FILE itself). They hold public certificates only."""
+    files = [path for path in CA_BUNDLES if os.path.isfile(path)]
+    custom = os.environ.get('SSL_CERT_FILE')
+    if custom and os.path.isfile(custom):
+        custom = os.path.abspath(custom)
+        conn.execute(f'SET ca_cert_file = {_quote(custom)}')
+        files.append(custom)
+    return files
+
+
 def _configure(conn, details):
     require_supported_duckdb()
     paths = [_resolve_local(p) for p in details.get('allowed_paths') or []]
     conn.execute('SET allow_persistent_secrets = false')  # never the host's own ~/.duckdb secrets
+    certificates = []
     if is_remote(details):
         _load_httpfs(conn)
         if details.get('user'):
             _create_secret(conn, details)
+        certificates = _ca_files(conn)
     directories = [p for p in paths if p.endswith(('/', os.sep))]
-    files = [p for p in paths if not p.endswith(('/', os.sep))]
+    files = [p for p in paths if not p.endswith(('/', os.sep))] + [c for c in certificates if c not in paths]
     conn.execute(f"SET allowed_directories = [{', '.join(_quote(p) for p in directories)}]")
     conn.execute(f"SET allowed_paths = [{', '.join(_quote(p) for p in files)}]")
     conn.execute('SET autoinstall_known_extensions = false')

@@ -14,7 +14,7 @@ from unittest import mock
 
 import duckdb
 
-from queryapigate import create_app
+from queryapigate import create_app, duckfiles
 from tests.helpers import create_key, put_connections, secret_of
 
 ADMIN = {'X-API-Key': 'admin-key'}
@@ -252,6 +252,121 @@ class HttpFilesTests(FilesTestCase):
             logging.getLogger('queryapigate').warning('marker')  # assertLogs needs at least one line
             create_app()
         self.assertFalse(any('Experimental:' in line for line in logs.output), logs.output)
+
+
+def _make_tls_files(folder):
+    """A private CA and a certificate for localhost signed by it, as PEM files: (ca.pem, cert.pem, key.pem)."""
+    import datetime
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ca_key, key = ec.generate_private_key(ec.SECP256R1()), ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'QueryAPIGate test CA')])
+    ca = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name).public_key(ca_key.public_key())
+          .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(minutes=5))
+          .not_valid_after(now + datetime.timedelta(days=1))
+          .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+          .add_extension(x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
+                                       content_commitment=False, key_encipherment=False, data_encipherment=False,
+                                       key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
+          .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+          .sign(ca_key, hashes.SHA256()))
+    cert = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'localhost')]))
+            .issuer_name(ca_name).public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName('localhost'),
+                                                        x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]),
+                           critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+            .sign(ca_key, hashes.SHA256()))
+    paths = tuple(os.path.join(folder, name) for name in ('ca.pem', 'cert.pem', 'key.pem'))
+    for path, data in zip(paths, (ca.public_bytes(serialization.Encoding.PEM),
+                                  cert.public_bytes(serialization.Encoding.PEM),
+                                  key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                    serialization.NoEncryption())), strict=True):
+        with open(path, 'wb') as handle:
+            handle.write(data)
+    return paths
+
+
+@unittest.skipUnless(httpfs_available(), "DuckDB's httpfs extension isn't installed and can't be downloaded here")
+class CertificateTests(unittest.TestCase):
+    """DuckDB 2.0 reads the CA bundle that verifies a TLS server through the file-access rules a connection is locked
+    with, so every https:// file and every real bucket failed ("Cannot read a CA certificate bundle") until the bundle
+    was allowed too. Checked on the locked connection's own settings, so it holds whichever DuckDB runs the suite."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bundle = os.path.join(self.tmp.name, 'ca-certificates.crt')
+        with open(self.bundle, 'w') as handle:
+            handle.write('# a stand-in for the system bundle\n')
+        patcher = mock.patch.object(duckfiles, 'CA_BUNDLES', (os.path.join(self.tmp.name, 'missing.pem'), self.bundle))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def allowed(self, details, env=None):
+        conn = duckdb.connect()
+        with mock.patch.dict(os.environ, env or {}):
+            if not env:
+                os.environ.pop('SSL_CERT_FILE', None)
+            duckfiles._configure(conn, details)
+        return conn, conn.execute("SELECT current_setting('allowed_paths')").fetchone()[0]
+
+    def test_a_connection_reading_remote_files_may_read_the_ca_bundle_that_exists(self):
+        _, allowed = self.allowed({'allowed_paths': ['https://data.example.com/prices.csv']})
+        self.assertIn(self.bundle, allowed)
+        self.assertNotIn(os.path.join(self.tmp.name, 'missing.pem'), allowed)
+        self.assertIn('https://data.example.com/prices.csv', allowed)
+
+    def test_a_connection_reading_only_local_files_gets_no_certificates(self):
+        _, allowed = self.allowed({'allowed_paths': [self.tmp.name + '/']})
+        self.assertNotIn(self.bundle, allowed)
+
+    def test_ssl_cert_file_becomes_duckdbs_ca_cert_file_and_is_allowed(self):
+        private_ca = os.path.join(self.tmp.name, 'private-ca.pem')
+        with open(private_ca, 'w') as handle:
+            handle.write('# a private CA\n')
+        conn, allowed = self.allowed({'allowed_paths': ['s3://sales/2026/']}, env={'SSL_CERT_FILE': private_ca})
+        self.assertIn(private_ca, allowed)
+        self.assertIn(self.bundle, allowed)
+        self.assertEqual(conn.execute("SELECT current_setting('ca_cert_file')").fetchone()[0], private_ca)
+
+
+@unittest.skipUnless(httpfs_available(), "DuckDB's httpfs extension isn't installed and can't be downloaded here")
+class HttpsFilesTests(FilesTestCase):
+    """An https:// file read through a locked connection, from a server with a certificate from a private CA that
+    SSL_CERT_FILE names - TLS verified for real, with no internet. Before the fix, DuckDB 2.0 refused every TLS read."""
+
+    def setUp(self):
+        super().setUp()
+        import ssl
+        ca, cert, key = _make_tls_files(self.tmp.name)
+        handler = functools.partial(_Quiet, directory=self.tmp.name)
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert, key)
+        self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.shutdown)
+        self.base = f'https://localhost:{self.server.server_address[1]}'
+        patcher = mock.patch.dict(os.environ, {'SSL_CERT_FILE': ca})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_an_allowed_https_file_is_read_over_verified_tls_and_no_other(self):
+        self.connect(allowed_paths=[f'{self.base}/public/regions.csv', f'{self.base}/public/products.parquet'],
+                     auto_views=True)
+        self.assertEqual(self.run_sql('SELECT region FROM regions').get_json(), [{'region': 'eu'}])
+        self.assertEqual(self.run_sql(f"SELECT COUNT(*) AS n FROM '{self.base}/public/products.parquet'").get_json(),
+                         [{'n': 10}])
+        self.assert_refused(self.run_sql(f"SELECT * FROM read_csv('{self.base}/private/secret.csv')"))
 
 
 @unittest.skipUnless(os.environ.get('QUERYAPIGATE_TEST_S3'), 'set QUERYAPIGATE_TEST_S3=endpoint,key,secret,bucket')
