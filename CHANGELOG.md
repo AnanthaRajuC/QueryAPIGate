@@ -49,6 +49,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.50.1 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
+  rolling-upgrade and Helm checks now start from 0.50.1.
+
 ## [0.50.1] - 2026-11-09
 
 A fix for files over TLS. **If you read files from S3, GCS, R2 or an `https://` address through a DuckDB connection
