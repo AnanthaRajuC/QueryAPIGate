@@ -161,7 +161,8 @@ documentation. #99 workspaces only if asked for.
 38. **0.50: Tracing graduates, and Trino reaches the image** ([ADR 0010](documentation/adr/0010-tracing-and-security-headers.md))
     - tracing stable, its database spans named as OpenTelemetry's conventions say; the `trino` client in the Docker
     image and a lakehouse example (#76); and a workspace's owner no longer opens files on the server through a
-    connection. (0.50.0, 2026-11-06.)
+    connection. (0.50.0, 2026-11-06.) 0.50.1 (2026-11-09) reads files over TLS again with DuckDB 2.0 - `https://`
+    files and real S3, GCS and R2 buckets.
 39. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
 40. **1.0.0.**
