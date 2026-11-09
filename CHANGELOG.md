@@ -49,6 +49,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-11-09
+
+A fix for files over TLS. **If you read files from S3, GCS, R2 or an `https://` address through a DuckDB connection
+- or export to a bucket - in the Docker image,** upgrade: with the DuckDB 2.0 the image ships, every such read failed,
+and an automatic view of such a file was missing (see *Fixed*). Nothing else changes.
+
 ### Fixed
 
 - **DuckDB connections couldn't read anything over TLS with DuckDB 2.0 - every `https://` file, and real S3, GCS and
@@ -3393,7 +3399,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.1...HEAD
+[0.50.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.0...v0.50.1
 [0.50.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.47.0...v0.48.0
