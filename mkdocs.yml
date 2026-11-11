@@ -72,6 +72,7 @@ nav:
       - 0030 Shipping the data plane: documentation/adr/0030-shipping-the-data-plane.md
       - 0031 The image's Python: documentation/adr/0031-the-image-s-python.md
       - 0032 Rate-limited keys on the data plane: documentation/adr/0032-dataplane-rate-limits.md
+      - 0033 Live queries: documentation/adr/0033-live-queries.md
   - Contributing: CONTRIBUTING.md
   - Code of conduct: CODE_OF_CONDUCT.md
   - Changelog: CHANGELOG.md

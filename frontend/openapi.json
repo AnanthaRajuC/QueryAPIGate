@@ -12865,6 +12865,61 @@
         ]
       }
     },
+    "/ingest/cdc/{source}": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. Debezium Server's HTTP sink posts its change events here - one, or a batch - signed with Standard Webhooks using the secret QUERYAPIGATE_CDC_SOURCES gives the source. No API key or token is accepted. The changes are reduced to the tables they touched and stored as one `table.changed` event, with no row data, before the 204; live queries reading those tables are re-run. Only with QUERYAPIGATE_LIVE_QUERIES on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "summary": "Debezium Server's changes, for live queries",
+        "tags": [
+          "Saved queries"
+        ],
+        "x-experimental": true
+      }
+    },
     "/metrics": {
       "get": {
         "responses": {

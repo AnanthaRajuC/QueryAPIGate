@@ -70,6 +70,15 @@ FEATURES: dict[str, dict[str, Any]] = {
         'settings': ('QUERYAPIGATE_DATAPLANE_SECRET',),
         'docs': ('documentation/DEPLOYMENT.md', 'A Rust data plane in front of /q/'),
     },
+    'live_queries': {
+        'name': 'Live queries',
+        'why': 'new (ADR 0033): the /live route of `queryapigate events`, its `result` events, the `table.changed` '
+               'signal and the CDC settings may change; CDC sources come from an environment variable until they '
+               'have an API, and only PostgreSQL has been tested with Debezium',
+        'settings': ('QUERYAPIGATE_LIVE_QUERIES', 'QUERYAPIGATE_LIVE_MIN_INTERVAL', 'QUERYAPIGATE_CDC_SOURCES'),
+        'operations': (('post', '/ingest/cdc/{source}'),),
+        'docs': ('documentation/API.md', 'Live queries'),
+    },
 }
 
 DB_TYPES = frozenset(t for f in FEATURES.values() for t in f.get('db_types', ()))

@@ -1,0 +1,1 @@
+--8<-- "documentation/adr/0033-live-queries.md"

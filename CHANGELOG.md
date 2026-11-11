@@ -21,8 +21,8 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
-connections, workspaces, secrets and credentials from AWS (`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
-(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
+connections, workspaces, secrets and credentials from AWS (`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`), and live queries (`QUERYAPIGATE_LIVE_QUERIES`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -48,6 +48,19 @@ features (above) need no deprecation period, and a security fix that can't be ma
 sooner, saying why. The list of what is deprecated now is `queryapigate/deprecations.py`.
 
 ## [Unreleased]
+
+### Added
+
+- **Live queries: a saved query's result, pushed again when the data behind it changes** (experimental, ADR 0033,
+  BACKLOG #60). `GET /live/<query>?<parameters>` on `queryapigate events` sends the query's current result as a
+  server-sent event, then its new result each time a table it reads changes - only when the result differs, at most
+  once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` (default 1 s). Each result is an ordinary run as the subscriber, with their
+  grants, `from_claim`, masking and quota, so a key that may run a query may subscribe to it and nobody else can. A
+  change is signalled by a write through QueryAPIGate, or by **Debezium Server** reading the database's change log and
+  posting to the new `POST /ingest/cdc/<source>`, signed with Standard Webhooks (`QUERYAPIGATE_CDC_SOURCES`, a secret
+  setting). A signal is a `table.changed` event in the event log: a connection and table names, never row data. Off
+  unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested against Debezium Server 3.7.1 and PostgreSQL 16; `demo/live-queries`
+  runs it in Docker.
 
 ## [0.50.1] - 2026-11-09
 

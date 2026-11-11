@@ -67,6 +67,8 @@ bp = Blueprint('api', __name__)
 RESERVED_ARGS = {'format', 'page', 'page_size', 'connection_name', 'version', 'timeout', 'stream'}
 PUBLIC_ENDPOINTS = {'api.index', 'api.favicon', 'api.health', 'api.docs', 'api.openapi_spec', 'api.admin_ui',
                     'api.console_page', 'api.metrics_endpoint',
+                    # Debezium Server's changes (live.py): signed with the source's own secret, never a key or token
+                    'api.ingest_cdc',
                     # the data plane's reports and run store lease: gate() lets only its secret through (ADR 0028)
                     'api.dataplane_runs', 'api.dataplane_lease',
                     # Console sign-in (sso.py): each checks what it needs itself - state, the session and its CSRF token
@@ -1055,6 +1057,10 @@ def _run_saved(ref, body, url_params):
             raise ApiError('Over MCP, saved queries only read - this one writes, so it is not run here', 403,
                            code='read_only')
         agent_write = True
+    if g.get('transport') == 'live' and not sqltools.is_read_only(saved['sql_query'],
+                                                                   store.get_connection(connection_name)['db']):
+        # A live query (live.py) is re-run each time its tables change: a write would be repeated with every change.
+        raise ApiError('Only a saved query that reads can be a live query - this one writes', 403, code='read_only')
     # Per-query write curation (apikeys.can_write_query()) only ever adds write reach for this one named
     # query on top of whatever the key's blanket allow_writes already grants - never the other way round.
     effective_allow_writes = g.permission.allow_writes or apikeys.can_write_query(g.permission, query_name)
@@ -1092,7 +1098,8 @@ def _run_saved(ref, body, url_params):
                                                 workspace=scope.current())
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
                          'format': output_format, 'page': page, 'workspace': scope.current()}
-            cached = cache_lookup(cache_key, ttl)
+            # A live re-run (live.py) happens because the data changed: a cached response would be the stale one
+            cached = None if g.get('transport') == 'live' else cache_lookup(cache_key, ttl)
             tracing.set_attributes(query_span, queryapigate__cache='hit' if cached is not None else 'miss')
             if cached is not None:
                 return cached
@@ -1329,6 +1336,16 @@ def dataplane_lease():
 _SSE_HEARTBEAT_SECONDS = 15  # module constant so tests can shrink it
 _open_streams = 0  # GET /events streams this process holds open right now - see stream_events()
 _open_streams_lock = threading.Lock()
+
+
+@bp.route('/ingest/cdc/<source>', methods=['POST'])
+def ingest_cdc(source):
+    """Debezium Server's HTTP sink posts its changes here (live.py, ADR 0033 - a prototype): each request signed with
+    Standard Webhooks, using the secret QUERYAPIGATE_CDC_SOURCES gives this source. Stored as one `table.changed`
+    signal - the tables that changed, no row data - before answering 204, so Debezium only moves on once it's kept."""
+    from . import live
+    live.ingest(source, request.headers, request.get_data(cache=False))
+    return '', 204
 
 
 @bp.route('/events', methods=['GET'])
