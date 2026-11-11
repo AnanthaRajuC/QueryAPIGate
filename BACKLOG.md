@@ -2006,8 +2006,11 @@ left out of #30 for being much bigger than its scope, and stays a separate item.
 
 ## 60. Change data capture via Debezium: governed row-change events
 
-**Status: open.** Depends on #59. Nothing in QueryAPIGate captures data changes today; every event is a query
-run.
+**Status: built, experimental** ([ADR 0033](documentation/adr/0033-live-queries.md), accepted 2026-11-11; graduation
+terms in its section 7). The design changed from streaming row changes to **live queries**: a client subscribes to a
+saved query, and Debezium (or QueryAPIGate's own writes) only signals which tables changed, so the query is re-run
+as the subscriber and the new result pushed. No new access rules, no row data stored. What follows is the original
+item.
 
 **Impact:** organizations that already use, or would adopt, Debezium for CDC get raw change streams with no
 per-consumer access control. QueryAPIGate already knows who may see which connection and table: `connections`

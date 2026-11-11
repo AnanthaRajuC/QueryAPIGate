@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live film</title>
+<style>
+  :root { --bg: #f7f7f5; --card: #fff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e3e3de; --accent: #2f6fde; --flash: #fff4c2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --card: #20201f; --ink: #ededea; --muted: #9a9a94; --line: #34342f; --accent: #7aa7ff; --flash: #4a4220; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 560px; margin: 32px auto; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  input, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+                  background: var(--card); color: var(--ink); }
+  input[name=key] { flex: 1 1 260px; }
+  input[name=film] { width: 80px; }
+  button { background: var(--accent); color: #fff; border: 0; cursor: pointer; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; transition: background .6s; }
+  .card.flash { background: var(--flash); transition: none; }
+  .title { font-size: 22px; font-weight: 600; }
+  .rate { font-size: 32px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .status { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  ol { color: var(--muted); font-size: 13px; padding-left: 20px; }
+  code { font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live film</h1>
+  <p class="lead">Subscribes to the saved query <code>film_lookup</code> on QueryAPIGate's events server. Change the film in
+    PostgreSQL and the card updates by itself.</p>
+  <form id="connect">
+    <input name="key" placeholder="API key (alice's)" autocomplete="off" required>
+    <input name="film" type="number" value="1" min="1" aria-label="Film id">
+    <button>Subscribe</button>
+  </form>
+  <div class="card" id="card">
+    <div class="title" id="title">-</div>
+    <div class="rate" id="rate">-</div>
+    <div class="status" id="status">Not subscribed</div>
+  </div>
+  <ol id="log"></ol>
+</main>
+<script>
+const EVENTS = 'http://localhost:5052';
+let controller = null;
+
+document.getElementById('connect').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  subscribe(form.get('key').trim(), form.get('film'));
+});
+
+async function subscribe(key, film) {
+  if (controller) controller.abort();
+  controller = new AbortController();
+  setStatus('Connecting...');
+  try {
+    // fetch, not EventSource: EventSource can't send the X-API-Key header
+    const response = await fetch(`${EVENTS}/live/film_lookup?film_id=${encodeURIComponent(film)}`,
+                                 {headers: {'X-API-Key': key}, signal: controller.signal});
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      return setStatus(`Refused: ${response.status} ${body.code || ''} ${body.error || ''}`);
+    }
+    setStatus('Live');
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buffer += value;
+      let end;
+      while ((end = buffer.indexOf('\n\n')) >= 0) {   // one SSE event per blank-line-terminated block
+        handle(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+      }
+    }
+    setStatus('Stream ended');
+  } catch (error) {
+    if (error.name !== 'AbortError') setStatus(`Disconnected: ${error.message}`);
+  }
+}
+
+function handle(block) {
+  let type = 'message', data = '';
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event: ')) type = line.slice(7);
+    else if (line.startsWith('data: ')) data += line.slice(6);
+  }
+  if (!data) return;  // a ": keepalive" comment
+  const payload = JSON.parse(data);
+  if (type === 'error') return setStatus(`Error: ${payload.code} ${payload.error}`);
+  const film = payload.rows[0];
+  document.getElementById('title').textContent = film ? film.title : 'No such film';
+  document.getElementById('rate').textContent = film ? `$${Number(film.rental_rate).toFixed(2)}` : '-';
+  setStatus(`Live - ${payload.reason === 'change' ? 'updated' : 'loaded'} at ${payload.refreshed_at}`);
+  const item = document.createElement('li');
+  item.textContent = `${payload.refreshed_at} ${payload.reason}: ${film ? `${film.title}, $${film.rental_rate}` : 'no row'}`;
+  document.getElementById('log').prepend(item);
+  if (payload.reason === 'change') {
+    const card = document.getElementById('card');
+    card.classList.add('flash');
+    requestAnimationFrame(() => requestAnimationFrame(() => card.classList.remove('flash')));
+  }
+}
+
+function setStatus(text) { document.getElementById('status').textContent = text; }
+</script>
+</body>
+</html>

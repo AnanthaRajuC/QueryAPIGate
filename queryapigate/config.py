@@ -1,5 +1,6 @@
 """Runtime configuration, read from environment variables at call time."""
 import functools
+import json
 import logging
 import math
 import os
@@ -681,7 +682,7 @@ def _check_vault():
 SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
                    'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
                    'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID',
-                   'QUERYAPIGATE_METRICS_TOKEN', 'QUERYAPIGATE_RUN_STORE_URL')
+                   'QUERYAPIGATE_METRICS_TOKEN', 'QUERYAPIGATE_RUN_STORE_URL', 'QUERYAPIGATE_CDC_SOURCES')
 # QUERYAPIGATE_VAULT_TOKEN_FILE isn't one of them: vault.py reads it again at each sign-in, as Vault Agent rotates it.
 _from_files: dict[str, str] = {}  # setting -> the file it was read from
 
@@ -1235,6 +1236,34 @@ def events_poll_interval():
     return float(raw) if raw else DEFAULT_EVENTS_POLL_INTERVAL
 
 
+def live_queries():
+    """QUERYAPIGATE_LIVE_QUERIES: live queries (live.py, ADR 0033 - a prototype): writes signal the tables they change,
+    `queryapigate events` serves /live/<query>, and the main server accepts Debezium's changes. Off by default."""
+    return env_flag('QUERYAPIGATE_LIVE_QUERIES')
+
+
+def live_min_interval():
+    """Seconds between two re-runs of one live query, however often its tables change (QUERYAPIGATE_LIVE_MIN_INTERVAL,
+    default 1): a burst of changes costs one re-run per interval, not one per change."""
+    raw = os.environ.get('QUERYAPIGATE_LIVE_MIN_INTERVAL', '').strip()
+    return max(0.0, float(raw)) if raw else 1.0
+
+
+def cdc_sources():
+    """QUERYAPIGATE_CDC_SOURCES, JSON: {source name: {"connection": ..., "secret": "whsec_...", "workspace": ...,
+    "server_name": ...}} - each a Debezium Server posting to /ingest/cdc/<name>, signing with that secret (live.py).
+    The prototype's stand-in for the sources API ADR 0033 proposes. Invalid JSON is no sources at all."""
+    raw = os.environ.get('QUERYAPIGATE_CDC_SOURCES', '').strip()
+    if not raw:
+        return {}
+    try:
+        sources = json.loads(raw)
+    except ValueError:
+        logging.getLogger('queryapigate').warning('QUERYAPIGATE_CDC_SOURCES is not valid JSON - no CDC sources')
+        return {}
+    return sources if isinstance(sources, dict) else {}
+
+
 def events_retention_hours():
     """Hours the event log keeps an event (QUERYAPIGATE_EVENTS_RETENTION_HOURS), default 24 - how far back a client of
     `queryapigate events` can resume with Last-Event-ID (ADR 0020)."""
@@ -1608,7 +1637,14 @@ def describe_settings():
             row('Events poll interval', 'Seconds between checks for new runs (on PostgreSQL a notification '
                 'usually arrives first).', 'QUERYAPIGATE_EVENTS_POLL_INTERVAL', _seconds(events_poll_interval())),
             row('Event retention', 'Hours the event log keeps an event: how far back a client can resume with '
-                'Last-Event-ID.', 'QUERYAPIGATE_EVENTS_RETENTION_HOURS', f'{events_retention_hours()} h')]},
+                'Last-Event-ID.', 'QUERYAPIGATE_EVENTS_RETENTION_HOURS', f'{events_retention_hours()} h'),
+            row('Live queries', 'GET /live/<query> on `queryapigate events`: a saved query\'s result, sent again '
+                'when a table it reads changes. Writes and CDC sources signal the changes.',
+                'QUERYAPIGATE_LIVE_QUERIES', on_off(live_queries())),
+            row('Live re-run interval', 'Seconds between two re-runs of one live query, however often its tables '
+                'change.', 'QUERYAPIGATE_LIVE_MIN_INTERVAL', _seconds(live_min_interval())),
+            row('CDC sources', 'Debezium Servers posting changes to /ingest/cdc/<source>, each with its signing '
+                'secret (JSON).', 'QUERYAPIGATE_CDC_SOURCES', f'{len(cdc_sources())} source(s)', secret=True)]},
         {'id': 'alerts', 'title': 'Alerts',
          'description': 'When GET /api/v1/alerts (the Console\'s Alerts screen) calls something out. A query is '
              'slow when its typical run is over the slow-query threshold (Query execution).', 'rows': [

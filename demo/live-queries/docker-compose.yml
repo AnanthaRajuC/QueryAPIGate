@@ -1,0 +1,21 @@
+# Live queries demo (ADR 0033): PostgreSQL with logical decoding, and Debezium Server posting its changes to
+# QueryAPIGate's /ingest/cdc/shop. QueryAPIGate itself runs from the feat/live-queries branch on this machine
+# (README.md). Linux only as written: Debezium uses the host's network to reach it on 127.0.0.1:5050.
+services:
+  postgres:
+    image: postgres:16
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_PASSWORD: pw
+      POSTGRES_DB: shop
+    ports: ["55432:5432"]
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  debezium:
+    image: quay.io/debezium/server:3.7.1.Final
+    network_mode: host
+    depends_on: [postgres]
+    restart: on-failure
+    volumes:
+      - ./application.properties:/debezium/config/application.properties:ro

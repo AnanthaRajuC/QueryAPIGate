@@ -37,12 +37,13 @@ import asyncio
 import json
 import logging
 import time
+import urllib.parse
 from collections import deque
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, instances, ratelimit, runstore, scope, secheaders, tracing
-from .errors import code_for
+from . import config, cors, db, instances, live, ratelimit, runstore, scope, secheaders, tracing
+from .errors import ApiError, code_for
 
 try:
     import resource  # POSIX only: raising the open-file limit is skipped where it doesn't exist (Windows)
@@ -329,6 +330,8 @@ class EventServer:
         self.by_second = {}         # a run store's: second -> ids delivered in it, for _LATE_WINDOW seconds
         self.started_at = 0         # a run store's: the newest id when this server started - older ones aren't news
         self.late_checked = 0.0
+        self.live = live.LiveQueries() if live.enabled() else None  # GET /live/<query> (live.py, ADR 0033)
+        self.live_streams = 0
 
     # ---- lifecycle ----
 
@@ -345,6 +348,8 @@ class EventServer:
         self.server = await asyncio.start_server(self._handle, self.host, self.port, limit=16384)
         self.port = self.server.sockets[0].getsockname()[1]
         self.tasks = [asyncio.create_task(self._tail())]
+        if self.live is not None:
+            self.live.start()
         if db.is_postgres() and not runstore.enabled():
             self.tasks.append(asyncio.create_task(self._listen()))
         log.info('Serving events at http://%s:%s/events (metadata: %s)', self.host, self.port, db.describe())
@@ -352,6 +357,8 @@ class EventServer:
     async def stop(self):
         for task in self.tasks:
             task.cancel()
+        if self.live is not None:
+            self.live.stop()
         if self.server is not None:
             self.server.close()
         for client in list(self.clients):  # end every stream now, not at its next heartbeat
@@ -390,6 +397,8 @@ class EventServer:
         for event_id, workspace, key_name, type_, query_name, connection, status, occurred_at, payload_json in \
                 await asyncio.to_thread(_rows, new[:_BATCH]):
             kind = 'saved' if query_name is not None else 'adhoc'
+            if type_ == live.SIGNAL and self.live is not None:
+                self.live.on_signal(workspace, payload_json)
             self._deliver(event_id, key_name, (type_, kind, query_name, connection, status),
                           _format(event_id, payload_json), occurred_at, workspace)
         return len(new) > _BATCH or len(ids) >= _BATCH + _LOOKBACK
@@ -407,6 +416,8 @@ class EventServer:
     def _deliver_row(self, row):
         event_id, workspace = row['id'], row['workspace']
         kind = 'saved' if row['query_name'] is not None else 'adhoc'
+        if row['type'] == live.SIGNAL and self.live is not None:
+            self.live.on_signal(workspace, runstore.event_payload(row))
         self.by_second.setdefault(event_id // (runstore.PER_MS * 1000), set()).add(event_id)
         # An event no stream is listening for isn't formatted: at a data plane's rates, that's most of the tail's work
         listening = self.by_key.get((workspace, None)) or self.by_key.get((workspace, row['key_name']))
@@ -443,7 +454,10 @@ class EventServer:
 
     def _deliver(self, rowid, key_name, event_fields, data, occurred_at=None, workspace='default'):
         self._remember(rowid)
-        for client in (*self.by_key.get((workspace, None), ()), *self.by_key.get((workspace, key_name), ())):
+        everything = self.by_key.get((workspace, None), ())
+        # an event that names no key (a live query's signal, live.py) is for the streams that see everything - once
+        own = self.by_key.get((workspace, key_name), ()) if key_name is not None else ()
+        for client in (*everything, *own):
             if client.too_slow or not matches(client.filters, event_fields) \
                     or (client.since is not None and (occurred_at or '') < client.since):
                 continue
@@ -530,7 +544,10 @@ class EventServer:
                     await _respond_text(writer, 200, self.render_metrics())
                 else:
                     await _respond(writer, 401, {'error': metrics.UNAUTHORIZED}, allow_origin)
-            elif path != '/events':
+            elif self.live is not None and path.startswith('/live/') and method == 'GET':
+                await self._live_stream(reader, writer, headers, urllib.parse.unquote(path[len('/live/'):]), query,
+                                        allow_origin, named)
+            elif path != '/events' and not (self.live is not None and path.startswith('/live/')):
                 await _respond(writer, 404, {'error': 'Not found'}, allow_origin)
             elif method == 'OPTIONS' and allow_origin and 'access-control-request-method' in headers:
                 await _respond(writer, 204, None, allow_origin, preflight=True)
@@ -545,28 +562,37 @@ class EventServer:
         finally:
             writer.close()
 
-    async def _stream(self, reader, writer, headers, query, allow_origin, named=None):
+    async def _admit(self, writer, headers, allow_origin, named):
+        """A new stream's caller - (permission, secret, client IP) - or None, with the refusal already answered: the
+        client's rate limit, this server's connection limit, the credential, the workspace."""
         client_ip = _client_ip(writer, headers)
         limit = config.rate_limit()
         if limit is not None and not self.limiter.hit(client_ip, *limit)[0]:
             await _respond(writer, 429, {'error': 'Rate limit exceeded'}, allow_origin)
-            return
-        if len(self.clients) >= self.max_connections:
+            return None
+        if len(self.clients) + self.live_streams >= self.max_connections:
             await _respond(writer, 503, {'error': 'Too many open event streams - try again shortly',
                                          'code': 'too_many_streams'}, allow_origin,
                            extra={'Retry-After': '5'})
-            return
+            return None
         secret = (headers.get('x-api-key', ''), headers.get('authorization', ''))
         with scope.using(named):  # a signed-in user's role is found by name in it - as app.gate() does
             permission = await asyncio.to_thread(_authenticate, secret, client_ip)
         if permission is None:
             await _respond(writer, 401, {'error': 'Unauthorized'}, allow_origin)
-            return
+            return None
         permission = await asyncio.to_thread(_settle_workspace, permission, named)
         if permission is None:
             await _respond(writer, 404, {'error': f"No workspace named '{named}'", 'code': 'workspace_not_found'},
                            allow_origin)
+            return None
+        return permission, secret, client_ip
+
+    async def _stream(self, reader, writer, headers, query, allow_origin, named=None):
+        admitted = await self._admit(writer, headers, allow_origin, named)
+        if admitted is None:
             return
+        permission, secret, client_ip = admitted
         # One span for opening the stream (tracing.py) - not one per event: a stream can stay open for hours
         with tracing.span('GET /events', 'server', {
                 'http.request.method': 'GET', 'http.route': '/events', 'client.address': client_ip,
@@ -650,6 +676,60 @@ class EventServer:
                     return  # key revoked/expired/deactivated, or the bearer token expired, since the stream opened
 
 
+    async def _live_stream(self, reader, writer, headers, name, query, allow_origin, named=None):
+        """GET /live/<query>?<params> (live.py): the saved query's result now, then each time it changes."""
+        admitted = await self._admit(writer, headers, allow_origin, named)
+        if admitted is None:
+            return
+        permission, secret, client_ip = admitted
+        with tracing.span('GET /live', 'server', {
+                'http.request.method': 'GET', 'http.route': '/live/{query}', 'client.address': client_ip,
+                'queryapigate.caller': permission.name or '-'}, parent=tracing.extract(headers)):
+            pass
+        params = {key: values[0] for key, values in query.items() if key not in live.RESERVED and values}
+        self.live_streams += 1
+        try:
+            try:
+                group, queue = await self.live.subscribe(permission, name, params)
+            except ApiError as error:
+                await _respond(writer, error.status, {'error': error.message,
+                                                      'code': code_for(error.status, error.code)}, allow_origin)
+                return
+            try:
+                head = ['HTTP/1.1 200 OK', 'Content-Type: text/event-stream', 'Cache-Control: no-cache',
+                        'X-Accel-Buffering: no', 'Transfer-Encoding: chunked', 'Connection: close',
+                        *_SECURITY_HEADERS]
+                if allow_origin:
+                    head += [f'Access-Control-Allow-Origin: {allow_origin}', 'Vary: Origin']
+                writer.write(('\r\n'.join(head) + '\r\n\r\n').encode())
+                watcher = asyncio.create_task(_await_hangup(reader, queue))
+                try:
+                    next_check = time.monotonic() + _RECHECK_SECONDS
+                    while not writer.is_closing():
+                        try:
+                            item = await asyncio.wait_for(queue.get(), timeout=_HEARTBEAT_SECONDS)
+                        except asyncio.TimeoutError:
+                            item = b': keepalive\n\n'
+                        if item is None:
+                            break
+                        writer.write(_chunk(item))
+                        await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
+                        if time.monotonic() >= next_check:
+                            next_check = time.monotonic() + _RECHECK_SECONDS
+                            current = await asyncio.to_thread(_authenticate, secret, client_ip)
+                            if current is None:
+                                break  # revoked, expired or deactivated since the stream opened
+                            if current.name == permission.name:  # its grants as they are now, for the next re-run
+                                group.permission = current._replace(workspace=group.workspace)
+                    if not writer.is_closing():
+                        writer.write(b'0\r\n\r\n')
+                finally:
+                    watcher.cancel()
+            finally:
+                self.live.unsubscribe(group, queue)
+        finally:
+            self.live_streams -= 1
+
     def render_metrics(self):
         """This process's own counts, as Prometheus text (ADR 0020 §8)."""
         lines = ['# HELP queryapigate_events_streams Event streams open right now.',
@@ -670,10 +750,21 @@ class EventServer:
         lines += [f'queryapigate_events_lag_seconds_bucket{{le="+Inf"}} {cumulative}',
                   f'queryapigate_events_lag_seconds_sum {self.lag_sum}',
                   f'queryapigate_events_lag_seconds_count {cumulative}']
+        if self.live is not None:
+            lines += self.live.metrics_lines()
         return '\n'.join(lines) + '\n'
 
 
 # ---- small HTTP helpers ----
+
+async def _await_hangup(reader, queue):
+    """End a live stream as soon as its client hangs up (see EventServer._watch())."""
+    try:
+        await reader.read(1)
+    except Exception:
+        pass
+    live._offer(queue, None)
+
 
 async def _read_request(reader):
     line = (await reader.readline()).decode('latin-1').rstrip('\r\n')
