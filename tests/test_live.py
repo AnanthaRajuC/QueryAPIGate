@@ -178,8 +178,13 @@ class WriteSignalTests(LiveTestCase):
         stream.events(1)
         self.write('INSERT INTO rental (film_id) VALUES (1)')       # another table: not re-run at all
         self.write("UPDATE film SET title = 'Beta II' WHERE id = 2")  # its table, another row: re-run, same result
-        self.assertTrue(stream.nothing_more(1.0))
+        # the film write is re-run, found unchanged - after the signal is delivered, which with a run store waits
+        # for it to settle (runstore.SETTLE_SECONDS): wait for the count, rather than a fixed second
+        deadline = time.monotonic() + 10
+        while self.server.live.unchanged < 1 and time.monotonic() < deadline:
+            time.sleep(0.1)
         self.assertGreaterEqual(self.server.live.unchanged, 1)
+        self.assertTrue(stream.nothing_more(1.0))
 
     def test_subscribers_alike_share_one_run(self):
         first, second = self.subscribe('/live/film?id=1'), self.subscribe('/live/film?id=1')
