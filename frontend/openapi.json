@@ -1740,6 +1740,10 @@
                     "destination"
                   ],
                   "type": "string"
+                },
+                "workspace": {
+                  "description": "Its workspace - left out in `default`.",
+                  "type": "string"
                 }
               },
               "required": [

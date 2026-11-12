@@ -16,7 +16,8 @@ import json
 from . import config, db, store
 from .errors import ApiError
 
-# (table, kind shown to people, field in details_json) - each table keyed by `name`
+# (table, kind shown to people, field in details_json) - each table keyed by (workspace, name): names are unique only
+# within a workspace (ADR 0023), so every read and write here names both
 ENCRYPTED = (('connections', 'connection', 'password'), ('destinations', 'destination', 'password'))
 
 
@@ -39,12 +40,13 @@ def _key_index(fernets, value):
 
 
 def _values(conn):
-    """Every encrypted value stored: (table, kind, name, field, details, value)."""
+    """Every encrypted value stored: (table, kind, workspace, name, field, details, value)."""
     for table, kind, field in ENCRYPTED:
-        for row in conn.execute(f'SELECT name, details_json FROM {table} ORDER BY name').fetchall():
+        for row in conn.execute(f'SELECT workspace, name, details_json FROM {table} '
+                                'ORDER BY workspace, name').fetchall():
             details = json.loads(row['details_json'])
             if store._is_encrypted(details.get(field)):
-                yield table, kind, row['name'], field, details, details[field]
+                yield table, kind, row['workspace'], row['name'], field, details, details[field]
 
 
 def _require_keys():
@@ -60,19 +62,30 @@ def report(conn=None):
     fernets = _fernets() if config.secret_keys() else []
     by_key = [0] * len(fernets)
     undecryptable = []
-    for _table, kind, name, _field, _details, value in _values(conn):
+    for _table, kind, workspace, name, _field, _details, value in _values(conn):
         index = _key_index(fernets, value)
         if index is None:
-            undecryptable.append({'type': kind, 'name': name})
+            undecryptable.append(_value_named(kind, workspace, name))
         else:
             by_key[index] += 1
     return {'keys': len(fernets), 'values': sum(by_key) + len(undecryptable), 'by_key': by_key,
             'under_old_keys': sum(by_key[1:]), 'undecryptable': undecryptable}
 
 
+def _value_named(kind, workspace, name):
+    """How a value is named to people: its type and name, and its workspace outside `default`."""
+    return {'type': kind, 'name': name, **({'workspace': workspace} if workspace != db.DEFAULT_WORKSPACE else {})}
+
+
+def describe(value):
+    """One of report()'s `undecryptable`, in words: "connection 'shop'", or "connection 'shop' in workspace 'acme'"."""
+    where = f" in workspace '{value['workspace']}'" if 'workspace' in value else ''
+    return f"{value['type']} '{value['name']}'{where}"
+
+
 def _refuse_undecryptable(found):
     if found:
-        names = ', '.join(f"{v['type']} '{v['name']}'" for v in found)
+        names = ', '.join(describe(v) for v in found)
         raise ApiError(f'No key in QUERYAPIGATE_SECRET_KEY decrypts the password of {names} - nothing was changed. '
                        'Add the key it was encrypted with (after the first), or enter that password again, then run '
                        'rekey again', 409, code='password_undecryptable', values=found)
@@ -92,17 +105,18 @@ def rekey(actor, via=None):
     with db.transaction() as conn:
         pending = []
         undecryptable = []
-        for table, kind, name, field, details, value in _values(conn):
+        for table, kind, workspace, name, field, details, value in _values(conn):
             index = _key_index(fernets, value)
             if index is None:
-                undecryptable.append({'type': kind, 'name': name})
+                undecryptable.append(_value_named(kind, workspace, name))
             elif index > 0:
-                pending.append((table, name, field, details, value, index))
+                pending.append((table, workspace, name, field, details, value, index))
         _refuse_undecryptable(undecryptable)
-        for table, name, field, details, value, index in pending:
+        for table, workspace, name, field, details, value, index in pending:
             plain = fernets[index].decrypt(value[len(store._ENC_PREFIX):].encode('ascii'))
             details[field] = store._ENC_PREFIX + first.encrypt(plain).decode('ascii')
-            conn.execute(f'UPDATE {table} SET details_json = ? WHERE name = ?', (json.dumps(details), name))
+            conn.execute(f'UPDATE {table} SET details_json = ? WHERE workspace = ? AND name = ?',
+                         (json.dumps(details), workspace, name))
             moved += 1
         after = report(conn)
     store.record_audit(actor, 'rekey', 'secret_key', {'rekeyed': moved, 'values': after['values'],

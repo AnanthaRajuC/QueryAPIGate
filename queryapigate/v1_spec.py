@@ -287,7 +287,9 @@ SCHEMAS = {
             'undecryptable': {'type': 'array', 'description': 'What no listed key decrypts.', 'items': {
                 'type': 'object', 'required': ['type', 'name'],
                 'properties': {'type': {'type': 'string', 'enum': ['connection', 'destination']},
-                               'name': {'type': 'string'}}}},
+                               'name': {'type': 'string'},
+                               'workspace': {'type': 'string',
+                                             'description': 'Its workspace - left out in `default`.'}}}},
             'rekeyed': {'type': 'integer', 'description': 'How many were re-encrypted under the first key (not with '
                                                           '`check`).'},
         },
