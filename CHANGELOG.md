@@ -55,8 +55,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   BACKLOG #60). `GET /live/<query>?<parameters>` on `queryapigate events` sends the query's current result as a
   server-sent event, then its new result each time a table it reads changes - only when the result differs, at most
   once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` (default 1 s). Each result is an ordinary run as the subscriber, with their
-  grants, `from_claim`, masking and quota, so a key that may run a query may subscribe to it and nobody else can. A
-  change is signalled by a write through QueryAPIGate, or by **Debezium Server** reading the database's change log and
+  grants, `from_claim`, masking and quota, so a key that may run a query may subscribe to it and nobody else can.
+  Opening a stream and each re-run count against the caller's `rate_limit`; a re-run over it is postponed until the
+  limit allows, never dropped (ADR 0033 §12). A change is signalled by a write through QueryAPIGate, or by **Debezium
+  Server** reading the database's change log and
   posting to the new `POST /ingest/cdc/<source>`, signed with Standard Webhooks (`QUERYAPIGATE_CDC_SOURCES`, a secret
   setting). A signal is a `table.changed` event in the event log: a connection and table names, never row data. Off
   unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested end to end with Debezium Server 3.7.1 against PostgreSQL 16, MySQL

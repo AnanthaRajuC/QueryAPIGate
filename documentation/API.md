@@ -1919,6 +1919,12 @@ data: {..., "rows": [{..., "rental_rate": 1.99}], "truncated": false, "reason": 
   tokens that bind different `from_claim` values never share a result.
   It runs again at most once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` seconds (default 1), however many changes arrive:
   a 1,000-row `UPDATE` is one new result per stream.
+- **Rate limits:** opening a stream, and each run of a group after a change, is a call against the caller's own
+  `rate_limit` (a key's, or a signed-in user's role's), counted with their `GET /q/` calls - across instances when
+  `QUERYAPIGATE_REDIS_URL` is set. Opening one over the limit answers `429 rate_limited` with `Retry-After`, before the
+  stream opens. A run over the limit is **postponed, not dropped**: no error event; the query runs once the limit
+  allows, with every change made meanwhile, and the stream gets that newest result. A run refused by `max_concurrent`
+  waits the same way, a second or `QUERYAPIGATE_LIVE_MIN_INTERVAL`, whichever is longer.
 
 **What tells it a table changed: signals.** A signal is a `table.changed` event in the event log - a connection and
 the tables that changed there, never row data:
@@ -2018,7 +2024,8 @@ store_unavailable` and Debezium retries. Snapshot rows (`op: r`), tombstones and
 
 **Metrics.** `GET /metrics` on `queryapigate events` adds `queryapigate_live_subscriptions`, `queryapigate_live_groups`
 (distinct caller, query and parameters being kept fresh), and the counters `queryapigate_live_signals_total`,
-`_reruns_total`, `_pushed_total` and `_unchanged_total`. Many unchanged re-runs for each push means many changes to
+`_reruns_total`, `_pushed_total`, `_unchanged_total` and `_postponed_total` (runs held back by a caller's rate limit or
+`max_concurrent`, to run once it allows). Many unchanged re-runs for each push means many changes to
 a table touch rows nobody is watching.
 
 **The response cache.** Each signal also makes the [cached responses](#response-caching) of the tables it names a

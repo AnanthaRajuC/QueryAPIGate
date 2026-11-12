@@ -28,9 +28,10 @@ arrive, and its result is pushed only when it differs from the last one sent. A 
 newest result, not every one: a live query is a state, not a log, so there is no Last-Event-ID - a reconnect simply
 gets the current result first.
 
-Known prototype limits, written down rather than hidden: re-runs don't count against the key's rate limit (only the
-subscription does - quotas do count every run). A signal also makes the response cache's entries for the tables it
-names a miss (invalidate(), ADR 0033 §10), and a live re-run skips the cache's lookup.
+Opening a stream and each group's re-run are calls against the caller's own rate limit, counted where GET /q/ counts
+its calls; a re-run it refuses - or `max_concurrent` does - is postponed, not dropped (ADR 0033 §12). A signal also
+makes the response cache's entries for the tables it names a miss (invalidate(), ADR 0033 §10), and a live re-run
+skips the cache's lookup.
 """
 import asyncio
 import base64
@@ -302,7 +303,7 @@ def frame(event, data):
 class _Group:
     """Every subscription by one caller to one query with the same parameters: one run serves them all."""
     __slots__ = ('key', 'permission', 'name', 'params', 'workspace', 'connection', 'tables', 'subscribers',
-                 'digest', 'body', 'last_run', 'dirty', 'running')
+                 'digest', 'body', 'last_run', 'dirty', 'running', 'not_before')
 
     def __init__(self, key, permission, name, params, connection, tables):
         self.key, self.permission, self.name, self.params = key, permission, name, params
@@ -313,6 +314,7 @@ class _Group:
         self.last_run = 0.0
         self.dirty = False
         self.running = False
+        self.not_before = 0.0     # a postponed re-run waits until then (monotonic): the caller's limits allow it
 
 
 # Per-token claims that say when and which token, not who: two tokens differing only in these may share a group
@@ -340,7 +342,7 @@ class LiveQueries:
         self.wake = None
         self.semaphore = None
         self.task = None
-        self.reruns = self.pushed = self.unchanged = self.signals = 0
+        self.reruns = self.pushed = self.unchanged = self.signals = self.postponed = 0
 
     def flask_app(self):
         if self._flask_app is None:  # built on the first subscription: an events server without one never needs it
@@ -363,13 +365,30 @@ class LiveQueries:
             for queue in group.subscribers:
                 _offer(queue, None)
 
+    def _take(self, permission):
+        """One call from the caller's own `rate_limit` (a key's, or a signed-in user's role's - ADR 0033 §12), counted
+        where GET /q/ counts its calls: None when it may run, else how many seconds until it may."""
+        from . import governance
+        verdict = governance.check_key_limit(self.flask_app(), permission)
+        return None if verdict is None or verdict.allowed else max(1, verdict.retry_after)
+
+    def _postpone(self, group, seconds):
+        """Hold a re-run back - not drop it: the group stays marked, and runs once ``seconds`` have passed."""
+        group.dirty = True
+        group.not_before = time.monotonic() + seconds
+        self.postponed += 1
+
     async def subscribe(self, permission, name, params):
         """A new subscriber's queue, with the current result already in it. Raises ApiError - as GET /q/<name> would
-        answer - before anything is streamed, so a refusal is an ordinary HTTP error."""
+        answer - before anything is streamed, so a refusal is an ordinary HTTP error. Opening a stream is a call
+        against the caller's rate limit, whether or not it runs anything new."""
+        flask_app = await asyncio.to_thread(self.flask_app)
+        wait = await asyncio.to_thread(self._take, permission)
+        if wait is not None:
+            raise ApiError('Rate limit exceeded for this API key', 429, code='rate_limited', retry_after=wait)
         key = group_key(permission, name, params)
         group = self.groups.get(key)
         if group is None:
-            flask_app = await asyncio.to_thread(self.flask_app)
             connection, tables = await asyncio.to_thread(plan, flask_app, permission, name)
             group = _Group(key, permission, name, params, connection, tables)
             await self._run(group, 'subscribe', raise_errors=True)
@@ -417,13 +436,17 @@ class LiveQueries:
             self.wake.clear()
             now, interval = time.monotonic(), config.live_min_interval()
             for group in list(self.groups.values()):
-                if group.dirty and not group.running and now - group.last_run >= interval:
+                if group.dirty and not group.running and now - group.last_run >= interval and now >= group.not_before:
                     group.dirty = False
                     group.running = True
                     asyncio.create_task(self._refresh(group))
 
     async def _refresh(self, group):
         try:
+            wait = await asyncio.to_thread(self._take, group.permission)  # one call a group, however many subscribe
+            if wait is not None:
+                self._postpone(group, wait)
+                return
             async with self.semaphore:
                 await self._run(group, 'change')
         finally:
@@ -437,6 +460,9 @@ class LiveQueries:
         except ApiError as error:
             if raise_errors:
                 raise
+            if error.code == 'too_many_concurrent':  # the caller's other queries hold every slot: try again shortly
+                self._postpone(group, max(1.0, config.live_min_interval()))
+                return
             from .errors import code_for
             body = frame('error', {'error': error.message, 'code': code_for(error.status, error.code)})
             ending = error.status in (401, 403, 404)  # no longer allowed, or gone: end the streams, they won't recover
@@ -470,7 +496,9 @@ class LiveQueries:
                 ('signals', 'Table-change signals heard.', self.signals),
                 ('reruns', 'Live queries re-run after a change.', self.reruns),
                 ('pushed', 'Re-runs whose result changed, and was pushed.', self.pushed),
-                ('unchanged', 'Re-runs whose result was the same, so nothing was sent.', self.unchanged)):
+                ('unchanged', 'Re-runs whose result was the same, so nothing was sent.', self.unchanged),
+                ('postponed', "Re-runs held back by the caller's rate limit or max_concurrent, to run once it allows.",
+                 self.postponed)):
             lines += [f'# HELP queryapigate_live_{name}_total {help_text}',
                       f'# TYPE queryapigate_live_{name}_total counter', f'queryapigate_live_{name}_total {value}']
         return lines

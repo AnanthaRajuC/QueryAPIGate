@@ -692,8 +692,10 @@ class EventServer:
             try:
                 group, queue = await self.live.subscribe(permission, name, params)
             except ApiError as error:
+                retry_after = error.extra.get('retry_after')
                 await _respond(writer, error.status, {'error': error.message,
-                                                      'code': code_for(error.status, error.code)}, allow_origin)
+                                                      'code': code_for(error.status, error.code)},
+                               allow_origin, extra={'Retry-After': str(retry_after)} if retry_after else None)
                 return
             try:
                 head = ['HTTP/1.1 200 OK', 'Content-Type: text/event-stream', 'Cache-Control: no-cache',
