@@ -20,11 +20,21 @@ from collections import OrderedDict
 MAX_ENTRIES = 10_000  # bounds memory; the least recently used entry is evicted first
 
 
+def stale(snapshot, current):
+    """Whether an entry stored with generation ``snapshot`` is out of date at generations ``current`` (both
+    {field: count}; a field missing counts 0): any counter it depends on has moved since it was stored."""
+    return any(current.get(field, 0) != (snapshot or {}).get(field, 0) for field in current)
+
+
 class ResponseCache:
+    """Entries, and the generation counters live queries' signals move (ADR 0033): an entry stored with the counters
+    its query depends on, as they were before it ran, is a miss once any of them moves - see lookup()."""
+
     def __init__(self, clock=time.monotonic):
         self._clock = clock
         self._lock = threading.Lock()
-        self._entries = OrderedDict()  # key -> (body, content_type, headers, etag, expires_at, meta)
+        self._entries = OrderedDict()  # key -> (body, content_type, headers, etag, expires_at, meta, generations)
+        self._generations = {}  # field (live.cache_fields()) -> count
 
     @staticmethod
     def key(**parts):
@@ -35,25 +45,37 @@ class ResponseCache:
 
     def get(self, key):
         """(body, content_type, headers, etag) for a live entry, or None if missing or expired."""
+        return self.lookup(key)[0]
+
+    def lookup(self, key, fields=()):
+        """(hit or None, generations): ``generations`` are ``fields``' counters now - the snapshot to store a fresh
+        result with, read before its query runs - and a hit whose own snapshot differs from them is a miss."""
         with self._lock:
+            current = {field: self._generations.get(field, 0) for field in fields}
             entry = self._entries.get(key)
             if entry is None:
-                return None
-            body, content_type, headers, etag, expires_at, _meta = entry
-            if self._clock() >= expires_at:
+                return None, current
+            body, content_type, headers, etag, expires_at, _meta, snapshot = entry
+            if self._clock() >= expires_at or (fields and stale(snapshot, current)):
                 del self._entries[key]
-                return None
+                return None, current
             self._entries.move_to_end(key)  # most recently used
-            return body, content_type, headers, etag
+            return (body, content_type, headers, etag), current
 
-    def set(self, key, body, content_type, headers, ttl, meta=None):
+    def bump(self, fields):
+        """A signal: every entry depending on any of ``fields`` is out of date from now."""
+        with self._lock:
+            for field in fields:
+                self._generations[field] = self._generations.get(field, 0) + 1
+
+    def set(self, key, body, content_type, headers, ttl, meta=None, generations=None):
         """Store a response and return its ETag (a hash of the body, so it changes only when content does).
         ``meta`` (name/version/connection/format/page - see app.py's cache_store()) is never used to serve
         a hit; it exists purely so the admin UI's cache browser (BACKLOG: real-time cache entries) can show
         something more useful than an opaque hash - see list_entries()."""
         etag = hashlib.sha256(body).hexdigest()
         with self._lock:
-            self._entries[key] = (body, content_type, headers, etag, self._clock() + ttl, meta or {})
+            self._entries[key] = (body, content_type, headers, etag, self._clock() + ttl, meta or {}, generations)
             self._entries.move_to_end(key)
             while len(self._entries) > MAX_ENTRIES:
                 self._entries.popitem(last=False)
@@ -70,7 +92,7 @@ class ResponseCache:
         with self._lock:
             items = list(self._entries.items())
         out = []
-        for key, (body, content_type, _headers, _etag, expires_at, meta) in items:
+        for key, (body, content_type, _headers, _etag, expires_at, meta, _generations) in items:
             ttl_remaining = expires_at - now
             if ttl_remaining <= 0:
                 continue  # expired since the snapshot above - about to be evicted on its next get()

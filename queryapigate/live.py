@@ -71,6 +71,37 @@ def signal_columns(connection_name, tables, source, workspace=None):
             workspace or scope.current())
 
 
+# ---- the response cache (cache.py, rediscache.py): a signal makes what it concerns a miss ----
+
+def cache_fields(workspace, connection_name, tables):
+    """The generation counters a cached response depends on: its tables' and its connection's "every table" one -
+    or, when its tables can't be told (None), its connection's "any change" one. \x1f can't be in a name."""
+    base = f'{workspace}\x1f{connection_name}\x1f'
+    if tables is None:
+        return (base + '*any',)
+    return (base + '*all', *(base + table for table in sorted(tables)))
+
+
+def signal_fields(workspace, connection_name, tables):
+    """The counters a signal moves: each table's and "any change" - or, naming no tables, "every table" too."""
+    base = f'{workspace}\x1f{connection_name}\x1f'
+    if tables is None:
+        return (base + '*any', base + '*all')
+    return (base + '*any', *(base + table for table in sorted(tables)))
+
+
+def invalidate(workspace, connection_name, tables):
+    """A signal's effect on this process's response cache (or the shared one, with Redis): every cached response it
+    concerns becomes a miss. Outside a Flask app (no cache to reach) it does nothing. Never raises."""
+    from flask import current_app, has_app_context
+    if not has_app_context():
+        return
+    try:
+        current_app.extensions['queryapigate_cache'].bump(signal_fields(workspace, connection_name, tables))
+    except Exception:  # the signal is stored already; a cache entry then lives to its TTL
+        log.warning('Live queries: could not clear cached responses on %s', connection_name, exc_info=True)
+
+
 def note_write(sql, details, connection_name):
     """After a successful statement on a writable connection: if it wrote, queue a signal naming the tables it
     touched (all of them - INSERT ... SELECT's sources too, which only costs a needless re-run). Never raises."""
@@ -80,12 +111,14 @@ def note_write(sql, details, connection_name):
         dialect = details['db']
         if sqltools.is_read_only(sql, dialect):
             return
-        history.record_event(signal_columns(connection_name, _tables(sql, details), 'write'), scope.current())
+        tables = tables_read(sql, details)
+        history.record_event(signal_columns(connection_name, tables, 'write'), scope.current())
+        invalidate(scope.current(), connection_name, tables)
     except Exception:  # a signal must never fail the write it reports
         log.warning('Live queries: could not signal a write on %s', connection_name, exc_info=True)
 
 
-def _tables(sql, details):
+def tables_read(sql, details):
     """The qualified tables ``sql`` touches, as tableguard names them - None when that can't be told (an unsupported
     dialect, a parse failure, a `{name}` text placeholder that might be a table)."""
     if '{' in sql:
@@ -182,8 +215,9 @@ def ingest(source_name, headers, body):
     except (ValueError, UnicodeDecodeError) as error:
         raise ApiError(f'Not a Debezium change event: {error}', 422, code='invalid_change') from error
     if tables:
-        write_signal(signal_columns(source.get('connection'), tables, f'cdc:{source_name}',
-                                    source.get('workspace') or db.DEFAULT_WORKSPACE))
+        workspace = source.get('workspace') or db.DEFAULT_WORKSPACE
+        write_signal(signal_columns(source.get('connection'), tables, f'cdc:{source_name}', workspace))
+        invalidate(workspace, source.get('connection'), tables)
     return len(tables)
 
 
@@ -220,7 +254,7 @@ def plan(flask_app, permission, name):
             return connection_name, {f'{database}.{collection}'.lower()}
         if not isinstance(saved.get('sql_query'), str):
             return connection_name, None
-        return connection_name, _tables(saved['sql_query'], store.get_connection(connection_name))
+        return connection_name, tables_read(saved['sql_query'], store.get_connection(connection_name))
     finally:
         ctx.pop()
 

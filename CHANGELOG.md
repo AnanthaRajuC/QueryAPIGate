@@ -62,6 +62,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested end to end with Debezium Server 3.7.1 against PostgreSQL 16, MySQL
   8.4, MariaDB 11.4, MongoDB 7.0 (a query listens on its collection) and SQL Server 2022 (through a `jdbc` connection,
   where any change on the connection re-runs the query); `demo/live-queries` runs the PostgreSQL one in Docker.
+- **The response cache, kept fresh by live queries' signals** (experimental, ADR 0033). With live queries on, a write
+  through QueryAPIGate or a change Debezium reports makes every cached response that reads the changed tables a miss,
+  so `GET /q/` callers too get the new result on their next call - a long `cache_ttl` no longer means stale reads. An
+  entry remembers the tables' generation counters from before its query ran, so a change during the query still
+  leaves that result out of date. With Redis (`QUERYAPIGATE_REDIS_URL`) the counters are shared: a change reported to
+  one instance reaches every instance. With live queries off a cache hit does exactly what it did; on, the added work
+  is under 2 µs a hit (a hit through the whole request path is ~425 µs in-process).
 
 ### Fixed
 

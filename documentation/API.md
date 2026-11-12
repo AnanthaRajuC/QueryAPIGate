@@ -256,6 +256,15 @@ in this one process's memory by default, or shared across restarts/instances whe
 UI) - either way it is shared across every API key that can use the connection, since it stores nothing an
 authorized caller could not already see by running the query itself.
 
+**Kept fresh by live queries' signals** (experimental, with [live queries](#live-queries) on): a write through
+QueryAPIGate, or a change Debezium reports, makes every cached response that reads the changed tables a miss, so the
+next call runs the query again and caches the new result - a long `cache_ttl` stops meaning stale reads. A
+response whose tables can't be told (a `jdbc` or `h2` connection, a `{name}` text placeholder) is a miss after any
+change on its connection. With Redis, a change reported to any instance reaches every instance's next call; the
+in-process cache only hears of the changes its own process takes (its writes, and Debezium's posts to it), so with
+more than one process - several containers, or writes through `queryapigate mcp` - use Redis. A change made in the
+database that nothing reports - no Debezium, not through QueryAPIGate - is still only seen at the TTL.
+
 ## Parameter rules
 
 `query_parameters` maps each parameter name to its type, or to an object of rules:
@@ -1983,10 +1992,13 @@ store_unavailable` and Debezium retries. Snapshot rows (`op: r`), tombstones and
 `_reruns_total`, `_pushed_total` and `_unchanged_total`. Many unchanged re-runs for each push means many changes to
 a table touch rows nobody is watching.
 
-**Limits, for now:** re-runs count against quotas but not rate limits (the subscription itself does); a change
-doesn't clear the response cache for `GET /q/` callers (a live re-run skips it instead); `queryapigate events`
-runs the queries itself, so it needs the main server's database drivers and network access; and on a `jdbc` or `h2`
-connection a change to any table re-runs every live query on it.
+**The response cache.** Each signal also makes the [cached responses](#response-caching) of the tables it names a
+miss, for `GET /q/` callers too - so a query can keep a long `cache_ttl` and still never serve a result older than
+the last reported change.
+
+**Limits, for now:** re-runs count against quotas but not rate limits (the subscription itself does);
+`queryapigate events` runs the queries itself, so it needs the main server's database drivers and network access;
+and on a `jdbc` or `h2` connection a change to any table re-runs every live query on it.
 
 ## Alerts
 

@@ -900,11 +900,13 @@ def _client_cache_control(ttl):
     return f'private, max-age={ttl}'
 
 
-def cache_lookup(cache_key, ttl):
-    """A live entry rendered as a response (304 if the client already has it), or None on a cache miss."""
-    hit = current_app.extensions['queryapigate_cache'].get(cache_key)
+def cache_lookup(cache_key, ttl, fields=()):
+    """(response or None, generations): a live entry rendered as a response (304 if the client already has it), or
+    None on a miss; and ``fields``' generation counters now (live.cache_fields()), for cache_store() to keep - read
+    before the query runs, so a change during it leaves the result stored already out of date."""
+    hit, generations = current_app.extensions['queryapigate_cache'].lookup(cache_key, fields)
     if hit is None:
-        return None
+        return None, generations
     body, content_type, headers, etag = hit
     quoted = f'"{etag}"'
     if request.headers.get('If-None-Match') == quoted:
@@ -916,17 +918,17 @@ def cache_lookup(cache_key, ttl):
     response.headers['ETag'] = quoted
     response.headers['Cache-Control'] = _client_cache_control(ttl)
     response.headers['X-Cache'] = 'HIT'
-    return response
+    return response, generations
 
 
-def cache_store(cache_key, response, ttl, meta=None):
+def cache_store(cache_key, response, ttl, meta=None, generations=None):
     """Store `response` under `cache_key` for `ttl` seconds and tag it as a fresh cache MISS. `meta`
     (name/version/connection/format/page) is never consulted to serve a hit - it exists purely for the
     admin UI's cache browser, see cache.py's ResponseCache.set() docstring."""
     replay_headers = [(name, value) for name, value in response.headers.items()
                       if name.lower() not in ('content-type', 'content-length')]
     etag = current_app.extensions['queryapigate_cache'].set(cache_key, response.get_data(), response.content_type,
-                                                       replay_headers, ttl, meta)
+                                                       replay_headers, ttl, meta, generations)
     response.headers['ETag'] = f'"{etag}"'
     response.headers['Cache-Control'] = _client_cache_control(ttl)
     response.headers['X-Cache'] = 'MISS'
@@ -1087,9 +1089,10 @@ def _run_saved(ref, body, url_params):
     # A saved query is only ever cached when it declares a cache_ttl *and* its SQL is read-only - never a
     # write, no matter the setting, since serving a cached response would silently skip that write.
     ttl = saved.get('cache_ttl') or 0
-    cache_key = None
+    cache_key = generations = None
     if ttl > 0:
-        dialect = store.get_connection(connection_name)['db']
+        details = store.get_connection(connection_name)
+        dialect = details['db']
         if sqltools.is_read_only(sql, dialect):
             # Callers with different masking rules get different responses, so they never share one.
             cache_key = cache.ResponseCache.key(name=ref, version=number, connection=connection_name,
@@ -1098,8 +1101,14 @@ def _run_saved(ref, body, url_params):
                                                 workspace=scope.current())
             cache_meta = {'name': path, 'version': number, 'connection': connection_name,
                          'format': output_format, 'page': page, 'workspace': scope.current()}
-            # A live re-run (live.py) happens because the data changed: a cached response would be the stale one
-            cached = None if g.get('transport') == 'live' else cache_lookup(cache_key, ttl)
+            # With live queries on, a signal on its tables makes the entry a miss (live.cache_fields(), ADR 0033)
+            fields = ()
+            if config.live_queries():
+                from . import live
+                fields = live.cache_fields(scope.current(), connection_name, live.tables_read(sql, details))
+            cached, generations = cache_lookup(cache_key, ttl, fields)
+            if g.get('transport') == 'live':
+                cached = None  # a live re-run happens because the data changed: it refreshes the entry instead
             tracing.set_attributes(query_span, queryapigate__cache='hit' if cached is not None else 'miss')
             if cached is not None:
                 return cached
@@ -1121,7 +1130,7 @@ def _run_saved(ref, body, url_params):
                                          'serialization_ms': g.serialization_ms,
                                          **masked_entry(result.masked)})
     if cache_key is not None:
-        response = cache_store(cache_key, response, ttl, cache_meta)
+        response = cache_store(cache_key, response, ttl, cache_meta, generations)
     elif (g.get('dataplane_record') is not None and g.get('transport', 'rest') == 'rest' and not ttl
           and output_format == 'json'):  # the one format the data plane renders
         plan = dataplane.build(g.dataplane_record, g.permission, query_name, number, saved, connection_name, result,
