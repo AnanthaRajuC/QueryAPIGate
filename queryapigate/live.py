@@ -34,6 +34,7 @@ names a miss (invalidate(), ADR 0033 §10), and a live re-run skips the cache's 
 """
 import asyncio
 import base64
+import functools
 import hashlib
 import hmac
 import json
@@ -84,6 +85,18 @@ def cache_fields(workspace, connection_name, tables):
     return (base + '*all', *(base + table for table in sorted(tables)))
 
 
+def response_fields(workspace, connection_name, sql, details):
+    """cache_fields() for a saved query's SQL on its connection - what every cache lookup of it asks, so it's
+    memoized: one dict lookup a hit, instead of finding the tables and building the names again."""
+    return _response_fields(workspace, connection_name, sql, details.get('db'), *engine._table_defaults(details))
+
+
+@functools.lru_cache(maxsize=4096)  # bounded: one entry per (workspace, connection, SQL) - saved queries' SQL
+def _response_fields(workspace, connection_name, sql, dialect, default_catalog, default_schema):
+    tables = tables_read(sql, {'db': dialect}, (default_catalog, default_schema))
+    return cache_fields(workspace, connection_name, tables)
+
+
 def signal_fields(workspace, connection_name, tables):
     """The counters a signal moves: each table's and "any change" - or, naming no tables, "every table" too."""
     base = f'{workspace}\x1f{connection_name}\x1f'
@@ -120,13 +133,14 @@ def note_write(sql, details, connection_name):
         log.warning('Live queries: could not signal a write on %s', connection_name, exc_info=True)
 
 
-def tables_read(sql, details):
+def tables_read(sql, details, defaults=None):
     """The qualified tables ``sql`` touches, as tableguard names them - None when that can't be told (an unsupported
-    dialect, a parse failure, a `{name}` text placeholder that might be a table)."""
+    dialect, a parse failure, a `{name}` text placeholder that might be a table). ``defaults``: the connection's
+    (catalog, schema), when already known."""
     if '{' in sql:
         return None
     try:
-        return set(tableguard.extract_tables(sql, details['db'], *engine._table_defaults(details)))
+        return set(tableguard.extract_tables(sql, details['db'], *(defaults or engine._table_defaults(details))))
     except ApiError:
         return None
 
