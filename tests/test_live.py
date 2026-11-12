@@ -10,9 +10,11 @@ import tempfile
 import time
 import types
 import unittest
+import uuid
 from unittest import mock
 
 from queryapigate import create_app, live
+from queryapigate.errors import ApiError
 from tests.helpers import save_query, write_connections
 from tests.test_events_server import EventServerTestCase, Stream
 from tests.test_jwt import SECRET as JWT_SECRET
@@ -203,6 +205,72 @@ class LiveTestCase(EventServerTestCase):
         response = self.client.post('/execute_sql', headers=self.admin, json={'connection_name': 'shop',
                                                                               'sql': sql})
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+
+class RateLimitTests(LiveTestCase):
+    """ADR 0033 §12: opening a stream and each group's re-run are calls against the caller's own rate limit; a re-run
+    it refuses - or max_concurrent does - is postponed, not dropped, and no error event is sent."""
+
+    def start_server(self, **options):
+        super().start_server(**options)
+        # a name of its own: with QUERYAPIGATE_REDIS_URL set, a bucket outlives the test that spent it
+        self.limited = self.client.post('/api/v1/api-keys', headers=self.admin, json={
+            'name': f'limited-{uuid.uuid4().hex[:8]}', 'connections': [], 'queries': ['film'],
+            'rate_limit': '3/minute'}).get_json()['secret']
+
+    def test_opening_a_stream_is_a_call(self):
+        for _ in range(3):  # joining the group runs nothing new, and still counts - as a cache hit on /q/ does
+            stream = self.subscribe('/live/film?id=1', key=self.limited)
+            self.assertEqual(stream.status, 200)
+            stream.events(1)
+        refused = self.subscribe('/live/film?id=1', key=self.limited)
+        self.assertEqual(refused.status, 429)
+        self.assertEqual(refused.body()['code'], 'rate_limited')
+        self.assertGreaterEqual(int(refused.headers['retry-after']), 1)
+        self.assertEqual(self.subscribe('/live/film?id=1').status, 200)  # the admin key has no rate limit
+
+    def test_each_re_run_is_a_call_and_one_over_the_limit_waits(self):
+        stream = self.subscribe('/live/film?id=1', key=self.limited)  # 1 of 3
+        stream.events(1)
+        for title in ('Two', 'Three'):  # 2 and 3: run and pushed
+            self.write(f"UPDATE film SET title = '{title}' WHERE id = 1")
+            self.assertEqual(stream.events(1)[0][1]['rows'], [{'id': 1, 'title': title}])
+        self.write("UPDATE film SET title = 'Four' WHERE id = 1")  # over the limit: held back, no error event
+        self.assertTrue(stream.nothing_more(1.5))
+        self.assertEqual(self.server.live.postponed, 1)
+        group = next(iter(self.server.live.groups.values()))
+        self.assertTrue(group.dirty)
+        self.assertGreater(group.not_before, time.monotonic())
+        self.assertIn('queryapigate_live_postponed_total 1', '\n'.join(self.server.live.metrics_lines()))
+
+    def test_a_postponed_re_run_runs_once_it_is_allowed(self):
+        stream = self.subscribe('/live/film?id=1', key=self.limited)
+        stream.events(1)
+        answers = iter([1, None])  # refused with "wait 1 s", then allowed
+        with mock.patch.object(live.LiveQueries, '_take', lambda _self, _permission: next(answers)):
+            started = time.monotonic()
+            self.write("UPDATE film SET title = 'Later' WHERE id = 1")
+            (_, pushed), = stream.events(1, timeout=6)
+        self.assertEqual((pushed['rows'], pushed['reason']), ([{'id': 1, 'title': 'Later'}], 'change'))
+        self.assertGreaterEqual(time.monotonic() - started, 0.9)
+        self.assertEqual(self.server.live.postponed, 1)
+
+    def test_max_concurrent_postpones_instead_of_an_error_event(self):
+        stream = self.subscribe('/live/film?id=1')
+        stream.events(1)
+        real, calls = live.run_once, []
+
+        def busy_once(*args):
+            calls.append(1)
+            if len(calls) == 1:
+                raise ApiError('This caller already has 1 queries running', 429, code='too_many_concurrent')
+            return real(*args)
+
+        with mock.patch.object(live, 'run_once', busy_once):
+            self.write("UPDATE film SET title = 'Busy' WHERE id = 1")
+            (_, pushed), = stream.events(1, timeout=6)
+        self.assertEqual(pushed['rows'], [{'id': 1, 'title': 'Busy'}])  # a result, never an error event
+        self.assertEqual((len(calls), self.server.live.postponed), (2, 1))
 
 
 class SignedInTests(LiveTestCase):

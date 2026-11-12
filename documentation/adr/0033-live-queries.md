@@ -160,7 +160,7 @@ affecting the rows being watched. That ratio is what section 8's key-level match
    - that `/q/` latency doesn't move while re-runs happen;
    - ingest throughput with batches of 200.
 3. **Counted against rate limits.** In the prototype, only quotas count re-runs. A re-run refused by the key's rate
-   limit should be postponed, not dropped.
+   limit should be postponed, not dropped. *Built (2026-11-12), see section 12.*
 4. **The response cache invalidated by signals**, for `GET /q/` callers too. That is the performance win this
    opens up: long `cache_ttl`s without stale reads. *Built (2026-11-12), see section 10.*
 5. **A security review** (it guards access, and adds an unauthenticated-by-key route).
@@ -329,6 +329,28 @@ the new one, the old one ended - after which a Debezium Server signing with it w
 
 Not yet: sources in configuration as code (ADR 0014). Its files hold no secrets, and a source's secret is
 generated, so a file would need a `${VAR}` reference for it; to add when someone needs it.
+
+### 12. Live queries count against the caller's rate limit (built 2026-11-12)
+
+Section 7's third item. In the prototype nothing on `/live` counted against a key's own `rate_limit` (or a signed-in
+user's role's): only the server-wide limit by client address was checked when a stream opened, and quotas counted
+runs. A caller limited to 10 calls a minute on `/q/` could hold a stream re-run far more often than that.
+
+- **Opening a stream is a call.** `GET /live/<query>` takes one from the caller's budget, whether or not its group
+  is already running and so runs nothing new - as a `GET /q/` answered from the cache does. Refused: `429
+  rate_limited` with `Retry-After`, before the stream opens, as `/q/` answers.
+- **Each re-run is a call**, taken from the group's caller's budget before it runs: one a group, however many
+  subscribers share it.
+- **A refused re-run is postponed, not dropped.** The group stays marked and isn't tried again until the limiter's
+  `retry_after` has passed; then it runs once, with whatever changed meanwhile. Subscribers get no error event: what
+  they'll get is the newest result, a little later. The same holds for a re-run refused by `max_concurrent` (`429
+  too_many_concurrent`): it waits `QUERYAPIGATE_LIVE_MIN_INTERVAL` (at least a second) and tries again, where it
+  used to send an `error` event and wait for the next change. A quota used up still sends `error`: it won't recover
+  for the rest of its period.
+- **Counted where `/q/` calls are.** The events server's limiter is the same as the main server's: with
+  `QUERYAPIGATE_REDIS_URL` set, one bucket per caller across every instance and both servers; without it, each
+  process counts its own, as each REST worker does.
+- **Measured** by `queryapigate_live_postponed_total` on the events server's `/metrics`.
 
 ## Alternatives considered
 
