@@ -267,7 +267,7 @@ def create_app():
         if found['undecryptable']:
             log.warning('No key in QUERYAPIGATE_SECRET_KEY decrypts the password of %s - add the key it was '
                         'encrypted with (after the first), or enter it again.',
-                        ', '.join(f"{v['type']} '{v['name']}'" for v in found['undecryptable']))
+                        ', '.join(rekey.describe(v) for v in found['undecryptable']))
         if found['under_old_keys']:
             log.warning('%d password(s) are still encrypted with an old key in QUERYAPIGATE_SECRET_KEY - run '
                         '`queryapigate rekey` to move them to the first key, then remove the others.',

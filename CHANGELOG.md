@@ -81,6 +81,18 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   hadn't used H2 or JDBC yet could both try to start it, and one answered `502`. The VM is now started once, under a
   lock; queries after it run in parallel as before.
 
+### Security
+
+- **Workspaces (experimental): rotating the encryption key could swap connections between workspaces.**
+  `queryapigate rekey` (and `POST /api/v1/settings/rekey`), and the start that encrypts passwords saved before
+  `QUERYAPIGATE_SECRET_KEY` was set, wrote each re-encrypted connection or destination back by its name alone. Names
+  are unique only within a workspace, so every connection or destination of that name, in every workspace, took the
+  details of the last one written: its host, database, user and password. Callers in one workspace could then run
+  their queries against another workspace's database. Each is now written by its workspace and name. Since 0.38.0, and
+  only with two workspaces holding a connection or destination of the same name. **If that's you and you've run
+  `rekey`, or set `QUERYAPIGATE_SECRET_KEY` for the first time, since 0.38.0:** check those connections' and
+  destinations' details in each workspace. A value no key decrypts is now named with its workspace.
+
 ## [0.50.1] - 2026-11-09
 
 A fix for files over TLS. **If you read files from S3, GCS, R2 or an `https://` address through a DuckDB connection

@@ -387,13 +387,14 @@ def encrypt_plaintext_passwords_in_place():
         # destinations too (ADR 0004): their secret is stored the same way, and one saved before the key existed
         # would otherwise stay literal for good - `rekey` only moves values that are already encrypted
         for table in ('connections', 'destinations'):
-            for row in conn.execute(f'SELECT name, details_json FROM {table}').fetchall():
+            # every workspace's, each row named by (workspace, name): a name alone is unique only within one
+            for row in conn.execute(f'SELECT workspace, name, details_json FROM {table}').fetchall():
                 details = json.loads(row['details_json'])
                 password = details.get('password')
                 if _is_plaintext_password(password):
                     details['password'] = _encrypt_password(password)
-                    conn.execute(f'UPDATE {table} SET details_json = ? WHERE name = ?',
-                                 (json.dumps(details), row['name']))
+                    conn.execute(f'UPDATE {table} SET details_json = ? WHERE workspace = ? AND name = ?',
+                                 (json.dumps(details), row['workspace'], row['name']))
 
 
 def encrypted_password_connections():

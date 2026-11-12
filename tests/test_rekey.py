@@ -13,7 +13,7 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
-from queryapigate import admins, alerts, cli, config, create_app, db, destinations, rekey, store
+from queryapigate import admins, alerts, cli, config, create_app, db, destinations, rekey, scope, store, workspaces
 from queryapigate.errors import ApiError
 
 OLD, NEW = Fernet.generate_key().decode(), Fernet.generate_key().decode()
@@ -275,6 +275,65 @@ class RekeyApiTests(RekeyTestCase):
         with self.keys(f'{NEW},{OLD}'), self.assertLogs('queryapigate', 'WARNING') as logs:
             create_app()
         self.assertTrue(any('3 password(s) are still encrypted with an old key' in m for m in logs.output))
+
+
+class WorkspaceTests(RekeyTestCase):
+    """Names are unique only within a workspace (ADR 0023): a connection or destination named as one in another
+    workspace keeps its own details through a rekey and the startup encryption - each row is written by
+    (workspace, name), never by name alone."""
+
+    def setUp(self):
+        super().setUp()
+        workspaces.create_workspace('acme')
+        with scope.using('acme'):
+            store.update_connections({'a': {'db': 'sqlite', 'database': '/acme.db', 'password': 'pw-acme',
+                                            'active': True}})
+            destinations.create('bucket', {'url': 's3://acme/exports/', 'user': 'AKIA-ACME', 'password': 'pw-acme-d'})
+
+    def details(self, table, workspace, name):
+        row = db.connection().execute(f'SELECT details_json FROM {table} WHERE workspace = ? AND name = ?',
+                                      (workspace, name)).fetchone()
+        return json.loads(row['details_json'])
+
+    def password(self, table, workspace, name):
+        return store._decrypt_password(self.details(table, workspace, name)['password'])
+
+    def assert_each_keeps_its_own(self):
+        self.assertEqual(self.details('connections', 'default', 'a')['database'], self.db_path)
+        self.assertEqual(self.password('connections', 'default', 'a'), 'pw-a')
+        self.assertEqual(self.details('connections', 'acme', 'a')['database'], '/acme.db')
+        self.assertEqual(self.password('connections', 'acme', 'a'), 'pw-acme')
+        self.assertEqual(self.details('destinations', 'default', 'bucket')['url'], 's3://bucket/exports/')
+        self.assertEqual(self.password('destinations', 'default', 'bucket'), 'pw-d')
+        self.assertEqual(self.details('destinations', 'acme', 'bucket')['url'], 's3://acme/exports/')
+        self.assertEqual(self.password('destinations', 'acme', 'bucket'), 'pw-acme-d')
+
+    def test_rekey_keeps_each_workspace_s_own(self):
+        with self.keys(f'{NEW},{OLD}'):
+            self.assertEqual(rekey.rekey('tester')['rekeyed'], 5)
+            self.assert_each_keeps_its_own()
+            for workspace, password in (('default', 'pw-a'), ('acme', 'pw-acme')):  # each under the new key
+                stored = self.details('connections', workspace, 'a')['password'][len('enc:'):]
+                self.assertEqual(Fernet(NEW.encode()).decrypt(stored.encode()).decode(), password)
+
+    def test_startup_encryption_keeps_each_workspace_s_own(self):
+        with self.keys(''):
+            store.update_connections({'p': {'db': 'sqlite', 'database': self.db_path, 'password': 'pw-p'}})
+            with scope.using('acme'):
+                store.update_connections({'p': {'db': 'sqlite', 'database': '/acme.db', 'password': 'pw-acme-p'}})
+        create_app()
+        self.assertEqual(self.details('connections', 'default', 'p')['database'], self.db_path)
+        self.assertEqual(self.password('connections', 'default', 'p'), 'pw-p')
+        self.assertEqual(self.details('connections', 'acme', 'p')['database'], '/acme.db')
+        self.assertEqual(self.password('connections', 'acme', 'p'), 'pw-acme-p')
+        self.assert_each_keeps_its_own()
+
+    def test_what_no_key_decrypts_is_named_with_its_workspace(self):
+        with self.keys(NEW), self.assertRaises(ApiError) as caught:
+            rekey.rekey('tester')
+        self.assertIn({'type': 'connection', 'name': 'a', 'workspace': 'acme'}, caught.exception.extra['values'])
+        self.assertIn({'type': 'connection', 'name': 'a'}, caught.exception.extra['values'])
+        self.assertIn("connection 'a' in workspace 'acme'", caught.exception.message)
 
 
 if __name__ == '__main__':
