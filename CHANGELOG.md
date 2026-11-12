@@ -69,6 +69,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   leaves that result out of date. With Redis (`QUERYAPIGATE_REDIS_URL`) the counters are shared: a change reported to
   one instance reaches every instance. With live queries off a cache hit does exactly what it did; on, the added work
   is under 2 µs a hit (a hit through the whole request path is ~425 µs in-process).
+- **CDC sources, managed in the Console and through `/api/v1/cdc-sources`** (experimental, ADR 0033 §11). Each
+  Debezium Server that reports changes for live queries is now a workspace object: a name, its connection, an optional
+  `server_name`, and a signing secret that QueryAPIGate generates and shows once - stored encrypted with
+  `QUERYAPIGATE_SECRET_KEY` (and moved by `queryapigate rekey`), rotated with a grace period during which both secrets verify (`POST .../rotate`,
+  `DELETE .../previous`, as API keys'). A source outside `default` takes posts at `/w/<workspace>/ingest/cdc/<name>`.
+  `last_received_at` says when Debezium last reached it. The Console's *CDC sources* screen lists them with that
+  status and, on creating or rotating, gives the secret with the Debezium sink lines to paste. Reading needs
+  `connections.read`, changing `connections.write`; every change is audited, never with the secret.
+  `QUERYAPIGATE_CDC_SOURCES` still works, and its sources are listed read-only. Store schema 19 (a new table;
+  additive).
 
 ### Fixed
 

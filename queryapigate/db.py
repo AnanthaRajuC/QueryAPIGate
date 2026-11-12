@@ -28,13 +28,13 @@ import threading
 
 from . import config
 
-SCHEMA_VERSION = 18  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
+SCHEMA_VERSION = 19  # 3: execution_history.status/key_name; 4: saved_queries.published_version;
 #                    5: ad-hoc runs in execution_history (query_name/version nullable); 6: instances;
 #                    7: administrators and admin_tokens; 8: destinations, exports, server_secrets;
 #                    9: descriptions; 10: admin_sessions, sso_logins; 11: write_requests;
 #                    12: api_keys.previous_hash/previous_expires_at; 13: usage_counters;
 #                    14: audit_log.seq/prev_hash/hash, audit_chain, audit_delivery; 15: config_managed, config_applied;
-#                    16: events; 17: workspaces; 18: run_store, run_writer_leases - see _upgrade()
+#                    16: events; 17: workspaces; 18: run_store, run_writer_leases; 19: cdc_sources - see _upgrade()
 
 _local = threading.local()
 _savepoints = itertools.count(1)  # names for nested transactions' savepoints - see transaction()
@@ -197,6 +197,18 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
   details_json TEXT NOT NULL   -- label, last_used_at
 );
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
+-- The Debezium Servers that tell live queries what changed (cdcsources.py, ADR 0033 §11): the connection their changes
+-- are about, and the secret their posts are signed with - encrypted as a password is, with the one before a rotation.
+CREATE TABLE IF NOT EXISTS cdc_sources (
+  workspace TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_received_at TEXT,       -- a verified post's time, moved at most once a minute
+  details_json TEXT NOT NULL,  -- connection, server_name, secret, previous_secret, previous_expires_at
+  PRIMARY KEY (workspace, name)
+);
+
 -- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
 CREATE TABLE IF NOT EXISTS destinations (
   workspace TEXT NOT NULL DEFAULT 'default',
@@ -486,6 +498,18 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
   details_json TEXT NOT NULL   -- label, last_used_at
 );
 CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_name);
+-- The Debezium Servers that tell live queries what changed (cdcsources.py, ADR 0033 §11): the connection their changes
+-- are about, and the secret their posts are signed with - encrypted as a password is, with the one before a rotation.
+CREATE TABLE IF NOT EXISTS cdc_sources (
+  workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
+  name TEXT COLLATE "C" NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_received_at TEXT,       -- a verified post's time, moved at most once a minute
+  details_json TEXT NOT NULL,  -- connection, server_name, secret, previous_secret, previous_expires_at
+  PRIMARY KEY (workspace, name)
+);
+
 -- Where exports may write (destinations.py, ADR 0004): a bucket prefix or folder, and the credentials to write there.
 CREATE TABLE IF NOT EXISTS destinations (
   workspace TEXT COLLATE "C" NOT NULL DEFAULT 'default',
@@ -890,7 +914,9 @@ def _upgrade(conn, postgres):
         a 0.37 process can't write to an upgraded store (its upserts name the old keys), so every instance is
         stopped before the first 0.38 one starts (_add_workspaces()).
     18: run_store and run_writer_leases (ADR 0029) - new tables, made by CREATE TABLE IF NOT EXISTS; additive. Both
-        stay empty unless QUERYAPIGATE_RUN_STORE_URL is set."""
+        stay empty unless QUERYAPIGATE_RUN_STORE_URL is set.
+    19: cdc_sources (ADR 0033 §11) - a new table, made by CREATE TABLE IF NOT EXISTS; additive: a 0.50 process ignores
+        it (and serves only QUERYAPIGATE_CDC_SOURCES's sources at ingest)."""
     if 'entry_json' not in _columns(conn, 'execution_history', postgres):
         _replace_placeholder_history(conn, postgres)
     if 'status' not in _columns(conn, 'execution_history', postgres):
@@ -1302,6 +1328,7 @@ _MIGRATED_TABLES = (
     ('administrators', ('name', 'role', 'active', 'created_at', 'details_json'), 'name'),
     ('admin_tokens', ('id', 'admin_name', 'hash', 'expires_at', 'created_at', 'details_json'), 'id'),
     ('destinations', ('workspace', 'name', 'created_at', 'updated_at', 'details_json'), 'name'),
+    ('cdc_sources', ('workspace', 'name', 'created_at', 'updated_at', 'last_received_at', 'details_json'), 'name'),
     ('exports', ('workspace', 'name', 'created_at', 'updated_at', 'watermark', 'lease_until', 'details_json'), 'name'),
     ('server_secrets', ('name', 'value', 'created_at'), 'name'),
     ('descriptions', ('workspace', 'connection_name', 'table_name', 'column_name', 'description', 'source',

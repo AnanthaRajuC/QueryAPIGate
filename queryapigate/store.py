@@ -384,15 +384,17 @@ def encrypt_plaintext_passwords_in_place():
     a literal, so a connection saved before the key existed benefits immediately rather than waiting for its
     next save of it - "don't require a one-time manual migration step" from the start."""
     with db.transaction() as conn:
-        # destinations too (ADR 0004): their secret is stored the same way, and one saved before the key existed
-        # would otherwise stay literal for good - `rekey` only moves values that are already encrypted
-        for table in ('connections', 'destinations'):
+        # destinations and CDC sources too (ADR 0004, ADR 0033 §11): their secrets are stored the same way, and one
+        # saved before the key existed would otherwise stay literal for good - `rekey` only moves encrypted values
+        from .rekey import ENCRYPTED
+        for table, _kind, fields in ENCRYPTED:
             # every workspace's, each row named by (workspace, name): a name alone is unique only within one
             for row in conn.execute(f'SELECT workspace, name, details_json FROM {table}').fetchall():
                 details = json.loads(row['details_json'])
-                password = details.get('password')
-                if _is_plaintext_password(password):
-                    details['password'] = _encrypt_password(password)
+                literal = [field for field in fields if _is_plaintext_password(details.get(field))]
+                for field in literal:
+                    details[field] = _encrypt_password(details[field])
+                if literal:
                     conn.execute(f'UPDATE {table} SET details_json = ? WHERE workspace = ? AND name = ?',
                                  (json.dumps(details), row['workspace'], row['name']))
 

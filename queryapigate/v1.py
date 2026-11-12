@@ -37,6 +37,7 @@ from .app import caller_key_name, get_int, get_json_body
 from .db import DEFAULT_WORKSPACE
 from .errors import ApiError
 from .services import access, administrators, audit, collections, connections, mcp, queries
+from .services import cdc_sources as cdc_source_service
 from .services import descriptions as description_service
 from .services import destinations as destination_service
 from .services import exports as export_service
@@ -525,6 +526,82 @@ def delete_destination(name):
 def test_destination(name):
     """Write one small probe object under the prefix, as an export would: url, credentials and permission."""
     return jsonify(destination_service.test(name=name)), 200
+
+
+# --------------------------------------------------------------------------------------
+# CDC sources: the Debezium Servers that tell live queries what changed (ADR 0033 §11)
+# --------------------------------------------------------------------------------------
+
+def _cdc_source_etag(source):
+    return cdc_source_service.etag({k: v for k, v in source.items() if k not in ('updated_at', 'last_received_at')})
+
+
+def _cdc_source_response(source, status=200):
+    response = jsonify(source)
+    response.headers['ETag'] = _cdc_source_etag({k: v for k, v in source.items() if k != 'secret'})
+    if 'secret' in source:
+        response.headers['Cache-Control'] = 'no-store'  # the responses that carry a secret
+    return response, status
+
+
+def _check_cdc_source_if_match(name):
+    expected = request.headers.get('If-Match')
+    if expected and expected != '*' and expected != _cdc_source_etag(cdc_source_service.load(name)):
+        raise ApiError('This CDC source changed since you loaded it - reload it and try again', 412,
+                       code='precondition_failed')
+
+
+def _grace_minutes():
+    body = get_json_body(required=False) or {}
+    if not isinstance(body, dict) or set(body) - {'grace_minutes'}:
+        raise ApiError('The body may hold only grace_minutes', code='invalid_body')
+    return body.get('grace_minutes')
+
+
+@bp.route('/cdc-sources', methods=['GET'])
+def list_cdc_sources():
+    return jsonify({'items': cdc_source_service.list_all()}), 200
+
+
+@bp.route('/cdc-sources', methods=['POST'])
+def create_cdc_source():
+    """A Debezium Server that reports a connection's changes. The response's `secret` - what Debezium signs its posts
+    with - is the only time it is ever shown: store it now."""
+    return _cdc_source_response(cdc_source_service.create(get_json_body(), caller_key_name()), 201)
+
+
+@bp.route('/cdc-sources/<name>', methods=['GET'])
+def get_cdc_source(name):
+    return _cdc_source_response(cdc_source_service.load(name))
+
+
+@bp.route('/cdc-sources/<name>', methods=['PATCH'])
+def update_cdc_source(name):
+    """Change `connection` or `server_name` (null: accept any server). The secret isn't a field: rotate it."""
+    _check_cdc_source_if_match(name)
+    cdc_source_service.update(name, get_json_body(), caller_key_name())
+    return _cdc_source_response(cdc_source_service.load(name))
+
+
+@bp.route('/cdc-sources/<name>/rotate', methods=['POST'])
+def rotate_cdc_source(name):
+    """A new secret, shown this once - the old one keeps working for `grace_minutes` (default 60, 0 stops it at
+    once), so Debezium can be restarted with the new one without a post refused."""
+    return _cdc_source_response(cdc_source_service.rotate(name, _grace_minutes(), caller_key_name()))
+
+
+@bp.route('/cdc-sources/<name>/previous', methods=['DELETE'])
+def end_cdc_source_previous_secret(name):
+    """Stop the source's old secret now, before its grace period ends."""
+    return _cdc_source_response(cdc_source_service.end_previous(name, caller_key_name()))
+
+
+@bp.route('/cdc-sources/<name>', methods=['DELETE'])
+def delete_cdc_source(name):
+    """Remove it: Debezium's next post answers 404, and it retries until a source of that name exists again."""
+    _check_cdc_source_if_match(name)
+    cdc_source_service.delete(name, caller_key_name())
+    return '', 204
 
 
 # --------------------------------------------------------------------------------------

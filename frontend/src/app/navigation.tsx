@@ -66,6 +66,18 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         ),
       },
       {
+        tab: 'cdcsources',
+        needs: 'connections.read',
+        path: '/cdc-sources',
+        group: 'Data',
+        label: 'CDC sources',
+        icon: svg(
+          <>
+            <path d="M4 12h3l2-6 4 12 2-6h5" />
+          </>,
+        ),
+      },
+      {
         tab: 'caching',
         needs: 'cache.read',
         path: '/caching',

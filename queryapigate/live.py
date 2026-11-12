@@ -12,9 +12,11 @@ is written by:
 
 - QueryAPIGate's own writes: a successful write through `engine.execute_sql()` (saved write queries, ad-hoc SQL, an
   agent's approved write) signals the tables the statement touches (note_write());
-- Debezium Server's HTTP sink, posting to `POST /ingest/cdc/<source>` on the main server, each request signed with
-  Standard Webhooks (verify_signature()); its changes are reduced to the tables they touched (debezium_tables()) and
-  stored as one signal before the request is answered, so Debezium only moves on once it's durable.
+- Debezium Server's HTTP sink, posting to `POST /ingest/cdc/<source>` on the main server (`/w/<workspace>/...`
+  outside `default`), each request signed with Standard Webhooks (verify_signature()) using the source's secret
+  (cdcsources.py, ADR 0033 §11 - managed through /api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES); its changes are
+  reduced to the tables they touched (debezium_tables()) and stored as one signal before the request is answered, so
+  Debezium only moves on once it's durable.
 
 Because the signal is an event, every `queryapigate events` process sharing the store hears it, from any instance,
 woken by NOTIFY on PostgreSQL. The admin's /events stream shows it too; no other key's does (it names no key).
@@ -27,8 +29,8 @@ newest result, not every one: a live query is a state, not a log, so there is no
 gets the current result first.
 
 Known prototype limits, written down rather than hidden: re-runs don't count against the key's rate limit (only the
-subscription does - quotas do count every run); the response cache isn't invalidated by signals (a live re-run skips
-the cache instead); sources are configured in QUERYAPIGATE_CDC_SOURCES, not managed through an API.
+subscription does - quotas do count every run). A signal also makes the response cache's entries for the tables it
+names a miss (invalidate(), ADR 0033 §10), and a live re-run skips the cache's lookup.
 """
 import asyncio
 import base64
@@ -41,7 +43,7 @@ import time
 import urllib.parse
 from datetime import datetime
 
-from . import config, db, engine, events, history, runstore, scope, sqltools, store, tableguard
+from . import cdcsources, config, db, engine, events, history, runstore, scope, sqltools, store, tableguard
 from .errors import ApiError
 
 log = logging.getLogger('queryapigate')
@@ -200,24 +202,26 @@ def debezium_tables(body, server_name=None):
     return tables
 
 
-def ingest(source_name, headers, body):
-    """POST /ingest/cdc/<source>: verify, reduce to tables, store one signal. Returns how many tables it named."""
+def ingest(source_name, headers, body, workspace=None):
+    """POST /ingest/cdc/<source>: verify, reduce to tables, store one signal. Returns how many tables it named.
+    `workspace` is the one the path named (/w/<workspace>/ingest/...), None when it named none (cdcsources.find())."""
     if not enabled():
         raise ApiError('Not Found', 404)
-    source = config.cdc_sources().get(source_name)
-    # An unknown source and a bad signature both answer 404, so names can't be probed
-    if not isinstance(source, dict) or not verify_signature(source.get('secret'), headers, body):
+    source = cdcsources.find(source_name, workspace)
+    # An unknown workspace, an unknown source and a bad signature all answer 404, so names can't be probed. During a
+    # rotation's grace period (ADR 0009) the secret before it verifies too.
+    if source is None or not any(verify_signature(secret, headers, body) for secret in source['secrets']):
         raise ApiError(f"No CDC source named '{source_name}'", 404, code='cdc_source_not_found')
+    cdcsources.mark_received(source, source_name)
     if len(body) > MAX_BODY:
         raise ApiError('The request is too large', 413, code='payload_too_large')
     try:
-        tables = debezium_tables(body.decode('utf-8'), source.get('server_name'))
+        tables = debezium_tables(body.decode('utf-8'), source['server_name'])
     except (ValueError, UnicodeDecodeError) as error:
         raise ApiError(f'Not a Debezium change event: {error}', 422, code='invalid_change') from error
     if tables:
-        workspace = source.get('workspace') or db.DEFAULT_WORKSPACE
-        write_signal(signal_columns(source.get('connection'), tables, f'cdc:{source_name}', workspace))
-        invalidate(workspace, source.get('connection'), tables)
+        write_signal(signal_columns(source['connection'], tables, f'cdc:{source_name}', source['workspace']))
+        invalidate(source['workspace'], source['connection'], tables)
     return len(tables)
 
 

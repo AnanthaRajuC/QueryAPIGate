@@ -97,6 +97,8 @@ test('/docs renders under its own policy, and "Try it out" reaches this server',
   expect(res?.headers()['content-security-policy']).toContain('swagger-ui-dist@');
   await expect(page.locator('.swagger-ui .info .title')).toContainText('QueryAPIGate');
   const health = page.locator('.opblock-get').filter({ hasText: '/health' }).first();
+  // With this many operations Swagger UI renders only those near the viewport: scroll until /health is one of them
+  for (let i = 0; i < 60 && !(await health.count()); i++) await page.mouse.wheel(0, 600);
   await health.locator('.opblock-summary').click();
   await health.getByRole('button', { name: 'Try it out' }).click();
   await health.getByRole('button', { name: 'Execute' }).click();

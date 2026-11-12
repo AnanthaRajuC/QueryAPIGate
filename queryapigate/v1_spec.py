@@ -280,13 +280,15 @@ SCHEMAS = {
                        '(ADR 0009).',
         'properties': {
             'keys': {'type': 'integer', 'description': 'How many keys QUERYAPIGATE_SECRET_KEY lists.'},
-            'values': {'type': 'integer', 'description': 'Encrypted passwords stored - connections and destinations.'},
+            'values': {'type': 'integer',
+                       'description': "Encrypted secrets stored - connections' and destinations' passwords, CDC "
+                                      "sources' signing secrets."},
             'by_key': {'type': 'array', 'items': {'type': 'integer'},
                        'description': 'How many are under each listed key, in order: the first encrypts.'},
             'under_old_keys': {'type': 'integer', 'description': 'How many are under a key other than the first.'},
             'undecryptable': {'type': 'array', 'description': 'What no listed key decrypts.', 'items': {
                 'type': 'object', 'required': ['type', 'name'],
-                'properties': {'type': {'type': 'string', 'enum': ['connection', 'destination']},
+                'properties': {'type': {'type': 'string', 'enum': ['connection', 'destination', 'CDC source']},
                                'name': {'type': 'string'},
                                'workspace': {'type': 'string',
                                              'description': 'Its workspace - left out in `default`.'}}}},
@@ -622,6 +624,49 @@ SCHEMAS = {
         'type': 'object', 'required': ['object', 'elapsed_ms'],
         'properties': {'object': {'type': 'string', 'description': 'The probe object written.'},
                        'elapsed_ms': {'type': 'number'}},
+    },
+    'CdcSource': {
+        'type': 'object',
+        'required': ['name', 'connection', 'server_name', 'ingest_path', 'managed_by', 'created_at', 'updated_at',
+                     'last_received_at', 'previous_expires_at'],
+        'properties': {
+            'name': {'type': 'string'},
+            'connection': {'type': 'string', 'description': 'The connection whose changes it reports.'},
+            'server_name': {'type': 'string', 'nullable': True,
+                            'description': "Debezium's `topic.prefix`: a post from any other server is refused "
+                                           '(`422 invalid_change`). Null: any.'},
+            'ingest_path': {'type': 'string',
+                            'description': "Where Debezium posts, after the server's address - "
+                                           '`debezium.sink.http.url`.'},
+            'managed_by': {'type': 'string', 'nullable': True, 'enum': ['QUERYAPIGATE_CDC_SOURCES', None],
+                           'description': "Set for a source from the setting: read-only here."},
+            'created_at': _NULLABLE_STRING, 'updated_at': _NULLABLE_STRING,
+            'last_received_at': {'type': 'string', 'nullable': True,
+                                 'description': 'When a verified post last arrived, heartbeats included - to the '
+                                                'minute. Null: never.'},
+            'previous_expires_at': {'type': 'string', 'nullable': True,
+                                    'description': 'Until when the secret before the last rotation still works.'},
+        },
+    },
+    'CdcSourceWithSecret': {
+        'allOf': [_ref('CdcSource'), {
+            'type': 'object', 'required': ['secret'],
+            'properties': {'secret': {'type': 'string',
+                                      'description': 'What Debezium signs its posts with '
+                                                     '(`debezium.sink.http.authentication.webhook.secret`): shown '
+                                                     'only here, never again.'}}}],
+    },
+    'CdcSourceList': {
+        'type': 'object', 'required': ['items'],
+        'properties': {'items': {'type': 'array', 'items': _ref('CdcSource')}},
+    },
+    'CdcSourceInput': {
+        'type': 'object',
+        'properties': {
+            'name': {'type': 'string', 'description': 'Create only.'},
+            'connection': {'type': 'string'},
+            'server_name': _NULLABLE_STRING,
+        },
     },
     'Export': {
         'type': 'object', 'required': ['name', 'query', 'params', 'format', 'destination', 'path', 'skip_empty',
@@ -1409,6 +1454,42 @@ PATHS = {
     '/api/v1/destinations/{name}/test': {
         'post': _op('Write a probe object under its prefix: url, credentials and permission at once',
                     {'200': _ok(_ref('DestinationTest'))}, parameters=[_NAME]),
+    },
+    '/api/v1/cdc-sources': {
+        'get': _op('List CDC sources - the Debezium Servers that tell live queries what changed (never a secret)',
+                   {'200': _ok(_ref('CdcSourceList'))}),
+        'post': _op('Create a CDC source, with a new secret shown this once',
+                    {'201': _ok(_ref('CdcSourceWithSecret'), etag=True), **_CONFLICT}, body=_ref('CdcSourceInput'),
+                    description='The secret is generated, never given. 409 `cdc_source_exists` for a name taken - '
+                                'here, or by QUERYAPIGATE_CDC_SOURCES. Audited as `create_cdc_source`, without '
+                                'the secret.'),
+    },
+    '/api/v1/cdc-sources/{name}': {
+        'get': _op('Get a CDC source', {'200': _ok(_ref('CdcSource'), etag=True)}, parameters=[_NAME]),
+        'patch': _op('Change its connection or server_name', {'200': _ok(_ref('CdcSource'), etag=True),
+                                                             **_PRECONDITION, **_CONFLICT},
+                     parameters=[_NAME, _IF_MATCH], body=_ref('CdcSourceInput'),
+                     description='409 `cdc_source_managed` for a source from QUERYAPIGATE_CDC_SOURCES.'),
+        'delete': _op("Remove it - Debezium's next post answers 404",
+                      {'204': {'description': 'Removed'}, **_PRECONDITION, **_CONFLICT},
+                      parameters=[_NAME, _IF_MATCH]),
+    },
+    '/api/v1/cdc-sources/{name}/rotate': {
+        'post': _op("Reissue the source's secret: a new one, shown this once, and the old one still working for "
+                    '`grace_minutes`', {'200': _ok(_ref('CdcSourceWithSecret'), etag=True),
+                                        '409': {'description': 'The secret before the last rotation still works '
+                                                               '(`cdc_source_rotation_pending`) - end it first',
+                                                **_json(_ref('V1Error'))}},
+                    parameters=[_NAME],
+                    body={'type': 'object', 'properties': {'grace_minutes': {
+                        'type': 'integer', 'minimum': 0, 'maximum': 10080, 'default': 60,
+                        'description': 'How long the old secret keeps working; 0 stops it at once.'}}},
+                    description='A post signed with either secret is accepted until then, so Debezium can be '
+                                'restarted with the new one at any point. Audited as `rotate_cdc_source_secret`.'),
+    },
+    '/api/v1/cdc-sources/{name}/previous': {
+        'delete': _op('Stop the old secret now, before its grace period ends',
+                      {'200': _ok(_ref('CdcSource'), etag=True)}, parameters=[_NAME]),
     },
     '/api/v1/exports': {
         'get': _op('List exports - saved queries delivered to destinations', {'200': _ok(_ref('ExportList'))}),

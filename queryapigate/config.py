@@ -1252,7 +1252,8 @@ def live_min_interval():
 def cdc_sources():
     """QUERYAPIGATE_CDC_SOURCES, JSON: {source name: {"connection": ..., "secret": "whsec_...", "workspace": ...,
     "server_name": ...}} - each a Debezium Server posting to /ingest/cdc/<name>, signing with that secret (live.py).
-    The prototype's stand-in for the sources API ADR 0033 proposes. Invalid JSON is no sources at all."""
+    The prototype's way, kept for deployments configured only by environment; /api/v1/cdc-sources manages them
+    otherwise (cdcsources.py, ADR 0033 §11), and lists these read-only. Invalid JSON is no sources at all."""
     raw = os.environ.get('QUERYAPIGATE_CDC_SOURCES', '').strip()
     if not raw:
         return {}
@@ -1643,8 +1644,10 @@ def describe_settings():
                 'QUERYAPIGATE_LIVE_QUERIES', on_off(live_queries())),
             row('Live re-run interval', 'Seconds between two re-runs of one live query, however often its tables '
                 'change.', 'QUERYAPIGATE_LIVE_MIN_INTERVAL', _seconds(live_min_interval())),
-            row('CDC sources', 'Debezium Servers posting changes to /ingest/cdc/<source>, each with its signing '
-                'secret (JSON).', 'QUERYAPIGATE_CDC_SOURCES', f'{len(cdc_sources())} source(s)', secret=True)]},
+            row('CDC sources from the environment', 'Debezium Servers posting changes to /ingest/cdc/<source>, '
+                'each with its signing secret (JSON). Optional: CDC sources are managed in the Console '
+                '(/api/v1/cdc-sources); these are listed there read-only.', 'QUERYAPIGATE_CDC_SOURCES',
+                f'{len(cdc_sources())} source(s)', secret=True)]},
         {'id': 'alerts', 'title': 'Alerts',
          'description': 'When GET /api/v1/alerts (the Console\'s Alerts screen) calls something out. A query is '
              'slow when its typical run is over the slow-query threshold (Query execution).', 'rows': [
