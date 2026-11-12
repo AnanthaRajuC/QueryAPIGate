@@ -72,6 +72,10 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Fixed
 
+- **A data plane stopping could lose the runs of its last calls.** On SIGTERM it waited one report interval and then
+  for the reports already under way - but a batch begun just before (a call still being answered when the signal
+  came, say) only started its report at its own interval's end, after that wait, and was lost with the process: those
+  runs never reached run history. The data plane now cuts that batch when it stops and waits for its report.
 - **The first H2 or `jdbc` queries of a process, run at the same moment, could fail with `JVM is already started`.**
   The driver checks whether the Java VM runs and then starts it, so two requests arriving together on a server that
   hadn't used H2 or JDBC yet could both try to start it, and one answered `502`. The VM is now started once, under a
