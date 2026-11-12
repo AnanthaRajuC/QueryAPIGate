@@ -38,6 +38,39 @@ class _Pipeline:
         return results
 
 
+class _Connection:
+    """A pooled connection, as far as RedisResponseCache uses one: packed commands sent, then their replies read in
+    order - HGETALL's as RESP2 sends it, a flat list of fields and values."""
+
+    def __init__(self, client):
+        self.client, self.replies, self.disconnected = client, [], False
+
+    def pack_commands(self, commands):
+        return list(commands)
+
+    def send_packed_command(self, commands):
+        for name, *args in commands:
+            reply = getattr(self.client, name.lower())(*args)
+            self.replies.append([x for pair in reply.items() for x in pair] if name == 'HGETALL' else reply)
+
+    def read_response(self):
+        return self.replies.pop(0)
+
+    def disconnect(self):
+        self.disconnected = True
+
+
+class _Pool:
+    def __init__(self, client):
+        self.client, self.released = client, []
+
+    def get_connection(self):
+        return _Connection(self.client)
+
+    def release(self, conn):
+        self.released.append(conn)
+
+
 class FakeRedis:
     """An in-memory Redis for the hash calls the cache makes, bytes in and out (decode_responses=False)."""
 
@@ -45,6 +78,7 @@ class FakeRedis:
         import redis
         self.RedisError = redis.RedisError
         self.hashes, self.ttls = {}, {}
+        self.connection_pool = _Pool(self)
 
     @staticmethod
     def _bytes(value):
@@ -76,6 +110,24 @@ class FakeRedis:
 FILM = live.cache_fields('default', 'shop', {'main.film'})
 RENTAL_SIGNAL = live.signal_fields('default', 'shop', {'main.rental'})
 FILM_SIGNAL = live.signal_fields('default', 'shop', {'main.film'})
+
+
+class ResponseFieldsTests(unittest.TestCase):
+    """live.response_fields(): cache_fields() of the tables a saved query's SQL reads, memoized - the same answer."""
+
+    def test_the_same_names_as_built_each_time(self):
+        details = {'db': 'sqlite', 'database': '/x.db'}
+        for sql in ('SELECT id FROM film WHERE id = :id', 'SELECT * FROM film JOIN rental USING (id)',
+                    'SELECT * FROM {table}', 'SELECT 1'):
+            with self.subTest(sql=sql):
+                built = live.cache_fields('default', 'shop', live.tables_read(sql, details))
+                self.assertEqual(live.response_fields('default', 'shop', sql, details), built)
+                self.assertEqual(live.response_fields('default', 'shop', sql, details), built)  # from the memo
+
+    def test_workspaces_and_connections_never_share_names(self):
+        details, sql = {'db': 'sqlite'}, 'SELECT id FROM film'
+        names = {live.response_fields(w, c, sql, details) for w in ('default', 'acme') for c in ('shop', 'other')}
+        self.assertEqual(len(names), 4)
 
 
 class BackendContract:
@@ -144,6 +196,15 @@ class FakeRedisCounterTests(BackendContract, unittest.TestCase):
         with mock.patch.object(FakeRedis, 'hgetall', side_effect=backend._redis_error('down')):
             self.assertEqual(backend.lookup('k', FILM), (None, None))
 
+    def test_a_connection_that_fails_part_way_is_dropped_and_still_returned_to_the_pool(self):
+        pool = self.cache._client.connection_pool
+        with mock.patch.object(_Connection, 'read_response', side_effect=self.cache._redis_error('mid-read')):
+            self.assertEqual(self.cache.lookup('k', FILM), (None, None))
+        self.assertTrue(pool.released[-1].disconnected)
+        self.store()
+        self.assertIsNotNone(self.cache.lookup('k', FILM)[0])
+        self.assertFalse(pool.released[-1].disconnected)
+
 
 @unittest.skipUnless(REDIS_URL, 'set QUERYAPIGATE_TEST_REDIS_URL')
 class RedisCounterTests(BackendContract, unittest.TestCase):
@@ -155,6 +216,16 @@ class RedisCounterTests(BackendContract, unittest.TestCase):
         backend = RedisResponseCache(REDIS_URL)
         self.addCleanup(backend.clear)
         return backend
+
+    def test_an_error_reply_drops_the_connection_and_the_next_lookup_is_clean(self):
+        import redis
+        self.store()
+        redis.Redis.from_url(REDIS_URL).set('qag:cache-generations', 'not a hash')  # HMGET answers WRONGTYPE
+        self.assertEqual(self.cache.lookup('k', FILM), (None, None))
+        redis.Redis.from_url(REDIS_URL).delete('qag:cache-generations')
+        self.store('k2')  # the reply left unread didn't stay on a pooled connection to answer this one
+        self.assertIsNotNone(self.cache.lookup('k2', FILM)[0])
+        self.assertIsNone(self.cache.lookup('nope', FILM)[0])
 
 
 class AppTests(unittest.TestCase):

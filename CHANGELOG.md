@@ -67,8 +67,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   so `GET /q/` callers too get the new result on their next call - a long `cache_ttl` no longer means stale reads. An
   entry remembers the tables' generation counters from before its query ran, so a change during the query still
   leaves that result out of date. With Redis (`QUERYAPIGATE_REDIS_URL`) the counters are shared: a change reported to
-  one instance reaches every instance. With live queries off a cache hit does exactly what it did; on, the added work
-  is under 2 µs a hit (a hit through the whole request path is ~425 µs in-process).
+  one instance reaches every instance. With live queries off a cache hit does exactly what it did; on, it costs about
+  4-5 µs more in-process (a hit is ~430 µs through the whole request path) and nothing measurable with Redis, whose
+  entry and counters are read in one round trip for what the entry alone costs.
 - **CDC sources, managed in the Console and through `/api/v1/cdc-sources`** (experimental, ADR 0033 §11). Each
   Debezium Server that reports changes for live queries is now a workspace object: a name, its connection, an optional
   `server_name`, and a signing secret that QueryAPIGate generates and shows once - stored encrypted with

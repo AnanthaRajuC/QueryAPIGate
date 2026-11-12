@@ -251,11 +251,27 @@ depends on:
   read with the entry in one pipelined round trip - so a change reported to any instance reaches all of them, and a
   hit costs no extra network call.
 
-Only with live queries on, since only then are there signals; off, the lookup is the one it always was. Measured
-through the whole Flask request path (test client, 5,000 hits, laptop on battery): in-process ~425 µs a hit, +6 to
-15 µs with live queries on; Redis ~830 µs, within its noise (-44 to +75 µs). The added code itself is under 2 µs a hit
-(`timeit`), so most of the in-process difference is noise; to measure again on mains power. Tested in both backends,
-a real Redis, and three real instances sharing PostgreSQL and Redis (`tests/test_multinode.py`).
+Only with live queries on, since only then are there signals; off, the lookup is the one it always was.
+
+**What it costs a hit** (measured 2026-11-12 on mains power, the whole Flask request path through the test client,
+one process pinned to a P-core, live queries switched off and on in alternating blocks of 1,000 hits, twice):
+
+| Backend | A hit | Live queries on, as first built | After the two changes below |
+|---|---|---|---|
+| In-process | ~430 µs | +8 to +9 µs | +4 to +5 µs |
+| Redis | ~670-700 µs | +46 to +92 µs | within noise (-4 to +10 µs) |
+
+- **The counter names are memoized** per workspace, connection and SQL (`live.response_fields()`): finding the tables
+  and building the names had cost each hit a parse-cache lookup, a set, a sort and string building.
+- **With Redis, the entry and the counters are sent as two packed commands on one connection** and their replies
+  read in order, instead of through redis-py's pipeline object: 45 µs for both, what the `HGETALL` alone costs,
+  against 61 µs pipelined in isolation, and much more inside the request. A connection that fails part way is
+  dropped rather than returned with a reply unread. Tested with redis-py 5.0 (the oldest allowed) and 8.1, RESP2
+  and RESP3.
+
+The battery-powered first measurement (+6 to 15 µs in-process, Redis "within noise") had put most of the difference
+down to noise; on mains power it was real. Tested in both backends, a real Redis, and three real instances sharing
+PostgreSQL and Redis (`tests/test_multinode.py`).
 
 Not done: a change nothing reports (no Debezium, not through QueryAPIGate) is still seen only at the TTL; the
 in-process cache hears only of its own process's changes, so more than one process needs Redis, as before.

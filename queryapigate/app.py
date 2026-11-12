@@ -38,6 +38,7 @@ from . import (
     instances,
     jwtauth,
     limits,
+    live,
     logging_setup,
     masking,
     metacache,
@@ -1104,8 +1105,7 @@ def _run_saved(ref, body, url_params):
             # With live queries on, a signal on its tables makes the entry a miss (live.cache_fields(), ADR 0033)
             fields = ()
             if config.live_queries():
-                from . import live
-                fields = live.cache_fields(scope.current(), connection_name, live.tables_read(sql, details))
+                fields = live.response_fields(scope.current(), connection_name, sql, details)
             cached, generations = cache_lookup(cache_key, ttl, fields)
             if g.get('transport') == 'live':
                 cached = None  # a live re-run happens because the data changed: it refreshes the entry instead
@@ -1353,7 +1353,6 @@ def ingest_cdc(source):
     Standard Webhooks, using the source's secret (/api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES) - outside
     `default`, at /w/<workspace>/ingest/cdc/<source>. Stored as one `table.changed` signal - the tables that changed,
     no row data - before answering 204, so Debezium only moves on once it's kept."""
-    from . import live
     live.ingest(source, request.headers, request.get_data(cache=False), request.environ.get(scope.ENVIRON_KEY))
     return '', 204
 
