@@ -8,12 +8,16 @@ import os
 import sqlite3
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
 from queryapigate import create_app, live
 from tests.helpers import save_query, write_connections
 from tests.test_events_server import EventServerTestCase, Stream
+from tests.test_jwt import SECRET as JWT_SECRET
+from tests.test_jwt import bearer
+from tests.test_jwt import token as jwt_token
 
 SECRET = 'whsec_' + base64.b64encode(b'0123456789abcdef0123456789abcdef').decode()
 
@@ -61,6 +65,12 @@ class DebeziumTablesTests(unittest.TestCase):
                            {'before': None, 'after': {}, 'op': 'c', 'source': {'db': 'shop', 'table': 'stock'}}])
         self.assertEqual(live.debezium_tables(body), {'main.film', 'public.rental', 'shop.stock'})
 
+    def test_a_mongodb_change_names_its_collection_in_its_database(self):
+        body = json.dumps({'before': None, 'after': '{"_id": 1}', 'op': 'u', 'ts_ms': 1,
+                           'source': {'name': 'shop', 'connector': 'mongodb', 'db': 'rental', 'rs': 'rs0',
+                                      'collection': 'Films'}})
+        self.assertEqual(live.debezium_tables(body, server_name='shop'), {'rental.films'})
+
     def test_snapshots_tombstones_and_heartbeats_touch_nothing(self):
         self.assertEqual(live.debezium_tables(json.dumps([change('film', 'r'), None, {'ts_ms': 1}])), set())
         self.assertEqual(live.debezium_tables(''), set())
@@ -70,6 +80,79 @@ class DebeziumTablesTests(unittest.TestCase):
             live.debezium_tables(json.dumps(change('film', name='other')), server_name='shop')
         with self.assertRaises(ValueError):
             live.debezium_tables('not json')
+
+
+class PlanTests(unittest.TestCase):
+    """What a subscription listens on: plan() reads the saved query's published version."""
+
+    def plan(self, saved, connection):
+        app = create_app()
+        with mock.patch.object(live.store, 'resolve_saved_file', return_value='q'), \
+                mock.patch.object(live.store, 'load_versions', return_value=[]), \
+                mock.patch.object(live.store, 'select_version', return_value=(1, saved)), \
+                mock.patch.object(live.store, 'get_connection', return_value=connection):
+            return live.plan(app, mock.Mock(workspace='default'), 'q')
+
+    def test_a_mongodb_query_listens_on_its_collection(self):
+        saved = {'query_type': 'mongo', 'connection_name': 'docs', 'mongo_collection': 'Films'}
+        self.assertEqual(self.plan(saved, {'db': 'mongo', 'database': 'rental'}), ('docs', {'rental.films'}))
+
+    def test_a_mongodb_connection_without_a_database_listens_on_any_change(self):
+        saved = {'query_type': 'mongo', 'connection_name': 'docs', 'mongo_collection': 'films'}
+        self.assertEqual(self.plan(saved, {'db': 'mongo'}), ('docs', None))
+
+    def test_sql_tableguard_cant_read_listens_on_any_change(self):  # a jdbc connection: SQL Server, Oracle, Db2
+        saved = {'connection_name': 'erp', 'sql_query': 'SELECT * FROM dbo.film'}
+        self.assertEqual(self.plan(saved, {'db': 'jdbc'}), ('erp', None))
+
+
+class GroupKeyTests(unittest.TestCase):
+    """Subscriptions sharing a group share its result: never across callers, workspaces or signed-in claims."""
+
+    @staticmethod
+    def caller(name='jwt:alice', claims=None, workspace='default'):
+        return types.SimpleNamespace(workspace=workspace, name=name, via=None, claims=claims)
+
+    def test_the_same_caller_query_and_parameters_share_one(self):
+        self.assertEqual(live.group_key(self.caller(), 'orders', {'a': '1'}),
+                         live.group_key(self.caller(), 'orders', {'a': '1'}))
+        self.assertNotEqual(live.group_key(self.caller(), 'orders', {'a': '1'}),
+                            live.group_key(self.caller(), 'orders', {'a': '2'}))
+        self.assertNotEqual(live.group_key(self.caller(), 'orders', {}),
+                            live.group_key(self.caller(workspace='acme'), 'orders', {}))
+
+    def test_one_user_with_other_claims_gets_another_group(self):  # from_claim parameters come from the claims
+        one = self.caller(claims={'sub': 'alice', 'tenant': 'acme', 'exp': 1})
+        other = self.caller(claims={'sub': 'alice', 'tenant': 'globex', 'exp': 1})
+        self.assertNotEqual(live.group_key(one, 'orders', {}), live.group_key(other, 'orders', {}))
+
+    def test_a_refreshed_token_with_the_same_claims_shares_it(self):
+        one = self.caller(claims={'sub': 'alice', 'tenant': 'acme', 'iat': 1, 'exp': 2, 'jti': 'a'})
+        refreshed = self.caller(claims={'sub': 'alice', 'tenant': 'acme', 'iat': 5, 'exp': 9, 'jti': 'b'})
+        self.assertEqual(live.group_key(one, 'orders', {}), live.group_key(refreshed, 'orders', {}))
+
+
+class FlaskAppTests(unittest.TestCase):
+    def test_two_first_subscriptions_at_once_build_one_app(self):
+        import threading
+        built, gate = [], threading.Barrier(2)
+
+        def slow_create_app():
+            built.append(1)
+            time.sleep(0.2)
+            return object()
+
+        queries = live.LiveQueries()
+        apps = []
+        with mock.patch('queryapigate.app.create_app', side_effect=slow_create_app):
+            threads = [threading.Thread(target=lambda: (gate.wait(), apps.append(queries.flask_app())))
+                       for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(len(built), 1)
+        self.assertIs(apps[0], apps[1])
 
 
 class LiveTestCase(EventServerTestCase):
@@ -120,6 +203,51 @@ class LiveTestCase(EventServerTestCase):
         response = self.client.post('/execute_sql', headers=self.admin, json={'connection_name': 'shop',
                                                                               'sql': sql})
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+
+class SignedInTests(LiveTestCase):
+    """A signed-in user (jwtauth.py) subscribing to a query bound to their token's claims (`from_claim`)."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_JWT_SECRET': JWT_SECRET,
+                                               'QUERYAPIGATE_JWT_ROLE': 'mobile'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        super().setUp()
+
+    def start_server(self, **options):
+        conn = sqlite3.connect(self.shop)
+        conn.executescript('CREATE TABLE orders (user_id TEXT, tenant TEXT, item TEXT);'
+                           "INSERT INTO orders VALUES ('alice', 'acme', 'anvil'), ('alice', 'globex', 'globe'),"
+                           "('bob', 'acme', 'bucket');")
+        conn.close()
+        super().start_server(**options)
+        save_query(self.client, headers=self.admin, body={
+            'filename': 'my_orders', 'description': 'd', 'connection_name': 'shop',
+            'sql_query': 'SELECT item FROM orders WHERE user_id = :user_id AND tenant = :tenant ORDER BY item',
+            'query_parameters': {'user_id': {'type': 'str', 'from_claim': 'sub'},
+                                 'tenant': {'type': 'str', 'from_claim': 'tenant'}}})
+        self.client.post('/api/v1/roles', headers=self.admin,
+                         json={'name': 'mobile', 'connections': [], 'queries': ['my_orders']})
+
+    def subscribe_as(self, **claims):
+        stream = Stream(self.server.port, path='/live/my_orders', headers=bearer(jwt_token(claims)))
+        self.addCleanup(stream.close)
+        return stream
+
+    def test_each_user_sees_their_own_rows_and_a_write_updates_only_theirs(self):
+        alice, bob = self.subscribe_as(tenant='acme'), self.subscribe_as(sub='bob', tenant='acme')
+        self.assertEqual(alice.events(1)[0][1]['rows'], [{'item': 'anvil'}])
+        self.assertEqual(bob.events(1)[0][1]['rows'], [{'item': 'bucket'}])
+        self.write("INSERT INTO orders VALUES ('bob', 'acme', 'broom')")
+        self.assertEqual(bob.events(1)[0][1]['rows'], [{'item': 'broom'}, {'item': 'bucket'}])
+        self.assertTrue(alice.nothing_more(1.0))
+
+    def test_one_user_with_two_tenants_never_sees_the_other_tenants_rows(self):  # tokens differing in a claim
+        acme = self.subscribe_as(tenant='acme')
+        self.assertEqual(acme.events(1)[0][1]['rows'], [{'item': 'anvil'}])
+        globex = self.subscribe_as(tenant='globex')
+        self.assertEqual(globex.events(1)[0][1]['rows'], [{'item': 'globe'}])
 
 
 class SubscribeTests(LiveTestCase):

@@ -74,7 +74,7 @@ FEATURES: dict[str, dict[str, Any]] = {
         'name': 'Live queries',
         'why': 'new (ADR 0033): the /live route of `queryapigate events`, its `result` events, the `table.changed` '
                'signal and the CDC settings may change; CDC sources come from an environment variable until they '
-               'have an API, and only PostgreSQL has been tested with Debezium',
+               'have an API; tested with Debezium on PostgreSQL, MySQL, MariaDB, MongoDB and SQL Server',
         'settings': ('QUERYAPIGATE_LIVE_QUERIES', 'QUERYAPIGATE_LIVE_MIN_INTERVAL', 'QUERYAPIGATE_CDC_SOURCES'),
         'operations': (('post', '/ingest/cdc/{source}'),),
         'docs': ('documentation/API.md', 'Live queries'),

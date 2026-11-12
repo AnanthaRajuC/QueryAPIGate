@@ -604,6 +604,23 @@ def _attach_thread_as_daemon():
         jpype.java.lang.Thread.attachAsDaemon()
 
 
+_jvm_start_lock = threading.Lock()
+
+
+def _jdbc_connect(driver_class, url, credentials):
+    """jaydebeapi.connect(), with the JVM started only once. jaydebeapi checks whether it's running and then starts it,
+    so two threads making a process's first H2 or jdbc connection at once - two requests, or two live queries - both
+    try to start it, and one fails with 'JVM is already started'. The lock covers only that first start: once the JVM
+    runs, connections open in parallel."""
+    import jaydebeapi
+    import jpype
+    if not jpype.isJVMStarted():
+        with _jvm_start_lock:
+            if not jpype.isJVMStarted():
+                return jaydebeapi.connect(driver_class, url, credentials, _jvm_classpath())
+    return jaydebeapi.connect(driver_class, url, credentials, _jvm_classpath())
+
+
 _jvm_exit_hook_registered = False
 
 
@@ -641,7 +658,6 @@ class _H2(_Driver):
     PARAM_STYLE = 'qmark'
 
     def connect(self, details, read_only):
-        import jaydebeapi
         if not os.path.isfile(config.h2_jar()):  # a source checkout: the driver is fetched, not committed
             raise ApiError(f"H2's driver isn't installed ({config.h2_jar()}): in a source checkout run "
                            'python .github/scripts/fetch_h2_jar.py, or set QUERYAPIGATE_H2_JAR', 500,
@@ -653,8 +669,7 @@ class _H2(_Driver):
         url = f"jdbc:h2:tcp://{host}/~/{details.get('database')}"
         # Unlike the other drivers, H2's JDBC setReadOnly() is only a hint and does not block writes,
         # so here the read-only guarantee rests on validate_sql() alone.
-        conn = jaydebeapi.connect('org.h2.Driver', url, [details.get('user'), details.get('password')],
-                                  _jvm_classpath())
+        conn = _jdbc_connect('org.h2.Driver', url, [details.get('user'), details.get('password')])
         _register_jvm_exit_hook()
         return conn
 
@@ -738,14 +753,12 @@ class _JDBC(_Driver):
     PARAM_STYLE = 'qmark'
 
     def connect(self, details, read_only):
-        import jaydebeapi
         _attach_thread_as_daemon()
         jar, driver_class, url = details.get('jar'), details.get('driver_class'), details.get('jdbc_url')
         if not (jar and driver_class and url):
             raise ApiError("A 'jdbc' connection needs 'jar', 'driver_class' and 'jdbc_url'", 500,
                            code='connection_misconfigured')
-        conn = jaydebeapi.connect(driver_class, url, [details.get('user'), details.get('password')],
-                                  _jvm_classpath())
+        conn = _jdbc_connect(driver_class, url, [details.get('user'), details.get('password')])
         if read_only:
             try:
                 conn.jconn.setReadOnly(True)

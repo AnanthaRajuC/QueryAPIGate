@@ -1869,8 +1869,8 @@ disconnects frees its slot at the next keepalive, within 15 seconds.
 
 > **Experimental** - new in this release ([ADR 0033](adr/0033-live-queries.md)): the `/live` route, its `result`
 > events, the `table.changed` signal and the CDC settings may change. Off unless `QUERYAPIGATE_LIVE_QUERIES` is on.
-> CDC sources come from `QUERYAPIGATE_CDC_SOURCES` until they have an API, and only PostgreSQL has been tested with
-> Debezium ([what experimental means](../CHANGELOG.md#versioning-and-compatibility)).
+> CDC sources come from `QUERYAPIGATE_CDC_SOURCES` until they have an API. Tested with Debezium on PostgreSQL, MySQL,
+> MariaDB, MongoDB and SQL Server ([what experimental means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Live events say that *a query ran*. A live query sends a saved query's **result**, and sends it again whenever the
 data behind it changes - including a change made straight in the database, not through QueryAPIGate. An app showing
@@ -1906,6 +1906,8 @@ data: {..., "rows": [{..., "rental_rate": 1.99}], "truncated": false, "reason": 
 - **If a re-run fails:** `event: error` with the usual error body. A `401`, `403` or `404` also ends the stream; any
   other error keeps it, and the next change tries again.
 - **How often:** one query with the same parameters, by the same caller, is one run however many streams share it.
+  For a signed-in user, the same caller also means the same token claims (`exp`, `iat` and the like aside), so two
+  tokens that bind different `from_claim` values never share a result.
   It runs again at most once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` seconds (default 1), however many changes arrive:
   a 1,000-row `UPDATE` is one new result per stream.
 
@@ -1925,8 +1927,10 @@ It names no key, so only the admin's `/events` shows it. Signals come from two p
    change log and posts each change to `POST /ingest/cdc/<source>` on the main server. QueryAPIGate keeps only the
    names of the tables they touched, and answers `204` once that's stored, so Debezium moves on only then.
 
-A subscription listens for the tables its query reads, named as `allowed_tables` names them (`public.film`). When
-they can't be told - a MongoDB query, or a `{name}` text placeholder - any signal on its connection re-runs it.
+A subscription listens for the tables its query reads, named as `allowed_tables` names them (`public.film`), and a
+MongoDB query for its collection (`rental.film`, the connection's database and the collection). When they can't be
+told - SQL on a `jdbc` or `h2` connection, or a `{name}` text placeholder - any signal on its connection re-runs it,
+and the result is still sent only if it changed.
 
 **Setting up Debezium.** Each source gets a name, the connection its changes belong to, and a signing secret
 (`whsec_` and at least 24 random bytes in base64; `QUERYAPIGATE_CDC_SOURCES` is a secret setting, so
@@ -1953,6 +1957,20 @@ debezium.sink.http.authentication.type=standard-webhooks
 debezium.sink.http.authentication.webhook.secret=whsec_...
 ```
 
+The source lines differ for each database; the sink lines stay the same. What each one needs, as tested:
+
+| Database | `connector.class` (under `debezium.source.`) | The database needs | A signal names |
+|---|---|---|---|
+| PostgreSQL | `io.debezium.connector.postgresql.PostgresConnector`, `plugin.name=pgoutput` | `wal_level=logical` | `schema.table` (`public.film`) |
+| MySQL | `io.debezium.connector.mysql.MySqlConnector`, a unique `database.server.id` | the binary log in `ROW` format (MySQL 8's default) | `database.table` (`rental.film`) |
+| MariaDB | `io.debezium.connector.mariadb.MariaDbConnector`, a unique `database.server.id` | `--log-bin --binlog-format=ROW` | `database.table` |
+| MongoDB | `io.debezium.connector.mongodb.MongoDbConnector`, `mongodb.connection.string` | a replica set (a single member is enough) | `database.collection` |
+| SQL Server | `io.debezium.connector.sqlserver.SqlServerConnector`, `database.names` | CDC on the database and each table (`sys.sp_cdc_enable_db`, `sys.sp_cdc_enable_table`) and the SQL Server Agent running | `schema.table` (`dbo.film`); the query's `jdbc` connection listens for any of them |
+
+MySQL, MariaDB and SQL Server also need `schema.history.internal` (a file, for Debezium Server) to keep each table's
+columns. Debezium Server reads `${VAR}` in its properties from the environment, so the database password and
+`webhook.secret` needn't be written in the file.
+
 Each request is checked with the [Standard Webhooks](https://www.standardwebhooks.com/) signature Debezium sends,
 and a timestamp more than 5 minutes off is refused. No API key or token is accepted on this route, and a wrong
 signature answers the same `404 cdc_source_not_found` as an unknown source. A body that isn't a change event, or comes
@@ -1967,8 +1985,8 @@ a table touch rows nobody is watching.
 
 **Limits, for now:** re-runs count against quotas but not rate limits (the subscription itself does); a change
 doesn't clear the response cache for `GET /q/` callers (a live re-run skips it instead); `queryapigate events`
-runs the queries itself, so it needs the main server's database drivers and network access; and only PostgreSQL
-has been tested with Debezium - MySQL should work the same way, while a MongoDB change doesn't signal yet.
+runs the queries itself, so it needs the main server's database drivers and network access; and on a `jdbc` or `h2`
+connection a change to any table re-runs every live query on it.
 
 ## Alerts
 
