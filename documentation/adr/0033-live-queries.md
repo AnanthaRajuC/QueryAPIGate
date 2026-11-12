@@ -163,7 +163,7 @@ affecting the rows being watched. That ratio is what section 8's key-level match
 3. **Counted against rate limits.** In the prototype, only quotas count re-runs. A re-run refused by the key's rate
    limit should be postponed, not dropped.
 4. **The response cache invalidated by signals**, for `GET /q/` callers too. That is the performance win this
-   opens up: long `cache_ttl`s without stale reads.
+   opens up: long `cache_ttl`s without stale reads. *Built (2026-11-12), see section 10.*
 5. **A security review** (it guards access, and adds an unauthenticated-by-key route).
 6. **Real Debezium in CI**, as section 9's test, run on every PR that touches it.
 7. A how-to guide. (The `experimental.py` entry, the Settings rows, the API documentation's *Live queries* section
@@ -236,6 +236,30 @@ What the testing found, each fixed with a test:
 Unexplained, and not reproduced: twice, a fresh `queryapigate events` process exited with no log line and no Python
 fault (`PYTHONFAULTHANDLER` was on the second time), right after its first two concurrent MariaDB re-runs started.
 68 fresh starts in the same way afterwards all survived. Worth watching in the CI job of section 7.
+
+### 10. The response cache, kept fresh by signals (built 2026-11-12)
+
+Section 7's fourth item. Every signal moves **generation counters**, and a cached response remembers the counters it
+depends on:
+
+- A response depends on its connection's "every table" counter and one per table its SQL reads (`tableguard`, as a
+  subscription does), or - its tables unknown (`jdbc`, `h2`, a `{name}` placeholder) - its connection's "any change"
+  counter. A signal naming tables moves theirs and "any change"; one naming none moves "any change" and "every table".
+- The counters are read **before** the query runs, in the same lookup as the entry, and stored with the result. A
+  change during the query moves them, so the result it read is stored already out of date - never served.
+- A hit whose stored counters differ from the current ones is a miss; the new result replaces it.
+- The counters live where the entries do: a dictionary in the process, or one Redis hash (`qag:cache-generations`)
+  read with the entry in one pipelined round trip - so a change reported to any instance reaches all of them, and a
+  hit costs no extra network call.
+
+Only with live queries on, since only then are there signals; off, the lookup is the one it always was. Measured
+through the whole Flask request path (test client, 5,000 hits, laptop on battery): in-process ~425 µs a hit, +6 to
+15 µs with live queries on; Redis ~830 µs, within its noise (-44 to +75 µs). The added code itself is under 2 µs a hit
+(`timeit`), so most of the in-process difference is noise; to measure again on mains power. Tested in both backends,
+a real Redis, and three real instances sharing PostgreSQL and Redis (`tests/test_multinode.py`).
+
+Not done: a change nothing reports (no Debezium, not through QueryAPIGate) is still seen only at the TTL; the
+in-process cache hears only of its own process's changes, so more than one process needs Redis, as before.
 
 ## Alternatives considered
 

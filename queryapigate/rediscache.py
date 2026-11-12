@@ -11,9 +11,12 @@ import hashlib
 import json
 import logging
 
+from .cache import stale as cache_stale
+
 log = logging.getLogger('queryapigate')
 
 _PREFIX = 'qag:cache:'
+_GENERATIONS = 'qag:cache-generations'  # one hash: field (live.cache_fields()) -> count, shared by every instance
 
 
 class RedisResponseCache:
@@ -30,16 +33,41 @@ class RedisResponseCache:
     def get(self, key):
         """(body, content_type, headers, etag) for a live entry, or None if missing, expired or Redis
         itself is unreachable right now."""
+        return self.lookup(key)[0]
+
+    def lookup(self, key, fields=()):
+        """As cache.ResponseCache.lookup(): the entry and ``fields``' counters, in one round trip. Redis unreachable:
+        a miss, and None for the counters - nothing is stored then (see set())."""
         try:
-            raw = self._client.hgetall(_PREFIX + key)
+            if fields:
+                with self._client.pipeline(transaction=False) as pipe:
+                    pipe.hgetall(_PREFIX + key)
+                    pipe.hmget(_GENERATIONS, *fields)
+                    raw, counts = pipe.execute()
+                current = {field: int(count or 0) for field, count in zip(fields, counts, strict=True)}
+            else:
+                raw, current = self._client.hgetall(_PREFIX + key), {}
         except self._redis_error as e:
             log.warning('Redis cache read failed, treating as a miss: %s', e)
-            return None
+            return None, None
         if not raw:
-            return None
-        return raw[b'body'], raw[b'content_type'].decode(), json.loads(raw[b'headers']), raw[b'etag'].decode()
+            return None, current
+        if fields and cache_stale(json.loads(raw.get(b'generations') or b'{}'), current):
+            return None, current
+        return (raw[b'body'], raw[b'content_type'].decode(), json.loads(raw[b'headers']),
+                raw[b'etag'].decode()), current
 
-    def set(self, key, body, content_type, headers, ttl, meta=None):
+    def bump(self, fields):
+        """A signal: every entry depending on any of ``fields``, on any instance, is out of date from now."""
+        try:
+            with self._client.pipeline(transaction=False) as pipe:
+                for field in fields:
+                    pipe.hincrby(_GENERATIONS, field, 1)
+                pipe.execute()
+        except self._redis_error as e:
+            log.warning('Redis cache invalidation failed - entries expire at their TTL: %s', e)
+
+    def set(self, key, body, content_type, headers, ttl, meta=None, generations=None):
         """Store a response under `key` for `ttl` seconds and return its ETag - always, even if the write
         to Redis itself fails, since ETag is just a hash of the body the caller already has in hand.
         ``meta`` is stored alongside for the admin UI's cache browser only - see cache.py's ResponseCache.set()
@@ -49,7 +77,8 @@ class RedisResponseCache:
             full_key = _PREFIX + key
             with self._client.pipeline() as pipe:
                 pipe.hset(full_key, mapping={'body': body, 'content_type': content_type, 'etag': etag,
-                                             'headers': json.dumps(headers), 'meta': json.dumps(meta or {})})
+                                             'headers': json.dumps(headers), 'meta': json.dumps(meta or {}),
+                                             'generations': json.dumps(generations or {})})
                 pipe.expire(full_key, ttl)
                 pipe.execute()
         except self._redis_error as e:

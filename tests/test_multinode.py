@@ -2,9 +2,10 @@
 
 Three `queryapigate serve` processes - each with its own QUERYAPIGATE_HOME, as separate machines would have - share a
 PostgreSQL store and a Redis, with one `queryapigate events` process beside them. Every check makes a change through
-one node and looks for it on another: keys, saved-query versions, connections, rate limits, the response cache,
-history, the audit log and live events. Everything here goes over HTTP to real processes; nothing is shared in
-memory, so a value held in one process's memory would fail these tests.
+one node and looks for it on another: keys, saved-query versions, connections, rate limits, the response cache
+(cleared, and kept fresh by live queries' signals), history, the audit log and live events. Everything here goes
+over HTTP to real processes; nothing is shared in memory, so a value held in one process's memory would fail these
+tests.
 
 Runs when both QUERYAPIGATE_TEST_DATABASE_URL and QUERYAPIGATE_TEST_REDIS_URL are set (CI's PostgreSQL job)."""
 import json
@@ -20,6 +21,9 @@ import unittest
 import urllib.error
 import urllib.request
 import uuid
+
+from tests.test_live import SECRET as CDC_SECRET
+from tests.test_live import signed
 
 DATABASE_URL = os.environ.get('QUERYAPIGATE_TEST_DATABASE_URL')
 REDIS_URL = os.environ.get('QUERYAPIGATE_TEST_REDIS_URL')
@@ -79,12 +83,17 @@ class MultiNodeTests(unittest.TestCase):
             db = sqlite3.connect(path)
             db.execute('CREATE TABLE things (id INTEGER, label TEXT)')
             db.execute('INSERT INTO things VALUES (1, ?)', (name,))
+            db.execute('CREATE TABLE prices (id INTEGER PRIMARY KEY, amount REAL)')
+            db.execute('INSERT INTO prices VALUES (1, 0.99)')
             db.commit()
             db.close()
         separator = '&' if '?' in DATABASE_URL else '?'
         env = {**os.environ, 'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_REDIS_URL': REDIS_URL,
                'QUERYAPIGATE_DATABASE_URL': f'{DATABASE_URL}{separator}options=-csearch_path%3D{cls.schema}',
-               'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0.1', 'PYTHONUNBUFFERED': '1'}
+               'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '0.1', 'PYTHONUNBUFFERED': '1',
+               # live queries' signals keep the shared response cache fresh (ADR 0033): writes, and Debezium's posts
+               'QUERYAPIGATE_LIVE_QUERIES': '1', 'QUERYAPIGATE_ALLOW_WRITES': '1',
+               'QUERYAPIGATE_CDC_SOURCES': json.dumps({'shop': {'connection': 'shop', 'secret': CDC_SECRET}})}
         env.pop('QUERYAPIGATE_TEST_DATABASE_URL', None)
         cls.processes, cls.nodes = [], []
         for i in range(NODES):
@@ -193,6 +202,31 @@ class MultiNodeTests(unittest.TestCase):
         self.assertEqual(call(a, 'GET', f'/q/{name}')[2]['X-Cache'], 'MISS')
         self.assertEqual(call(b, 'GET', f'/q/{name}')[2]['X-Cache'], 'HIT')
         self.assertEqual(call(c, 'DELETE', '/api/v1/cache/entries')[0], 204)
+        self.assertEqual(call(b, 'GET', f'/q/{name}')[2]['X-Cache'], 'MISS')
+
+    def test_a_write_on_one_node_makes_a_cached_response_on_another_a_miss(self):
+        a, b, c = self.nodes
+        name = self.unique('price')
+        self.save_query(a, name, 'SELECT amount FROM prices WHERE id = 1', cache_ttl=3600)
+        self.assertEqual(call(a, 'GET', f'/q/{name}')[2]['X-Cache'], 'MISS')
+        self.assertEqual(call(b, 'GET', f'/q/{name}')[2]['X-Cache'], 'HIT')
+        status, body, _ = call(c, 'POST', '/execute_sql', {'connection_name': 'shop',
+                                                          'sql': 'UPDATE prices SET amount = amount + 1 WHERE id = 1'})
+        self.assertEqual(status, 200, body)
+        status, rows, headers = call(b, 'GET', f'/q/{name}')
+        self.assertEqual(headers['X-Cache'], 'MISS')
+        self.assertEqual(call(a, 'GET', f'/q/{name}')[1], rows)
+
+    def test_a_change_debezium_reports_to_one_node_makes_it_a_miss_on_another(self):
+        a, b, _ = self.nodes
+        name = self.unique('things')
+        self.save_query(a, name, 'SELECT label FROM things WHERE id = 1', cache_ttl=3600)
+        call(a, 'GET', f'/q/{name}')
+        self.assertEqual(call(b, 'GET', f'/q/{name}')[2]['X-Cache'], 'HIT')
+        body = json.dumps({'op': 'u', 'source': {'name': 'shop', 'schema': 'main', 'table': 'things'}}).encode()
+        request = urllib.request.Request(a + '/ingest/cdc/shop', data=body, method='POST', headers=signed(body))
+        with urllib.request.urlopen(request, timeout=30) as res:
+            self.assertEqual(res.status, 204)
         self.assertEqual(call(b, 'GET', f'/q/{name}')[2]['X-Cache'], 'MISS')
 
     def test_runs_on_every_node_are_in_one_history(self):
