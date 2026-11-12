@@ -8,7 +8,7 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
-from queryapigate import admins, cdcsources, create_app, db, rekey, store
+from queryapigate import admins, cdcsources, create_app, db, live, rekey, store
 from tests.test_api_v1 import ADMIN, V1TestCase
 from tests.test_live import SECRET, change, signed
 
@@ -27,6 +27,9 @@ class CdcSourceTestCase(V1TestCase):
                                                'QUERYAPIGATE_CDC_SOURCES': json.dumps(self.setting)})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # What ingest signals, wherever the store keeps it (the events table, or a ClickHouse run store)
+        self.written = mock.patch.object(live, 'write_signal', wraps=live.write_signal).start()
+        self.addCleanup(mock.patch.stopall)
 
     def source(self, name='shop', status=201, headers=ADMIN, prefix='', **fields):
         body = {'name': name, 'connection': 'lite', **fields}
@@ -37,9 +40,9 @@ class CdcSourceTestCase(V1TestCase):
         return self.client.post(path, data=body, headers=signed(body, secret))
 
     def signals(self):
-        return [(row['workspace'], row['source'], json.loads(row['payload_json'])['tables'])
-                for row in db.connection().execute("SELECT workspace, source, payload_json FROM events "
-                                                   "WHERE type = 'table.changed' ORDER BY id").fetchall()]
+        """(workspace, source, tables) of each signal stored, in order - each one written through the store."""
+        return [(columns[-1], columns[1], json.loads(columns[7])['tables'])
+                for columns in (call.args[0] for call in self.written.call_args_list)]
 
     def stored(self, name='shop', workspace='default'):
         row = db.connection().execute('SELECT details_json, last_received_at FROM cdc_sources '
