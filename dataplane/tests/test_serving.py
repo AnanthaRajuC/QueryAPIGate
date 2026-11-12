@@ -179,6 +179,32 @@ class ServingTests(unittest.TestCase):
         finally:
             pair.stop()
 
+    def test_a_run_still_being_served_at_shutdown_reaches_python(self):
+        """A call the data plane is still answering when SIGTERM comes queues its run after the shutdown began: it
+        starts a batch whose interval ends after the drain's own wait. The drain cuts that batch now, not at its
+        interval's end - a report started after the wait was lost when the process exited (CI on #173)."""
+        import threading
+        pair = Pair(self.pair.home, {'QUERYAPIGATE_API_KEY': ADMIN, 'QUERYAPIGATE_MASK_KEY': 'serving-mask',
+                                     'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL': '5'})
+        try:
+            key = self.keys['plain']
+            for _ in range(2):  # the plan, so the data plane serves the slow call itself
+                request('127.0.0.1', pair.port, 'GET', '/q/sleepy?s=0', {'X-API-Key': key, 'X-Request-Id': 'warm'})
+            answered = []
+            slow = threading.Thread(target=lambda: answered.append(request(
+                '127.0.0.1', pair.port, 'GET', '/q/sleepy?s=1', {'X-API-Key': key, 'X-Request-Id': 'in-flight'})))
+            slow.start()
+            time.sleep(0.3)  # the call is running in PostgreSQL
+            pair.dataplane.terminate()
+            slow.join(15)
+            self.assertEqual(answered[0][0], 200)
+            self.assertEqual(pair.dataplane.wait(timeout=15), 0)
+            status, _h, body = request('127.0.0.1', pair.python_port, 'GET',
+                                       '/api/v1/history?query=sleepy&limit=200', self.admin)
+            self.assertIn('in-flight', {e.get('request_id') for e in json.loads(body)['items']})
+        finally:
+            pair.stop()
+
     def test_a_served_run_is_in_python_s_history(self):
         self.assertServedAsPython('/q/by_id?id=7', self.keys['plain'], request_id='history-check')
         for _ in range(50):
