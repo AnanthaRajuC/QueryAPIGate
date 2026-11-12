@@ -78,6 +78,42 @@ class JvmClasspathTests(unittest.TestCase):
         self.assertEqual(jars, sorted(set(jars)))
 
 
+class JvmStartTests(unittest.TestCase):
+    """Two threads making a process's first H2 or jdbc connection at once start the JVM once (runners._jdbc_connect).
+    jaydebeapi checks whether it runs, then starts it: a fake with the same gap between the two."""
+
+    def test_two_first_connections_at_once_both_connect(self):
+        import threading
+        import time
+        started, gate, results = [], threading.Barrier(2), []
+
+        def connect(driver_class, url, credentials, classpath):
+            if not started:
+                time.sleep(0.1)  # jaydebeapi between its isJVMStarted() and startJVM()
+                if started:
+                    raise OSError('JVM is already started')
+                started.append(1)
+            return 'conn'
+
+        def first():
+            gate.wait()
+            try:
+                results.append(runners._jdbc_connect('org.h2.Driver', 'jdbc:h2:mem:x', ['sa', '']))
+            except OSError as error:
+                results.append(error)
+
+        fake_jpype = mock.Mock(isJVMStarted=lambda: bool(started))
+        with mock.patch.dict('sys.modules', {'jpype': fake_jpype, 'jaydebeapi': mock.Mock(connect=connect)}), \
+                mock.patch.object(runners, '_jvm_classpath', return_value=[]):
+            threads = [threading.Thread(target=first) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(results, ['conn', 'conn'])
+        self.assertEqual(len(started), 1)
+
+
 class JdbcConnectValidationTests(unittest.TestCase):
     """jaydebeapi.connect() is never reached when a required field is missing."""
 

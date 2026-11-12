@@ -36,6 +36,7 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
 import time
 import urllib.parse
 from datetime import datetime
@@ -139,8 +140,9 @@ def verify_signature(secret, headers, body, now=None):
 
 
 def debezium_tables(body, server_name=None):
-    """The qualified tables (``schema.table`` - PostgreSQL's schema, else MySQL's database) that the changes in
-    ``body`` touched: one Debezium change event, or a batch of them (`batch.enabled=true`), each with or without
+    """The qualified tables (``schema.table`` - PostgreSQL's schema, else MySQL's database; MongoDB's
+    ``database.collection``) that the changes in ``body`` touched: one Debezium change event, or a batch of them
+    (`batch.enabled=true`), each with or without
     the `{"schema", "payload"}` wrapper. Tombstones, heartbeats and schema changes touch none; a snapshot's rows
     (`op: r`) are rows that didn't change, and touch none either. Raises ValueError for a body that isn't one, or
     for a change from a server other than ``server_name`` when that's set."""
@@ -157,7 +159,8 @@ def debezium_tables(body, server_name=None):
         source = item['source']
         if server_name and source.get('name') != server_name:
             raise ValueError(f"a change from server '{source.get('name')}', not '{server_name}'")
-        namespace, table = source.get('schema') or source.get('db'), source.get('table')
+        # a relational source names a table; MongoDB's names a collection in a database (no schema)
+        namespace, table = source.get('schema') or source.get('db'), source.get('table') or source.get('collection')
         if not (isinstance(namespace, str) and isinstance(table, str) and table):
             continue
         tables.add(f'{namespace}.{table}'.lower())
@@ -202,13 +205,20 @@ def _context(flask_app, permission, name, params):
 
 def plan(flask_app, permission, name):
     """(connection, tables) a subscription to ``name`` listens on: its published version's connection, and the tables
-    its SQL reads (None: any change on the connection - a MongoDB query, or SQL whose tables can't be told)."""
+    its SQL reads - for a MongoDB query, its collection as ``database.collection``, as Debezium names it (None: any
+    change on the connection - SQL whose tables can't be told)."""
     ctx = _context(flask_app, permission, name, {})
     try:
         path = store.resolve_saved_file(name, check_exists=False)
         _, saved = store.select_version(store.load_versions(path, with_history=False), None)
         connection_name = saved.get('connection_name')
-        if saved.get('query_type') == 'mongo' or not isinstance(saved.get('sql_query'), str):
+        if saved.get('query_type') == 'mongo':
+            database = store.get_connection(connection_name).get('database')
+            collection = saved.get('mongo_collection')
+            if not (isinstance(database, str) and database and isinstance(collection, str) and collection):
+                return connection_name, None
+            return connection_name, {f'{database}.{collection}'.lower()}
+        if not isinstance(saved.get('sql_query'), str):
             return connection_name, None
         return connection_name, _tables(saved['sql_query'], store.get_connection(connection_name))
     finally:
@@ -253,9 +263,26 @@ class _Group:
         self.running = False
 
 
+# Per-token claims that say when and which token, not who: two tokens differing only in these may share a group
+_TOKEN_CLAIMS = frozenset({'exp', 'iat', 'nbf', 'jti', 'auth_time'})
+
+
+def group_key(permission, name, params):
+    """Which subscriptions share one re-run - and so one result: the same caller, query and parameters. A signed-in
+    user's claims are part of it, since `from_claim` parameters (app.bind_claims) come from them: two tokens for one
+    user with another tenant, say, must never see each other's rows."""
+    claims = permission.claims
+    if claims:
+        claims = hashlib.sha256(json.dumps({k: v for k, v in claims.items() if k not in _TOKEN_CLAIMS},
+                                           sort_keys=True, default=str).encode()).hexdigest()
+    return (permission.workspace, permission.name, permission.via, claims or None, name,
+            tuple(sorted(params.items())))
+
+
 class LiveQueries:
     def __init__(self, flask_app=None):
         self._flask_app = flask_app
+        self._flask_app_lock = threading.Lock()
         self.groups = {}           # group key -> _Group
         self.by_connection = {}    # (workspace, connection) -> set of group keys
         self.wake = None
@@ -265,8 +292,11 @@ class LiveQueries:
 
     def flask_app(self):
         if self._flask_app is None:  # built on the first subscription: an events server without one never needs it
-            from .app import create_app
-            self._flask_app = create_app()
+            # under a lock: two first subscriptions at once (worker threads) would each build an app otherwise
+            with self._flask_app_lock:
+                if self._flask_app is None:
+                    from .app import create_app
+                    self._flask_app = create_app()
         return self._flask_app
 
     def start(self):
@@ -284,7 +314,7 @@ class LiveQueries:
     async def subscribe(self, permission, name, params):
         """A new subscriber's queue, with the current result already in it. Raises ApiError - as GET /q/<name> would
         answer - before anything is streamed, so a refusal is an ordinary HTTP error."""
-        key = (permission.workspace, permission.name, permission.via, name, tuple(sorted(params.items())))
+        key = group_key(permission, name, params)
         group = self.groups.get(key)
         if group is None:
             flask_app = await asyncio.to_thread(self.flask_app)

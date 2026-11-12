@@ -59,8 +59,16 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   change is signalled by a write through QueryAPIGate, or by **Debezium Server** reading the database's change log and
   posting to the new `POST /ingest/cdc/<source>`, signed with Standard Webhooks (`QUERYAPIGATE_CDC_SOURCES`, a secret
   setting). A signal is a `table.changed` event in the event log: a connection and table names, never row data. Off
-  unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested against Debezium Server 3.7.1 and PostgreSQL 16; `demo/live-queries`
-  runs it in Docker.
+  unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested end to end with Debezium Server 3.7.1 against PostgreSQL 16, MySQL
+  8.4, MariaDB 11.4, MongoDB 7.0 (a query listens on its collection) and SQL Server 2022 (through a `jdbc` connection,
+  where any change on the connection re-runs the query); `demo/live-queries` runs the PostgreSQL one in Docker.
+
+### Fixed
+
+- **The first H2 or `jdbc` queries of a process, run at the same moment, could fail with `JVM is already started`.**
+  The driver checks whether the Java VM runs and then starts it, so two requests arriving together on a server that
+  hadn't used H2 or JDBC yet could both try to start it, and one answered `502`. The VM is now started once, under a
+  lock; queries after it run in parallel as before.
 
 ## [0.50.1] - 2026-11-09
 

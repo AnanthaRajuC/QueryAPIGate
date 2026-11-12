@@ -207,6 +207,36 @@ The unit and integration tests (`tests/test_live.py`, 24 tests) cover the same p
 write queries refused, writes through `/execute_sql` and saved write queries, unrelated writes, shared runs,
 throttling, ingest signature and body checks, and the feature off by default. The full suite passes.
 
+**More databases (2026-11-11 and -12), from `main`.** The same scenarios against each database, with Debezium Server
+3.7.1.Final and changes made directly in the database: a subscription's row changed, another row changed (nothing
+sent), a join's other table changed (only the join's stream), 2,000 rows changed at once (10 to 11 signals), a
+`DELETE` (an empty result), and changes after an `ALTER TABLE`. Every ingest answered `204`.
+
+| Database | Connector | From the change to the new result | Notes |
+|---|---|---|---|
+| MySQL 8.4 | MySQL (binary log) | 0.4 to 0.6 s | signals name `database.table` |
+| MariaDB 11.4 | MariaDB (binary log) | 0.8 s | through a `mysql` connection |
+| MongoDB 7.0 | MongoDB (change streams, a one-member replica set) | about 1 s | needed a fix, below |
+| SQL Server 2022 | SQL Server (CDC tables, the Agent running) | 0.4 to 2.4 s | through a `jdbc` connection: any change on it re-runs the query; most of the delay is SQL Server's capture job |
+
+What the testing found, each fixed with a test:
+
+- **MongoDB changes signalled nothing.** Debezium names a MongoDB change by `collection`, not `table`, so ingest
+  skipped every one, and a MongoDB query's subscription got its first result and nothing after it. Ingest now reads
+  the collection, and a MongoDB query listens for `database.collection`.
+- **One signed-in user's tokens with different claims shared a result.** Subscriptions were grouped by caller name,
+  query and parameters; a JWT user's name is the same in every token, while a `from_claim` parameter (a tenant, say)
+  may differ. The second token got the first one's rows. The group key now includes the token's claims, leaving out
+  the ones that only say when and which token (`exp`, `iat`, `nbf`, `jti`, `auth_time`). Never in a release.
+- **Two first subscriptions at once built the internal Flask app twice.** It is now built once, under a lock.
+- **Two first JDBC queries at once failed with `JVM is already started`.** jaydebeapi checks and then starts the JVM;
+  two threads could both start it. This one predates live queries: the main server had it for H2 and `jdbc`
+  connections too. The JVM is now started under a lock.
+
+Unexplained, and not reproduced: twice, a fresh `queryapigate events` process exited with no log line and no Python
+fault (`PYTHONFAULTHANDLER` was on the second time), right after its first two concurrent MariaDB re-runs started.
+68 fresh starts in the same way afterwards all survived. Worth watching in the CI job of section 7.
+
 ## Alternatives considered
 
 - **Stream the changes themselves**, the first draft. See Context: it couldn't serve app users, stored row data, and
