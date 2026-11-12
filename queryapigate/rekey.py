@@ -16,9 +16,11 @@ import json
 from . import config, db, store
 from .errors import ApiError
 
-# (table, kind shown to people, field in details_json) - each table keyed by (workspace, name): names are unique only
-# within a workspace (ADR 0023), so every read and write here names both
-ENCRYPTED = (('connections', 'connection', 'password'), ('destinations', 'destination', 'password'))
+# (table, kind shown to people, fields in details_json) - each table keyed by (workspace, name): names are unique only
+# within a workspace (ADR 0023), so every read and write here names both. A CDC source keeps two secrets during a
+# rotation's grace period (ADR 0033 §11): both are moved, in one write of the row.
+ENCRYPTED = (('connections', 'connection', ('password',)), ('destinations', 'destination', ('password',)),
+             ('cdc_sources', 'CDC source', ('secret', 'previous_secret')))
 
 
 def _fernets():
@@ -40,13 +42,15 @@ def _key_index(fernets, value):
 
 
 def _values(conn):
-    """Every encrypted value stored: (table, kind, workspace, name, field, details, value)."""
-    for table, kind, field in ENCRYPTED:
+    """Every encrypted value stored: (table, kind, workspace, name, field, details, value). The fields of one row share
+    one `details`, so writing it after changing several of them keeps every change."""
+    for table, kind, fields in ENCRYPTED:
         for row in conn.execute(f'SELECT workspace, name, details_json FROM {table} '
                                 'ORDER BY workspace, name').fetchall():
             details = json.loads(row['details_json'])
-            if store._is_encrypted(details.get(field)):
-                yield table, kind, row['workspace'], row['name'], field, details, details[field]
+            for field in fields:
+                if store._is_encrypted(details.get(field)):
+                    yield table, kind, row['workspace'], row['name'], field, details, details[field]
 
 
 def _require_keys():
@@ -86,7 +90,7 @@ def describe(value):
 def _refuse_undecryptable(found):
     if found:
         names = ', '.join(describe(v) for v in found)
-        raise ApiError(f'No key in QUERYAPIGATE_SECRET_KEY decrypts the password of {names} - nothing was changed. '
+        raise ApiError(f'No key in QUERYAPIGATE_SECRET_KEY decrypts the secret of {names} - nothing was changed. '
                        'Add the key it was encrypted with (after the first), or enter that password again, then run '
                        'rekey again', 409, code='password_undecryptable', values=found)
 
@@ -101,7 +105,8 @@ def rekey(actor, via=None):
     first = Fernet(config.secret_keys()[0].encode('utf-8'))
     moved = 0
     # db.transaction() holds the store's write lock (BEGIN IMMEDIATE, or the advisory lock on PostgreSQL), so a
-    # connection or destination saved meanwhile waits for this, and nothing read here changes before it's written.
+    # connection, destination or CDC source saved meanwhile waits for this, and nothing read here changes before it's
+    # written.
     with db.transaction() as conn:
         pending = []
         undecryptable = []

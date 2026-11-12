@@ -943,6 +943,114 @@
         ],
         "type": "object"
       },
+      "CdcSource": {
+        "properties": {
+          "connection": {
+            "description": "The connection whose changes it reports.",
+            "type": "string"
+          },
+          "created_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "ingest_path": {
+            "description": "Where Debezium posts, after the server's address - `debezium.sink.http.url`.",
+            "type": "string"
+          },
+          "last_received_at": {
+            "description": "When a verified post last arrived, heartbeats included - to the minute. Null: never.",
+            "nullable": true,
+            "type": "string"
+          },
+          "managed_by": {
+            "description": "Set for a source from the setting: read-only here.",
+            "enum": [
+              "QUERYAPIGATE_CDC_SOURCES",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "previous_expires_at": {
+            "description": "Until when the secret before the last rotation still works.",
+            "nullable": true,
+            "type": "string"
+          },
+          "server_name": {
+            "description": "Debezium's `topic.prefix`: a post from any other server is refused (`422 invalid_change`). Null: any.",
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "connection",
+          "server_name",
+          "ingest_path",
+          "managed_by",
+          "created_at",
+          "updated_at",
+          "last_received_at",
+          "previous_expires_at"
+        ],
+        "type": "object"
+      },
+      "CdcSourceInput": {
+        "properties": {
+          "connection": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Create only.",
+            "type": "string"
+          },
+          "server_name": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CdcSourceList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CdcSource"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CdcSourceWithSecret": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CdcSource"
+          },
+          {
+            "properties": {
+              "secret": {
+                "description": "What Debezium signs its posts with (`debezium.sink.http.authentication.webhook.secret`): shown only here, never again.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "secret"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "CollectionList": {
         "properties": {
           "items": {
@@ -1737,7 +1845,8 @@
                 "type": {
                   "enum": [
                     "connection",
-                    "destination"
+                    "destination",
+                    "CDC source"
                   ],
                   "type": "string"
                 },
@@ -1759,7 +1868,7 @@
             "type": "integer"
           },
           "values": {
-            "description": "Encrypted passwords stored - connections and destinations.",
+            "description": "Encrypted secrets stored - connections' and destinations' passwords, CDC sources' signing secrets.",
             "type": "integer"
           }
         },
@@ -5761,6 +5870,634 @@
         "tags": [
           "Management API v1"
         ]
+      }
+    },
+    "/api/v1/cdc-sources": {
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSourceList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "List CDC sources - the Debezium Servers that tell live queries what changed (never a secret)",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. The secret is generated, never given. 409 `cdc_source_exists` for a name taken - here, or by QUERYAPIGATE_CDC_SOURCES. Audited as `create_cdc_source`, without the secret.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CdcSourceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSourceWithSecret"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          }
+        },
+        "summary": "Create a CDC source, with a new secret shown this once",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/cdc-sources/{name}": {
+      "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Remove it - Debezium's next post answers 404",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "get": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSource"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Get a CDC source",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      },
+      "patch": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. 409 `cdc_source_managed` for a source from QUERYAPIGATE_CDC_SOURCES.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The query's ETag from a previous read; the change is refused with 412 if it changed.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CdcSourceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSource"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Already exists"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Changed since read (If-Match)"
+          }
+        },
+        "summary": "Change its connection or server_name",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/cdc-sources/{name}/previous": {
+      "delete": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSource"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          }
+        },
+        "summary": "Stop the old secret now, before its grace period ends",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
+      }
+    },
+    "/api/v1/cdc-sources/{name}/rotate": {
+      "post": {
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. A post signed with either secret is accepted until then, so Debezium can be restarted with the new one at any point. Audited as `rotate_cdc_source_secret`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "grace_minutes": {
+                    "default": 60,
+                    "description": "How long the old secret keeps working; 0 stops it at once.",
+                    "maximum": 10080,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CdcSourceWithSecret"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Send back as If-Match to make a change conditional.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not an administrator (admin_only), or not one whose role may (role_forbidden)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1Error"
+                }
+              }
+            },
+            "description": "The secret before the last rotation still works (`cdc_source_rotation_pending`) - end it first"
+          }
+        },
+        "summary": "Reissue the source's secret: a new one, shown this once, and the old one still working for `grace_minutes`",
+        "tags": [
+          "Management API v1"
+        ],
+        "x-experimental": true
       }
     },
     "/api/v1/collections": {
@@ -12871,7 +13608,7 @@
     },
     "/ingest/cdc/{source}": {
       "post": {
-        "description": "**Experimental** - may change in any minor release, noted in the changelog. Debezium Server's HTTP sink posts its change events here - one, or a batch - signed with Standard Webhooks using the secret QUERYAPIGATE_CDC_SOURCES gives the source. No API key or token is accepted. The changes are reduced to the tables they touched and stored as one `table.changed` event, with no row data, before the 204; live queries reading those tables are re-run. Only with QUERYAPIGATE_LIVE_QUERIES on.",
+        "description": "**Experimental** - may change in any minor release, noted in the changelog. Debezium Server's HTTP sink posts its change events here - one, or a batch - signed with Standard Webhooks using the source's secret (/api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES); outside the `default` workspace, at /w/{workspace}/ingest/cdc/{source}. No API key or token is accepted; an unknown source and a bad signature both answer 404 `cdc_source_not_found`. The changes are reduced to the tables they touched and stored as one `table.changed` event, with no row data, before the 204; live queries reading those tables are re-run. Only with QUERYAPIGATE_LIVE_QUERIES on.",
         "parameters": [
           {
             "in": "path",

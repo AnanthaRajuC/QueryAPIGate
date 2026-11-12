@@ -25,6 +25,7 @@ describe('Console shell - the classic frame', () => {
     expect(labels).toEqual([
       'Home',
       'Connections',
+      'CDC sources',
       'Caching',
       'API Repository',
       'API Designer',
@@ -68,6 +69,7 @@ describe('Console shell - the classic frame', () => {
     expect(labels).toEqual([
       'Home',
       'Connections',
+      'CDC sources',
       'API Repository',
       'API Designer',
       'MCP server',

@@ -265,7 +265,7 @@ def create_app():
         from . import rekey
         found = rekey.report()
         if found['undecryptable']:
-            log.warning('No key in QUERYAPIGATE_SECRET_KEY decrypts the password of %s - add the key it was '
+            log.warning('No key in QUERYAPIGATE_SECRET_KEY decrypts the secret of %s - add the key it was '
                         'encrypted with (after the first), or enter it again.',
                         ', '.join(rekey.describe(v) for v in found['undecryptable']))
         if found['under_old_keys']:
@@ -1349,11 +1349,12 @@ _open_streams_lock = threading.Lock()
 
 @bp.route('/ingest/cdc/<source>', methods=['POST'])
 def ingest_cdc(source):
-    """Debezium Server's HTTP sink posts its changes here (live.py, ADR 0033 - a prototype): each request signed with
-    Standard Webhooks, using the secret QUERYAPIGATE_CDC_SOURCES gives this source. Stored as one `table.changed`
-    signal - the tables that changed, no row data - before answering 204, so Debezium only moves on once it's kept."""
+    """Debezium Server's HTTP sink posts its changes here (live.py, ADR 0033 - experimental): each request signed with
+    Standard Webhooks, using the source's secret (/api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES) - outside
+    `default`, at /w/<workspace>/ingest/cdc/<source>. Stored as one `table.changed` signal - the tables that changed,
+    no row data - before answering 204, so Debezium only moves on once it's kept."""
     from . import live
-    live.ingest(source, request.headers, request.get_data(cache=False))
+    live.ingest(source, request.headers, request.get_data(cache=False), request.environ.get(scope.ENVIRON_KEY))
     return '', 204
 
 

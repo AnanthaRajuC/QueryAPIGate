@@ -71,6 +71,10 @@ const ExportsPage = lazy(() =>
   import('@/features/exports/ExportsPage').then((m) => ({ default: m.ExportsPage })),
 );
 
+const CdcSourcesPage = lazy(() =>
+  import('@/features/cdcsources/CdcSourcesPage').then((m) => ({ default: m.CdcSourcesPage })),
+);
+
 const DestinationsPage = lazy(() =>
   import('@/features/exports/DestinationsPage').then((m) => ({ default: m.DestinationsPage })),
 );
@@ -144,6 +148,14 @@ export function App() {
           element={
             <Suspense fallback={<Loading />}>
               <ExportsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="cdc-sources"
+          element={
+            <Suspense fallback={<Loading />}>
+              <CdcSourcesPage />
             </Suspense>
           }
         />

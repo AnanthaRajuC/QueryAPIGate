@@ -125,9 +125,8 @@ On the main server, for `debezium.sink.http.url`:
   route answers `503 store_unavailable` and Debezium retries. Debezium moves its offset only on success, so no change
   is lost. A resent change is a second signal, which costs at most one extra re-run whose result is unchanged.
 
-In the prototype, sources come from `QUERYAPIGATE_CDC_SOURCES` (JSON: name → connection, secret, workspace,
-`server_name`). Before it ships they become workspace objects with an API (`/api/v1/cdc-sources`): the secret
-generated and shown once, stored encrypted, reissued with a grace period (ADR 0009), and every change audited.
+In the prototype, sources came from `QUERYAPIGATE_CDC_SOURCES` (JSON: name → connection, secret, workspace,
+`server_name`). They are now workspace objects with their own API (section 11). The setting still works.
 
 ### 5. Re-runs: grouped, throttled, compared
 
@@ -154,7 +153,7 @@ affecting the rows being watched. That ratio is what section 8's key-level match
 
 ### 7. Before it graduates (ADR 0017's terms)
 
-1. **Sources API**, as described in section 4.
+1. **Sources API**, as described in section 4. *Built (2026-11-12), see section 11.*
 2. **Measured**, on the benchmark laptop under the usual conditions:
    - re-run cost per group under a write storm;
    - delivery lag (commit to push) with 1,000 subscriptions across 100 groups;
@@ -260,6 +259,60 @@ a real Redis, and three real instances sharing PostgreSQL and Redis (`tests/test
 
 Not done: a change nothing reports (no Debezium, not through QueryAPIGate) is still seen only at the TTL; the
 in-process cache hears only of its own process's changes, so more than one process needs Redis, as before.
+
+### 11. CDC sources, managed through the API (built 2026-11-12)
+
+Section 7's first item. A CDC source becomes a workspace object, like a destination: one per Debezium Server.
+
+- **Fields:** `name` (as a destination's), `connection` (a connection in the workspace, checked when saved),
+  `server_name` (optional: Debezium's `topic.prefix`; when set, events from any other server are refused).
+- **Routes**, under `/api/v1/cdc-sources`, modelled on API keys' (ADR 0009):
+
+  | Route | What it does |
+  |---|---|
+  | `GET /`, `GET /<name>` | list and read; never the secret |
+  | `POST /` | create; the response carries the secret, the only time it is shown |
+  | `PATCH /<name>` | change `connection` or `server_name`; the secret isn't a field |
+  | `POST /<name>/rotate` | a new secret, shown once; the old one keeps working `grace_minutes` (default 60, at most a week; 0 stops it at once) |
+  | `DELETE /<name>/previous` | stop the old secret before its grace period ends |
+  | `DELETE /<name>` | delete; Debezium's next post answers 404 and it retries until the source exists again |
+
+- **The secret is always generated**: `whsec_` and 32 random bytes in base64, the form Debezium and every Standard
+  Webhooks library expect. It is never accepted from the caller, so no source has a weak one. It must be usable to
+  check a signature, so it can't be hashed as an API key's is: it is stored like a connection password, encrypted
+  with `QUERYAPIGATE_SECRET_KEY` when that is set, and re-encrypted by `queryapigate rekey` (which now handles more
+  than one encrypted field in a row: the secret and the previous one).
+- **During a grace period both secrets verify.** Debezium can be restarted with the new secret at any point within
+  it, with no signal refused.
+- **The ingest URL names the workspace** outside `default`, with the prefix every route already takes:
+  `/ingest/cdc/<source>` in `default`, `/w/<workspace>/ingest/cdc/<source>` elsewhere. No API key says which
+  workspace a post is for, and source names are unique only within one. An unknown workspace, an unknown source and
+  a bad signature all answer the same `404 cdc_source_not_found`. The API's responses carry the path
+  (`ingest_path`).
+- **Status without a write per post:** `last_received_at` is set by a verified post (heartbeats included) when it is
+  more than a minute old, so the Console can tell "never heard from" and "silent for an hour" from "connected",
+  costing at most one update a minute per source.
+- **Access:** reading needs `connections.read`, changing `connections.write`: a source belongs to a connection and
+  carries a credential like one. Every change is audited (`create_cdc_source`, `update_cdc_source`,
+  `rotate_cdc_source_secret`, `end_cdc_source_previous_secret`, `delete_cdc_source`), never with the secret.
+  A workspace with a source isn't empty, so it can't be deleted until its sources are.
+- **`QUERYAPIGATE_CDC_SOURCES` keeps working**, for deployments configured only by environment (Helm). Its sources
+  are listed read-only (`"managed_by": "QUERYAPIGATE_CDC_SOURCES"`), keep their `/ingest/cdc/<name>` URL whatever their
+  workspace, and win over a stored source of the same name there; the API refuses to create a source the setting's
+  would hide (one in `default`, or in the setting's source's own workspace, with its name).
+- **The API works with live queries off**, so sources can be set up first; ingest still answers 404 until they are on.
+  The routes are experimental with the rest of the feature.
+- **The Console** gets a *CDC sources* screen: the list with each source's status, a form to create one, and, once
+  created or rotated, the secret with a ready-to-paste Debezium `application.properties` block (sink URL, signing
+  secret) and a warning that it won't be shown again.
+
+Tested end to end (2026-11-12) with a real Debezium Server 3.7.1 and PostgreSQL 16, `QUERYAPIGATE_SECRET_KEY` set:
+a source made through the API in workspace `acme`, Debezium signing with its generated secret at
+`/w/acme/ingest/cdc/shop`. Then a rotation: Debezium still on the old secret during the grace period, restarted with
+the new one, the old one ended - after which a Debezium Server signing with it was refused (404), nothing signalled.
+
+Not yet: sources in configuration as code (ADR 0014). Its files hold no secrets, and a source's secret is
+generated, so a file would need a `${VAR}` reference for it; to add when someone needs it.
 
 ## Alternatives considered
 

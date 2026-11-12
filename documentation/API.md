@@ -1877,9 +1877,9 @@ disconnects frees its slot at the next keepalive, within 15 seconds.
 ## Live queries
 
 > **Experimental** - new in this release ([ADR 0033](adr/0033-live-queries.md)): the `/live` route, its `result`
-> events, the `table.changed` signal and the CDC settings may change. Off unless `QUERYAPIGATE_LIVE_QUERIES` is on.
-> CDC sources come from `QUERYAPIGATE_CDC_SOURCES` until they have an API. Tested with Debezium on PostgreSQL, MySQL,
-> MariaDB, MongoDB and SQL Server ([what experimental means](../CHANGELOG.md#versioning-and-compatibility)).
+> events, the `table.changed` signal, the CDC sources API and the settings may change. Off unless
+> `QUERYAPIGATE_LIVE_QUERIES` is on. Tested with Debezium on PostgreSQL, MySQL, MariaDB, MongoDB and SQL Server
+> ([what experimental means](../CHANGELOG.md#versioning-and-compatibility)).
 
 Live events say that *a query ran*. A live query sends a saved query's **result**, and sends it again whenever the
 data behind it changes - including a change made straight in the database, not through QueryAPIGate. An app showing
@@ -1941,17 +1941,46 @@ MongoDB query for its collection (`rental.film`, the connection's database and t
 told - SQL on a `jdbc` or `h2` connection, or a `{name}` text placeholder - any signal on its connection re-runs it,
 and the result is still sent only if it changed.
 
-**Setting up Debezium.** Each source gets a name, the connection its changes belong to, and a signing secret
-(`whsec_` and at least 24 random bytes in base64; `QUERYAPIGATE_CDC_SOURCES` is a secret setting, so
-`QUERYAPIGATE_CDC_SOURCES_FILE` works too):
+**Setting up Debezium: a CDC source.** Each Debezium Server is a CDC source: a name, the connection its changes
+belong to, and the secret it signs its posts with. Make one on the Console's *CDC sources* screen, or:
+
+```
+POST /api/v1/cdc-sources
+{"name": "rental", "connection": "rental", "server_name": "rental"}
+
+201
+{"name": "rental", "connection": "rental", "server_name": "rental", "ingest_path": "/ingest/cdc/rental",
+ "secret": "whsec_...", "managed_by": null, "last_received_at": null, "previous_expires_at": null, ...}
+```
+
+- **The secret is generated** - `whsec_` and 32 random bytes, never chosen by the caller - and shown **only in that
+  response**: give it to Debezium straight away. It is stored encrypted with `QUERYAPIGATE_SECRET_KEY` when that's
+  set, as connection passwords are.
+- **`server_name`**, optional, is Debezium's `topic.prefix`: a change from another server is refused.
+- **`ingest_path`** is where Debezium posts: `/ingest/cdc/<name>`, or `/w/<workspace>/ingest/cdc/<name>` for a
+  source in a workspace other than `default` (sources belong to a workspace, as connections do).
+- **`last_received_at`** is when a verified post last arrived, heartbeats included, to the minute: `null` means
+  Debezium has never reached it.
+- **Rotating the secret:** `POST /api/v1/cdc-sources/<name>/rotate` returns a new one, shown once. The old one keeps
+  working for `grace_minutes` (default 60, up to a week; `0` stops it at once, for a leaked one), so Debezium can be
+  restarted with the new secret any time in between. `DELETE .../previous` stops the old one early.
+- `GET`, `PATCH` (`connection`, `server_name`) and `DELETE` work as on the other resources, with `ETag` and
+  `If-Match`. Reading needs `connections.read`; changing needs `connections.write`. Each change is audited, never
+  with the secret. The API works with live queries off, so sources can be set up first.
+
+Sources can also come from the environment, as before, for a deployment configured only that way:
+`QUERYAPIGATE_CDC_SOURCES` is JSON, a secret setting (so `QUERYAPIGATE_CDC_SOURCES_FILE` works too), and its secrets
+are `whsec_` and at least 24 random bytes in base64. Its sources are listed in the API and the Console read-only
+(`"managed_by": "QUERYAPIGATE_CDC_SOURCES"`), keep `/ingest/cdc/<name>` whatever their `workspace`, and win over a
+stored source of the same name - so the API refuses to make one they would hide.
 
 ```
 QUERYAPIGATE_LIVE_QUERIES=1
 QUERYAPIGATE_CDC_SOURCES={"rental": {"connection": "rental", "server_name": "rental", "secret": "whsec_..."}}
 ```
 
-`server_name`, optional, is Debezium's `topic.prefix`: a change from another server is refused. `workspace` names
-the source's workspace (`default` unless set). Debezium Server's side (PostgreSQL needs `wal_level=logical`):
+There, `workspace` names the source's workspace (`default` unless set). Debezium Server's side (PostgreSQL needs
+`wal_level=logical`):
 
 ```properties
 debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector
@@ -1963,7 +1992,7 @@ debezium.sink.type=http
 debezium.sink.http.url=http://queryapigate:5000/ingest/cdc/rental
 debezium.sink.http.batch.enabled=true
 debezium.sink.http.authentication.type=standard-webhooks
-debezium.sink.http.authentication.webhook.secret=whsec_...
+debezium.sink.http.authentication.webhook.secret=${WEBHOOK_SECRET}
 ```
 
 The source lines differ for each database; the sink lines stay the same. What each one needs, as tested:
@@ -2495,6 +2524,9 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `not_published` | 404 | The query has no published version |
 | `connection_not_found` | 404 | No such connection |
 | `cdc_source_not_found` | 404 | `POST /ingest/cdc/<source>` (experimental): no such CDC source, or the request isn't signed with its secret - the two aren't told apart |
+| `cdc_source_exists` | 409 | `POST /api/v1/cdc-sources` (experimental): a CDC source has that name here, or `QUERYAPIGATE_CDC_SOURCES` has one it would hide |
+| `cdc_source_managed` | 409 | The CDC source comes from `QUERYAPIGATE_CDC_SOURCES`: change it there |
+| `cdc_source_rotation_pending` | 409 | The CDC source's secret from before its last rotation still works (`previous_expires_at`) - end it (`DELETE /api/v1/cdc-sources/{name}/previous`) or wait, then rotate again |
 | `invalid_change` | 422 | `POST /ingest/cdc/<source>` (experimental): the body isn't a Debezium change event, or it comes from another server than the source's `server_name` |
 | `store_unavailable` | 503 | `POST /ingest/cdc/<source>` (experimental): the change couldn't be stored; Debezium retries |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
