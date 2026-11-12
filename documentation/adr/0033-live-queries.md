@@ -163,7 +163,8 @@ affecting the rows being watched. That ratio is what section 8's key-level match
    limit should be postponed, not dropped. *Built (2026-11-12), see section 12.*
 4. **The response cache invalidated by signals**, for `GET /q/` callers too. That is the performance win this
    opens up: long `cache_ttl`s without stale reads. *Built (2026-11-12), see section 10.*
-5. **A security review** (it guards access, and adds an unauthenticated-by-key route).
+5. **A security review** (it guards access, and adds an unauthenticated-by-key route). *Done (2026-11-12), see
+   section 13.*
 6. **Real Debezium in CI**, as section 9's test, run on every PR that touches it.
 7. A how-to guide. (The `experimental.py` entry, the Settings rows, the API documentation's *Live queries* section
    and the changelog entry ship with the first version.)
@@ -351,6 +352,53 @@ runs. A caller limited to 10 calls a minute on `/q/` could hold a stream re-run 
   `QUERYAPIGATE_REDIS_URL` set, one bucket per caller across every instance and both servers; without it, each
   process counts its own, as each REST worker does.
 - **Measured** by `queryapigate_live_postponed_total` on the events server's `/metrics`.
+
+### 13. Security review (2026-11-12)
+
+Section 7's fifth item. Reviewed: the ingest route (`POST /ingest/cdc/<source>`, the one that takes no API key), CDC
+sources and their API (section 11), and `/live` on the events server - the groups, the re-checks, the re-runs.
+
+**Found and fixed:**
+
+1. **The events server answered any client in open-access mode** (shipped since 0.12.0, so in the changelog's
+   Security section). With no key, administrator or JWT configured, the main server and the MCP server answer only
+   local clients (`403 open_access_remote`); the events server let anyone who reached its port in as the unrestricted
+   caller - every run on `/events`, and with live queries on, any saved query on `/live`. Its default address is
+   loopback, which kept most servers out of it. It now refuses a remote client as the MCP server does: by the
+   connection's peer and by the client a trusted proxy names.
+2. **The re-check of an open stream ignored the workspace.** It judged the credential again outside the workspace
+   the path named. For an API key and a signed-in user that changes nothing (their workspace is their own), but an
+   administrator's role is per workspace: re-checked as if in `default`, one taken out of a workspace kept their
+   `/w/<workspace>/events` stream (in the changelog too - since 0.38.0), and a live group there took on their
+   `default` role for its next re-run. The re-check is now made as the stream was let in: in the path's workspace,
+   then settled in it, and a caller who no longer belongs there loses the stream.
+3. **Ingest read the whole body before checking anything.** Its size was checked after the signature, which is
+   computed over the body, so an unsigned post could make a worker hold any amount (gunicorn has no body limit, and
+   the data plane streams it through). A body over 8 MB is now refused by its `Content-Length` unread, and one sent
+   chunked is read only up to the limit.
+4. **A signed body nested too deeply was a 500**, which Debezium would retry forever. It's a `422 invalid_change`.
+
+**Checked and kept:**
+
+- **Probing.** An unknown workspace, an unknown source and a bad signature all answer the same 404. A known source
+  takes longer to refuse (its secret is decrypted and an HMAC computed), so its name could be told by timing. Names
+  aren't secrets, and the server-wide limit by client address applies to the route before anything else does.
+- **Replays.** A signed post can be replayed for as long as its timestamp is within 5 minutes. A replay can only
+  repeat a signal: no row data, re-runs bounded by `QUERYAPIGATE_LIVE_MIN_INTERVAL` and now the callers' own rate
+  limits (section 12), and cache entries made a miss. Deduplicating `webhook-id`s would need state shared across
+  instances for that small a gain.
+- **A source's reach.** A source signals only its own connection, in its own workspace, which must exist when the
+  source is made; a source in `QUERYAPIGATE_CDC_SOURCES` is configured by whoever runs the server. Managing sources
+  takes `connections.write` (reading them, `connections.read`), workspace-scoped like connections.
+- **The secret.** Generated (32 random bytes), shown once, `Cache-Control: no-store` on the responses that carry it,
+  never in the audit log or the ETag, encrypted like a connection password with `QUERYAPIGATE_SECRET_KEY` (plain
+  without it, as passwords are), rekeyed with them, compared in constant time.
+- **Live access.** Every result is a run of the saved query as the caller, through the same `run_saved()` as `/q/`;
+  a query name goes through the same `resolve_saved_file()` (no `/` or `..`). Groups are keyed by workspace, caller,
+  claims (minus per-token ones) and parameters, so no two callers share a result. A revoked or expired credential
+  loses its stream within about 75 seconds; a new subscriber joining a group in that window gets the group's last
+  result, computed with grants at most that old - the same bound as an open `/events` stream.
+- **Signals carry table names only**, and only the administrator's `/events` stream shows them.
 
 ## Alternatives considered
 

@@ -200,6 +200,8 @@ def debezium_tables(body, server_name=None):
         parsed = json.loads(body) if body.strip() else None
     except ValueError as error:
         raise ValueError('the body is not JSON') from error
+    except RecursionError as error:  # nested deeper than the parser goes: a 500 would have Debezium retry it forever
+        raise ValueError('the body is nested too deeply') from error
     tables = set()
     for item in parsed if isinstance(parsed, list) else [parsed]:
         if isinstance(item, dict) and 'payload' in item and 'schema' in item:
@@ -222,14 +224,14 @@ def ingest(source_name, headers, body, workspace=None):
     `workspace` is the one the path named (/w/<workspace>/ingest/...), None when it named none (cdcsources.find())."""
     if not enabled():
         raise ApiError('Not Found', 404)
+    if len(body) > MAX_BODY:  # before the signature is computed over it
+        raise ApiError('The request is too large', 413, code='payload_too_large')
     source = cdcsources.find(source_name, workspace)
     # An unknown workspace, an unknown source and a bad signature all answer 404, so names can't be probed. During a
     # rotation's grace period (ADR 0009) the secret before it verifies too.
     if source is None or not any(verify_signature(secret, headers, body) for secret in source['secrets']):
         raise ApiError(f"No CDC source named '{source_name}'", 404, code='cdc_source_not_found')
     cdcsources.mark_received(source, source_name)
-    if len(body) > MAX_BODY:
-        raise ApiError('The request is too large', 413, code='payload_too_large')
     try:
         tables = debezium_tables(body.decode('utf-8'), source['server_name'])
     except (ValueError, UnicodeDecodeError) as error:

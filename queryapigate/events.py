@@ -17,9 +17,11 @@ missed or repeated in between. An event older than the retention window can't be
 stream from the oldest one still kept.
 
 **Who sees what.** Exactly as GET /events on the main server: an X-API-Key is required (unless the server runs
-with no keys at all); the admin key sees every event, any other key only its own. Subscription filters
-(?type=, ?kind=, ?query=, ?connection=, ?status= - parse_filters()) narrow that, never widen it. A stream's key is
-checked again every _RECHECK_SECONDS, so a revoked or expired key's stream is closed. A client that stops reading
+with no keys at all - then only a local client is answered, as the main server answers one); the admin key sees every
+event, any other key only its own. Subscription filters (?type=, ?kind=, ?query=, ?connection=, ?status= -
+parse_filters()) narrow that, never widen it. A stream's caller is checked again every _RECHECK_SECONDS, as it was
+let in - in the workspace its path names (_recheck()) - so a revoked or expired key's stream is closed, and so is an
+administrator's in a workspace they are no longer a member of. A client that stops reading
 is disconnected once _QUEUE_SIZE events are waiting for it, rather than holding memory or silently losing events -
 it reconnects with Last-Event-ID and catches up.
 
@@ -42,7 +44,7 @@ from collections import deque
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
-from . import config, cors, db, instances, live, ratelimit, runstore, scope, secheaders, tracing
+from . import apikeys, config, cors, db, governance, instances, live, ratelimit, runstore, scope, secheaders, tracing
 from .errors import ApiError, code_for
 
 try:
@@ -284,6 +286,16 @@ def _settle_workspace(permission, named):
     if not workspaces.exists(named) or (not permission.server_wide and named not in (permission.memberships or {})):
         return None
     return permission._replace(workspace=named)
+
+
+def _recheck(credentials, client_ip, named):
+    """An open stream's caller as they are now, judged as _admit() let them in - authenticated in the workspace the
+    path names (an administrator's role is that workspace's), then settled in it - or None: the key revoked, expired or
+    deactivated, the bearer token expired, or an administrator no longer a member there. Without the workspace an
+    administrator's token was judged by their `default` role, and stayed let in wherever they had been removed."""
+    with scope.using(named):
+        permission = _authenticate(credentials, client_ip)
+    return None if permission is None else _settle_workspace(permission, named)
 
 
 def _lag(occurred_at):
@@ -581,6 +593,14 @@ class EventServer:
         if permission is None:
             await _respond(writer, 401, {'error': 'Unauthorized'}, allow_origin)
             return None
+        peer = (writer.get_extra_info('peername') or (None,))[0]
+        if permission is apikeys.OPEN and not (governance.is_loopback(client_ip) and governance.is_loopback(peer)):
+            # No key, administrator or JWT configured anywhere: the unrestricted OPEN caller, which only a local client
+            # may be - as the main server (app.gate()) and the MCP server answer. Before, any client that could reach
+            # this port saw every event and could run every saved query live, as an administrator.
+            await _respond(writer, 403, {'error': governance.OPEN_ACCESS_REMOTE, 'code': 'open_access_remote'},
+                           allow_origin)
+            return None
         permission = await asyncio.to_thread(_settle_workspace, permission, named)
         if permission is None:
             await _respond(writer, 404, {'error': f"No workspace named '{named}'", 'code': 'workspace_not_found'},
@@ -632,7 +652,7 @@ class EventServer:
                     await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
             watcher = asyncio.create_task(self._watch(reader, client))
             try:
-                await self._pump(client, secret, client_ip, sent)
+                await self._pump(client, secret, client_ip, sent, named)
                 if not writer.is_closing():
                     writer.write(b'0\r\n\r\n')  # the last chunk: the stream ended cleanly
             finally:
@@ -654,7 +674,7 @@ class EventServer:
             client.queue.get_nowait()
         client.queue.put_nowait(None)
 
-    async def _pump(self, client, secret, client_ip, sent):
+    async def _pump(self, client, secret, client_ip, sent, named=None):
         writer = client.writer
         next_check = time.monotonic() + _RECHECK_SECONDS
         while not writer.is_closing():
@@ -672,8 +692,8 @@ class EventServer:
             await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
             if time.monotonic() >= next_check:
                 next_check = time.monotonic() + _RECHECK_SECONDS
-                if await asyncio.to_thread(_authenticate, secret, client_ip) is None:
-                    return  # key revoked/expired/deactivated, or the bearer token expired, since the stream opened
+                if await asyncio.to_thread(_recheck, secret, client_ip, named) is None:
+                    return  # revoked, expired, deactivated or no longer a member there, since the stream opened
 
 
     async def _live_stream(self, reader, writer, headers, name, query, allow_origin, named=None):
@@ -718,11 +738,11 @@ class EventServer:
                         await asyncio.wait_for(writer.drain(), timeout=_WRITE_TIMEOUT)
                         if time.monotonic() >= next_check:
                             next_check = time.monotonic() + _RECHECK_SECONDS
-                            current = await asyncio.to_thread(_authenticate, secret, client_ip)
+                            current = await asyncio.to_thread(_recheck, secret, client_ip, named)
                             if current is None:
-                                break  # revoked, expired or deactivated since the stream opened
+                                break  # revoked, expired, deactivated or no longer a member there, since it opened
                             if current.name == permission.name:  # its grants as they are now, for the next re-run
-                                group.permission = current._replace(workspace=group.workspace)
+                                group.permission = current
                     if not writer.is_closing():
                         writer.write(b'0\r\n\r\n')
                 finally:
@@ -790,8 +810,8 @@ _SECURITY_HEADERS = [f'{name}: {value}' for name, value in secheaders.api_header
 
 
 async def _respond(writer, status, body, allow_origin, preflight=False, extra=None):
-    reasons = {200: 'OK', 204: 'No Content', 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found',
-               405: 'Method Not Allowed', 429: 'Too Many Requests', 503: 'Service Unavailable'}
+    reasons = {200: 'OK', 204: 'No Content', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden',
+               404: 'Not Found', 405: 'Method Not Allowed', 429: 'Too Many Requests', 503: 'Service Unavailable'}
     if body is not None and 'error' in body:  # the same {error, code} every front door answers with (errors.py)
         body = {'error': body['error'], 'code': code_for(status, body.get('code'))}
     payload = b'' if body is None else json.dumps(body).encode()
