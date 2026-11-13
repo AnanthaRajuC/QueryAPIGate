@@ -1783,7 +1783,8 @@ format:
 | Delay | immediate | up to `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 s), plus `QUERYAPIGATE_EVENTS_POLL_INTERVAL` on SQLite |
 
 **Each key gets its own view, not a shared firehose.** Either way, a real API key is required (unless the server
-runs with no keys at all). The admin key sees every event; any other key sees only the runs made with that same
+runs with no keys at all - then only a local client is answered, and any other gets `403 open_access_remote`, as on
+every route). The admin key sees every event; any other key sees only the runs made with that same
 key since it was created - its own personal activity feed. (A deleted key's name can be given to a new key; the old
 one's runs don't come with it.) A stream looks like this:
 
@@ -1853,7 +1854,8 @@ Put it behind the same reverse proxy as the main server, routing `/events` to it
   heavy traffic, a shorter window keeps the store small. Runs dropped under back-pressure (see
   [Run history](#run-history)) are lost to both.
 - **Limits.** A stream whose key is revoked, deactivated or expires is closed within about a minute (at most 75
-  seconds: the key is checked again every 60, at the stream's next write). A client that stops
+  seconds: the key is checked again every 60, at the stream's next write) - and so is an administrator's on
+  `/w/<workspace>/events` once they're no longer a member of that workspace. A client that stops
   reading is disconnected once 1,000 events are waiting for it - it reconnects with `Last-Event-ID` and catches up.
   Beyond `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` open streams, new ones get `503` with `Retry-After`;
   `QUERYAPIGATE_RATE_LIMIT` applies to connection attempts; `QUERYAPIGATE_CORS_ORIGINS` and

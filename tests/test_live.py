@@ -3,6 +3,7 @@ on, subscribed to over plain HTTP, kept fresh by writes through the main server 
 import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import sqlite3
@@ -13,7 +14,7 @@ import unittest
 import uuid
 from unittest import mock
 
-from queryapigate import create_app, live
+from queryapigate import cdcsources, create_app, live
 from queryapigate.errors import ApiError
 from tests.helpers import save_query, write_connections
 from tests.test_events_server import EventServerTestCase, Stream
@@ -455,6 +456,32 @@ class IngestTests(LiveTestCase):
         self.assertEqual(self.post(change('film', name='other')).status_code, 422)
         body = b'nope'
         self.assertEqual(self.client.post('/ingest/cdc/shop', data=body, headers=signed(body)).status_code, 422)
+
+    def test_a_body_over_the_limit_is_refused_before_it_is_read_or_checked(self):
+        body = json.dumps([change('film')] * 20).encode()
+        with mock.patch.object(live, 'MAX_BODY', 100), mock.patch.object(cdcsources, 'find') as find:
+            res = self.client.post('/ingest/cdc/shop', data=body, headers=signed(body))
+            self.assertEqual((res.status_code, res.get_json()['code']), (413, 'payload_too_large'))
+            # sent chunked - no Content-Length to refuse it by: read only as far as the limit, then refused
+            res = self.client.post('/ingest/cdc/shop', input_stream=io.BytesIO(body), headers=signed(body),
+                                   environ_overrides={'wsgi.input_terminated': True})
+            self.assertEqual((res.status_code, res.get_json()['code']), (413, 'payload_too_large'))
+        find.assert_not_called()  # an unsigned post that size is never even looked up, let alone verified
+
+    def test_a_signed_body_nested_too_deeply_is_never_a_500(self):
+        # a 500 would have Debezium retry it forever. Since Python 3.14 the parser's depth is bounded by the real stack,
+        # so whether this one parses depends on the platform: parsed, it names no table (204); too deep, 422.
+        body = b'[' * 100_000 + b']' * 100_000
+        self.assertIn(self.client.post('/ingest/cdc/shop', data=body, headers=signed(body)).status_code, (204, 422))
+        loads = json.loads
+
+        def too_deep(text, *args, **kwargs):  # only the body: the source's own settings are JSON too
+            if text == '[[[]]]':
+                raise RecursionError
+            return loads(text, *args, **kwargs)
+        with mock.patch.object(live.json, 'loads', side_effect=too_deep):
+            res = self.client.post('/ingest/cdc/shop', data=b'[[[]]]', headers=signed(b'[[[]]]'))
+        self.assertEqual((res.status_code, res.get_json()['code']), (422, 'invalid_change'))
 
     def test_a_snapshot_is_accepted_and_signals_nothing(self):
         admin_events = self.open('admin')

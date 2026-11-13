@@ -96,6 +96,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Security
 
+- **`queryapigate events` answered any client in open-access mode, as an unrestricted admin.** With no API key,
+  administrator or JWT configured, the main server and the MCP server answer local (loopback) clients only and refuse
+  others with `403 open_access_remote`; the events server never applied that rule. On any address but loopback (its
+  default), any client that reached its port could watch every run on `/events` - which query, by whom, an ad-hoc
+  run's SQL - and, with live queries on, run any saved query on `/live`. It now refuses them as the other servers
+  do: by the connection's peer, and by the client a trusted proxy names. A server with a key, administrators or JWT
+  configured wasn't affected. Since `queryapigate events` first shipped (0.12.0). **If you ran it on another address
+  without a key,** set `QUERYAPIGATE_API_KEY`.
+- **Workspaces (experimental): an administrator taken out of a workspace kept their open event streams there.** A
+  stream is checked again every minute, but the check judged an administrator's token as if in `default` - where an
+  administrator whose roles are all memberships has none, which still counts as signed in - so a stream on
+  `/w/<workspace>/events` stayed open after they were removed from that workspace. The check is now made as the
+  stream was let in, in the workspace its path names: the stream closes within about a minute and a quarter. Since
+  0.38.0, for administrators without a server-wide role.
 - **Workspaces (experimental): rotating the encryption key could swap connections between workspaces.**
   `queryapigate rekey` (and `POST /api/v1/settings/rekey`), and the start that encrypts passwords saved before
   `QUERYAPIGATE_SECRET_KEY` was set, wrote each re-encrypted connection or destination back by its name alone. Names

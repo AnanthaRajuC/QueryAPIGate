@@ -1352,8 +1352,14 @@ def ingest_cdc(source):
     """Debezium Server's HTTP sink posts its changes here (live.py, ADR 0033 - experimental): each request signed with
     Standard Webhooks, using the source's secret (/api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES) - outside
     `default`, at /w/<workspace>/ingest/cdc/<source>. Stored as one `table.changed` signal - the tables that changed,
-    no row data - before answering 204, so Debezium only moves on once it's kept."""
-    live.ingest(source, request.headers, request.get_data(cache=False), request.environ.get(scope.ENVIRON_KEY))
+    no row data - before answering 204, so Debezium only moves on once it's kept.
+
+    The body is read only up to live.MAX_BODY, and one that says it's larger is refused unread: nothing is checked
+    before it's read (the signature covers it), so an unsigned post could otherwise make this hold any amount."""
+    if (request.content_length or 0) > live.MAX_BODY:
+        raise ApiError('The request is too large', 413, code='payload_too_large')
+    body = request.stream.read(live.MAX_BODY + 1)  # bounded however it's sent - chunked has no Content-Length
+    live.ingest(source, request.headers, body, request.environ.get(scope.ENVIRON_KEY))
     return '', 204
 
 
