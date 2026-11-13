@@ -468,9 +468,19 @@ class IngestTests(LiveTestCase):
             self.assertEqual((res.status_code, res.get_json()['code']), (413, 'payload_too_large'))
         find.assert_not_called()  # an unsigned post that size is never even looked up, let alone verified
 
-    def test_a_signed_body_nested_too_deeply_is_422_not_500(self):
-        body = b'[' * 100_000 + b']' * 100_000  # a 500 would have Debezium retry it forever
-        res = self.client.post('/ingest/cdc/shop', data=body, headers=signed(body))
+    def test_a_signed_body_nested_too_deeply_is_never_a_500(self):
+        # a 500 would have Debezium retry it forever. Since Python 3.14 the parser's depth is bounded by the real stack,
+        # so whether this one parses depends on the platform: parsed, it names no table (204); too deep, 422.
+        body = b'[' * 100_000 + b']' * 100_000
+        self.assertIn(self.client.post('/ingest/cdc/shop', data=body, headers=signed(body)).status_code, (204, 422))
+        loads = json.loads
+
+        def too_deep(text, *args, **kwargs):  # only the body: the source's own settings are JSON too
+            if text == '[[[]]]':
+                raise RecursionError
+            return loads(text, *args, **kwargs)
+        with mock.patch.object(live.json, 'loads', side_effect=too_deep):
+            res = self.client.post('/ingest/cdc/shop', data=b'[[[]]]', headers=signed(b'[[[]]]'))
         self.assertEqual((res.status_code, res.get_json()['code']), (422, 'invalid_change'))
 
     def test_a_snapshot_is_accepted_and_signals_nothing(self):
