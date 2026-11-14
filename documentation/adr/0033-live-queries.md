@@ -165,7 +165,8 @@ affecting the rows being watched. That ratio is what section 8's key-level match
    opens up: long `cache_ttl`s without stale reads. *Built (2026-11-12), see section 10.*
 5. **A security review** (it guards access, and adds an unauthenticated-by-key route). *Done (2026-11-12), see
    section 13.*
-6. **Real Debezium in CI**, as section 9's test, run on every PR that touches it.
+6. **Real Debezium in CI**, as section 9's test, run on every PR that touches it. *Built (2026-11-14), see
+   section 9.*
 7. A how-to guide. (The `experimental.py` entry, the Settings rows, the API documentation's *Live queries* section
    and the changelog entry ship with the first version.)
 
@@ -236,6 +237,29 @@ What the testing found, each fixed with a test:
 Unexplained, and not reproduced: twice, a fresh `queryapigate events` process exited with no log line and no Python
 fault (`PYTHONFAULTHANDLER` was on the second time), right after its first two concurrent MariaDB re-runs started.
 68 fresh starts in the same way afterwards all survived. Worth watching in the CI job of section 7.
+
+**In CI (2026-11-14).** `tests/test_live_debezium.py`, run by the `Live queries (Debezium)` workflow on pull requests
+that change `live.py`, `cdcsources.py`, `events.py` or the CDC sources service (and on demand). PostgreSQL 16 and
+Debezium Server 3.7.1.Final in Docker, both pinned by digest; `queryapigate serve` and `queryapigate events` as two
+processes on one store, as they're deployed, set up through the API only - a connection, a saved query, a key that may
+run only it, and a CDC source whose generated secret Debezium signs with. Changes are made in PostgreSQL directly:
+
+- a change to the subscribed row reaches the stream (1.0 to 1.7 s from the `UPDATE`, on the laptop);
+- a change to another row of the same table sends nothing;
+- 2,000 rows of another table changed at once are a handful of signals, not 2,000, and no result;
+- a post signed with another secret is refused (`404`).
+
+Setup proves the whole path before any test: Debezium's readiness isn't enough (it isn't streaming yet), so it changes
+a table nothing watches until the source's `last_received_at` is set. About 15 seconds with the images pulled.
+
+Writing it found a bug that predates live queries: `queryapigate serve` and `queryapigate events` started together on
+a new SQLite store, and one of them exited with `cannot open the metadata database ...: database is locked` - in one
+start of three here, and with four processes in nearly every round. Each switches the new file to WAL, which takes a
+read lock and then needs the file to itself; with two at once SQLite sees the deadlock and fails one immediately,
+without waiting its busy timeout. The switch is now tried again until that timeout would have run out
+(`db._wal()`, tests in `tests/test_db.py`).
+MySQL, MariaDB, MongoDB and SQL Server stay manual (the table above): each would add minutes to CI for paths the
+PostgreSQL run and `tests/test_live.py` already cover, past what Debezium itself names.
 
 ### 10. The response cache, kept fresh by signals (built 2026-11-12)
 

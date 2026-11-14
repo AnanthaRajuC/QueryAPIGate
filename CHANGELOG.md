@@ -85,6 +85,13 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Fixed
 
+- **Processes started together on a new SQLite store could exit with `database is locked`.** Each switches the new
+  file to WAL mode, which takes a read lock and then needs the file to itself; with two at once SQLite sees a deadlock
+  and fails one immediately, without waiting its busy timeout. So `queryapigate serve` and `queryapigate events` (or
+  `queryapigate mcp`) started at the same moment on a fresh home could leave one of them stopped with `cannot open the
+  metadata database ...: database is locked` - one start in three in the new Debezium test. The switch is now tried
+  again for as long as the busy timeout (5 seconds) would wait. Only the first start on a new store was affected: a
+  file already in WAL mode needs no switch. PostgreSQL stores weren't.
 - **A data plane stopping could lose the runs of its last calls.** On SIGTERM it waited one report interval and then
   for the reports already under way - but a batch begun just before (a call still being answered when the signal
   came, say) only started its report at its own interval's end, after that wait, and was lost with the process: those

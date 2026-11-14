@@ -113,7 +113,9 @@ python -m unittest discover -s tests -t .
 
 `tests/test_integration.py` runs against real MySQL, PostgreSQL, ClickHouse, H2 and MongoDB servers when the matching
 `QUERYAPIGATE_IT_*` environment variables are set (see the file header); otherwise those tests are skipped. CI runs them
-against service containers. `tests/test_sql_guard_fuzz.py` property-tests the SQL guard and parameter binder with
+against service containers. `tests/test_live_debezium.py` runs live queries against a real Debezium Server and
+PostgreSQL in Docker, with `QUERYAPIGATE_TEST_DEBEZIUM=1` (about 15 seconds once both images are pulled); the
+`Live queries (Debezium)` workflow runs it when live queries' code changes. `tests/test_sql_guard_fuzz.py` property-tests the SQL guard and parameter binder with
 [Hypothesis](https://hypothesis.readthedocs.io/); a failure there prints a minimal reproducing example.
 
 `mypy` is configured for gradual typing (`[tool.mypy]` in `pyproject.toml`) - the codebase has no type hints yet, so

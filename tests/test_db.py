@@ -5,6 +5,8 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -135,6 +137,57 @@ class DbTests(unittest.TestCase):
         row = db.connection().execute("SELECT name FROM saved_queries WHERE name = 'q2'").fetchone()
         self.assertIsNone(row)
 
+
+
+class WalSwitchTests(unittest.TestCase):
+    """Two processes opening a new SQLite file at once each need it to themselves to switch it to WAL: SQLite fails
+    one at once with "database is locked" (a deadlock, so no busy timeout), and that process exited - `queryapigate
+    events` started beside `queryapigate serve` on a fresh home, in 1 start of 3 in tests/test_live_debezium.py."""
+
+    def busy(self):
+        error = sqlite3.OperationalError('database is locked')
+        error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        return error
+
+    def test_a_busy_switch_is_tried_again(self):
+        conn = mock.Mock()
+        conn.execute.side_effect = [self.busy(), self.busy(), None]
+        db._wal(conn)
+        self.assertEqual(conn.execute.call_count, 3)
+
+    def test_only_until_the_busy_timeout_would_have_run_out(self):
+        conn = mock.Mock()
+        conn.execute.side_effect = self.busy()
+        with mock.patch.object(db, '_BUSY_SECONDS', 0.05), self.assertRaises(sqlite3.OperationalError):
+            db._wal(conn)
+
+    def test_any_other_error_is_raised_at_once(self):
+        conn = mock.Mock()
+        error = sqlite3.OperationalError('disk I/O error')
+        error.sqlite_errorcode = sqlite3.SQLITE_IOERR
+        conn.execute.side_effect = error
+        with self.assertRaises(sqlite3.OperationalError):
+            db._wal(conn)
+        self.assertEqual(conn.execute.call_count, 1)
+
+    @unittest.skipIf(TEST_DATABASE_URL, 'starts processes on a SQLite home')
+    def test_processes_starting_at_once_on_a_new_home_all_start(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = {k: v for k, v in os.environ.items()
+               if k not in ('QUERYAPIGATE_DATABASE_URL', 'QUERYAPIGATE_RUN_STORE_URL')}
+        for _ in range(2):  # before the fix, every round had one fail
+            with tempfile.TemporaryDirectory() as home:
+                # imported first, then all open the store at the same moment - not staggered by their start-up
+                at = time.time() + 1.0
+                code = (f'import time\nfrom queryapigate import db\ntime.sleep(max(0, {at} - time.time()))\n'
+                        'db.init_schema()')
+                started = [subprocess.Popen([sys.executable, '-c', code], cwd=root,
+                                            env={**env, 'QUERYAPIGATE_HOME': home}, stderr=subprocess.PIPE)
+                           for _ in range(4)]
+                failed = [p.stderr.read().decode() for p in started if p.wait(60) != 0]
+                for p in started:
+                    p.stderr.close()
+                self.assertEqual(failed, [])
 
 
 @unittest.skipIf(TEST_DATABASE_URL, 'a PostgreSQL suite run replaces db._target() with its own (tests/__init__.py)')
