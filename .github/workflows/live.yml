@@ -1,0 +1,41 @@
+name: Live queries (Debezium)
+
+# Live queries against a real Debezium Server (ADR 0033 §7, item 6): PostgreSQL 16 with logical decoding and Debezium
+# Server 3.7.1 in Docker, `queryapigate serve` and `queryapigate events` as they're deployed, and a change made in
+# PostgreSQL directly that must reach a /live stream (tests/test_live_debezium.py). Runs only when what it tests
+# changes, so other pull requests don't wait on two image pulls and a JVM's start.
+on:
+  push:
+    branches: [main]
+    paths: ["queryapigate/live.py", "queryapigate/cdcsources.py", "queryapigate/events.py",
+            "queryapigate/services/cdc_sources.py", "tests/test_live_debezium.py", ".github/workflows/live.yml"]
+  pull_request:
+    paths: ["queryapigate/live.py", "queryapigate/cdcsources.py", "queryapigate/events.py",
+            "queryapigate/services/cdc_sources.py", "tests/test_live_debezium.py", ".github/workflows/live.yml"]
+  workflow_dispatch:
+
+# Every job gets a read-only token unless it asks for more (OpenSSF Scorecard: Token-Permissions).
+permissions:
+  contents: read
+
+jobs:
+  debezium:
+    name: Live queries (real Debezium, PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QUERYAPIGATE_TEST_DEBEZIUM: "1"
+      QUERYAPIGATE_TEST_DEBEZIUM_LOGS: "1"  # the containers' and both servers' last lines, after the tests
+      PYTHONFAULTHANDLER: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Debezium Server posts PostgreSQL's changes to QueryAPIGate - none may skip
+        run: |
+          set -o pipefail
+          python -m unittest tests.test_live_debezium -v 2>&1 | tee /tmp/debezium.log
+          ! grep -E "skipped '" /tmp/debezium.log
