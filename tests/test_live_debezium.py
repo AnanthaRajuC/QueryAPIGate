@@ -55,7 +55,7 @@ debezium.sink.type=http
 debezium.sink.http.url=http://127.0.0.1:{api_port}{ingest_path}
 debezium.sink.http.batch.enabled=true
 debezium.sink.http.authentication.type=standard-webhooks
-debezium.sink.http.authentication.webhook.secret={secret}
+debezium.sink.http.authentication.webhook.secret=${{QAG_CDC_SECRET}}
 debezium.format.value=json
 quarkus.http.port={health_port}
 """
@@ -162,13 +162,16 @@ class DebeziumTests(unittest.TestCase):
         source = cls._created(_call(cls.api_port, 'POST', '/api/v1/cdc-sources', {
             'name': 'shop', 'connection': 'shop', 'server_name': 'shop'}))
 
+        # The secret never reaches a file or a command line: the properties name it as ${QAG_CDC_SECRET}, and
+        # `docker run -e QAG_CDC_SECRET` copies its value from docker's own environment, as a deployment's would
         properties = os.path.join(cls.tmp, 'application.properties')
         with open(properties, 'w') as f:
             f.write(PROPERTIES.format(pg_port=cls.pg_port, api_port=cls.api_port, ingest_path=source['ingest_path'],
-                                      secret=source['secret'], health_port=cls.health_port))
-        os.chmod(properties, 0o644)  # Debezium Server reads it as its own user
+                                      health_port=cls.health_port))
         cls.debezium = cls._container(f'qag-debezium-server-{suffix}', [
-            '--network', 'host', '-v', f'{properties}:/debezium/config/application.properties:ro', DEBEZIUM_IMAGE])
+            '--network', 'host', '-e', 'QAG_CDC_SECRET',
+            '-v', f'{properties}:/debezium/config/application.properties:ro', DEBEZIUM_IMAGE],
+            env={**os.environ, 'QAG_CDC_SECRET': source['secret']})
         _wait('Debezium Server', lambda: urllib.request.urlopen(
             f'http://127.0.0.1:{cls.health_port}/q/health/ready', timeout=5).status == 200, 120)
 
@@ -180,8 +183,8 @@ class DebeziumTests(unittest.TestCase):
         _wait('a first change through Debezium', received, 90)
 
     @classmethod
-    def _container(cls, name, args):
-        subprocess.run(['docker', 'run', '-d', '--name', name, *args], check=True, capture_output=True)
+    def _container(cls, name, args, env=None):
+        subprocess.run(['docker', 'run', '-d', '--name', name, *args], check=True, capture_output=True, env=env)
         cls.containers.append(name)
         return name
 
