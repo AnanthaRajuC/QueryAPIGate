@@ -14,6 +14,7 @@ occasionally).
 | `caching.py` | Cache hit vs. miss latency delta for a `cache_ttl`-carrying saved query | No |
 | `oltp.py` | Two git refs side by side on PostgreSQL OLTP: throughput, latency against load, scale-out, where the time goes | Yes |
 | `tpcc_mysql.py` | Several git refs on MySQL with TPC-C data split into six databases: per-user cross-database joins, direct against through the gateway | Yes |
+| `live.py` | Live queries (ADR 0033): what a re-run costs, how many groups one events server keeps fresh, delivery lag to 1,000 streams, `/q/` while re-runs happen, ingest throughput | Yes |
 
 Shared plumbing (`common.py`): a real queryapigate subprocess hit over real HTTP - not the Flask test
 client, so there's an actual separate OS process whose RSS (`/proc/<pid>/status`) can be sampled, the same
@@ -202,4 +203,20 @@ python benchmarks/tpcc_mysql_report.py /tmp/qag-tpcc/results.jsonl
 `A` is blocks m1-m3 (direct baseline, throughput, single-call latency) and `B` is m4-m11 (open loop, scale-out,
 threads, skew and the response cache, network and the store, round trips, a profile, the cross-database allow-list
 check). `--out` must be absolute. The 2026-10-24 run is in `results/tpcc-mysql-2026-10-24/`.
+
+---
+
+## `live.py` - live queries under load
+
+Live queries (ADR 0033) measured on the checkout it runs from: gunicorn, `queryapigate events`, PostgreSQL 16 and the
+load each on their own cores, as `oltp.py` pins them. It plays Debezium itself - each change posted, signed, the
+moment its write commits - so its lags are QueryAPIGate's share. Blocks m1 (re-run cost in a write storm), m2
+(delivery lag, 1,000 streams on 100 groups), m3 (`/q/` while re-runs happen), m4 (ingest, batches of 200) and m5
+(1,000 groups on one events server).
+
+~~~bash
+python benchmarks/live.py --out /tmp/qag-live setup all teardown   # about 15 minutes; --smoke for a 2-minute check
+~~~
+
+The 2026-11-16 run is in [results/live-2026-11-16/](results/live-2026-11-16/README.md).
 
