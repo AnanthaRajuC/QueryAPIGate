@@ -392,6 +392,17 @@ class WriteSignalTests(LiveTestCase):
         self.assertEqual(second.events(1)[0][1]['rows'][0]['title'], 'Shared')
         self.assertEqual(self.server.live.reruns, 1)
 
+    def test_joining_a_group_after_a_change_still_starts_with_subscribe(self):
+        first = self.subscribe('/live/film?id=1')
+        first.events(1)
+        self.write("UPDATE film SET title = 'Changed before' WHERE id = 1")
+        self.assertEqual(first.events(1)[0][1]['reason'], 'change')
+        joined = self.subscribe('/live/film?id=1')  # the same group: its result, not a new run
+        result = joined.events(1)[0][1]
+        self.assertEqual((result['rows'][0]['title'], result['reason']), ('Changed before', 'subscribe'))
+        self.assertEqual(len(self.server.live.groups), 1)
+        self.assertEqual(self.server.live.reruns, 1)
+
     def test_a_burst_of_writes_is_re_run_at_most_once_per_interval(self):
         stream = self.subscribe('/live/film?id=1')
         stream.events(1)

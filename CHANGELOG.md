@@ -64,6 +64,9 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested end to end with Debezium Server 3.7.1 against PostgreSQL 16, MySQL
   8.4, MariaDB 11.4, MongoDB 7.0 (a query listens on its collection) and SQL Server 2022 (through a `jdbc` connection,
   where any change on the connection re-runs the query); `demo/live-queries` runs the PostgreSQL one in Docker.
+  [Guide 67](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/67-push-new-results-when-the-data-changes.md)
+  walks through it. Behind a proxy, route `/live/` to the events server as `/events` is: the Helm chart's ingress,
+  `deploy/kubernetes` and `deploy/scale-out`'s Caddyfile now do.
 - **The response cache, kept fresh by live queries' signals** (experimental, ADR 0033). With live queries on, a write
   through QueryAPIGate or a change Debezium reports makes every cached response that reads the changed tables a miss,
   so `GET /q/` callers too get the new result on their next call - a long `cache_ttl` no longer means stale reads. An

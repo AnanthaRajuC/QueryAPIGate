@@ -168,7 +168,9 @@ affecting the rows being watched. That ratio is what section 8's key-level match
 6. **Real Debezium in CI**, as section 9's test, run on every PR that touches it. *Built (2026-11-14), see
    section 9.*
 7. A how-to guide. (The `experimental.py` entry, the Settings rows, the API documentation's *Live queries* section
-   and the changelog entry ship with the first version.)
+   and the changelog entry ship with the first version.) *Written (2026-11-16):
+   [guide 67](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/67-push-new-results-when-the-data-changes.md),
+   followed end to end with PostgreSQL 16 and Debezium Server 3.7.1.*
 
 ### 8. Later, not now
 

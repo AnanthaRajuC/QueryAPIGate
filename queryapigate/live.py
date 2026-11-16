@@ -305,14 +305,15 @@ def frame(event, data):
 class _Group:
     """Every subscription by one caller to one query with the same parameters: one run serves them all."""
     __slots__ = ('key', 'permission', 'name', 'params', 'workspace', 'connection', 'tables', 'subscribers',
-                 'digest', 'body', 'last_run', 'dirty', 'running', 'not_before')
+                 'digest', 'result', 'body', 'last_run', 'dirty', 'running', 'not_before')
 
     def __init__(self, key, permission, name, params, connection, tables):
         self.key, self.permission, self.name, self.params = key, permission, name, params
         self.workspace, self.connection, self.tables = permission.workspace, connection, tables
         self.subscribers = set()   # asyncio.Queue of frames; None ends a stream
         self.digest = None         # of the last result sent
-        self.body = None           # the last result frame, for a subscriber joining the group
+        self.result = None         # the last result sent, as its event's data
+        self.body = None           # ... and as the frame sent
         self.last_run = 0.0
         self.dirty = False
         self.running = False
@@ -400,7 +401,10 @@ class LiveQueries:
                 self.groups[key] = group
                 self.by_connection.setdefault((group.workspace, connection), set()).add(key)
         queue = asyncio.Queue(maxsize=_GROUP_QUEUE)
-        queue.put_nowait(group.body)
+        # A subscriber's first result says `subscribe`, whether its group ran for it or already had one: an app tells
+        # "loaded" from "changed" by it. A group's last frame said `change`, once its data had changed.
+        queue.put_nowait(group.body if group.result['reason'] == 'subscribe'
+                         else frame('result', {**group.result, 'reason': 'subscribe'}))
         group.subscribers.add(queue)
         return group, queue
 
@@ -481,8 +485,9 @@ class LiveQueries:
             self.unchanged += 1
             return
         group.digest = digest
-        group.body = frame('result', {'query': group.name, 'params': group.params, **result, 'reason': reason,
-                                      'refreshed_at': datetime.now().strftime(TIME_FORMAT)})
+        group.result = {'query': group.name, 'params': group.params, **result, 'reason': reason,
+                        'refreshed_at': datetime.now().strftime(TIME_FORMAT)}
+        group.body = frame('result', group.result)
         if reason == 'change':
             self.pushed += 1
             for queue in list(group.subscribers):

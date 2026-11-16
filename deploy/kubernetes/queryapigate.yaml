@@ -159,4 +159,5 @@ spec:
       http:
         paths:
           - {path: /events, pathType: Prefix, backend: {service: {name: queryapigate-events, port: {name: http}}}}
+          - {path: /live, pathType: Prefix, backend: {service: {name: queryapigate-events, port: {name: http}}}}
           - {path: /, pathType: Prefix, backend: {service: {name: queryapigate, port: {name: http}}}}

@@ -1,6 +1,6 @@
 {{- if .Values.ingress.enabled -}}
 {{- $fullname := include "queryapigate.fullname" . -}}
-# One host for the API: /events to the events server when it's on, the rest to the instances. And the MCP server on
+# One host for the API: /events and /live (live queries) to the events server when it's on, the rest to the instances. And the MCP server on
 # its own host, when mcp.ingress.host is set.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -29,6 +29,7 @@ spec:
         paths:
           {{- if .Values.events.enabled }}
           - {path: /events, pathType: Prefix, backend: {service: {name: {{ $fullname }}-events, port: {name: http}}}}
+          - {path: /live, pathType: Prefix, backend: {service: {name: {{ $fullname }}-events, port: {name: http}}}}
           {{- end }}
           - {path: /, pathType: Prefix, backend: {service: {name: {{ $fullname }}, port: {name: http}}}}
     {{- if and .Values.mcp.enabled .Values.mcp.ingress.host }}
