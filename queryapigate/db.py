@@ -25,6 +25,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 
 from . import config
 
@@ -731,15 +732,38 @@ class _PgConnection:
         self.raw.close()
 
 
+_BUSY_SECONDS = 5  # how long a connection waits for another's lock: busy_timeout, and the WAL switch below
+
+
+def _wal(conn):
+    """Put the file in WAL mode (a no-op once it is). Two processes opening a new file at once - `queryapigate serve`
+    and `queryapigate events` started together, say - each read it, then each need it to themselves to switch: SQLite
+    sees the deadlock and fails one at once with "database is locked", without waiting the busy timeout. The other's
+    switch takes milliseconds, so try again until the busy timeout would have run out."""
+    deadline = time.monotonic() + _BUSY_SECONDS
+    while True:
+        try:
+            conn.execute('PRAGMA journal_mode=WAL')
+            return
+        except sqlite3.OperationalError as error:
+            if error.sqlite_errorcode & 0xff != sqlite3.SQLITE_BUSY or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 def _connect(path):
-    conn = sqlite3.connect(path, isolation_level=None, timeout=5)
-    conn.execute('PRAGMA journal_mode=WAL')
+    conn = sqlite3.connect(path, isolation_level=None, timeout=_BUSY_SECONDS)
+    try:
+        _wal(conn)
+    except BaseException:
+        conn.close()
+        raise
     # NORMAL is SQLite's recommended setting under WAL: still never corrupts the file, but commits no longer
     # fsync - which matters because every saved-query run commits a history row. The trade-off is that a
     # power loss (not a process crash) can lose the last few commits.
     conn.execute('PRAGMA synchronous=NORMAL')
     conn.execute('PRAGMA foreign_keys=ON')
-    conn.execute('PRAGMA busy_timeout=5000')
+    conn.execute(f'PRAGMA busy_timeout={_BUSY_SECONDS * 1000}')
     conn.row_factory = sqlite3.Row
     return conn
 
