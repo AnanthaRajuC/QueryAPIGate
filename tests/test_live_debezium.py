@@ -1,6 +1,7 @@
 """Live queries against a real Debezium Server (ADR 0033 §7, item 6): section 9's manual test, run in CI.
 
-PostgreSQL 16 with logical decoding and Debezium Server 3.7.1 run in Docker, each pinned by digest. QueryAPIGate runs
+PostgreSQL 16 with logical decoding (pinned by digest) and Debezium Server 3.7.1 (by tag: see DEBEZIUM_IMAGE) run in
+Docker. QueryAPIGate runs
 as it's deployed - `queryapigate serve` and `queryapigate events`, two processes on one store - and is set up only
 through its API: a connection, a saved query, a key that may run only that query, and a CDC source whose generated
 secret Debezium signs its posts with. Changes are made in PostgreSQL directly, as another application would make them,
@@ -25,8 +26,10 @@ import uuid
 from tests.test_events_server import Stream
 
 POSTGRES_IMAGE = 'postgres:16@sha256:63e83b5a3dc36a917dccb76fe1bd2ac51f1ec9c1deb47ff20d4f04233bf6eae9'
-DEBEZIUM_IMAGE = ('quay.io/debezium/server:3.7.1.Final'
-                  '@sha256:90561ee67e28312784c35a439e75d4fb416caa6b5726c1d0c05c962d1d2251bf')
+# By tag, not digest: Debezium republishes a release's tag on quay.io every night with a new digest, and the old one is
+# gone soon after - a digest pinned on 2026-11-14 couldn't be pulled on the 16th. The tag is always this release; the
+# digest that ran is printed, to tie a failure to a build.
+DEBEZIUM_IMAGE = 'quay.io/debezium/server:3.7.1.Final'
 ADMIN = {'X-API-Key': 'admin'}
 PUSH_WITHIN = 30  # seconds from a change in PostgreSQL to the new result on the stream (measured: 0.5 to 2)
 ENABLED = os.environ.get('QUERYAPIGATE_TEST_DEBEZIUM') == '1'
@@ -172,6 +175,9 @@ class DebeziumTests(unittest.TestCase):
             '--network', 'host', '-e', 'QAG_CDC_SECRET',
             '-v', f'{properties}:/debezium/config/application.properties:ro', DEBEZIUM_IMAGE],
             env={**os.environ, 'QAG_CDC_SECRET': source['secret']})
+        ran = subprocess.run(['docker', 'inspect', '--format', '{{index .RepoDigests 0}}', DEBEZIUM_IMAGE],
+                             capture_output=True, text=True).stdout.strip()
+        print(f'Debezium Server image: {ran}', file=sys.stderr)
         _wait('Debezium Server', lambda: urllib.request.urlopen(
             f'http://127.0.0.1:{cls.health_port}/q/health/ready', timeout=5).status == 200, 120)
 
@@ -184,7 +190,10 @@ class DebeziumTests(unittest.TestCase):
 
     @classmethod
     def _container(cls, name, args, env=None):
-        subprocess.run(['docker', 'run', '-d', '--name', name, *args], check=True, capture_output=True, env=env)
+        started = subprocess.run(['docker', 'run', '-d', '--name', name, *args], capture_output=True, text=True,
+                                 env=env)
+        if started.returncode != 0:  # docker's own reason - an image that can't be pulled, say - not only its status
+            raise AssertionError(f'docker run {name} failed ({started.returncode}): {started.stderr.strip()}')
         cls.containers.append(name)
         return name
 

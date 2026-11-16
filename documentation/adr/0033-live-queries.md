@@ -240,7 +240,8 @@ fault (`PYTHONFAULTHANDLER` was on the second time), right after its first two c
 
 **In CI (2026-11-14).** `tests/test_live_debezium.py`, run by the `Live queries (Debezium)` workflow on pull requests
 that change `live.py`, `cdcsources.py`, `events.py` or the CDC sources service (and on demand). PostgreSQL 16 and
-Debezium Server 3.7.1.Final in Docker, both pinned by digest; `queryapigate serve` and `queryapigate events` as two
+Debezium Server 3.7.1.Final in Docker - PostgreSQL pinned by digest, Debezium by tag, as quay.io replaces a
+release's digest every night (one pinned on 2026-11-14 was gone by the 16th); `queryapigate serve` and `queryapigate events` as two
 processes on one store, as they're deployed, set up through the API only - a connection, a saved query, a key that may
 run only it, and a CDC source whose generated secret Debezium signs with. Changes are made in PostgreSQL directly:
 
