@@ -103,6 +103,9 @@ guide covers one scenario end to end, and every command and response in it was r
     - parsing the stream, reconnecting.
 29. [**Give each user of your app their own private activity feed**](29-per-key-live-feeds.md) -
     per-key and per-user streams, and resuming.
+67. [**Push a query's new result to your app when the data changes**](67-push-new-results-when-the-data-changes.md) -
+    live queries (experimental): a saved query's result pushed again when its rows change, even straight in
+    PostgreSQL, through Debezium.
 
 ## Exporting and scheduling
 

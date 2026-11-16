@@ -72,7 +72,8 @@ class ShapeTests(unittest.TestCase):
         ingress = by_kind(docs, 'Ingress')[0]
         rules = {r['host']: [(p['path'], p['backend']['service']['name']) for p in r['http']['paths']]
                  for r in ingress['spec']['rules']}
-        self.assertEqual(rules, {'api.example.com': [('/events', 'qag-queryapigate-events'), ('/', 'qag-queryapigate')],
+        self.assertEqual(rules, {'api.example.com': [('/events', 'qag-queryapigate-events'),
+                                                     ('/live', 'qag-queryapigate-events'), ('/', 'qag-queryapigate')],
                                  'mcp.example.com': [('/', 'qag-queryapigate-mcp')]})
         self.assertEqual(ingress['spec']['tls'][0]['hosts'], ['api.example.com', 'mcp.example.com'])
         self.assertEqual(ingress['metadata']['annotations']['nginx.ingress.kubernetes.io/proxy-buffering'], 'off')

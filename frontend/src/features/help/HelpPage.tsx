@@ -429,6 +429,12 @@ const DOCS = [
     path: 'how-to/66-serve-a-lakehouse-through-trino.md',
     group: 'How-to guides',
   },
+  {
+    id: 'howto-67',
+    title: 'Push new results when the data changes',
+    path: 'how-to/67-push-new-results-when-the-data-changes.md',
+    group: 'How-to guides',
+  },
 ];
 
 type Doc = (typeof DOCS)[number];

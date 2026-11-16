@@ -76,12 +76,13 @@ ingress:
   tls:
     enabled: true
     secretName: queryapigate-tls
-  # ingress-nginx's: /events must reach the client unbuffered. Another controller: replace them with its own.
+  # ingress-nginx's: /events and /live must reach the client unbuffered. Another controller: replace them with its own.
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
 
-# Live events for many clients (`queryapigate events`), routed at /events through the ingress.
+# Live events for many clients (`queryapigate events`), routed at /events through the ingress - and live queries
+# at /live.
 events:
   enabled: false
   replicas: 1
