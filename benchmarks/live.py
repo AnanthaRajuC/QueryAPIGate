@@ -40,6 +40,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -257,22 +258,31 @@ def stop():
                 pass
 
 
+_keys = {}
+
+
 def seed():
-    """The connection, the saved query, the app's key and the CDC source - once per store (setup), kept in keys.json."""
-    path = OUT / 'keys.json'
-    if path.exists():
-        return json.loads(path.read_text())
-    api('POST', '/api/v1/connections', {'name': 'shop', 'db': 'postgres', 'host': pg_ip(), 'port': 5432,
-                                        'user': 'postgres', 'password': 'pw', 'database': 'shop'})
-    api('POST', '/api/v1/queries', {'name': 'item', 'description': 'One item', 'connection_name': 'shop',
-                                    'sql': 'SELECT id, name, price, stock FROM item WHERE id = :id',
-                                    'parameters': {'id': {'type': 'int'}}, 'publish': True})
-    key = api('POST', '/api/v1/api-keys', {'name': 'app', 'connections': [], 'queries': ['item']})['secret']
-    secret = api('POST', '/api/v1/cdc-sources', {'name': 'shop', 'connection': 'shop',
-                                                 'server_name': 'shop'})['secret']
-    keys = {'app': key, 'cdc': secret}
-    path.write_text(json.dumps(keys))
-    return keys
+    """The connection and the saved query (once per store), and the app's key and the CDC source's secret - made
+    afresh for each run of this harness and kept in memory only, never on disk. The servers must be running."""
+    if _keys:
+        return _keys
+    try:
+        api('GET', '/api/v1/connections/shop')
+    except urllib.error.HTTPError:
+        api('POST', '/api/v1/connections', {'name': 'shop', 'db': 'postgres', 'host': pg_ip(), 'port': 5432,
+                                            'user': 'postgres', 'password': 'pw', 'database': 'shop'})
+        api('POST', '/api/v1/queries', {'name': 'item', 'description': 'One item', 'connection_name': 'shop',
+                                        'sql': 'SELECT id, name, price, stock FROM item WHERE id = :id',
+                                        'parameters': {'id': {'type': 'int'}}, 'publish': True})
+    for path in ('/api/v1/api-keys/app', '/api/v1/cdc-sources/shop'):  # an earlier run's: their secrets are gone
+        try:
+            api('DELETE', path)
+        except urllib.error.HTTPError:
+            pass
+    _keys['app'] = api('POST', '/api/v1/api-keys', {'name': 'app', 'connections': [], 'queries': ['item']})['secret']
+    _keys['cdc'] = api('POST', '/api/v1/cdc-sources', {'name': 'shop', 'connection': 'shop',
+                                                       'server_name': 'shop'})['secret']
+    return _keys
 
 
 # ---------------------------------------------------------------- Debezium, as the harness plays it
@@ -424,7 +434,7 @@ def data_conn():
 def b_setup():
     """PostgreSQL 16, pinned: `shop` (10,000 items, and a table no stream reads) and the store `qagstore`."""
     sh('docker', 'rm', '-fv', PG)
-    (OUT / 'keys.json').unlink(missing_ok=True)
+    _keys.clear()  # a new store: an earlier store's key and source are gone with it
     started = sh('docker', 'run', '-d', '--name', PG, '--cpuset-cpus', args.db_cpus, '--shm-size=256m',
                  '-e', 'POSTGRES_PASSWORD=pw', PG_IMAGE, '-c', 'shared_buffers=1GB', '-c', 'max_connections=300')
     if started.returncode:
@@ -455,8 +465,8 @@ def b_teardown():
 def m1():
     """Re-run cost: the same storm against 100 groups, naming the table they read (re-runs) or one they don't (none),
     interleaved. What the re-runs cost is the difference."""
-    keys = seed()
     start()
+    keys = seed()
     conn = data_conn()
     with Subscribers(keys['app'], range(1, GROUPS + 1), 1):
         for r in range(rounds(5)):
@@ -478,8 +488,8 @@ def m1():
 
 def m2():
     """Delivery lag: 1,000 streams on 100 groups; one UPDATE changes all 100 rows, then the post says so."""
-    keys = seed()
     start()
+    keys = seed()
     conn = data_conn()
     cur = conn.cursor()
     poster = Poster(keys['cdc'])
@@ -528,8 +538,8 @@ def oha(url, key, c, seconds, method='GET', body=None, headers=None):
 
 def m3():
     """GET /q/ under the same storm, re-running 100 groups or none, interleaved: only the re-runs differ."""
-    keys = seed()
     start()
+    keys = seed()
     conn = data_conn()
     url = API + r'/q/item\?id=[1-9][0-9]{0,3}'
     with Subscribers(keys['app'], range(1, GROUPS + 1), 1):
@@ -551,8 +561,8 @@ def m3():
 
 def m4():
     """Ingest: batches of 200 change events, posted by oha 8 and 32 at once, with no stream open."""
-    keys = seed()
     start()
+    keys = seed()
     body = json.dumps([change('item', random.randint(1, ITEMS)) for _ in range(200)]).encode()
     path = OUT / 'batch.json'
     path.write_bytes(body)
@@ -582,8 +592,8 @@ def m4():
 def m5():
     """Re-run capacity: m1's storm, on 1,000 groups (items 1..1,000). Each may re-run once a second: whether one events
     server keeps up shows in re-runs a second against 1,000, and its CPU."""
-    keys = seed()
     start()
+    keys = seed()
     conn = data_conn()
     groups = 100 if args.smoke else 1000
     with Subscribers(keys['app'], range(1, groups + 1), 1):
