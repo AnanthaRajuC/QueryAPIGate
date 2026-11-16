@@ -86,6 +86,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `QUERYAPIGATE_CDC_SOURCES` still works, and its sources are listed read-only. Store schema 19 (a new table;
   additive).
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.50.1 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
+  rolling-upgrade and Helm checks now start from 0.50.1.
+
 ### Fixed
 
 - **Processes started together on a new SQLite store could exit with `database is locked`.** Each switches the new
