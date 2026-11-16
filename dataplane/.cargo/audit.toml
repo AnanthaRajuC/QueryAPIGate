@@ -1,0 +1,19 @@
+# cargo audit's settings for the data plane (CI's "No crate with a known vulnerability" step runs it here).
+#
+# Every ignore below is temporary: it says why it's safe for now, and when it comes out.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0459 (CVE-2026-119375, medium), published 2026-11-09: libsqlite3-sys 0.37 bundles SQLite 3.53.x,
+    # which can return uninitialized page-cache memory when it opens a database file whose sibling -wal file has a
+    # different page size. The patched libsqlite3-sys (0.39, SQLite 3.54) can't be used yet: sqlx 0.9.0, the newest
+    # release, requires < 0.38. sqlx's main branch allows 0.39 (launchbadge/sqlx#4502, 2026-11-08), not yet released.
+    #
+    # Why it's acceptable meanwhile: the attack needs a less trusted party to write the database file and its -wal.
+    # The data plane only opens SQLite files an administrator configured - the SQLite metadata store, and SQLite
+    # connections, which only a server-wide role may set up (0.50.0) - never a file a caller supplies.
+    #
+    # Remove this when sqlx publishes a release that allows libsqlite3-sys 0.39: bump sqlx, `cargo update -p
+    # libsqlite3-sys`, and check `cargo audit` passes without it.
+    "RUSTSEC-2026-0459",
+]

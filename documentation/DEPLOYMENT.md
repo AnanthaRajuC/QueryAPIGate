@@ -319,7 +319,8 @@ rolling upgrade.
 
 The main server's own `GET /events` holds a request thread per open stream, so it serves only a few (see
 [Live events](API.md#live-events-server-sent-events)). For apps and phones, add the asyncio events server as a
-second service from the same image, and route `/events` to it:
+second service from the same image, and route `/events` to it - and `/live/`, for
+[live queries](API.md#live-queries), with the `/w/<workspace>/` forms of both:
 
 ~~~yaml
 # docker-compose.yml - next to the queryapigate service
@@ -341,7 +342,8 @@ second service from the same image, and route `/events` to it:
 ~~~caddyfile
 # Caddyfile
 api.example.com {
-    reverse_proxy /events* events:5002
+    @events path /events* /live/* /w/*/events* /w/*/live/*
+    reverse_proxy @events events:5002
     reverse_proxy queryapigate:5000
 }
 ~~~

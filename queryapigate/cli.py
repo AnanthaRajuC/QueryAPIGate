@@ -801,7 +801,7 @@ def _rekey(args):
         print(f"Re-encrypted {found['rekeyed']} password(s) under the first key.")
     print(_describe_keys(found))
     for value in found['undecryptable']:
-        print(f"  no listed key decrypts {value['type']} '{value['name']}'")
+        print(f'  no listed key decrypts {rekey.describe(value)}')
     if found['undecryptable']:
         return 1
     if found['keys'] > 1 and not found['under_old_keys']:

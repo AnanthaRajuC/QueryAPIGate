@@ -210,6 +210,17 @@ def record(name, version, entry, sample=True, live=True):
         _writer().add(target, row)
 
 
+def record_event(columns, workspace):
+    """Queue one event that isn't a run - live.py's `table.changed` - for the event log only: no history row, never
+    sampled out. ``columns``: the event's row, as events.INSERT takes it."""
+    row = (None, None, columns[2], '{}', None, None, False, columns, workspace)
+    target = db.current_target()
+    if config.history_flush_interval() == 0:
+        write([row], target)
+    else:
+        _writer().add(target, row)
+
+
 def record_reported(runs):
     """Queue the saved-query runs a data plane reports (ADR 0028), each with its entry already JSON (``entry``, as
     json.dumps writes it): as record() queues each, sampled the same way, but in one go and without decoding or

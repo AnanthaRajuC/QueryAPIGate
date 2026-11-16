@@ -256,6 +256,15 @@ in this one process's memory by default, or shared across restarts/instances whe
 UI) - either way it is shared across every API key that can use the connection, since it stores nothing an
 authorized caller could not already see by running the query itself.
 
+**Kept fresh by live queries' signals** (experimental, with [live queries](#live-queries) on): a write through
+QueryAPIGate, or a change Debezium reports, makes every cached response that reads the changed tables a miss, so the
+next call runs the query again and caches the new result - a long `cache_ttl` stops meaning stale reads. A
+response whose tables can't be told (a `jdbc` or `h2` connection, a `{name}` text placeholder) is a miss after any
+change on its connection. With Redis, a change reported to any instance reaches every instance's next call; the
+in-process cache only hears of the changes its own process takes (its writes, and Debezium's posts to it), so with
+more than one process - several containers, or writes through `queryapigate mcp` - use Redis. A change made in the
+database that nothing reports - no Debezium, not through QueryAPIGate - is still only seen at the TTL.
+
 ## Parameter rules
 
 `query_parameters` maps each parameter name to its type, or to an object of rules:
@@ -1774,7 +1783,8 @@ format:
 | Delay | immediate | up to `QUERYAPIGATE_HISTORY_FLUSH_INTERVAL` (default 1 s), plus `QUERYAPIGATE_EVENTS_POLL_INTERVAL` on SQLite |
 
 **Each key gets its own view, not a shared firehose.** Either way, a real API key is required (unless the server
-runs with no keys at all). The admin key sees every event; any other key sees only the runs made with that same
+runs with no keys at all - then only a local client is answered, and any other gets `403 open_access_remote`, as on
+every route). The admin key sees every event; any other key sees only the runs made with that same
 key since it was created - its own personal activity feed. (A deleted key's name can be given to a new key; the old
 one's runs don't come with it.) A stream looks like this:
 
@@ -1844,7 +1854,8 @@ Put it behind the same reverse proxy as the main server, routing `/events` to it
   heavy traffic, a shorter window keeps the store small. Runs dropped under back-pressure (see
   [Run history](#run-history)) are lost to both.
 - **Limits.** A stream whose key is revoked, deactivated or expires is closed within about a minute (at most 75
-  seconds: the key is checked again every 60, at the stream's next write). A client that stops
+  seconds: the key is checked again every 60, at the stream's next write) - and so is an administrator's on
+  `/w/<workspace>/events` once they're no longer a member of that workspace. A client that stops
   reading is disconnected once 1,000 events are waiting for it - it reconnects with `Last-Event-ID` and catches up.
   Beyond `QUERYAPIGATE_EVENTS_MAX_CONNECTIONS` open streams, new ones get `503` with `Retry-After`;
   `QUERYAPIGATE_RATE_LIMIT` applies to connection attempts; `QUERYAPIGATE_CORS_ORIGINS` and
@@ -1864,6 +1875,168 @@ as long as it is open. So at most `QUERYAPIGATE_EVENTS_MAX_STREAMS` (default 4, 
 are held at once; beyond that it answers `503` with `Retry-After`, rather than leave no threads for requests
 (`0` turns it off). It only sees runs handled by its own process, and has no event ids or resume. A client that
 disconnects frees its slot at the next keepalive, within 15 seconds.
+
+## Live queries
+
+> **Experimental** - new in this release ([ADR 0033](adr/0033-live-queries.md)): the `/live` route, its `result`
+> events, the `table.changed` signal, the CDC sources API and the settings may change. Off unless
+> `QUERYAPIGATE_LIVE_QUERIES` is on. Tested with Debezium on PostgreSQL, MySQL, MariaDB, MongoDB and SQL Server
+> ([what experimental means](../CHANGELOG.md#versioning-and-compatibility)).
+
+Live events say that *a query ran*. A live query sends a saved query's **result**, and sends it again whenever the
+data behind it changes - including a change made straight in the database, not through QueryAPIGate. An app showing
+a price, a job's status or an order subscribes to the query it already calls, and its screen stays current without
+polling.
+
+```
+GET :5002/live/film_lookup?film_id=7
+X-API-Key: <the app's key>
+
+event: result
+data: {"query": "film_lookup", "params": {"film_id": "7"}, "rows": [{"film_id": 7, "title": "CRIMSON CITADEL",
+       "rating": "PG-13", "rental_rate": 0.99}], "truncated": false, "reason": "subscribe", "refreshed_at": "2026-11-11 05:34:39"}
+
+event: result
+data: {..., "rows": [{..., "rental_rate": 1.99}], "truncated": false, "reason": "change", "refreshed_at": "2026-11-11 05:34:43"}
+```
+
+- **Where:** `GET /live/<query>?<parameters>` on `queryapigate events` (and `/w/<workspace>/live/...`), with an
+  `X-API-Key` or a bearer token, as `/events`. `format`, `page`, `page_size`, `stream`, `version` and
+  `connection_name` aren't parameters here.
+- **What it sends:** first the current result, as `GET /q/<query>?format=json` returns it, with `reason`
+  `subscribe`. Then, each time a table the query reads changes, the query is run again and its result sent with
+  `reason` `change` - only if it differs from the last one sent. There are no ids and no `Last-Event-ID`: a live
+  query is a state, not a log, so a client that reconnects simply gets the current result first. One that falls
+  behind gets the newest result, not every one in between. `: keepalive` comes every 15 seconds when it's quiet.
+- **Who may subscribe:** exactly who may run the query. Every result is an ordinary run of the saved query as the
+  subscriber - their grants, `from_claim`, masking, `max_rows` and `query_timeout`, and their usage quota, which
+  counts every run. Each is in run history with transport `live`. A refusal is the status `GET /q/<query>` would
+  answer, before any stream opens (`401`, `403`, `404`, `400` for a missing parameter). A saved query that writes
+  is refused with `403 read_only`: re-running it would repeat the write. A stream re-checks its credential every
+  minute, as `/events` does.
+- **If a re-run fails:** `event: error` with the usual error body. A `401`, `403` or `404` also ends the stream; any
+  other error keeps it, and the next change tries again.
+- **How often:** one query with the same parameters, by the same caller, is one run however many streams share it.
+  For a signed-in user, the same caller also means the same token claims (`exp`, `iat` and the like aside), so two
+  tokens that bind different `from_claim` values never share a result.
+  It runs again at most once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` seconds (default 1), however many changes arrive:
+  a 1,000-row `UPDATE` is one new result per stream.
+- **Rate limits:** opening a stream, and each run of a group after a change, is a call against the caller's own
+  `rate_limit` (a key's, or a signed-in user's role's), counted with their `GET /q/` calls - across instances when
+  `QUERYAPIGATE_REDIS_URL` is set. Opening one over the limit answers `429 rate_limited` with `Retry-After`, before the
+  stream opens. A run over the limit is **postponed, not dropped**: no error event; the query runs once the limit
+  allows, with every change made meanwhile, and the stream gets that newest result. A run refused by `max_concurrent`
+  waits the same way, a second or `QUERYAPIGATE_LIVE_MIN_INTERVAL`, whichever is longer.
+
+**What tells it a table changed: signals.** A signal is a `table.changed` event in the event log - a connection and
+the tables that changed there, never row data:
+
+```json
+{"type": "table.changed", "source": "cdc:rental", "occurred_at": "2026-11-11 05:39:02", "connection_name": "rental",
+ "tables": ["public.film"]}
+```
+
+It names no key, so only the admin's `/events` shows it. Signals come from two places:
+
+1. **QueryAPIGate's own writes**, with nothing to set up: a successful write through a saved query, ad-hoc SQL or an
+   agent's approved write signals the tables the statement touches (`source` `write`).
+2. **Debezium Server**, for changes made anywhere else (`source` `cdc:<source>`). Debezium reads the database's
+   change log and posts each change to `POST /ingest/cdc/<source>` on the main server. QueryAPIGate keeps only the
+   names of the tables they touched, and answers `204` once that's stored, so Debezium moves on only then.
+
+A subscription listens for the tables its query reads, named as `allowed_tables` names them (`public.film`), and a
+MongoDB query for its collection (`rental.film`, the connection's database and the collection). When they can't be
+told - SQL on a `jdbc` or `h2` connection, or a `{name}` text placeholder - any signal on its connection re-runs it,
+and the result is still sent only if it changed.
+
+**Setting up Debezium: a CDC source.** Each Debezium Server is a CDC source: a name, the connection its changes
+belong to, and the secret it signs its posts with. Make one on the Console's *CDC sources* screen, or:
+
+```
+POST /api/v1/cdc-sources
+{"name": "rental", "connection": "rental", "server_name": "rental"}
+
+201
+{"name": "rental", "connection": "rental", "server_name": "rental", "ingest_path": "/ingest/cdc/rental",
+ "secret": "whsec_...", "managed_by": null, "last_received_at": null, "previous_expires_at": null, ...}
+```
+
+- **The secret is generated** - `whsec_` and 32 random bytes, never chosen by the caller - and shown **only in that
+  response**: give it to Debezium straight away. It is stored encrypted with `QUERYAPIGATE_SECRET_KEY` when that's
+  set, as connection passwords are.
+- **`server_name`**, optional, is Debezium's `topic.prefix`: a change from another server is refused.
+- **`ingest_path`** is where Debezium posts: `/ingest/cdc/<name>`, or `/w/<workspace>/ingest/cdc/<name>` for a
+  source in a workspace other than `default` (sources belong to a workspace, as connections do).
+- **`last_received_at`** is when a verified post last arrived, heartbeats included, to the minute: `null` means
+  Debezium has never reached it.
+- **Rotating the secret:** `POST /api/v1/cdc-sources/<name>/rotate` returns a new one, shown once. The old one keeps
+  working for `grace_minutes` (default 60, up to a week; `0` stops it at once, for a leaked one), so Debezium can be
+  restarted with the new secret any time in between. `DELETE .../previous` stops the old one early.
+- `GET`, `PATCH` (`connection`, `server_name`) and `DELETE` work as on the other resources, with `ETag` and
+  `If-Match`. Reading needs `connections.read`; changing needs `connections.write`. Each change is audited, never
+  with the secret. The API works with live queries off, so sources can be set up first.
+
+Sources can also come from the environment, as before, for a deployment configured only that way:
+`QUERYAPIGATE_CDC_SOURCES` is JSON, a secret setting (so `QUERYAPIGATE_CDC_SOURCES_FILE` works too), and its secrets
+are `whsec_` and at least 24 random bytes in base64. Its sources are listed in the API and the Console read-only
+(`"managed_by": "QUERYAPIGATE_CDC_SOURCES"`), keep `/ingest/cdc/<name>` whatever their `workspace`, and win over a
+stored source of the same name - so the API refuses to make one they would hide.
+
+```
+QUERYAPIGATE_LIVE_QUERIES=1
+QUERYAPIGATE_CDC_SOURCES={"rental": {"connection": "rental", "server_name": "rental", "secret": "whsec_..."}}
+```
+
+There, `workspace` names the source's workspace (`default` unless set). Debezium Server's side (PostgreSQL needs
+`wal_level=logical`):
+
+```properties
+debezium.source.connector.class=io.debezium.connector.postgresql.PostgresConnector
+debezium.source.plugin.name=pgoutput
+debezium.source.topic.prefix=rental
+debezium.source.table.include.list=public.film
+debezium.source.snapshot.mode=no_data
+debezium.sink.type=http
+debezium.sink.http.url=http://queryapigate:5000/ingest/cdc/rental
+debezium.sink.http.batch.enabled=true
+debezium.sink.http.authentication.type=standard-webhooks
+debezium.sink.http.authentication.webhook.secret=${WEBHOOK_SECRET}
+```
+
+The source lines differ for each database; the sink lines stay the same. What each one needs, as tested:
+
+| Database | `connector.class` (under `debezium.source.`) | The database needs | A signal names |
+|---|---|---|---|
+| PostgreSQL | `io.debezium.connector.postgresql.PostgresConnector`, `plugin.name=pgoutput` | `wal_level=logical` | `schema.table` (`public.film`) |
+| MySQL | `io.debezium.connector.mysql.MySqlConnector`, a unique `database.server.id` | the binary log in `ROW` format (MySQL 8's default) | `database.table` (`rental.film`) |
+| MariaDB | `io.debezium.connector.mariadb.MariaDbConnector`, a unique `database.server.id` | `--log-bin --binlog-format=ROW` | `database.table` |
+| MongoDB | `io.debezium.connector.mongodb.MongoDbConnector`, `mongodb.connection.string` | a replica set (a single member is enough) | `database.collection` |
+| SQL Server | `io.debezium.connector.sqlserver.SqlServerConnector`, `database.names` | CDC on the database and each table (`sys.sp_cdc_enable_db`, `sys.sp_cdc_enable_table`) and the SQL Server Agent running | `schema.table` (`dbo.film`); the query's `jdbc` connection listens for any of them |
+
+MySQL, MariaDB and SQL Server also need `schema.history.internal` (a file, for Debezium Server) to keep each table's
+columns. Debezium Server reads `${VAR}` in its properties from the environment, so the database password and
+`webhook.secret` needn't be written in the file.
+
+Each request is checked with the [Standard Webhooks](https://www.standardwebhooks.com/) signature Debezium sends,
+and a timestamp more than 5 minutes off is refused. No API key or token is accepted on this route, and a wrong
+signature answers the same `404 cdc_source_not_found` as an unknown source. A body that isn't a change event, or comes
+from another `server_name`, is `422 invalid_change`; a store that can't take the signal answers `503
+store_unavailable` and Debezium retries. Snapshot rows (`op: r`), tombstones and heartbeats signal nothing - prefer
+`snapshot.mode=no_data`. Keep `batch.enabled=true`: without it, a 1,000-row `UPDATE` is 1,000 requests.
+
+**Metrics.** `GET /metrics` on `queryapigate events` adds `queryapigate_live_subscriptions`, `queryapigate_live_groups`
+(distinct caller, query and parameters being kept fresh), and the counters `queryapigate_live_signals_total`,
+`_reruns_total`, `_pushed_total`, `_unchanged_total` and `_postponed_total` (runs held back by a caller's rate limit or
+`max_concurrent`, to run once it allows). Many unchanged re-runs for each push means many changes to
+a table touch rows nobody is watching.
+
+**The response cache.** Each signal also makes the [cached responses](#response-caching) of the tables it names a
+miss, for `GET /q/` callers too - so a query can keep a long `cache_ttl` and still never serve a result older than
+the last reported change.
+
+**Limits, for now:** re-runs count against quotas but not rate limits (the subscription itself does);
+`queryapigate events` runs the queries itself, so it needs the main server's database drivers and network access;
+and on a `jdbc` or `h2` connection a change to any table re-runs every live query on it.
 
 ## Alerts
 
@@ -2359,6 +2532,12 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `version_not_found` | 404 | No such version - or a draft, to a key that can't see drafts |
 | `not_published` | 404 | The query has no published version |
 | `connection_not_found` | 404 | No such connection |
+| `cdc_source_not_found` | 404 | `POST /ingest/cdc/<source>` (experimental): no such CDC source, or the request isn't signed with its secret - the two aren't told apart |
+| `cdc_source_exists` | 409 | `POST /api/v1/cdc-sources` (experimental): a CDC source has that name here, or `QUERYAPIGATE_CDC_SOURCES` has one it would hide |
+| `cdc_source_managed` | 409 | The CDC source comes from `QUERYAPIGATE_CDC_SOURCES`: change it there |
+| `cdc_source_rotation_pending` | 409 | The CDC source's secret from before its last rotation still works (`previous_expires_at`) - end it (`DELETE /api/v1/cdc-sources/{name}/previous`) or wait, then rotate again |
+| `invalid_change` | 422 | `POST /ingest/cdc/<source>` (experimental): the body isn't a Debezium change event, or it comes from another server than the source's `server_name` |
+| `store_unavailable` | 503 | `POST /ingest/cdc/<source>` (experimental): the change couldn't be stored; Debezium retries |
 | `key_not_found`, `role_not_found` | 404 | No such API key or role |
 | `key_rotation_pending` | 409 | The key's old secret from its last rotation still works (`previous_expires_at`) - end it (`DELETE /api/v1/api-keys/{name}/previous`) or wait, then rotate again |
 | `key_secret_taken` | 409 | A configuration file gives a key the `secret_sha256` another key already has - each key needs its own secret |

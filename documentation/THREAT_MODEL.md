@@ -737,8 +737,9 @@ and Vault's own answer. AWS (`${aws-sm:...}`, `aws-rds-iam`) stays experimental,
 which query, on which connection, by which key, how it went, and an ad-hoc run's SQL as history keeps it. So:
 
 - **Never public.** A real key or a signed-in user's token, in a header - never the URL, where it would reach access
-  logs - unless the server runs with no keys at all. A stream is checked again every minute, so a revoked key or an
-  expired token loses it within about a minute and a quarter.
+  logs - unless the server runs with no keys at all, when both servers answer local (loopback) clients only. A
+  stream is checked again every minute, as it was let in - in the workspace its path names - so a revoked key, an
+  expired token, or an administrator taken out of that workspace loses it within about a minute and a quarter.
 - **The admin key and data administrators see every run; anyone else only their own** - the runs made with that key,
   or by that user, since the key was created. Filters only narrow that, and their values are bound, never SQL.
   Key names can't hold the `:` of `jwt:<subject>`, and an administrator's name can't be a key's.

@@ -13,7 +13,7 @@ import unittest
 from datetime import datetime
 from unittest import mock
 
-from queryapigate import config, create_app, db, events, runstore
+from queryapigate import admins, apikeys, config, create_app, db, events, governance, runstore, workspaces
 from tests import TEST_DATABASE_URL, TEST_RUN_STORE_URL
 from tests.helpers import save_query, write_connections
 
@@ -61,15 +61,18 @@ class Stream:
         return False
 
     def closed(self, timeout=5.0):
-        self.sock.settimeout(timeout)
+        """Whether the server ends the stream within ``timeout`` seconds - keepalives or not."""
+        deadline = time.monotonic() + timeout
         try:
-            while self.file.readline():
-                pass
+            while time.monotonic() < deadline:
+                self.sock.settimeout(max(0.05, deadline - time.monotonic()))
+                if not self.file.readline():
+                    return True
         except (socket.timeout, TimeoutError):
             return False
         except ConnectionError:
-            pass
-        return True
+            return True
+        return False
 
     def close(self):
         self.file.close()
@@ -472,6 +475,66 @@ class LimitTests(EventServerTestCase):
         self.assertTrue(client.too_slow)
         self.assertEqual(client.queue.qsize(), 1)
         self.assertIsNone(client.queue.get_nowait())  # the pump's signal to close the stream
+
+
+class OpenAccessTests(EventServerTestCase):
+    """No credential configured anywhere: the unrestricted OPEN caller, which only a local client may be - as the main
+    server (app.gate()) and the MCP server answer. Any client that could reach this port used to be let in as it."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(apikeys, 'auth_required', return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_local_client_is_answered(self):
+        self.assertEqual(self.open().status, 200)
+
+    def test_a_remote_client_is_refused(self):
+        with mock.patch.object(governance, 'is_loopback', return_value=False):
+            refused = self.open()
+        self.assertEqual((refused.status, refused.body()['code']), (403, 'open_access_remote'))
+
+    def test_a_remote_client_a_trusted_proxy_names_is_refused(self):
+        with mock.patch.object(config, 'proxy_hops', return_value=1):
+            refused = self.open(**{'X-Forwarded-For': '203.0.113.9'})
+        self.assertEqual((refused.status, refused.body()['code']), (403, 'open_access_remote'))
+
+    def test_a_key_is_judged_as_ever_from_anywhere(self):
+        with mock.patch.object(governance, 'is_loopback', return_value=False):
+            self.assertEqual(self.open('admin').status, 200)
+
+
+class WorkspaceRecheckTests(EventServerTestCase):
+    """An open stream's caller is checked again as it was let in: in the workspace its path names. An administrator's
+    role is per workspace, and was re-checked as their `default` one - so one removed from a workspace kept its
+    stream there."""
+
+    def setUp(self):
+        super().setUp()
+        workspaces.create_workspace('team')
+        admins.create_admin('mia', None)  # no role server-wide: only what a membership gives
+        workspaces.set_member('team', 'mia', 'developer')
+        self.mia = admins.issue_token('mia')[1]
+
+    def test_an_administrator_removed_from_a_workspace_loses_their_stream_there(self):
+        with mock.patch.object(events, '_RECHECK_SECONDS', 0.2), mock.patch.object(events, '_HEARTBEAT_SECONDS', 0.1):
+            stream = Stream(self.server.port, path='/w/team/events', headers={'X-API-Key': self.mia})
+            self.addCleanup(stream.close)
+            self.assertEqual(stream.status, 200)
+            time.sleep(0.8)  # checked again a few times: still a member, so kept
+            self.assertEqual(len(self.server.clients), 1)
+            workspaces.remove_member('team', 'mia')
+            self.assertTrue(stream.closed(timeout=5))
+
+    def test_the_recheck_gives_the_role_of_the_workspace_named(self):
+        current = events._recheck((self.mia, ''), '127.0.0.1', 'team')
+        self.assertEqual((current.workspace, current.role), ('team', 'developer'))
+        workspaces.set_member('team', 'mia', 'auditor')
+        self.assertEqual(events._recheck((self.mia, ''), '127.0.0.1', 'team').role, 'auditor')
+        workspaces.remove_member('team', 'mia')
+        self.assertIsNone(events._recheck((self.mia, ''), '127.0.0.1', 'team'))
+        self.assertIsNotNone(events._recheck(('admin', ''), '127.0.0.1', 'team'))  # the shared key: an owner anywhere
 
 
 class CorsTests(EventServerTestCase):

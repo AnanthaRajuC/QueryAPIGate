@@ -49,6 +49,7 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 | `sso_logins` | A sign-in under way: its state and PKCE verifier | - | 10 minutes | - |
 | `write_requests` | An agent's write: its arguments, who asked, who approved or rejected it, the result | Caller, approver; the arguments may be personal | 30 days | `writes.approve` |
 | `destinations`, `exports` | Where exports go, with credentials encrypted or as references; each export's watermark - the last value of its incremental column it delivered | The watermark may be a value | Until deleted | `exports.read` (secrets masked) |
+| `cdc_sources` | Each Debezium Server that reports changes for live queries ([ADR 0033](adr/0033-live-queries.md)): its name, connection and `server_name`, its signing secret - encrypted with `QUERYAPIGATE_SECRET_KEY` when set - and the one before a rotation, and when a post last arrived | - | Until deleted; the old secret until its grace period ends or the next rotation | `connections.read` (never a secret) |
 | `instances` | Each running process: host name, process id, version | - | 1 day after it stops | `observe` |
 | `config_managed`, `config_applied` | What a configuration file manages, and each file applied, by its hash (ADR 0014) | - | Until deleted | `observe` |
 | `server_secrets` | Keys the server makes for itself - masking's `hash` key, unless `QUERYAPIGATE_MASK_KEY` is set | - | For the store's life | - |

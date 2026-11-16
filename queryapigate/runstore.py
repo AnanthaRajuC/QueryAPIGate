@@ -630,7 +630,9 @@ def write(rows, target=None):
             events_rows.append({'type': event[0], 'source': event[1], 'occurred_at': event[2], 'workspace': workspace,
                                 'query_name': name, 'version': version, 'key_name': event[3],
                                 'connection_name': event[4], 'status': event[6], 'in_history': keep, 'rows': count,
-                                'seconds': seconds, **columns, 'entry': entry_json, 'payload_json': ''})
+                                'seconds': seconds, **columns, 'entry': entry_json,
+                                # a run's payload is rebuilt from its columns; any other event's is kept as written
+                                'payload_json': '' if event[0] == 'query.run' else event[7]})
         _send('events', events_rows, target)
         _send('history', history_rows, target)
     except (RunStoreError, LeaseError, OSError, *db.Error):

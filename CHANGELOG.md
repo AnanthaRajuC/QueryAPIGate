@@ -21,8 +21,8 @@ is a minor release, called out under **Breaking** - never a patch.
 release still never breaks them), and every such change is noted here. Each is marked where you meet it - a
 callout in its documentation, `x-experimental: true` on its operations in `/openapi.json`, an "experimental" tag on
 its rows in the Console's Settings, and a warning in the log at startup while one is in use. Today: H2, JDBC and Trino
-connections, workspaces, secrets and credentials from AWS (`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), and the Rust data plane in front of /q/
-(`QUERYAPIGATE_DATAPLANE_SECRET`). The list is `queryapigate/experimental.py`.
+connections, workspaces, secrets and credentials from AWS (`${aws-sm:...}`, `aws-rds-iam`), semantic search (embed parameters), the Rust data plane in front of /q/
+(`QUERYAPIGATE_DATAPLANE_SECRET`), and live queries (`QUERYAPIGATE_LIVE_QUERIES`). The list is `queryapigate/experimental.py`.
 
 **Graduating.** A feature leaves that list - and comes under the promise - when it's tested for real in CI against
 what it works with; has had a security review, if it guards access or data; hasn't changed shape for a release, with
@@ -49,10 +49,91 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Added
+
+- **Live queries: a saved query's result, pushed again when the data behind it changes** (experimental, ADR 0033,
+  BACKLOG #60). `GET /live/<query>?<parameters>` on `queryapigate events` sends the query's current result as a
+  server-sent event, then its new result each time a table it reads changes - only when the result differs, at most
+  once per `QUERYAPIGATE_LIVE_MIN_INTERVAL` (default 1 s). Each result is an ordinary run as the subscriber, with their
+  grants, `from_claim`, masking and quota, so a key that may run a query may subscribe to it and nobody else can.
+  Opening a stream and each re-run count against the caller's `rate_limit`; a re-run over it is postponed until the
+  limit allows, never dropped (ADR 0033 §12). A change is signalled by a write through QueryAPIGate, or by **Debezium
+  Server** reading the database's change log and
+  posting to the new `POST /ingest/cdc/<source>`, signed with Standard Webhooks (`QUERYAPIGATE_CDC_SOURCES`, a secret
+  setting). A signal is a `table.changed` event in the event log: a connection and table names, never row data. Off
+  unless `QUERYAPIGATE_LIVE_QUERIES` is on. Tested end to end with Debezium Server 3.7.1 against PostgreSQL 16, MySQL
+  8.4, MariaDB 11.4, MongoDB 7.0 (a query listens on its collection) and SQL Server 2022 (through a `jdbc` connection,
+  where any change on the connection re-runs the query); `demo/live-queries` runs the PostgreSQL one in Docker.
+  [Guide 67](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/67-push-new-results-when-the-data-changes.md)
+  walks through it. Behind a proxy, route `/live/` to the events server as `/events` is: the Helm chart's ingress,
+  `deploy/kubernetes` and `deploy/scale-out`'s Caddyfile now do.
+- **The response cache, kept fresh by live queries' signals** (experimental, ADR 0033). With live queries on, a write
+  through QueryAPIGate or a change Debezium reports makes every cached response that reads the changed tables a miss,
+  so `GET /q/` callers too get the new result on their next call - a long `cache_ttl` no longer means stale reads. An
+  entry remembers the tables' generation counters from before its query ran, so a change during the query still
+  leaves that result out of date. With Redis (`QUERYAPIGATE_REDIS_URL`) the counters are shared: a change reported to
+  one instance reaches every instance. With live queries off a cache hit does exactly what it did; on, it costs about
+  4-5 µs more in-process (a hit is ~430 µs through the whole request path) and nothing measurable with Redis, whose
+  entry and counters are read in one round trip for what the entry alone costs.
+- **CDC sources, managed in the Console and through `/api/v1/cdc-sources`** (experimental, ADR 0033 §11). Each
+  Debezium Server that reports changes for live queries is now a workspace object: a name, its connection, an optional
+  `server_name`, and a signing secret that QueryAPIGate generates and shows once - stored encrypted with
+  `QUERYAPIGATE_SECRET_KEY` (and moved by `queryapigate rekey`), rotated with a grace period during which both secrets verify (`POST .../rotate`,
+  `DELETE .../previous`, as API keys'). A source outside `default` takes posts at `/w/<workspace>/ingest/cdc/<name>`.
+  `last_received_at` says when Debezium last reached it. The Console's *CDC sources* screen lists them with that
+  status and, on creating or rotating, gives the secret with the Debezium sink lines to paste. Reading needs
+  `connections.read`, changing `connections.write`; every change is audited, never with the secret.
+  `QUERYAPIGATE_CDC_SOURCES` still works, and its sources are listed read-only. Store schema 19 (a new table;
+  additive).
+
 ### Changed
 
 - **CI:** the upgrade fixtures from 0.50.1 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.50.1.
+
+### Fixed
+
+- **Processes started together on a new SQLite store could exit with `database is locked`.** Each switches the new
+  file to WAL mode, which takes a read lock and then needs the file to itself; with two at once SQLite sees a deadlock
+  and fails one immediately, without waiting its busy timeout. So `queryapigate serve` and `queryapigate events` (or
+  `queryapigate mcp`) started at the same moment on a fresh home could leave one of them stopped with `cannot open the
+  metadata database ...: database is locked` - one start in three in the new Debezium test. The switch is now tried
+  again for as long as the busy timeout (5 seconds) would wait. Only the first start on a new store was affected: a
+  file already in WAL mode needs no switch. PostgreSQL stores weren't.
+- **A data plane stopping could lose the runs of its last calls.** On SIGTERM it waited one report interval and then
+  for the reports already under way - but a batch begun just before (a call still being answered when the signal
+  came, say) only started its report at its own interval's end, after that wait, and was lost with the process: those
+  runs never reached run history. The data plane now cuts that batch when it stops and waits for its report.
+- **The first H2 or `jdbc` queries of a process, run at the same moment, could fail with `JVM is already started`.**
+  The driver checks whether the Java VM runs and then starts it, so two requests arriving together on a server that
+  hadn't used H2 or JDBC yet could both try to start it, and one answered `502`. The VM is now started once, under a
+  lock; queries after it run in parallel as before.
+
+### Security
+
+- **`queryapigate events` answered any client in open-access mode, as an unrestricted admin.** With no API key,
+  administrator or JWT configured, the main server and the MCP server answer local (loopback) clients only and refuse
+  others with `403 open_access_remote`; the events server never applied that rule. On any address but loopback (its
+  default), any client that reached its port could watch every run on `/events` - which query, by whom, an ad-hoc
+  run's SQL - and, with live queries on, run any saved query on `/live`. It now refuses them as the other servers
+  do: by the connection's peer, and by the client a trusted proxy names. A server with a key, administrators or JWT
+  configured wasn't affected. Since `queryapigate events` first shipped (0.12.0). **If you ran it on another address
+  without a key,** set `QUERYAPIGATE_API_KEY`.
+- **Workspaces (experimental): an administrator taken out of a workspace kept their open event streams there.** A
+  stream is checked again every minute, but the check judged an administrator's token as if in `default` - where an
+  administrator whose roles are all memberships has none, which still counts as signed in - so a stream on
+  `/w/<workspace>/events` stayed open after they were removed from that workspace. The check is now made as the
+  stream was let in, in the workspace its path names: the stream closes within about a minute and a quarter. Since
+  0.38.0, for administrators without a server-wide role.
+- **Workspaces (experimental): rotating the encryption key could swap connections between workspaces.**
+  `queryapigate rekey` (and `POST /api/v1/settings/rekey`), and the start that encrypts passwords saved before
+  `QUERYAPIGATE_SECRET_KEY` was set, wrote each re-encrypted connection or destination back by its name alone. Names
+  are unique only within a workspace, so every connection or destination of that name, in every workspace, took the
+  details of the last one written: its host, database, user and password. Callers in one workspace could then run
+  their queries against another workspace's database. Each is now written by its workspace and name. Since 0.38.0, and
+  only with two workspaces holding a connection or destination of the same name. **If that's you and you've run
+  `rekey`, or set `QUERYAPIGATE_SECRET_KEY` for the first time, since 0.38.0:** check those connections' and
+  destinations' details in each workspace. A value no key decrypts is now named with its workspace.
 
 ## [0.50.1] - 2026-11-09
 

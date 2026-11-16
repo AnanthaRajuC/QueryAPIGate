@@ -178,6 +178,20 @@ def build_spec(version, saved_queries=None, jwt=None):
                 'responses': {'200': {'description': 'text/event-stream of events',
                                       'content': {'text/event-stream': {'schema': {'type': 'string'}}}},
                              **_ERRORS}}},
+            '/ingest/cdc/{source}': {'post': {
+                'summary': "Debezium Server's changes, for live queries", 'tags': ['Saved queries'],
+                'description': "Debezium Server's HTTP sink posts its change events here - one, or a batch - signed "
+                    "with Standard Webhooks using the source's secret (/api/v1/cdc-sources, or "
+                    'QUERYAPIGATE_CDC_SOURCES); outside the `default` workspace, at '
+                    '/w/{workspace}/ingest/cdc/{source}. No API key or token is accepted; an unknown source and a '
+                    'bad signature both answer 404 `cdc_source_not_found`. The changes are reduced to the tables '
+                    'they touched and stored as one '
+                    '`table.changed` event, with no row data, before the 204; live queries reading those tables '
+                    'are re-run. Only with QUERYAPIGATE_LIVE_QUERIES on.',
+                'security': [],
+                'parameters': [{'name': 'source', 'in': 'path', 'required': True, 'schema': {'type': 'string'}}],
+                'requestBody': {'required': True, 'content': {'application/json': {'schema': {}}}},
+                'responses': {'204': {'description': 'Stored'}, **_ERRORS}}},
             '/connections/{name}/schema': {'get': {
                 'summary': "List a connection's tables/views and their columns", 'tags': ['Connections'],
                 'description': "'database' browses a different database on the same server than the "

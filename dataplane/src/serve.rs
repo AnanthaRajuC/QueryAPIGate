@@ -33,7 +33,7 @@ use hyper::header::{self, HeaderMap};
 use hyper::{Method, Request, Response};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json, json};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 use crate::auth::{self, Clock};
 use crate::db::{self, Dialect, Failure};
@@ -373,6 +373,9 @@ enum Queued {
     Run(Json),
     /// A 429 was noted (App::refused): the report it waits for is sent
     Refused,
+    /// Shutting down (App::drain): send the batch being gathered now, not at its interval's end, and answer once its
+    /// report holds an in_flight permit - so waiting for every permit afterwards waits for that report too
+    Flush(oneshot::Sender<()>),
 }
 
 // --------------------------------------------------------------------------------------
@@ -1240,11 +1243,22 @@ impl App {
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        // The batch being gathered is sent at its interval's end, then every report finishes
+        // Requests still being answered queue their runs meanwhile
         tokio::time::sleep_until(
             (tokio::time::Instant::now() + self.settings.flush_every).min(until),
         )
         .await;
+        // The batch being gathered is cut now and its report started - not left to its interval's end, which a
+        // batch begun just before shutdown hadn't reached: its report then started after the wait below, and was
+        // lost when the process exited
+        let (flushed, done) = oneshot::channel();
+        if tokio::time::timeout_at(until, self.runs.send(Queued::Flush(flushed)))
+            .await
+            .is_ok_and(|sent| sent.is_ok())
+        {
+            let _ = tokio::time::timeout_at(until, done).await;
+        }
+        // Then every report finishes
         let _ =
             tokio::time::timeout_at(until, self.in_flight.acquire_many(REPORTS_IN_FLIGHT as u32))
                 .await;
@@ -1267,15 +1281,22 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Queued>) {
             return;
         };
         let mut batch = Vec::new();
-        if let Queued::Run(run) = first {
-            batch.push(run);
+        let mut flushed = None;
+        match first {
+            Queued::Run(run) => batch.push(run),
+            Queued::Refused => {}
+            Queued::Flush(answer) => flushed = Some(answer),
         }
-        if !every.is_zero() {
+        if !every.is_zero() && flushed.is_none() {
             let deadline = tokio::time::Instant::now() + every;
             while batch.len() < most {
                 match tokio::time::timeout_at(deadline, queue.recv()).await {
                     Ok(Some(Queued::Run(run))) => batch.push(run),
                     Ok(Some(Queued::Refused)) => {}
+                    Ok(Some(Queued::Flush(answer))) => {
+                        flushed = Some(answer);
+                        break;
+                    }
                     Ok(None) | Err(_) => break,
                 }
             }
@@ -1296,11 +1317,17 @@ async fn report(app: Arc<App>, mut queue: mpsc::Receiver<Queued>) {
             })
             .collect();
         if batch.is_empty() && rate_limited.is_empty() {
+            if let Some(answer) = flushed {
+                let _ = answer.send(());
+            }
             continue;
         }
         let Ok(permit) = app.in_flight.clone().acquire_owned().await else {
             return;
         };
+        if let Some(answer) = flushed {
+            let _ = answer.send(()); // its report holds a permit now: drain()'s wait for every permit includes it
+        }
         let (app, count) = (app.clone(), batch.len());
         tokio::spawn(async move {
             // With a run store this process writes the runs itself; Python is told only to count them

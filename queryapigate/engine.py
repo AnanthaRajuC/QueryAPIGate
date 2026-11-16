@@ -145,6 +145,9 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
                         logged_sql(sql),
                        extra={'connection': connection_name, 'dialect': details['db'],
                               'duration_ms': round(elapsed * 1000, 1)})
+    if effective_allow_writes and config.live_queries():  # a write tells live queries what changed (live.py)
+        from . import live
+        live.note_write(sql, details, connection_name)
     has_more = len(rows) > limit
     result_rows = rows[:limit]
     metrics.observe_rows(connection_name, details['db'], key_name, len(result_rows))

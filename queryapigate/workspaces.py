@@ -1,8 +1,9 @@
 """Workspaces and their members (ADR 0023): delegated administration for teams on one server.
 
-A workspace owns connections, saved queries, API keys, roles, destinations and exports - each name unique within it
-(db.py, schema 17). `default` holds everything a server had before workspaces, and what is made without naming one;
-it can't be removed. A workspace is removed only once it owns nothing - deleting it never deletes a team's work.
+A workspace owns connections, saved queries, API keys, roles, destinations, exports and CDC sources - each name unique
+within it (db.py, schema 17). `default` holds everything a server had before workspaces, and what is made without
+naming one; it can't be removed. A workspace is removed only once it owns nothing - deleting it never deletes a team's
+work.
 
 A **membership** gives an administrator one of the four roles (adminroles.py) in one workspace, and nothing outside
 it. An administrator's own `role` (administrators.role) is their server-wide one; with none (NULL), memberships are
@@ -22,9 +23,9 @@ _NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$')
 _DESCRIPTION_MAX = 500
 # What a workspace owns, as the store keeps it: a workspace with a row in any of these isn't empty.
 OWNED = (('connections', 'connections'), ('saved_queries', 'queries'), ('api_keys', 'API keys'), ('roles', 'roles'),
-         ('destinations', 'destinations'), ('exports', 'exports'))
+         ('destinations', 'destinations'), ('exports', 'exports'), ('cdc_sources', 'CDC sources'))
 _ONE = {'connections': 'connection', 'queries': 'query', 'API keys': 'API key', 'roles': 'role',
-        'destinations': 'destination', 'exports': 'export'}
+        'destinations': 'destination', 'exports': 'export', 'CDC sources': 'CDC source'}
 
 
 def _not_found(name):
