@@ -159,6 +159,8 @@ affecting the rows being watched. That ratio is what section 8's key-level match
    - delivery lag (commit to push) with 1,000 subscriptions across 100 groups;
    - that `/q/` latency doesn't move while re-runs happen;
    - ingest throughput with batches of 200.
+
+   *Measured (2026-11-16), see section 14.*
 3. **Counted against rate limits.** In the prototype, only quotas count re-runs. A re-run refused by the key's rate
    limit should be postponed, not dropped. *Built (2026-11-12), see section 12.*
 4. **The response cache invalidated by signals**, for `GET /q/` callers too. That is the performance win this
@@ -426,6 +428,28 @@ sources and their API (section 11), and `/live` on the events server - the group
   loses its stream within about 75 seconds; a new subscriber joining a group in that window gets the group's last
   result, computed with grants at most that old - the same bound as an open `/events` stream.
 - **Signals carry table names only**, and only the administrator's `/events` stream shows them.
+
+### 14. Measured under load (2026-11-16)
+
+Section 7's second item, with `benchmarks/live.py` on the benchmark laptop (AC power, the `performance` profile;
+gunicorn, the events server, PostgreSQL 16 and the load each on their own cores). The harness plays Debezium - each
+change posted, signed, as its write commits - so the lags are QueryAPIGate's share; Debezium's own is section 9's
+0.5-1.7 s. The full write-up, with every cell:
+[benchmarks/results/live-2026-11-16](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/benchmarks/results/live-2026-11-16/README.md).
+
+| Section 7 asked | Measured |
+|---|---|
+| Re-run cost per group under a write storm | 0.75 ms of the events server's CPU and 0.12 ms of PostgreSQL's a re-run, none of the gateway's. 200 writes and 20 posts a second against 100 groups became 97 re-runs a second: the interval bounds it |
+| Delivery lag, 1,000 subscriptions across 100 groups | Commit to arrival p50 51 ms, p99 86 ms (median of 20 rounds), every stream every round |
+| `/q/` latency while re-runs happen | Unchanged: p50 8.19 vs 8.24 ms, p99 13.24 vs 13.24 ms, throughput +15 ± 62 req/s, re-running 100 groups a second vs none |
+| Ingest throughput, batches of 200 | 1,200-1,470 posts (240,000-290,000 changes) a second on two gunicorn workers, CPU-bound at 1.55-1.9 ms a post |
+
+And one it didn't ask: **1,000 groups** on one events server each re-ran as often as the interval allows (959 re-runs
+a second), at 0.75 of a core. The events server is one Python process, so about 1,300 re-runs a second - groups
+changing every second - is one server's ceiling; past it, more events servers share the store and the subscribers.
+
+Nothing here argues for a change before graduating. What would cut the cost further is section 8's key-level
+matching: in the storm, 14% of re-runs found the result unchanged.
 
 ## Alternatives considered
 
