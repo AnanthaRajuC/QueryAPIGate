@@ -49,6 +49,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Changed
+
+- **CI:** the upgrade fixtures from 0.51.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
+  rolling-upgrade and Helm checks now start from 0.51.0.
+
 ## [0.51.0] - 2026-11-17
 
 Live queries, experimental: a saved query's result pushed to an app again when the data behind it changes - changed
