@@ -1,7 +1,8 @@
 # ADR 0033: Live queries - a saved query's result, pushed again when the data behind it changes
 
-- **Status:** Accepted (2026-11-11). Ships experimental, behind `QUERYAPIGATE_LIVE_QUERIES` (off by default), tested
-  against a real Debezium Server 3.7.1 and PostgreSQL 16 (section 9). Section 7 lists what remains before it graduates.
+- **Status:** Accepted (2026-11-11). Shipped in 0.51.0 (2026-11-17), experimental, behind `QUERYAPIGATE_LIVE_QUERIES`
+  (off by default). Everything section 7 asks before graduating is done (sections 9-14); it ships experimental for a
+  release first, by choice (2026-11-16), and graduates in a later one.
 - **Date:** 2026-11-11
 - **Backlog:** #60 (change data capture via Debezium). Builds on [ADR 0020](0020-the-event-log.md) (the event log).
   Additive after 1.0: a new event type, a new events-server route and a new ingest route, all experimental (#64).

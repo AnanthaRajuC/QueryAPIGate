@@ -49,6 +49,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-17
+
+Live queries, experimental: a saved query's result pushed to an app again when the data behind it changes - changed
+through QueryAPIGate or straight in the database, which Debezium Server reports - and the response cache kept fresh by
+the same signals
+([guide 67](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/67-push-new-results-when-the-data-changes.md)).
+Off unless `QUERYAPIGATE_LIVE_QUERIES` is on. Three security fixes, none of them in a default setup:
+**if you run `queryapigate events` on an address other than loopback without an API key,** upgrade, or set
+`QUERYAPIGATE_API_KEY` - any client could watch every run, as an administrator. **If you use workspaces**, an
+administrator removed from one now loses their open event streams there; and **if two workspaces have a connection or
+destination of the same name and you've run `rekey`, or set `QUERYAPIGATE_SECRET_KEY` for the first time, since
+0.38.0,** check those connections' details in each workspace (see *Security*).
+
 ### Added
 
 - **Live queries: a saved query's result, pushed again when the data behind it changes** (experimental, ADR 0033,
@@ -88,6 +101,8 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Changed
 
+- **The image:** the data plane is built with Rust 1.99.0 (from 1.98.1), on an updated `debian:trixie-slim`, and
+  Python is installed by `uv` 0.13.8 - still Python 3.13.18. The data plane's `redis` client is 1.8.1.
 - **CI:** the upgrade fixtures from 0.50.1 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.50.1.
 
@@ -3485,7 +3500,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.1...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.51.0...HEAD
+[0.51.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.1...v0.51.0
 [0.50.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.0...v0.50.1
 [0.50.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.48.0...v0.49.0

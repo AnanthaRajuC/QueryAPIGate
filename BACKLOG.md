@@ -163,9 +163,14 @@ documentation. #99 workspaces only if asked for.
     image and a lakehouse example (#76); and a workspace's owner no longer opens files on the server through a
     connection. (0.50.0, 2026-11-06.) 0.50.1 (2026-11-09) reads files over TLS again with DuckDB 2.0 - `https://`
     files and real S3, GCS and R2 buckets.
-39. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+39. **0.51: Live queries** (experimental, [ADR 0033](documentation/adr/0033-live-queries.md), #60) - a saved query's
+    result pushed again when its data changes, signalled by QueryAPIGate's own writes or by Debezium Server; the
+    response cache kept fresh by the same signals; CDC sources in the Console and the API. Everything ADR 0033 §7 asked
+    before graduating is done - security review, rate limits, Debezium in CI, a guide, measured under load - and they
+    ship experimental for a release first. (0.51.0, 2026-11-17.)
+40. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-40. **1.0.0.**
+41. **1.0.0.**
 
 ## 1. Per-key API permissions
 
@@ -2006,8 +2011,8 @@ left out of #30 for being much bigger than its scope, and stays a separate item.
 
 ## 60. Change data capture via Debezium: governed row-change events
 
-**Status: built, experimental** ([ADR 0033](documentation/adr/0033-live-queries.md), accepted 2026-11-11; graduation
-terms in its section 7). The design changed from streaming row changes to **live queries**: a client subscribes to a
+**Status: shipped (0.51.0, 2026-11-17), experimental** ([ADR 0033](documentation/adr/0033-live-queries.md), accepted
+2026-11-11; its section 7's graduation terms are all met - it ships experimental for a release first, by choice). The design changed from streaming row changes to **live queries**: a client subscribes to a
 saved query, and Debezium (or QueryAPIGate's own writes) only signals which tables changed, so the query is re-run
 as the subscriber and the new result pushed. No new access rules, no row data stored. What follows is the original
 item.
