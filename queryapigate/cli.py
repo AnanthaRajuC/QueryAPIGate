@@ -48,11 +48,18 @@ def _serve(args):
             'Listening on %s without QUERYAPIGATE_API_KEY set: in open-access mode the server answers only local '
             'clients, so callers on other hosts are refused. Set QUERYAPIGATE_API_KEY to serve them.', args.host)
     logging.getLogger('queryapigate').info('Using %s (metadata: %s)', config.home(), db.describe())
-    # SIGTERM - what a container runtime or `kill` sends - as a clean exit, so what runs at exit does: Vault leases
-    # revoked (ADR 0015), the audit stream's lease given back. Python's default ends the process without it.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    _exit_cleanly_on_sigterm()
     app.run(host=args.host, port=args.port, debug=args.debug, request_handler=_handler())
     return 0
+
+
+def _exit_cleanly_on_sigterm():
+    """SIGTERM - what a container runtime, systemd or `kill` sends - as a clean exit, so what runs at exit does: run
+    history still queued is written (history.py), tracing's last spans are exported, Vault leases are revoked (ADR
+    0015), the audit stream's and run store's leases are given back. Python's default ends the process without any
+    of it. `queryapigate mcp` needs it too: uvicorn shuts down gracefully on SIGTERM and then raises the signal again,
+    with this handler back in place of its own - without it, that ended the process there and then."""
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 
 def _mcp(args):
@@ -82,6 +89,7 @@ def _mcp(args):
                  config.mcp_resource_url(), config.mcp_scope())
         if oidc.jwks_uri(config.mcp_auth_server()) is None:
             log.warning('The MCP server will refuse every access token until that metadata can be fetched')
+    _exit_cleanly_on_sigterm()
     run(app, host=args.host, port=args.port)
     return 0
 

@@ -54,6 +54,19 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **CI:** the upgrade fixtures from 0.51.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.51.0.
 
+### Fixed
+
+- **`queryapigate mcp` and `queryapigate events` lost their last runs when stopped with SIGTERM** - how Docker,
+  Kubernetes and systemd stop a process. Run history is written in batches (every second by default), and the last
+  batch is written as the process exits; but both ended by the signal itself, skipping that. So the agent calls an
+  MCP server had just answered, or a live query's last re-runs, never reached run history, the Agents screen or the
+  usage counts. Everything else that runs at exit was skipped with it: tracing's last spans, revoking the process's
+  Vault leases (ADR 0015), giving back the audit stream's and the run store writer's leases. `queryapigate mcp` shut
+  down gracefully, then uvicorn raised the signal again with Python's default action in place; `queryapigate events`
+  had no handler at all. Both now exit cleanly, with code 0, as `queryapigate serve` and the image's gunicorn already
+  did: `mcp` once uvicorn has finished, `events` once it has ended every open stream. Since each was added
+  (`mcp` in 0.11.0, `events` in 0.12.0).
+
 ## [0.51.0] - 2026-11-17
 
 Live queries, experimental: a saved query's result pushed to an app again when the data behind it changes - changed

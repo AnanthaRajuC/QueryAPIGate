@@ -38,6 +38,7 @@ order.
 import asyncio
 import json
 import logging
+import signal
 import time
 import urllib.parse
 from collections import deque
@@ -874,8 +875,16 @@ def run(host='127.0.0.1', port=None):
     async def main():
         server = EventServer(host, port)
         await server.start()
+        # SIGTERM - what a container runtime, systemd or `kill` sends - stops it as Ctrl-C does: every stream ended,
+        # then a normal exit, so what runs at exit does - live queries' runs still queued are written to history,
+        # tracing's last spans exported, leases given back. Python's default ends the process without any of it.
+        stopping = asyncio.Event()
         try:
-            await asyncio.Event().wait()
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopping.set)
+        except NotImplementedError:  # Windows' event loop has no signal handlers
+            pass
+        try:
+            await stopping.wait()
         finally:
             await server.stop()
     try:
