@@ -5,8 +5,8 @@ import json
 import os
 
 from queryapigate import admins
-from tests.test_workspace_config_cli import FILE
 from tests.test_api_v1 import ADMIN
+from tests.test_workspace_config_cli import FILE
 from tests.test_workspace_isolation import B, IsolationTestCase
 
 
