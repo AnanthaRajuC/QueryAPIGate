@@ -326,6 +326,11 @@ This is the part worth being the most precise about, because it's also the part 
 - **A connection can't be pointed at the server's own metadata store** (`store_not_allowed`): neither a
   SQLite/DuckDB/H2 `database` of `queryapigate.db` nor a DuckDB `allowed_paths` folder containing it - which would
   otherwise hand an administrator the key and token hashes. A PostgreSQL store is kept apart by its own credentials.
+  Nor can a single call: the `database` a query or schema browse may name (Run SQL's database picker, MCP's
+  argument) switches only a server database's - PostgreSQL, MySQL, ClickHouse, Trino, MongoDB - and is refused on
+  every file-backed type, where it would be a path past these checks (`engine.with_database()`). Before the 2026-11-20
+  review of the workspace boundary it wasn't: any role that runs ad-hoc SQL could read the store through a SQLite
+  connection, and with writes on make itself an owner.
 - **A `${VAR}` reference can't name one of the server's own `QUERYAPIGATE_*` settings** in a connection or
   destination - otherwise an administrator could carry the admin key or secret key out in a password sent to a host
   of theirs. **Nor a credential the server itself may run with** - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,

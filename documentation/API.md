@@ -380,7 +380,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/queries/film_by_id/publish -H 'X-API-K
 | `GET /api/v1/connections/deleted` | Deleted connections, newest first, with who deleted them, when and why. |
 | `POST /api/v1/connections/test` | Try to connect with the given fields (an unsaved form), or a saved connection's own by `name`. Nothing is saved. A connection that can't be reached is a 502 `connection_failed` with the driver's message in `detail` (any password in it is redacted). |
 | `POST /api/v1/connections/databases` | The databases on that server, for the same two kinds of body. |
-| `GET /api/v1/connections/{name}/schema` | Its tables and columns, with their [descriptions](#descriptions); `?database=` reads another database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, MongoDB). |
+| `GET /api/v1/connections/{name}/schema` | Its tables and columns, with their [descriptions](#descriptions); `?database=` reads another database on the same server, for the types that have more than one (MySQL, PostgreSQL, ClickHouse, Trino, MongoDB); on any other it is `400 unsupported_operation`. |
 | `GET /api/v1/connections/{name}/descriptions` | What its tables and columns mean, and its notes - see [Descriptions](#descriptions). |
 | `PATCH /api/v1/connections/{name}/descriptions` | Set or remove some: `{"items": [{"table", "column", "description"}]}`. |
 | `POST /api/v1/connections/{name}/descriptions/import` | Its database's own table and column comments, as descriptions. |

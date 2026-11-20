@@ -43,6 +43,21 @@ def _sql_connection(connection_name):
     return details
 
 
+def with_database(details, database):
+    """`details` pointed at another `database` on the same server - Run SQL's database picker, `?database=` on the
+    schema routes, MCP's `database` argument - or `details` unchanged without one. Only a server database
+    (store.SERVER_DB_TYPES) switches: on SQLite, DuckDB, H2 and JDBC the `database` is a path or URL on this server,
+    and an override would open whatever file the caller names - this server's own store (and with writes on, an
+    owner's token), another workspace's database - past the checks the saved connection passed
+    (store.refuse_store_access(), services.connections.refuse_local_files())."""
+    if not database:
+        return details
+    if details.get('db') not in store.SERVER_DB_TYPES:
+        raise ApiError(f"Switching databases isn't supported for '{details.get('db')}' connections",
+                       code='unsupported_operation')
+    return {**details, 'database': database}
+
+
 def _table_defaults(details):
     """The (catalog, schema) that fill a reference's or grant's missing parts for qualified `allowed_tables` matching
     (tableguard.py): what an unqualified table name resolves to on this connection. Trino's catalog is the
@@ -99,9 +114,7 @@ def execute_sql(sql, connection_name, limit, offset, params=None, timeout=None, 
     schema.fetch_schema()); a stored, scoped API key can never send this itself (there is no request field
     for it), only the admin UI's own ad-hoc calls do.
     """
-    details = _sql_connection(connection_name)
-    if database:
-        details = {**details, 'database': database}
+    details = with_database(_sql_connection(connection_name), database)
     effective_allow_writes = config.allow_writes() and allow_writes
     default_catalog, default_schema = _table_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=effective_allow_writes,

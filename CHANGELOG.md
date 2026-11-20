@@ -67,6 +67,20 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   did: `mcp` once uvicorn has finished, `events` once it has ended every open stream. Since each was added
   (`mcp` in 0.11.0, `events` in 0.12.0).
 
+### Security
+
+- **Naming a `database` on a SQLite, DuckDB, H2 or JDBC connection opened any file the server could read - the store
+  included.** Run SQL's database picker sends a `database` with the query (also `?database=` on the schema routes,
+  and MCP's `execute_sql` argument) to browse another database on the same server. On a file-backed connection that
+  `database` is a path, and the override was applied after the checks that keep a connection off this server's own
+  store and other workspaces' files. So any role that runs ad-hoc SQL - `developer` included, and a workspace
+  member's role - could read `queryapigate.db` through any SQLite connection it can use (the bundled examples' among
+  them): every workspace's connections, key and token hashes, and connection passwords where no
+  `QUERYAPIGATE_SECRET_KEY` encrypts them. With `QUERYAPIGATE_ALLOW_WRITES` on, it could change its own role to
+  `owner`. Switching databases now works only on server databases (PostgreSQL, MySQL, ClickHouse, Trino, MongoDB),
+  where the picker is offered; anywhere else it is `400 unsupported_operation`, for every caller. Found in a review of
+  the workspace boundary. Since 0.17.0, when the store guard was added and missed this path.
+
 ## [0.51.0] - 2026-11-17
 
 Live queries, experimental: a saved query's result pushed to an app again when the data behind it changes - changed
