@@ -50,7 +50,8 @@ only to specific queries or collections never sees these two, the same way it ca
 endpoints either):
 
 - **`list_tables`** - `{"connection_name": "...", "database": "..."}` (`database` is admin-key only, same
-  as REST). Returns the same shape `GET /connections/<name>/schema` does: each table/view (or Mongo
+  as REST, and only on a server database - PostgreSQL, MySQL, ClickHouse, Trino, MongoDB; on a file-backed one it is
+  `unsupported_operation`). Returns the same shape `GET /connections/<name>/schema` does: each table/view (or Mongo
   collection) with its columns, types, nullability, and primary/foreign keys where the dialect supports it.
 - **`describe_table`** - `{"connection_name": "...", "table": "...", "database": "..."}`. One table's columns,
   types and primary/foreign keys - the same, masking-aware, so a masked or dropped column is flagged rather than

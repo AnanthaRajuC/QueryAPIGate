@@ -200,8 +200,7 @@ def _fetch_schema(connection_name, database):
     details = store.get_connection(connection_name)
     dialect = details['db']
     if dialect == 'mongo':
-        if database:
-            details = {**details, 'database': database}
+        details = engine.with_database(details, database)
         return {'tables': [{'name': name, 'type': 'collection', 'columns': []}
                            for name in engine.list_collections(details)], 'truncated': False}
     if dialect not in _QUERIES:

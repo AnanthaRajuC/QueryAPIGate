@@ -506,13 +506,26 @@ class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
     def test_admin_can_run_against_a_different_database_on_the_same_connection(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
         self.client = create_app().test_client()
+        admin = {'X-API-Key': 'admin-key'}  # ApiTestCase's `pg` is a PostgreSQL connection to database `d`
+        recorder = mock.MagicMock(return_value=(['x'], [(1,)]))
+        with mock.patch.dict(engine.RUNNERS, {'postgres': recorder}):
+            res = self.client.post('/execute_sql', json={
+                'sql': 'SELECT 1', 'connection_name': 'pg', 'database': 'reports'}, headers=admin)
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(recorder.call_args.args[0]['database'], 'reports')
+
+    def test_but_a_file_backed_connection_never_switches(self):
+        # On SQLite (DuckDB, H2, JDBC) the `database` is a path: it would open any file past the checks the saved
+        # connection passed - the store itself (store.refuse_store_access()). Not even the admin key.
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
         recorder = mock.MagicMock(return_value=(['x'], [(1,)]))
         with mock.patch.dict(engine.RUNNERS, {'sqlite': recorder}):
             res = self.client.post('/execute_sql', json={
                 'sql': 'SELECT 1', 'connection_name': 'lite', 'database': 'other.db'},
                 headers={'X-API-Key': 'admin-key'})
-        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
-        self.assertEqual(recorder.call_args.args[0]['database'], 'other.db')
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'unsupported_operation'))
+        recorder.assert_not_called()
 
     def test_a_scoped_key_cannot_choose_a_different_database(self):
         os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
