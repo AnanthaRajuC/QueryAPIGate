@@ -442,6 +442,52 @@ def check_fields(fields):
         check_credentials(fields['credentials'], fields)
 
 
+def holds_secrets(fields):
+    """Whether `fields` reach a secret through the server's own identity: a reference in a value - ${VAR}, a file,
+    Vault, AWS - or `credentials` (a Vault or RDS IAM lease)."""
+    return isinstance(fields, dict) and ('credentials' in fields or any(
+        isinstance(value, str) and REF_RE.search(value) for value in fields.values()))
+
+
+_NOT_ROUTING = ('active', 'created_at', 'updated_at', 'example')  # fields whose change sends nothing anywhere new
+
+
+def _unchanged(after, before, probe):
+    """Whether `after` sends the secret only where `before` does. A probe (the form's Test button) is judged on the
+    fields it sends - the form leaves out what it doesn't edit - and a save on every field, since one taken away
+    changes where it goes too (no `host` is localhost)."""
+    for key in (set(after) if probe else set(after) | set(before)) - set(_NOT_ROUTING):
+        if after.get(key) != before.get(key):
+            return False
+    return True
+
+
+def refuse_member_references(after, before=None, capability='connections.write', probe=False):
+    """Saving, testing or changing a connection or destination that reaches a secret through the server's identity
+    takes a server-wide role (ADR 0023). The allow-lists (QUERYAPIGATE_SECRET_ENV_VARS, QUERYAPIGATE_SECRET_FILE_DIRS,
+    Vault's and AWS's prefixes) are the server's, one for every workspace: a role from a workspace membership naming
+    one - or repointing a connection that holds one at a host of theirs - would have the server send them another
+    team's secret as a password. A member still runs these, switches them on and off, and replaces a reference with a
+    password of their own; outside a request - the CLI, startup - it is the server's own doing."""
+    if before is not None and after.get('password') == config.PASSWORD_MASK:
+        after = {**after, 'password': before.get('password')}  # the mask keeps the stored password - and its secret
+    if not holds_secrets(after):
+        return
+    from flask import g, has_request_context
+    if not has_request_context():
+        return
+    permission = getattr(g, 'permission', None)
+    if permission is None or getattr(permission, 'server_wide', True):
+        return
+    if before is not None and _unchanged(after, before, probe):
+        return
+    raise ApiError('A connection or destination that reaches a secret through the server - a ${VAR}, ${file:...}, '
+                   "Vault or AWS reference, or `credentials` - is set up and changed by a server-wide role: the "
+                   'allow-lists are the whole server\'s, so a role in a workspace could otherwise send another '
+                   "team's secret to a host of its own. Type the password itself, or ask a server administrator",
+                   403, code='role_forbidden', capability=capability, role=getattr(permission, 'role', None))
+
+
 # --------------------------------------------------------------------------------------
 # Resolving it when a connection is opened
 # --------------------------------------------------------------------------------------

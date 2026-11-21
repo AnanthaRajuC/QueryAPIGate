@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-from . import config, db, duckfiles, scope, store
+from . import config, db, duckfiles, scope, secretrefs, store
 from .errors import ApiError
 
 FIELDS = ('url', 'storage', 'region', 'endpoint', 'url_style', 'use_ssl', 'account_id', 'user', 'password')
@@ -157,6 +157,7 @@ def _write(conn, name, fields, created_at, timestamp):
 def create(name, fields):
     _check_name(name)
     fields = validate(fields)
+    secretrefs.refuse_member_references(fields, capability='destinations.write')
     if 'password' in fields:
         fields['password'] = store._encrypt_password(fields['password'])
     with db.transaction() as conn:
@@ -186,6 +187,8 @@ def update(name, changes):
             fields.pop('storage', None)  # re-derived from the new url's scheme
         fields = {**validate({k: v for k, v in fields.items() if k != 'password'}),
                   **({'password': fields['password']} if 'password' in fields else {})}
+        secretrefs.refuse_member_references(fields, {k: current[k] for k in FIELDS if k in current},
+                                            capability='destinations.write')
         _write(conn, name, fields, current['created_at'], store.now())
     return get(name)
 

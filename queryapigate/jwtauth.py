@@ -137,12 +137,13 @@ def _role_for(claims, mcp=False):
     return None, None
 
 
-def _token_workspace(claims):
-    """The workspace a signed-in user acts in (ADR 0023 §4): the QUERYAPIGATE_JWT_WORKSPACE_CLAIM claim's value, or
-    the default workspace when that is unset or the claim is missing. It comes from the token, never the request path,
-    so a federated user can't reach another team's workspace by changing the `/w/<workspace>/` prefix - a workspace
-    they don't belong to is a 404 in settle_workspace(), as it is for an API key."""
-    claim_name = config.jwt_workspace_claim()
+def _token_workspace(claims, mcp=False):
+    """The workspace a signed-in user acts in (ADR 0023 §4): the QUERYAPIGATE_JWT_WORKSPACE_CLAIM claim's value - on
+    the MCP server, QUERYAPIGATE_MCP_WORKSPACE_CLAIM's, else that one - or the default workspace when it is unset or
+    the claim is missing. It comes from the token, never the request path, so a federated user can't reach another
+    team's workspace by changing the `/w/<workspace>/` prefix - a workspace they don't belong to is a 404 in
+    settle_workspace(), as it is for an API key."""
+    claim_name = config.mcp_workspace_claim() if mcp else config.jwt_workspace_claim()
     if not claim_name:
         return DEFAULT_WORKSPACE
     value = claim(claims, claim_name)
@@ -239,14 +240,16 @@ def authenticate_mcp(authorization, client_ip=None):
     user = claims.get('sub')
     if not isinstance(user, str) or user == '':
         return None, McpRefusal(401, 'unauthorized', 'Unauthorized: the access token names no user (sub)')
-    role_name, role = _role_for(claims, mcp=True)
+    workspace = _token_workspace(claims, mcp=True)
+    with scope.using(workspace):  # the role is this user's workspace's - the MCP server has no path to name one
+        role_name, role = _role_for(claims, mcp=True)
     if role is None:
-        log.warning('A valid MCP access token for %s names no existing role - refused (QUERYAPIGATE_MCP_ROLE / '
-                    'QUERYAPIGATE_MCP_ROLE_CLAIM)', user)
+        log.warning('A valid MCP access token for %s names no existing role in workspace %r - refused '
+                    '(QUERYAPIGATE_MCP_ROLE / QUERYAPIGATE_MCP_ROLE_CLAIM)', user, workspace)
         return None, McpRefusal(403, 'forbidden', 'This access token is valid, but its user has no role here')
     if not apikeys.ip_allowed(role, client_ip):
         return None, McpRefusal(403, 'forbidden', "This role isn't allowed from this address")
-    return apikeys.permission_from_grants(mcp_caller_name(user), role, claims=claims), None
+    return apikeys.permission_from_grants(mcp_caller_name(user), role, claims=claims, workspace=workspace), None
 
 
 def mcp_caller_name(user):

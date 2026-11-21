@@ -214,7 +214,10 @@ not between a hosted service's tenants. What it holds against, and how:
   request path. The role is looked up in that workspace, and a path naming a different one is the same `404` as for
   an API key. So a user signed in for one team can't reach another team's data by changing the `/w/<workspace>/`
   prefix, even where both workspaces happen to have a role of the same name. (Before this was enforced, the role was
-  resolved in whatever workspace the path named - the finding the 0.39 boundary review turned up and closed.)
+  resolved in whatever workspace the path named - the finding the 0.39 boundary review turned up and closed.) An AI
+  agent signed in to the MCP server through OAuth is held the same way, by `QUERYAPIGATE_MCP_WORKSPACE_CLAIM` (else
+  REST's claim); before 0.52 its token's workspace was ignored and every agent acted in the default workspace, with
+  that workspace's role of the same name - found in the boundary review of 2026-11-20.
 - **A role from a membership is bounded twice**: its reach is its workspace's connections only, and it never holds
   what only a server-wide role does (`adminroles.SERVER_ONLY`): administrators, settings, re-keying, erasing a
   person, creating workspaces, `/metrics` and the instance list. A member naming a workspace they aren't in gets
@@ -227,6 +230,14 @@ not between a hosted service's tenants. What it holds against, and how:
   set up for its workspace, switches them on and off and changes their password, and sets up DuckDB over remote
   storage (`s3://`, `https://`...) itself. Before 0.50 a workspace owner could set any path (found in a review of the
   boundary on 2026-11-05, and confirmed by reading another workspace's database and a key file).
+- **A secret the server reaches for is a server-wide role's to point anywhere.** The allow-lists for `${VAR}`,
+  `${file:...}`, Vault and AWS references (`QUERYAPIGATE_SECRET_ENV_VARS`, `QUERYAPIGATE_SECRET_FILE_DIRS`, the
+  providers' prefixes) are one for the whole server; nothing in them says which workspace a secret is for. So saving,
+  testing or changing where a connection or destination that holds one - or `credentials` - sends it takes a
+  server-wide role (`secretrefs.refuse_member_references()`); a member still runs it, switches it on and off, and
+  replaces the reference with a password of its own. Before 0.52 a workspace owner could test a connection whose
+  password was another team's `${VAR}` against a host of theirs and receive it in the clear (found in the boundary
+  review of 2026-11-20, and confirmed with a ClickHouse handshake to a listener).
 - **What happened is per workspace**: audit entries carry their workspace inside the hash chain, so rewriting whose
   an entry was breaks the chain; a member reads only their workspace's. Events reach only their workspace's
   subscribers; the response cache, and its management, are per workspace.

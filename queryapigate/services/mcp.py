@@ -7,7 +7,7 @@ whether or not that process is running.
 """
 import socket
 
-from .. import apikeys, config, mcp_server
+from .. import apikeys, config, mcp_server, scope
 
 
 def status():
@@ -27,4 +27,4 @@ def tools():
         'kind': 'ad-hoc' if t['name'] in mcp_server.RESERVED_TOOL_NAMES else 'saved query',
         'params': sorted(t['inputSchema'].get('properties', {}).keys()),
         'read_only': t['readOnlyHint'],
-    } for t in mcp_server.list_tools_for(apikeys.OPEN)]
+    } for t in mcp_server.list_tools_for(apikeys.OPEN._replace(workspace=scope.current()))]  # this workspace's

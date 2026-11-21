@@ -11,7 +11,7 @@ import re
 
 from flask import g, has_request_context
 
-from .. import config, duckfiles, engine, masking, metrics, pool, schema, store
+from .. import config, duckfiles, engine, masking, metrics, pool, schema, secretrefs, store
 from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
@@ -145,6 +145,7 @@ def create(data, actor):
         raise ApiError(f"db is required - one of: {', '.join(config.SUPPORTED_DB_TYPES)}", code='invalid_body')
     fields.setdefault('active', True)
     refuse_local_files(fields)
+    secretrefs.refuse_member_references(fields)
     store.update_connections({name: fields})
     after = store.read_connections()[name]
     store.record_audit(actor, 'create_connection', name, _masked(name, after))
@@ -167,6 +168,7 @@ def update(name, data, actor):
     if 'password' not in fields and 'password' in before:
         merged['password'] = config.PASSWORD_MASK  # keep the stored (possibly encrypted) value as it is
     refuse_local_files(merged, before)
+    secretrefs.refuse_member_references(merged, before)
     store.update_connections({name: merged})
     after = store.read_connections()[name]
     changes = audit_changes(before, after)
@@ -198,7 +200,9 @@ def _probe_details(data):
         raise ApiError(f"db must be one of: {', '.join(config.SUPPORTED_DB_TYPES)}", code='invalid_body')
     if fields.get('password') == config.PASSWORD_MASK:
         fields['password'] = store.read_connections().get(name or '', {}).get('password', '')
-    refuse_local_files(fields, store.read_connections().get(name) if name else None)  # a probe opens it too
+    saved = store.read_connections().get(name) if name else None
+    refuse_local_files(fields, saved)  # a probe opens it too
+    secretrefs.refuse_member_references(fields, saved, probe=True)  # and sends its secret to the host it names
     return store.resolve_ad_hoc(fields), None
 
 

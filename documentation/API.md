@@ -1115,6 +1115,12 @@ see everything. It protects teams from each other's mistakes and reach, not from
   otherwise), since whoever chooses the path could read any file the server can. A workspace's own owner runs the ones
   a server administrator set up there, switches them on and off and changes their password, and sets up DuckDB over
   remote storage (`s3://`, `gs://`, `https://`...) and server databases themselves.
+- **So are secrets the server reaches for.** A connection or destination whose fields hold a secret reference -
+  `${VAR}`, `${file:...}`, Vault, AWS - or `credentials` is saved, tested and repointed by a server-wide role (`403
+  role_forbidden` otherwise): the allow-lists that bound them are the whole server's, so a workspace's owner naming one
+  could have another team's secret sent to a host of their own. They run those connections, switch them on and off,
+  and replace a reference with a password typed in; a connection or destination with a password of its own is
+  theirs to set up.
 - **The Console**: once there is a second workspace, a switcher under the wordmark picks the one the tab works in -
   every screen then reads and changes that workspace's things - and the **Workspaces** screen lists them, creates and
   removes them (owners), and manages each one's members. An administrator whose roles are all in workspaces starts

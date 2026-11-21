@@ -222,6 +222,10 @@ class ListingTests(IsolationTestCase):
         self.assertIn('b_only', {t['name'] for t in mcp_server.list_tools_for(b)})
         result = mcp_server.handle_call(app, self.b_key, '', '10.0.0.1', 'b_only', {})
         self.assertEqual([r['title'] for r in result['structuredContent']['rows']], ['Bravo', 'Bolero', 'Brazil'])
+        # The Console's MCP screen lists the workspace it is open in - not default's, wherever it is open
+        console = {t['name'] for t in self.ok('get', f'{B}/api/v1/mcp/tools').get_json()['items']}
+        self.assertIn('b_only', console)
+        self.assertNotIn('b_only', {t['name'] for t in self.ok('get', '/api/v1/mcp/tools').get_json()['items']})
 
     def test_schemas_collections_and_descriptions(self):
         tables = self.ok('get', f'{B}/connections/lite/schema').get_json()['tables']
