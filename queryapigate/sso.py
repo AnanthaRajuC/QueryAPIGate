@@ -185,19 +185,31 @@ def _verified_email(claims):
     return email.lower() if isinstance(email, str) and claims.get('email_verified') is True else None
 
 
-def role_for(claims):
-    """The most capable role the person's groups map to; else the default role, for a verified email at an allowed
-    domain; else Refused."""
+NO_ROLE = "You signed in, but you're in no group that's given a role here - ask an owner to add you to one"
+
+
+def group_role(claims):
+    """The most capable role the person's groups map to (QUERYAPIGATE_SSO_ROLES), or None."""
     groups = _groups(claims)
     mapped = {role for role, group in config.sso_roles() if group in groups}
-    for role in config.SSO_ROLE_ORDER:
-        if role in mapped:
-            return role
+    return next((role for role in config.SSO_ROLE_ORDER if role in mapped), None)
+
+
+def default_role(claims):
+    """QUERYAPIGATE_SSO_DEFAULT_ROLE, for a verified email at an allowed domain, or None."""
     default, email = config.sso_default_role(), _verified_email(claims)
     if default and email and email.rsplit('@', 1)[-1] in config.sso_allowed_domains():
         return default
-    raise Refused('sso_no_role', "You signed in, but you're in no group that's given a role here - ask an owner to "
-                                 'add you to one')
+    return None
+
+
+def role_for(claims):
+    """The most capable role the person's groups map to; else the default role, for a verified email at an allowed
+    domain; else Refused."""
+    role = group_role(claims) or default_role(claims)
+    if role is None:
+        raise Refused('sso_no_role', NO_ROLE)
+    return role
 
 
 def finish(code, state, browser, error=None):
@@ -209,19 +221,15 @@ def finish(code, state, browser, error=None):
         raise Refused('sso_token', 'The identity provider sent no code - sign in again')
     provider = _provider()
     claims = verify_id_token(provider, _exchange(provider, code, pending['verifier']), pending['nonce'])
-    try:
-        role = role_for(claims)
-    except Refused as refused:
-        refused.who = _verified_email(claims) or claims['sub']
-        raise
     wanted = claims.get('preferred_username') if isinstance(claims.get('preferred_username'), str) else None
     email = _verified_email(claims)
     try:
-        admin, change = admins.sign_in_sso(claims['iss'], claims['sub'], role,
+        admin, change = admins.sign_in_sso(claims['iss'], claims['sub'], group_role(claims), default_role(claims),
                                            wanted or (email.split('@')[0] if email else 'sso-' + claims['sub'][:8]),
                                            email)
     except ApiError as error:
         raise Refused(error.code or 'sso_refused', error.message, who=email or claims['sub']) from None
+    role = admin['role']  # what they got: a membership-only administrator's stays theirs (admins.sign_in_sso())
     if not admin['active']:
         raise Refused('sso_inactive', 'Your administrator account is switched off here - ask an owner',
                       who=admin['name'])

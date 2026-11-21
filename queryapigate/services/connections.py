@@ -11,7 +11,8 @@ import re
 
 from flask import g, has_request_context
 
-from .. import config, duckfiles, engine, masking, metrics, pool, schema, secretrefs, store
+from .. import config, duckfiles, engine, masking, metrics, pool, schema, scope, secretrefs, store
+from ..db import DEFAULT_WORKSPACE
 from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
@@ -234,11 +235,15 @@ def databases(data):
 
 
 def deleted():
-    """Every deleted connection, newest first - from the audit log, the only record of one (there is no separate
-    deleted-connections store)."""
+    """Every connection deleted in this workspace, newest first - from the audit log, the only record of one (there is
+    no separate deleted-connections store). The log is the whole server's: an entry from before workspaces names none,
+    and was the default workspace's."""
+    workspace = scope.current()
     out = []
     for entry in reversed(store.read_audit_log()):
         if entry.get('action') != 'delete_connection':
+            continue
+        if (entry.get('workspace') or DEFAULT_WORKSPACE) != workspace:
             continue
         c = entry.get('changes') or {}
         out.append({'name': entry.get('target'), 'db': c.get('db'), 'host': c.get('host') or None,

@@ -394,12 +394,26 @@ def _free_name(conn, wanted):
     raise ApiError('Could not find a free administrator name', 409, code='admin_exists')
 
 
-def sign_in_sso(issuer, subject, role, wanted_name, email):
+def sign_in_sso(issuer, subject, group_role, default_role, wanted_name, email):
     """The administrator for someone who just signed in through SSO, created on first sign-in - (admin, change)
     where change is 'created', 'linked' (an administrator waiting for this verified email, now bound - 'linked_role'
     when their groups also gave them a new role), 'role' (their groups gave a new role) or None. The provider decides
-    the role: one moved out of the owners' group is no longer an owner, last one or not - owners come from that
-    group."""
+    the role: the one their groups map to (`group_role`), else the default role (`default_role`, anyone with a verified
+    email at an allowed domain) - one moved out of the owners' group is no longer an owner, last one or not.
+
+    Except for an administrator whose roles are all workspace memberships (ADR 0023 - no server-wide role): the
+    default role doesn't make them server-wide. Their invitation to a workspace is what lets them in, so they sign in
+    with no group too; only a group the provider puts them in gives them a server-wide role. Before, an invitation to
+    one workspace became a server-wide role - a data role in every workspace - at the first sign-in."""
+    def role_for(admin):
+        if admin is not None and admin['role'] is None and group_role is None:
+            return None
+        role = group_role or default_role
+        if role is None:
+            from .sso import NO_ROLE
+            raise ApiError(NO_ROLE, 403, code='sso_no_role')
+        return role
+
     with db.transaction() as conn:
         found = find_by_sso(issuer, subject)
         if found is None and email:
@@ -409,17 +423,20 @@ def sign_in_sso(issuer, subject, role, wanted_name, email):
                 raise ApiError(f'More than one administrator waits for an SSO sign-in as {email}', 409,
                                code='sso_ambiguous')
             if waiting:
+                role = role_for(waiting[0])
                 found = {**waiting[0], 'sso': {'issuer': issuer, 'subject': subject}}
                 change = 'linked' if found['role'] == role else 'linked_role'
                 found['role'] = role
                 _write_admin(conn, found)
                 return found, change
         if found is not None:
+            role = role_for(found)
             if found['role'] == role:
                 return found, None
             found = {**found, 'role': role}
             _write_admin(conn, found)
             return found, 'role'
+        role = role_for(None)
         admin = {'name': _free_name(conn, wanted_name), 'role': role, 'active': True, 'created_at': store.now(),
                  'email': email if email and _EMAIL_RE.match(email) else None, 'created_by': 'sso',
                  'last_seen_at': None, 'sso': {'issuer': issuer, 'subject': subject}}

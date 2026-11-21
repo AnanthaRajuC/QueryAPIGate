@@ -42,6 +42,9 @@ PEER_HEADER = 'X-QAG-Peer'
 WANTED_HEADER = 'X-QAG-Plan-Wanted'
 VERSION_HEADER = 'X-QAG-Dataplane-Version'  # the data plane's release, sent with its secret
 PLAN_HEADER = 'X-QAG-Plan'
+# On the data plane's own calls to /internal/dataplane/* - never on one it relays, which it takes off what a client
+# sends. The secret says a call came through the data plane; this, beside it, that the data plane itself made it.
+OWN_HEADER = 'X-QAG-Own'
 COUNTED_HEADER = 'X-QAG-Rate-Counted'  # the rate-limit buckets a call the data plane forwards was counted in already
 VERSION = 1
 DIALECTS = ('postgres', 'mysql')  # the two the prototype serves - every other connection is forwarded
@@ -54,6 +57,7 @@ PEER_ENVIRON = 'HTTP_X_QAG_PEER'
 WANTED_ENVIRON = 'HTTP_X_QAG_PLAN_WANTED'
 VERSION_ENVIRON = 'HTTP_X_QAG_DATAPLANE_VERSION'
 COUNTED_ENVIRON = 'HTTP_X_QAG_RATE_COUNTED'
+OWN_ENVIRON = 'HTTP_X_QAG_OWN'
 UNPAIRED = ('This data plane is from another release than this server: it gets no plans and no run store lease '
             'until both are the same release')
 _unpaired_seen: set = set()

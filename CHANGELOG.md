@@ -69,6 +69,25 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Security
 
+- **Through the data plane, any client could call its own endpoints: write run history and take run store leases.**
+  Python answered `/internal/dataplane/runs` and `/internal/dataplane/lease` to any request carrying
+  `QUERYAPIGATE_DATAPLANE_SECRET` - which the data plane puts on every call it relays. So with the data plane on, a
+  client with no credentials could post runs (history, events, metrics, for any key name it chose), raise rate-limit
+  alerts for any workspace's keys, and take the run store's id blocks until a new or restarted process got none and
+  dropped its runs. The data plane's own calls now carry `X-QAG-Own` too, which it takes off whatever a client sends,
+  and Python answers those endpoints only beside both. The data plane also removes its headers spelt with `_` for
+  `-`, which gunicorn before 22 read as the same. A server without the data plane wasn't affected. Since 0.44.0.
+  **Upgrade the data plane and Python together** (they ship in one image): an older data plane is refused at both,
+  so the runs it serves aren't recorded until it is upgraded too.
+- **Workspaces (experimental): any member could see every workspace's deleted connections.**
+  `GET /api/v1/connections/deleted` - the Connections screen's "deleted" list, open to every role - read the whole
+  server's audit log: another workspace's deleted connections, with their host, database, who deleted them and why.
+  It now lists the workspace's own. Since 0.38.0.
+- **Workspaces (experimental): an administrator invited to one workspace became a server-wide one at their first
+  SSO sign-in.** Their role was set from their groups, or else `QUERYAPIGATE_SSO_DEFAULT_ROLE` - so someone given
+  only a membership became, say, a server-wide `developer`, with a data role in every workspace. An administrator with
+  no server-wide role now keeps none: their memberships let them in, and the default role doesn't apply to them. A
+  group that maps to a role still gives it, as the provider decides those. Since 0.38.0.
 - **Workspaces (experimental): an AI agent signed in to the MCP server through OAuth acted in the default workspace,
   whatever its token said.** REST's signed-in users go to the workspace their token's
   `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` names; the MCP server's OAuth sign-in never read it, and looked the agent's role

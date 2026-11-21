@@ -182,8 +182,10 @@ class _CapturePeer:
     server sees the request as if the client had connected directly, ProxyFix and QUERYAPIGATE_TRUST_PROXY included.
     A peer that isn't an IP address counts as remote, as a Unix socket does. A data plane from another release
     (X-QAG-Dataplane-Version) is still the data plane, but is given no plan (dataplane.paired()). The rate-limit buckets
-    it counted a call in before forwarding it (X-QAG-Rate-Counted, ADR 0032) are taken from it alone. Its headers are
-    removed here, so nothing after this layer reads, logs or passes on the secret."""
+    it counted a call in before forwarding it (X-QAG-Rate-Counted, ADR 0032) are taken from it alone. Its own calls to
+    /internal/dataplane/* carry X-QAG-Own as well, which it takes off every request it relays: the secret alone means
+    "came through the data plane", which every client's call does. Its headers are removed here, so nothing after this
+    layer reads, logs or passes on the secret."""
 
     def __init__(self, app):
         self.app = app
@@ -194,7 +196,9 @@ class _CapturePeer:
         wanted = environ.pop(dataplane.WANTED_ENVIRON, None)
         version = environ.pop(dataplane.VERSION_ENVIRON, None)
         rate_counted = environ.pop(dataplane.COUNTED_ENVIRON, None)
+        own = environ.pop(dataplane.OWN_ENVIRON, None)
         if supplied is not None and dataplane.matches(supplied):
+            environ['queryapigate.dataplane_own'] = own == '1'
             is_paired = dataplane.paired(version)
             environ['queryapigate.dataplane'] = 'plan' if wanted == '1' and is_paired else True
             environ['queryapigate.dataplane_paired'] = is_paired
@@ -336,7 +340,8 @@ def create_app():
         g.request_id = new_request_id(request.headers.get('X-Request-Id'))
         g.request_started = time.monotonic()
         if request.endpoint in DATAPLANE_ENDPOINTS:  # the data plane's own calls: nothing else applies to them
-            if request.environ.get('queryapigate.dataplane'):
+            # Its own - not merely through it: every client's call through the data plane carries the secret too
+            if request.environ.get('queryapigate.dataplane_own'):
                 return None
             return jsonify(error_body('Not Found', 404)), 404
         if request.environ.get('queryapigate.dataplane') == 'plan':  # before the key is read: a plan names its row

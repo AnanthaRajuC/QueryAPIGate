@@ -1056,7 +1056,9 @@ policies apply, and their role comes from their groups:
   ID), nonce, expiry. The browser never holds a token.
 - **Who**: the person is bound to their administrator by the provider's `sub`, never by email; the first sign-in
   creates the administrator (`via: sso`). **The role is the groups'**, at every sign-in - the most capable that maps;
-  none, and the sign-in is refused (`sso_no_role`).
+  none, and the sign-in is refused (`sso_no_role`). An administrator of [workspaces](#workspaces) only - no
+  server-wide role, invited with `{"sso": "pending"}` - stays one: their memberships let them in, with or without a
+  group, and `QUERYAPIGATE_SSO_DEFAULT_ROLE` never makes them server-wide; a group that maps does, as for anyone.
 - **The session** is an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, and a request is authenticated by it only
   together with the session's CSRF token in `X-QAG-CSRF` - which the Console reads from `GET /auth/session`. Sent
   with an `X-API-Key` or `Authorization` header, the header is judged instead. `POST /auth/sso/logout` ends it.
@@ -2567,6 +2569,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `sso_only` | 409 | A personal token for an administrator who signs in through SSO, with `QUERYAPIGATE_SSO_ONLY` on |
 | `email_required` | 409 | Marking an administrator for SSO before they have an email to match |
 | `sso_ambiguous` | 409 | Two administrators wait for an SSO sign-in with the same email |
+| `sso_no_role` | 403 | An SSO sign-in by someone no group (or default role) gives a role, who isn't an administrator of a workspace either - shown on the Console as `sso_error` |
 | `write_request_not_found` | 404 | No agent write request by that id - or not this caller's, for this tool |
 | `approval_pending` | 409 | An agent's write isn't approved yet |
 | `approval_rejected` | 403 | A person rejected the agent's write; the message gives their reason |

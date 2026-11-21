@@ -212,6 +212,18 @@ class ForwardingTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn('x-qag-plan', headers)
 
+    def test_a_client_can_t_reach_the_data_plane_s_own_endpoints_through_it(self):
+        # A relayed call carries the secret - so the secret alone let any client write run history and take run store
+        # leases. Only the data plane's own calls carry X-QAG-Own, which it takes off whatever a client sends, in
+        # either spelling (gunicorn before 22 read `_` as `-`).
+        runs = {'runs': [{'saved_query': 'by_rating', 'key': 'ceo', 'connection': 'payroll'}], 'dropped': 0}
+        for path, body in (('/internal/dataplane/runs', runs), ('/w/team-b/internal/dataplane/runs', runs),
+                           ('/internal/dataplane/lease', {'holder': 'mine'})):
+            for spoofed in ({}, {'X-QAG-Own': '1'}, {'X_QAG_Own': '1'}, {'X-QAG-Dataplane': SECRET, 'X-QAG-Own': '1'}):
+                with self.subTest(path=path, spoofed=spoofed):
+                    status, _h, _b = request('127.0.0.1', self.pair.port, 'POST', path, spoofed, body)
+                    self.assertEqual(status, 404)
+
     def test_live_events_stream_through_as_they_happen(self):
         conn = http.client.HTTPConnection('127.0.0.1', self.pair.port, timeout=10)
         conn.request('GET', '/events', headers={'X-API-Key': ADMIN})
