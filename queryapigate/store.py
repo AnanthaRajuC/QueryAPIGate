@@ -194,7 +194,8 @@ def workspace_names():
     """Every workspace's name (ADR 0023) - `default` always among them, also on a store not yet upgraded to have
     them (read before db.init_schema() by `queryapigate events`)."""
     try:
-        return [row[0] for row in db.connection().execute('SELECT name FROM workspaces ORDER BY name').fetchall()]
+        rows = db.connection().execute('SELECT name, details_json FROM workspaces ORDER BY name').fetchall()
+        return [row[0] for row in rows if not json.loads(row[1]).get('deleted_at')]  # a deleted one's name is kept
     except db.Error:
         return [db.DEFAULT_WORKSPACE]
 

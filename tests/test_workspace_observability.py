@@ -132,3 +132,24 @@ class MetricsTests(ObservabilityTestCase):
         self.assertIn('key="team-b/partner"', rendered)
         b_after, default_after = counted()
         self.assertEqual((b_after - b_before, default_after - default_before), (2, 1))
+
+    def test_an_administrator_is_counted_in_the_workspace_they_act_in(self):
+        # `admin` is every administrator's label - and qualified like any name: before 0.52 it wasn't, so a key or
+        # a connection named `admin` in one workspace counted every workspace's administrators and rows
+        def admins_counted():
+            with scope.using('team-b'):
+                b = metrics.summary_for_key('admin')['queries']
+            return b, metrics.summary_for_key('admin')['queries']
+        b_before, default_before = admins_counted()
+        self.titles(f'{B}/q/films')  # the shared key, an administrator, in team-b
+        b_after, default_after = admins_counted()
+        self.assertEqual((b_after - b_before, default_after - default_before), (1, 0))
+        rendered = self.client.get('/metrics', headers={'X-API-Key': 'admin-key'}).get_data(as_text=True)
+        self.assertIn('key="team-b/admin"', rendered)
+
+    def test_a_key_cant_take_a_reserved_name(self):
+        for name in ('admin', 'cli', 'startup', '-'):
+            with self.subTest(name=name):
+                self.assertEqual(self.code('post', f'{B}/api/v1/api-keys', 400, json={'name': name,
+                                                                                      'connections': ['lite']}),
+                                 'invalid_name')

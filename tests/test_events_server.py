@@ -144,8 +144,10 @@ class EventServerTestCase(unittest.TestCase):
 
 class RequestTests(EventServerTestCase):
     def test_health(self):
+        # Open to anyone, so no counts of streams or events: they'd be every workspace's activity together (/metrics
+        # has them, behind its token)
         stream = Stream(self.server.port, path='/health')
-        self.assertEqual((stream.status, stream.body()['status']), (200, 'ok'))
+        self.assertEqual((stream.status, stream.body()), (200, {'status': 'ok'}))
 
     def test_only_get_events_is_served(self):
         self.assertEqual(Stream(self.server.port, path='/q/q').status, 404)

@@ -71,10 +71,12 @@ def label_for(permission):
 def _in_workspace(name):
     """A key's or connection's label, qualified by its workspace outside `default` - `team-b/partner` - since two
     workspaces may each have a `partner` (ADR 0023). `default`'s names stay as they were, so a server with one
-    workspace counts exactly as before; `-` and `admin` (every administrator, server-wide) are never qualified."""
+    workspace counts exactly as before. `-` (no key at all) is never qualified; `admin` - the administrators - is, as
+    any name: administrators acting in team-b are `team-b/admin`. Before 0.52 it wasn't, so a key or a connection
+    named `admin` in one workspace was counted with every workspace's (a connection still may be called that)."""
     from . import scope
     workspace = scope.current()
-    if workspace == 'default' or not isinstance(name, str) or name in ('-', 'admin'):
+    if workspace == 'default' or not isinstance(name, str) or name == '-':
         return name
     return f'{workspace}/{name}'
 

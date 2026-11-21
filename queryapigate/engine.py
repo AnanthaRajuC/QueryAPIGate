@@ -415,6 +415,9 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     finally:
         metrics.dec_active_query()
         metrics.observe_query(connection_name, details['db'], status, time.monotonic() - started, key_name)
+    if config.live_queries():  # an approved write tells live queries what changed, as execute_sql()'s do (live.py)
+        from . import live
+        live.note_write(sql, details, connection_name)
     if masked is not None:
         columns, rows = masked.apply(columns, list(rows))
     result = ResultSetDTO(list(rows), columns, has_more=False)

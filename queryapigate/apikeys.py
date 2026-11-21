@@ -541,6 +541,8 @@ def create_key(name, connections=None, allow_writes=None, queries=None, expires_
                example=False, mask=None, max_concurrent=None, query_timeout=None, max_rows=None, quota=None):
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("API key name may only contain letters, digits, spaces, '.', '_' and '-'", code='invalid_name')
+    if name in admins.RESERVED_NAMES:  # `admin` is every administrator's label in /metrics, `-` no caller's
+        raise ApiError(f"'{name}' is reserved - choose another name", code='invalid_name')
     admins.refuse_taken_name(name)
     if role is None:
         collections = _normalize_collections(collections)

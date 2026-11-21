@@ -67,6 +67,12 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   did: `mcp` once uvicorn has finished, `events` once it has ended every open stream. Since each was added
   (`mcp` in 0.11.0, `events` in 0.12.0).
 
+- **Live queries (experimental): an AI agent's approved write didn't tell live queries what it changed.** A write
+  through Run SQL, a saved write query or the API signals the tables it touched, so the live queries over them run
+  again; an agent's write through the MCP server (ADR 0008) never did, though the documentation said so, and a live
+  query over its table stayed stale until something else wrote there. It now signals as every other write does.
+  Since 0.51.0.
+
 ### Security
 
 - **Through the data plane, any client could call its own endpoints: write run history and take run store leases.**
@@ -109,6 +115,25 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   `GET /api/v1/mcp/tools` - open to every role, a member's auditor included - answered with default's MCP tools
   (names, descriptions, parameters) wherever it was asked, and never the workspace's own. It now lists the
   workspace the request is in. No rows were exposed. Since 0.38.0.
+- **Workspaces (experimental): a new workspace given a deleted one's name showed its members the old team's
+  record.** Deleting a workspace keeps its run history, events, usage and audit entries - under its name - so an owner
+  creating a workspace of that name for another team handed its members the first team's: their ad-hoc SQL, who did
+  what. A deleted workspace's name is now retired, not freed: creating one by it is `409 workspace_name_retired`.
+  Workspaces deleted before this release left no mark, so their names can still be given again. Since 0.38.0.
+- **Workspaces (experimental): `/metrics` counted an `admin` key or connection with every workspace's.** `admin` -
+  every administrator's label - was never qualified by its workspace, so a team-b key or connection named `admin`
+  counted every workspace's administrators and rows, in `/metrics` and on its own Console screen. It is now qualified
+  like any name: administrators acting in team-b are counted as `team-b/admin` (in `default`, still `admin`). And a
+  new API key can't be named `admin`, `cli`, `startup` or `-` (`400 invalid_name`), as an administrator never could.
+  Since 0.38.0.
+- **The events server's open `/health` reported how many streams were open and events delivered.** It needs no key,
+  and on a server with workspaces those counts are every workspace's activity together. It now answers
+  `{"status": "ok"}` only; both counts are on its `/metrics` (`queryapigate_events_streams`,
+  `queryapigate_events_delivered_total`), behind `QUERYAPIGATE_METRICS_TOKEN`. Since 0.12.0.
+- **The threat model now says what workspaces don't separate:** the audit log the store keeps is one, trimmed to
+  `QUERYAPIGATE_AUDIT_LOG_LIMIT` entries for every workspace together - stream it to a SIEM or set
+  `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE` to keep each workspace's whole record - and `/metrics`, which names every
+  workspace's keys and connections, is open until `QUERYAPIGATE_METRICS_TOKEN` is set.
 - **Naming a `database` on a SQLite, DuckDB, H2 or JDBC connection opened any file the server could read - the store
   included.** Run SQL's database picker sends a `database` with the query (also `?database=` on the schema routes,
   and MCP's `execute_sql` argument) to browse another database on the same server. On a file-backed connection that

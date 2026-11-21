@@ -64,7 +64,7 @@ def update(name, data, actor):
 
 
 def delete(name, actor):
-    workspaces.delete_workspace(name)
+    workspaces.delete_workspace(name, deleted_by=actor)
     store.record_audit(actor, 'delete_workspace', name, None)
 
 

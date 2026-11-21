@@ -202,6 +202,25 @@ class AdministratorTests(IsolationTestCase):
         self.ok('delete', '/api/v1/workspaces/team-b', status=204)
         self.assertEqual(self.titles('/q/films'), ['Alpha', 'Beta'])  # default never noticed
 
+    def test_a_removed_workspaces_name_isnt_given_again(self):
+        # Its runs and audit entries stay under its name: a new team-b would show them to its own members
+        self.titles(f'{B}/q/films')
+        for path in ('/api/v1/api-keys/partner', '/api/v1/roles/analyst', '/api/v1/queries/films',
+                     '/api/v1/connections/lite'):
+            self.ok('delete', f'{B}{path}', status=204, json={'reason': 'moving out'})
+        self.ok('delete', '/api/v1/workspaces/team-b', status=204)
+        self.assertEqual(self.code('post', '/api/v1/workspaces', 409, json={'name': 'team-b'}),
+                         'workspace_name_retired')
+        self.assertNotIn('team-b', [w['name'] for w in self.ok('get', '/api/v1/workspaces').get_json()['items']])
+        for method, url, body in (('get', '/api/v1/workspaces/team-b', None),
+                                  ('patch', '/api/v1/workspaces/team-b', {'description': 'x'}),
+                                  ('delete', '/api/v1/workspaces/team-b', None), ('get', f'{B}/api/v1/history', None),
+                                  ('get', f'{B}/api/v1/audit', None),
+                                  ('put', '/api/v1/workspaces/team-b/members/bea', {'role': 'admin'})):
+            with self.subTest(method=method, url=url):
+                self.assertEqual(self.code(method, url, 404, json=body), 'workspace_not_found')
+        self.ok('post', '/api/v1/workspaces', status=201, json={'name': 'team-c'})  # any other name
+
 
 class ListingTests(IsolationTestCase):
     """Everything that lists saved queries, connections or what they mean - a query only team-b has shows up there
