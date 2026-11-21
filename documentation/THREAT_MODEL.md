@@ -221,7 +221,10 @@ not between a hosted service's tenants. What it holds against, and how:
 - **A role from a membership is bounded twice**: its reach is its workspace's connections only, and it never holds
   what only a server-wide role does (`adminroles.SERVER_ONLY`): administrators, settings, re-keying, erasing a
   person, creating workspaces, `/metrics` and the instance list. A member naming a workspace they aren't in gets
-  `404`.
+  `404`. `/metrics` holds that line only with `QUERYAPIGATE_METRICS_TOKEN` set - then it answers that token and
+  server-wide administrators. Without one it is open to anyone who can reach the port, as on a server without
+  workspaces - and it names every workspace's keys and connections (`team-b/partner`): set the token on a server with
+  workspaces (the Helm chart does), or keep the port to your monitoring.
 - **A file on the server is a server-wide role's to open.** Whoever chooses a connection's path reads any file the
   server process can - another workspace's SQLite or DuckDB database, a secret's file, a key file. So saving, testing
   or repointing a connection that opens local files - SQLite, H2, JDBC, a DuckDB file or local `allowed_paths` -
@@ -240,7 +243,14 @@ not between a hosted service's tenants. What it holds against, and how:
   review of 2026-11-20, and confirmed with a ClickHouse handshake to a listener).
 - **What happened is per workspace**: audit entries carry their workspace inside the hash chain, so rewriting whose
   an entry was breaks the chain; a member reads only their workspace's. Events reach only their workspace's
-  subscribers; the response cache, and its management, are per workspace.
+  subscribers; the response cache, and its management, are per workspace; `/metrics` names a key or connection with
+  its workspace - an administrator's work in team-b as `team-b/admin` (before 0.52 `admin` merged every workspace's).
+  The events server's open `/health` says only that it is up: no counts, which would be every workspace's activity
+  together.
+- **A deleted workspace's name isn't given again.** Its run history, events, usage and audit entries stay under its
+  name - deleting a workspace never deletes a team's record - so a new workspace given the name would show them to
+  its own members. The name is retired instead (`409 workspace_name_retired`). Before 0.52 it was freed (found in the
+  boundary review of 2026-11-20).
 
 What it doesn't protect against - stated in the documentation's first paragraph about it:
 
@@ -248,7 +258,11 @@ What it doesn't protect against - stated in the documentation's first paragraph 
 - **Shared infrastructure.** One process, one store, one encryption key for every workspace's connection passwords.
   A bug outside the lookups above - in the process, or in a driver - is a bug for every workspace. No per-workspace
   resource limits yet: one workspace can exhaust the shared connection pool, event-stream slots or database load for
-  the others (each key's own rate limits and quotas still apply).
+  the others (each key's own rate limits and quotas still apply). That includes the audit log the store keeps: it is
+  one log, trimmed to its newest `QUERYAPIGATE_AUDIT_LOG_LIMIT` entries (500 by default) for every workspace together,
+  so a workspace making many audited changes pushes others' older entries out of it - the hash chain still verifies,
+  as a trim moves its anchor. Keep the whole record where no workspace can trim it: stream it to a SIEM, which holds
+  undelivered entries back from the trim, or set `QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE`.
 - **The JVM, for what a server administrator set up.** An experimental H2 or JDBC connection is opened read-write on
   one shared JVM with only the SQL guard as its lock. Setting one up, or changing anything but its `active` flag and
   password, is a server-wide role's (above), so a workspace's owner can't choose its URL or jar - but one a server

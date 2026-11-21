@@ -3,7 +3,8 @@
 A workspace owns connections, saved queries, API keys, roles, destinations, exports and CDC sources - each name unique
 within it (db.py, schema 17). `default` holds everything a server had before workspaces, and what is made without
 naming one; it can't be removed. A workspace is removed only once it owns nothing - deleting it never deletes a team's
-work.
+work. Its name is retired, not freed: its run history, events, usage and audit entries stay under that name, so a new
+workspace given it would show them to its own members (the row stays, `deleted_at` in its details).
 
 A **membership** gives an administrator one of the four roles (adminroles.py) in one workspace, and nothing outside
 it. An administrator's own `role` (administrators.role) is their server-wide one; with none (NULL), memberships are
@@ -43,17 +44,23 @@ def _member_counts(conn):
         'SELECT workspace, COUNT(*) FROM workspace_members GROUP BY workspace').fetchall()}
 
 
+def retired(row):
+    """Whether a workspaces row is one that was deleted - its name kept, so it isn't given again."""
+    return bool(json.loads(row['details_json']).get('deleted_at'))
+
+
 def list_workspaces(names=None):
     """Every workspace, by name - or only those in `names`."""
     conn = db.connection()
     counts = _member_counts(conn)
     rows = conn.execute('SELECT name, created_at, details_json FROM workspaces ORDER BY name').fetchall()
-    return [_row(row, counts.get(row['name'], 0)) for row in rows if names is None or row['name'] in names]
+    return [_row(row, counts.get(row['name'], 0)) for row in rows
+            if not retired(row) and (names is None or row['name'] in names)]
 
 
 def _get(conn, name):
     row = conn.execute('SELECT name, created_at, details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
-    if row is None:
+    if row is None or retired(row):
         return None
     count = conn.execute('SELECT COUNT(*) FROM workspace_members WHERE workspace = ?', (name,)).fetchone()[0]
     return _row(row, count)
@@ -85,7 +92,12 @@ def create_workspace(name, description=None, created_by=None):
                        code='invalid_name')
     details = {'description': _validate_description(description), 'created_by': created_by}
     with db.transaction() as conn:
-        if _get(conn, name) is not None:
+        row = conn.execute('SELECT details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
+        if row is not None and retired(row):
+            raise ApiError(f"A workspace named '{name}' was deleted, and its name isn't given again: its run history "
+                           "and audit log still name it, and a new one's members would see them. Choose another name",
+                           409, code='workspace_name_retired')
+        if row is not None:
             raise ApiError(f"A workspace named '{name}' already exists", 409, code='workspace_exists')
         conn.execute('INSERT INTO workspaces (name, created_at, details_json) VALUES (?, ?, ?)',
                      (name, store.now(), json.dumps(details)))
@@ -96,7 +108,7 @@ def update_workspace(name, description):
     """Its description - the only thing about a workspace that changes; its name is what everything in it is under."""
     with db.transaction() as conn:
         row = conn.execute('SELECT details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
-        if row is None:
+        if row is None or retired(row):
             raise _not_found(name)
         details = {**json.loads(row['details_json']), 'description': _validate_description(description)}
         conn.execute('UPDATE workspaces SET details_json = ? WHERE name = ?', (json.dumps(details), name))
@@ -113,8 +125,9 @@ def contents(conn, name):
     return counts
 
 
-def delete_workspace(name):
-    """Remove an empty workspace, and its memberships. Its runs stay in history, and its name in the audit log."""
+def delete_workspace(name, deleted_by=None):
+    """Remove an empty workspace, and its memberships. Its runs stay in history, and its name in the audit log - so
+    the name is retired rather than freed (see the module docstring): its row stays, marked deleted."""
     if name == DEFAULT_WORKSPACE:
         raise ApiError("The default workspace can't be removed: it holds what is made without naming a workspace",
                        409, code='workspace_protected')
@@ -127,7 +140,9 @@ def delete_workspace(name):
             raise ApiError(f"Workspace '{name}' still has {listed} - delete or move them first", 409,
                            code='workspace_not_empty', contents=owned)
         conn.execute('DELETE FROM workspace_members WHERE workspace = ?', (name,))
-        conn.execute('DELETE FROM workspaces WHERE name = ?', (name,))
+        row = conn.execute('SELECT details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
+        details = {**json.loads(row['details_json']), 'deleted_at': store.now(), 'deleted_by': deleted_by}
+        conn.execute('UPDATE workspaces SET details_json = ? WHERE name = ?', (json.dumps(details), name))
 
 
 # --------------------------------------------------------------------------------------

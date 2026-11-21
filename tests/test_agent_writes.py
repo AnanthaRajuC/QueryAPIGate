@@ -245,6 +245,17 @@ class FlowTests(AgentWriteTestCase):
         self.assertEqual(conflict['code'], 'idempotency_conflict')
         self.assertEqual(self.call('file_ticket', title='mouse')['structuredContent']['status'], 'done')
 
+    @needs_sqlite_335  # file_ticket's INSERT ... RETURNING
+    def test_a_write_tells_live_queries_what_changed(self):
+        # As a write through execute_sql() does (live.py): before 0.52 an agent's write never signalled, so a live
+        # query over the table it changed went stale until the next change anything else made
+        from queryapigate import live
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_LIVE_QUERIES': 'true'}), \
+                mock.patch.object(live, 'note_write', wraps=live.note_write) as noted:
+            self.assertEqual(self.call('file_ticket', title='screen')['structuredContent']['status'], 'done')
+        self.assertEqual(len(noted.call_args_list), 1)
+        self.assertIn('INSERT INTO tickets', noted.call_args.args[0])
+
     @needs_sqlite_335
     def test_what_a_write_returns_is_masked_like_any_read(self):
         masked = self.key('masked', [{'name': 'file_ticket', 'allow_writes': True}],

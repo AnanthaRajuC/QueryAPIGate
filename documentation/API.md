@@ -432,7 +432,7 @@ and those `workspaces`.
 |---|---|
 | `GET /api/v1/workspaces` | Every workspace - `name`, `description`, `created_at`, `created_by`, `members` (how many) - for a server-wide owner, admin or auditor; the ones you belong to otherwise. |
 | `POST /api/v1/workspaces` | Create one: `{"name": "team-a", "description": "Payments"}`. 409 `workspace_exists`. Owners only. |
-| `GET`, `PATCH`, `DELETE /api/v1/workspaces/{name}` | One workspace (404 for one you may not see, as for one that doesn't exist); change its `description`; remove it - only when it owns nothing (409 `workspace_not_empty`, with what it still has in `contents`), and never `default` (409 `workspace_protected`). Changing and removing: owners only. |
+| `GET`, `PATCH`, `DELETE /api/v1/workspaces/{name}` | One workspace (404 for one you may not see, as for one that doesn't exist); change its `description`; remove it - only when it owns nothing (409 `workspace_not_empty`, with what it still has in `contents`), and never `default` (409 `workspace_protected`). A removed workspace's name isn't given again (409 `workspace_name_retired`): its run history and audit log still name it. Changing and removing: owners only. |
 | `GET /api/v1/workspaces/{name}/members` | Who has a role in it: `admin`, `role`, `created_at`, `added_by`. |
 | `PUT`, `DELETE /api/v1/workspaces/{name}/members/{admin}` | Give an administrator a role in it - `{"role": "developer"}` - or change it; take them out (404 `member_not_found`). A server owner's, or the workspace's own owner's. |
 
@@ -1027,7 +1027,8 @@ their own token, remove it from the environment: **authentication stays required
 and the last active owner can't be demoted, deactivated or removed while the shared key isn't set (`409 last_owner`).
 
 Administrator names and API key names never overlap (`409 name_taken`), so a name in the logs, `/metrics` and run
-history means one caller; `admin` and `cli` are reserved.
+history means one caller; `admin`, `cli`, `startup` and `-` are reserved, for administrators and - since 0.52, for
+new ones - API keys alike (`400 invalid_name`): `admin` is every administrator's label in `/metrics`.
 
 ### Console sign-in through SSO
 
@@ -2560,6 +2561,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `query_exists`, `connection_exists`, `key_exists`, `role_exists`, `collection_exists` | 409 | The name is taken |
 | `admin_exists` | 409 | An administrator by that name exists |
 | `workspace_exists` | 409 | A workspace by that name exists |
+| `workspace_name_retired` | 409 | A workspace by that name was removed: its history still names it, so the name isn't given again |
 | `workspace_not_empty`, `workspace_protected` | 409 | Removing a workspace that still owns something (`contents` counts it), or `default` |
 | `destination_exists`, `export_exists` | 409 | A destination or export by that name exists |
 | `export_running` | 409 | Another run of the export holds its lease; retry after `retry_after` seconds |

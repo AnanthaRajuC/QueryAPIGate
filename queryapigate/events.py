@@ -549,8 +549,9 @@ class EventServer:
         allow_origin = cors.allow_origin_value(origin)
         try:
             if path == '/health' and method == 'GET':
-                await _respond(writer, 200, {'status': 'ok', 'connections': len(self.clients),
-                                             'delivered': self.delivered}, allow_origin)
+                # Open to anyone - so no counts: how many streams are open and events delivered is every workspace's
+                # activity together (ADR 0023). /metrics has both, behind QUERYAPIGATE_METRICS_TOKEN.
+                await _respond(writer, 200, {'status': 'ok'}, allow_origin)
             elif path == '/metrics' and method == 'GET':
                 from . import metrics
                 if metrics.authorized(headers.get('authorization')):
