@@ -168,9 +168,14 @@ documentation. #99 workspaces only if asked for.
     response cache kept fresh by the same signals; CDC sources in the Console and the API. Everything ADR 0033 §7 asked
     before graduating is done - security review, rate limits, Debezium in CI, a guide, measured under load - and they
     ship experimental for a release first. (0.51.0, 2026-11-17.)
-40. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
+40. **0.52: The workspace boundary, reviewed again** - a query's `database` switches only a server database, never
+    opening a file past the store guard; the data plane's own endpoints answer only its own calls; MCP agents act in
+    their token's workspace; a secret the server reaches for is a server-wide role's to point anywhere; deleted
+    workspace names retired; and `queryapigate mcp` and `events` write their last runs when stopped with SIGTERM.
+    (0.52.0, 2026-11-21.)
+41. **1.0.0-rc1:** freeze; invite external users to upgrade real stores and report back. AWS against AWS graduates
     `aws_secrets` whenever an account to test it in exists - it doesn't hold up the freeze.
-41. **1.0.0.**
+42. **1.0.0.**
 
 ## 1. Per-key API permissions
 
