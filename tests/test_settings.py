@@ -35,7 +35,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_lists_every_setting_with_where_its_value_comes_from(self):
         rows = self.rows()
-        self.assertEqual(len(rows), 102)  # two rows have no variable of their own
+        self.assertEqual(len(rows), 103)  # two rows have no variable of their own
         self.assertEqual(rows['QUERYAPIGATE_LIVE_QUERIES']['value'], 'off')  # live queries (ADR 0033)
         self.assertEqual(rows['QUERYAPIGATE_CDC_SOURCES']['value'], '0 source(s)')
         self.assertIsNone(rows['QUERYAPIGATE_CDC_SOURCES']['env_value'])  # a secret: never shown

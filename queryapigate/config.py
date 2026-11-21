@@ -1029,7 +1029,7 @@ def check_jwt_settings():
 
 
 _MCP_OAUTH_VARS = ('QUERYAPIGATE_MCP_RESOURCE_URL', 'QUERYAPIGATE_MCP_AUTH_SERVER', 'QUERYAPIGATE_MCP_SCOPE',
-                   'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM')
+                   'QUERYAPIGATE_MCP_ROLE', 'QUERYAPIGATE_MCP_ROLE_CLAIM', 'QUERYAPIGATE_MCP_WORKSPACE_CLAIM')
 DEFAULT_MCP_SCOPE = 'queryapigate.mcp'
 
 
@@ -1064,6 +1064,13 @@ def mcp_role_claim():
     """QUERYAPIGATE_MCP_ROLE_CLAIM: a claim naming an OAuth caller's role on /mcp (a string, or a list - the first
     that names an existing role wins)."""
     return _env('QUERYAPIGATE_MCP_ROLE_CLAIM')
+
+
+def mcp_workspace_claim():
+    """QUERYAPIGATE_MCP_WORKSPACE_CLAIM: a claim naming the workspace an OAuth caller on /mcp belongs to (ADR 0023) -
+    else QUERYAPIGATE_JWT_WORKSPACE_CLAIM's, so a server that confines REST's signed-in users confines its agents too.
+    Neither set, every OAuth caller acts in the default workspace."""
+    return _env('QUERYAPIGATE_MCP_WORKSPACE_CLAIM') or jwt_workspace_claim()
 
 
 def _secure_url(url):
@@ -1709,5 +1716,8 @@ def describe_settings():
             row('Role', 'Role whose grants every agent signed in this way gets.', 'QUERYAPIGATE_MCP_ROLE',
                 mcp_role() or 'not set'),
             row('Role claim', 'Claim naming an agent\'s role instead.', 'QUERYAPIGATE_MCP_ROLE_CLAIM',
-                mcp_role_claim() or 'not set')]},
+                mcp_role_claim() or 'not set'),
+            row('Workspace claim', 'Claim naming the workspace an agent belongs to; its role is that workspace\'s. '
+                'Unset, QUERYAPIGATE_JWT_WORKSPACE_CLAIM\'s claim; neither set, every agent is in the default '
+                'workspace.', 'QUERYAPIGATE_MCP_WORKSPACE_CLAIM', mcp_workspace_claim() or 'not set')]},
     ]

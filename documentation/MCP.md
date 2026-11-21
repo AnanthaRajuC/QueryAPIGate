@@ -121,6 +121,7 @@ registers the client. QueryAPIGate never sees a password.
 | `QUERYAPIGATE_MCP_SCOPE` | `queryapigate.mcp` | The scope a token must carry. |
 | `QUERYAPIGATE_MCP_ROLE` | unset | The role every agent signed in this way gets... |
 | `QUERYAPIGATE_MCP_ROLE_CLAIM` | unset | ...or the token claim naming its role (a string or a list; the first existing role wins). |
+| `QUERYAPIGATE_MCP_WORKSPACE_CLAIM` | `QUERYAPIGATE_JWT_WORKSPACE_CLAIM`'s | The token claim naming the [workspace](API.md#workspaces) the agent belongs to (experimental, as workspaces are); its role is that workspace's. Neither set, every agent is in the default workspace. |
 
 Set the first two, and a role, to turn it on; anything half-set, or not `https://` (except `localhost`), stops
 startup. Then:
@@ -145,6 +146,11 @@ startup. Then:
   same name that person has signed in to REST, when REST trusts the same issuer (or signs nobody in). When REST trusts
   another issuer, whose users' `sub`s could be the same strings for other people, the agent is `mcp:<sub>` instead,
   so two people never share one name, rate limit or event stream.
+- **Its workspace** comes from the token, never from anything the client sends: the
+  `QUERYAPIGATE_MCP_WORKSPACE_CLAIM` claim (or `QUERYAPIGATE_JWT_WORKSPACE_CLAIM`'s, which REST's signed-in users go
+  by), else the default workspace. Its role is looked up there; a workspace without that role, or that doesn't exist,
+  is `403 forbidden`. Before 0.52 the claim was ignored and every agent acted in the default workspace - with the
+  default workspace's role of the same name, and its data.
 - **Registering the client** is between the client and your provider: Client ID Metadata Documents or Dynamic
   Client Registration where the provider supports them, or an administrator registering it by hand. QueryAPIGate
   plays no part, and issues no tokens of its own.

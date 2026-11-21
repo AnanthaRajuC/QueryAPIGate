@@ -33,7 +33,7 @@ RESOURCE = 'http://127.0.0.1:5001/mcp'
 CLEARED = {name: '' for name in ('QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_JWT_JWKS_URL', 'QUERYAPIGATE_JWT_ISSUER',
                                  'QUERYAPIGATE_JWT_AUDIENCE', 'QUERYAPIGATE_JWT_ALGORITHMS', 'QUERYAPIGATE_JWT_ROLE',
                                  'QUERYAPIGATE_JWT_ROLE_CLAIM', 'QUERYAPIGATE_JWT_USER_CLAIM',
-                                 *config._MCP_OAUTH_VARS)}
+                                 'QUERYAPIGATE_JWT_WORKSPACE_CLAIM', *config._MCP_OAUTH_VARS)}
 
 
 def b64(n):
@@ -249,6 +249,62 @@ class TokenTests(McpOAuthTestCase):
         self.assertNotIn('ann@example.com', emails)
         runs = self.client.get('/api/v1/queries/customers/history', headers={'X-API-Key': 'admin-key'})
         self.assertEqual(runs.get_json()['items'][0]['key_name'], 'jwt:alice')
+
+
+class WorkspaceTests(McpOAuthTestCase):
+    """An agent's workspace comes from its token (ADR 0023), as a REST user's does: the MCP server has no `/w/` path
+    to name one. Before 0.52 every OAuth caller acted in default - given default's role of the same name, and its
+    data."""
+
+    def setUp(self):
+        super().setUp()
+        admin = {'X-API-Key': 'admin-key'}
+        data = os.path.join(self.tmp.name, 'b.db')
+        conn = sqlite3.connect(data)
+        conn.execute('CREATE TABLE customer (id INTEGER, email TEXT)')
+        conn.execute("INSERT INTO customer VALUES (7, 'bea@team-b.example')")
+        conn.commit()
+        conn.close()
+        for url, body in (
+                ('/api/v1/workspaces', {'name': 'team-b'}),
+                ('/w/team-b/api/v1/connections', {'name': 'shop', 'db': 'sqlite', 'database': data, 'active': True}),
+                ('/w/team-b/api/v1/roles', {'name': 'agents', 'connections': ['shop']}),
+                ('/w/team-b/api/v1/queries', {'name': 'customers', 'description': 'Customers', 'publish': True,
+                                              'connection_name': 'shop',
+                                              'sql': 'SELECT id, email FROM customer ORDER BY id'})):
+            res = self.client.post(url, headers=admin, json=body)
+            self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+
+    def ids(self, permission):
+        result = mcp_server.call_as(self.app, permission, 'customers', {})
+        self.assertFalse(result.get('isError'), result)
+        return [row['id'] for row in result['structuredContent']['rows']]
+
+    def test_the_workspace_claim_picks_the_workspace_and_its_role(self):
+        for setting in ('QUERYAPIGATE_MCP_WORKSPACE_CLAIM', 'QUERYAPIGATE_JWT_WORKSPACE_CLAIM'):  # its own, or REST's
+            with self.subTest(setting=setting), mock.patch.dict(os.environ, {setting: 'tenant'}):
+                b, refusal = self.authenticate(self.provider.token(tenant='team-b'))
+                self.assertIsNone(refusal)
+                self.assertEqual(b.workspace, 'team-b')
+                self.assertFalse(b.mask)  # team-b's `agents`, not default's masked one
+                self.assertEqual(self.ids(b), [7])
+                default, _ = self.authenticate(self.provider.token())  # no claim: default
+                self.assertEqual((default.workspace, self.ids(default)), ('default', [1, 2]))
+
+    def test_mcps_own_claim_wins_over_rests(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_WORKSPACE_CLAIM': 'team',
+                                          'QUERYAPIGATE_JWT_WORKSPACE_CLAIM': 'tenant'}):
+            b, _ = self.authenticate(self.provider.token(team='team-b', tenant='default'))
+            self.assertEqual(b.workspace, 'team-b')
+
+    def test_a_workspace_without_the_role_is_a_403(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_WORKSPACE_CLAIM': 'tenant',
+                                          'QUERYAPIGATE_MCP_ROLE': ''}):
+            for tenant in ('nowhere', 'team-b'):  # no such workspace; and team-b, which has no `analysts`
+                with self.subTest(tenant=tenant):
+                    permission, refusal = self.authenticate(self.provider.token(tenant=tenant, qag_role='analysts'))
+                    self.assertIsNone(permission)
+                    self.assertEqual((refusal.status, refusal.code), (403, 'forbidden'))
 
 
 class RedirectTests(unittest.TestCase):

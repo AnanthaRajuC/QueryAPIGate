@@ -3,7 +3,7 @@
 destinations.py holds the rules (validation, the secret, the locked writer); this module gives them the v1 shapes
 and audits every change - with the secret masked, and a changed one recorded only as "changed".
 """
-from .. import config, destinations, store
+from .. import config, destinations, secretrefs, store
 from .access import _diff, etag  # noqa: F401 - etag re-exported for the routes
 
 
@@ -55,4 +55,5 @@ def test(name=None, fields=None):
     fields = destinations.validate({k: v for k, v in (fields or {}).items() if k != 'name'})
     if fields.get('password') == config.PASSWORD_MASK:
         fields.pop('password')
+    secretrefs.refuse_member_references(fields, capability='destinations.write')  # a probe writes with its secret
     return destinations.test(fields)

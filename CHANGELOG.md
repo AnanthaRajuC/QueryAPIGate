@@ -69,6 +69,27 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ### Security
 
+- **Workspaces (experimental): an AI agent signed in to the MCP server through OAuth acted in the default workspace,
+  whatever its token said.** REST's signed-in users go to the workspace their token's
+  `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` names; the MCP server's OAuth sign-in never read it, and looked the agent's role
+  up in `default`. So an agent for a team-b user, with `role: analyst`, got default's `analyst` and its data - and an
+  agent couldn't reach its own workspace at all. The workspace now comes from the token: the new
+  `QUERYAPIGATE_MCP_WORKSPACE_CLAIM`, or `QUERYAPIGATE_JWT_WORKSPACE_CLAIM`'s claim when that isn't set - so a server
+  already confining REST's users confines its agents with no change. A workspace without the role, or that doesn't
+  exist, is `403 forbidden`. Since 0.38.0, with workspaces and MCP OAuth both on. Found in a review of the workspace
+  boundary.
+- **Workspaces (experimental): a workspace's owner could have another team's secret sent to a host of their own.**
+  The allow-lists that bound secret references - `QUERYAPIGATE_SECRET_ENV_VARS`, `QUERYAPIGATE_SECRET_FILE_DIRS`,
+  Vault's and AWS's prefixes - are the whole server's. An owner by membership could save or test a connection whose
+  password was `${TEAM_A_WAREHOUSE_PW}` (or `${file:...}`, Vault, AWS) against a host they ran, and read it from the
+  login; or repoint a connection a server administrator had set up with one. Saving, testing or changing where such
+  a connection or destination sends its secret now takes a server-wide role (`403 role_forbidden`), through the API
+  and configuration files alike. Members still run them, switch them on and off, and type passwords of their own.
+  Since 0.38.0. Found in a review of the workspace boundary.
+- **Workspaces (experimental): the Console's MCP screen listed the default workspace's tools in every workspace.**
+  `GET /api/v1/mcp/tools` - open to every role, a member's auditor included - answered with default's MCP tools
+  (names, descriptions, parameters) wherever it was asked, and never the workspace's own. It now lists the
+  workspace the request is in. No rows were exposed. Since 0.38.0.
 - **Naming a `database` on a SQLite, DuckDB, H2 or JDBC connection opened any file the server could read - the store
   included.** Run SQL's database picker sends a `database` with the query (also `?database=` on the schema routes,
   and MCP's `execute_sql` argument) to browse another database on the same server. On a file-backed connection that
