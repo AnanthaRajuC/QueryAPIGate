@@ -451,10 +451,13 @@ def update_connections(connections):
 
 
 def delete_connection(name):
+    """Remove a connection - and its descriptions (descriptions.py): they describe its tables, and kept, they'd be
+    served again on whatever connection is given its name later, another database's."""
     with db.transaction() as conn:
         cur = conn.execute('DELETE FROM connections WHERE workspace = ? AND name = ?', (scope.current(), name))
         if cur.rowcount == 0:
             raise ApiError(f"Connection '{name}' not found", 404, code='connection_not_found')
+        conn.execute('DELETE FROM descriptions WHERE workspace = ? AND connection_name = ?', (scope.current(), name))
 
 
 # --------------------------------------------------------------------------------------

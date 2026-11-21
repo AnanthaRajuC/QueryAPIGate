@@ -677,7 +677,7 @@ def stream_sql_response(sql, connection_name, params, timeout, output_format, fi
         raise ApiError('stream=true exports the whole result and does not accept page/page_size', code='invalid_stream')
     key_name = metrics_key_name()
     columns, rows = engine.stream_sql(sql, connection_name, params, timeout, key_name=key_name,
-                                      allowed_tables=allowed_tables, mask=mask)
+                                      allowed_tables=allowed_tables, mask=mask, database=database)
     # Captured here, not inside _record_stream_history(): that generator's body runs lazily, as the response
     # streams out - by then the request/app context this view function runs in is long gone (no
     # flask.stream_with_context() wrapping is used), so g, caller_key_name() and current_app are only safe to read

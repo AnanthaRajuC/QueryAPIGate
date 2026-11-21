@@ -514,6 +514,27 @@ class ExecuteAgainstADifferentDatabaseTests(ApiTestCase):
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         self.assertEqual(recorder.call_args.args[0]['database'], 'reports')
 
+    def test_and_so_does_a_streamed_run(self):
+        # Before 0.52 ?stream=true ran on the connection's own database, while history recorded the one asked for
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.client = create_app().test_client()
+        admin = {'X-API-Key': 'admin-key'}
+        seen = []
+
+        def stream(details, sql, params, timeout=None, pool=None, **options):
+            seen.append(details['database'])
+            yield ['x']
+            yield (1,)
+        with mock.patch.dict(engine.STREAM_RUNNERS, {'postgres': stream}):
+            res = self.client.post('/execute_sql?stream=true&format=csv', headers=admin, json={
+                'sql': 'SELECT 1 AS x', 'connection_name': 'pg', 'database': 'reports'})
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+            self.assertEqual(res.get_data(as_text=True).split(), ['x', '1'])
+        self.assertEqual(seen, ['reports'])
+        res = self.client.post('/execute_sql?stream=true&format=csv', headers=admin, json={
+            'sql': 'SELECT 1', 'connection_name': 'lite', 'database': 'other.db'})  # a path: never, as above
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'unsupported_operation'))
+
     def test_but_a_file_backed_connection_never_switches(self):
         # On SQLite (DuckDB, H2, JDBC) the `database` is a path: it would open any file past the checks the saved
         # connection passed - the store itself (store.refuse_store_access()). Not even the admin key.

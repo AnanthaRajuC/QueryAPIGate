@@ -52,6 +52,17 @@ class WriteTests(DescriptionTestCase):
         self.assertEqual([(d['table'], d['column'], d['description']) for d in items],
                          [('customer', 'email', 'Where invoices are sent')])
 
+    def test_they_go_with_their_connection(self):
+        # Before 0.52 they stayed, and a connection given the name later - another database - was served them
+        self.describe(('customer', 'email', 'Where invoices go'), (None, None, 'Join on customer_id.'))
+        self.assertEqual(self.client.delete('/api/v1/connections/lite', headers=ADMIN,
+                                            json={'reason': 'moving'}).status_code, 204)
+        res = self.client.post('/api/v1/connections', headers=ADMIN,
+                               json={'name': 'lite', 'db': 'sqlite', 'database': self.db_path, 'active': True})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        self.assertEqual(self.call('get', URL, LIST, 200).get_json()['items'], [])
+        self.assertIsNone(descriptions.notes('lite'))
+
     def test_every_change_is_audited_with_what_it_said(self):
         self.describe(('customer', 'email', 'Where invoices go'))
         self.describe(('customer', 'email', 'Billing address'))

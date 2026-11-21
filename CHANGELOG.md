@@ -73,6 +73,15 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
   query over its table stayed stale until something else wrote there. It now signals as every other write does.
   Since 0.51.0.
 
+- **Run SQL streamed (`?stream=true`) on the connection's own database, not the one picked.** The database picker's
+  choice reached a paged run, but a streamed one ignored it - while its run history recorded the database asked for.
+  It now streams from the one picked, on a server database as a paged run does (SQLite, DuckDB, H2 and JDBC switch
+  none: `400 unsupported_operation`). Since 0.9.0.
+- **A deleted connection's descriptions stayed, and were served on the next connection given its name.** Its table,
+  column and notes descriptions were kept after the connection went, and came back on a new connection of the same
+  name - another database's tables described as the old one's, to people and agents alike. Deleting a connection now
+  deletes them with it. Since 0.18.0.
+
 ### Security
 
 - **Through the data plane, any client could call its own endpoints: write run history and take run store leases.**

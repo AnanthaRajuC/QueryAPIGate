@@ -984,6 +984,8 @@ curl -X PATCH http://127.0.0.1:5000/api/v1/connections/shop/descriptions -H "X-A
 - Who may: reading with `connections.read`, changing and importing with `connections.write` (owners and admins).
   Every change is in the audit log - `update_descriptions` or `import_descriptions`, with what each one said before
   and after.
+- **They go with their connection:** deleting a connection deletes its descriptions, so a connection given its name
+  later - another database, perhaps - starts with none.
 
 In the Console: the schema browser's **✎** beside a table describes it and its columns; **✎ Describe connection**
 holds the notes and **Import comments**.
