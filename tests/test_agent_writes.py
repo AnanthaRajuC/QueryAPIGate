@@ -245,6 +245,7 @@ class FlowTests(AgentWriteTestCase):
         self.assertEqual(conflict['code'], 'idempotency_conflict')
         self.assertEqual(self.call('file_ticket', title='mouse')['structuredContent']['status'], 'done')
 
+    @needs_sqlite_335  # file_ticket's INSERT ... RETURNING
     def test_a_write_tells_live_queries_what_changed(self):
         # As a write through execute_sql() does (live.py): before 0.52 an agent's write never signalled, so a live
         # query over the table it changed went stale until the next change anything else made
