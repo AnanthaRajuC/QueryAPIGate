@@ -14,6 +14,7 @@ from tests.helpers import save_query, write_connections
 
 ADMIN = {'X-API-Key': 'admin-key'}
 SECRET = 'dp-secret-0123456789'
+OWN = {dataplane.SECRET_HEADER: SECRET, dataplane.OWN_HEADER: '1'}  # the data plane's own call: through it, by it
 WANTED = 'X-QAG-Plan-Wanted'
 PAIRED = {'X-QAG-Dataplane-Version': __version__}  # a data plane of this release
 COLUMNS = ['id', 'email', 'name']
@@ -495,8 +496,10 @@ class RunReportTests(PlanTestCase):
         from queryapigate import alerts
         self.addCleanup(alerts._refusals.clear)  # the refusals reported here are the process's, for its alerts
 
-    def report(self, secret=SECRET):
+    def report(self, secret=SECRET, own=True):
         headers = {dataplane.SECRET_HEADER: secret} if secret else {}
+        if own:
+            headers[dataplane.OWN_HEADER] = '1'
         return self.client.post('/internal/dataplane/runs', json={'runs': [self.RUN]}, headers=headers)
 
     def history(self):
@@ -507,6 +510,20 @@ class RunReportTests(PlanTestCase):
         for secret in (None, 'wrong'):
             with self.subTest(secret=secret):
                 self.assertEqual(self.report(secret).status_code, 404)
+        self.assertEqual(self.history(), [])
+
+    def test_nor_on_a_call_the_data_plane_relays(self):
+        # Every client's call through the data plane carries the secret: only the data plane's own carry X-QAG-Own
+        # too, which it takes off whatever a client sends. The secret alone let anyone write run history.
+        self.assertEqual(self.report(own=False).status_code, 404)
+        for value in ('0', 'yes', ''):
+            with self.subTest(value=value):
+                res = self.client.post('/internal/dataplane/runs', json={'runs': [self.RUN]},
+                                       headers={dataplane.SECRET_HEADER: SECRET, dataplane.OWN_HEADER: value})
+                self.assertEqual(res.status_code, 404)
+        res = self.client.post('/internal/dataplane/lease', json={'holder': 'dp'},
+                               headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: __version__})
+        self.assertEqual(res.status_code, 404)
         self.assertEqual(self.history(), [])
 
     def test_a_reported_run_is_recorded_as_python_records_one(self):
@@ -533,7 +550,7 @@ class RunReportTests(PlanTestCase):
         from queryapigate import metrics
         before = metrics.history_counts().get('dropped', 0)
         res = self.client.post('/internal/dataplane/runs', json={'runs': [self.RUN], 'dropped': 7},
-                               headers={dataplane.SECRET_HEADER: SECRET})
+                               headers=OWN)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(metrics.history_counts().get('dropped', 0) - before, 7)
         self.assertEqual(self.history(), [self.ENTRY])
@@ -558,7 +575,7 @@ class RunReportTests(PlanTestCase):
             with alerts._lock:
                 return len(alerts._refusals.get(who, ()))
         before, key, client = counts(), refusals(('key', ('default', 'limited'))), refusals(('client', '203.0.113.9'))
-        res = self.client.post('/internal/dataplane/runs', headers={dataplane.SECRET_HEADER: SECRET}, json={
+        res = self.client.post('/internal/dataplane/runs', headers=OWN, json={
             'runs': [], 'dropped': 0, 'rate_limited': [
                 {'scope': 'key', 'workspace': 'default', 'key': 'limited', 'method': 'GET', 'seconds': [0.001, 0.002]},
                 {'scope': 'client', 'client': '203.0.113.9', 'method': 'POST', 'seconds': [0.001]}]})
@@ -571,7 +588,7 @@ class RunReportTests(PlanTestCase):
     def test_a_key_that_keeps_getting_them_raises_its_alert(self):
         from queryapigate import alerts
         seconds = [0.001] * alerts.RATE_LIMITED_PER_HOUR
-        self.client.post('/internal/dataplane/runs', headers={dataplane.SECRET_HEADER: SECRET}, json={
+        self.client.post('/internal/dataplane/runs', headers=OWN, json={
             'runs': [], 'rate_limited': [{'scope': 'key', 'workspace': 'default', 'key': 'limited', 'method': 'GET',
                                           'seconds': seconds}]})
         raised = [a for a in self.client.get('/api/v1/alerts', headers=ADMIN).get_json()['items']

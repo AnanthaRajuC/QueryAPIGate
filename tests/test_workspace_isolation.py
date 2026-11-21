@@ -170,6 +170,23 @@ class AdministratorTests(IsolationTestCase):
         self.assertEqual(self.code('get', '/w/default/q/films', 404, headers=bea), 'workspace_not_found')
         self.assertNotIn('more', [c['name'] for c in self.ok('get', '/api/v1/connections').get_json()['items']])
 
+    def test_deleted_connections_are_the_workspaces_own(self):
+        # Read back from the audit log, which is the whole server's: before 0.52 every workspace's were listed to any
+        # member - host, database, who deleted it and why
+        self.ok('post', '/api/v1/connections', status=201, json={
+            'name': 'payroll', 'db': 'postgres', 'host': 'db.internal.team-a', 'database': 'payroll', 'active': False})
+        self.ok('delete', '/api/v1/connections/payroll', status=204, json={'reason': 'moving to the new cluster'})
+        self.ok('post', f'{B}/api/v1/connections', status=201, json={
+            'name': 'scratch', 'db': 'postgres', 'host': 'db.internal.team-b', 'database': 'b', 'active': False})
+        self.ok('delete', f'{B}/api/v1/connections/scratch', status=204, json={'reason': 'not needed'})
+        bea = self.member_of_b(role='auditor')
+        for headers in (bea, ADMIN):
+            with self.subTest(headers=headers):
+                b = self.ok('get', f'{B}/api/v1/connections/deleted', headers=headers).get_json()['items']
+                self.assertEqual([c['name'] for c in b], ['scratch'])
+        self.assertEqual([c['name'] for c in self.ok('get', '/api/v1/connections/deleted').get_json()['items']],
+                         ['payroll'])
+
     def test_a_server_wide_administrator_reaches_any_workspace_by_name(self):
         self.ok('get', f'{B}/api/v1/queries')
         self.assertEqual(self.code('get', '/w/no-such/api/v1/queries', 404), 'workspace_not_found')

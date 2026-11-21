@@ -343,6 +343,34 @@ class LinkingTests(SsoTestCase):
         self.assertNotIn('subject', linked['sso'])
         self.assertIn('link_admin_sso', [e['action'] for e in store.read_audit_log()])
 
+    def test_an_administrator_of_one_workspace_stays_one(self):
+        # Invited to team-b only (no server-wide role): before 0.52 the default role - anyone at an allowed domain -
+        # became their role at the first sign-in, a data role in every workspace
+        self.assertEqual(self.browser.post('/api/v1/workspaces', headers=self.ADMIN, json={'name': 'team-b'})
+                         .status_code, 201)
+        admins.create_admin('alice.ito', None, email='alice@example.com')
+        self.patch('alice.ito', sso='pending')
+        self.browser.put('/api/v1/workspaces/team-b/members/alice.ito', headers=self.ADMIN, json={'role': 'admin'})
+        env = {'QUERYAPIGATE_SSO_ROLES': 'owner=qag-owners', 'QUERYAPIGATE_SSO_DEFAULT_ROLE': 'developer',
+               'QUERYAPIGATE_SSO_ALLOWED_DOMAINS': 'example.com'}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(self.sign_in(groups=None).headers['Location'], '/console/')
+            linked = self.browser.get('/api/v1/administrators/alice.ito', headers=self.ADMIN).get_json()
+            self.assertEqual((linked['sso']['status'], linked['role']), ('linked', None))
+            csrf = {sso.CSRF_HEADER: self.csrf()}
+            self.assertEqual(self.browser.get('/w/team-b/api/v1/me', headers=csrf).get_json()['server_wide'], False)
+            self.assertEqual(self.browser.get('/api/v1/queries', headers=csrf).status_code, 403)  # not default's
+            self.assertEqual(self.sign_in(groups=None).headers['Location'], '/console/')  # and at every sign-in
+            self.assertIsNone(admins.get_admin('alice.ito')['role'])
+            # A group the provider puts them in is a server-wide role, as for anyone: groups decide those
+            self.sign_in(groups=['qag-owners'])
+            self.assertEqual(admins.get_admin('alice.ito')['role'], 'owner')
+
+    def test_one_with_no_invitation_still_needs_a_role(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SSO_ROLES': 'owner=qag-owners'}):
+            self.assertEqual(self.refused(self.sign_in(groups=None)), 'sso_no_role')
+        self.assertEqual(admins.list_admins(), [])  # nobody made
+
     def test_marking_needs_an_email_and_two_waiting_for_one_email_is_refused(self):
         admins.create_admin('noemail', 'admin')
         self.assertEqual(self.patch('noemail', sso='pending').get_json()['code'], 'email_required')

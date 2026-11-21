@@ -536,11 +536,13 @@ class LeaseEndpointTests(StoreTestCase):
 
     def lease(self, **body):
         return self.client.post('/internal/dataplane/lease', json={'holder': 'dp', **body},
-                                headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: __version__})
+                                headers={dataplane.SECRET_HEADER: SECRET, dataplane.OWN_HEADER: '1',
+                                         dataplane.VERSION_HEADER: __version__})
 
     def test_a_data_plane_from_another_release_gets_none(self):
         res = self.client.post('/internal/dataplane/lease', json={'holder': 'dp'},
-                               headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: '0.1.0'})
+                               headers={dataplane.SECRET_HEADER: SECRET, dataplane.OWN_HEADER: '1',
+                                        dataplane.VERSION_HEADER: '0.1.0'})
         self.assertEqual((res.status_code, res.get_json()['error']), (409, dataplane.UNPAIRED))
 
     def test_names_where_runs_are_and_takes_the_block_back(self):
@@ -550,6 +552,15 @@ class LeaseEndpointTests(StoreTestCase):
         block = res.get_json()['block']
         self.assertEqual(self.lease(block=block, release=True).status_code, 204)
         self.assertFalse(runstore.renew(block, 'dp'))  # given back, not lapsing a minute later
+
+    def test_a_call_the_data_plane_relays_gets_none(self):
+        # The secret is on every call through the data plane; only its own carry X-QAG-Own. Before, any client could
+        # take blocks through it - 16 of the 4096 ids per millisecond's, renewed each minute, starved every new process.
+        with mock.patch.object(runstore, 'lease') as lease:
+            res = self.client.post('/internal/dataplane/lease', json={'holder': 'mine'},
+                                   headers={dataplane.SECRET_HEADER: SECRET, dataplane.VERSION_HEADER: __version__})
+        self.assertEqual(res.status_code, 404)
+        lease.assert_not_called()
 
     def test_every_block_taken_is_a_503_that_says_so(self):
         with mock.patch.object(runstore, 'lease', side_effect=runstore.LeaseError('a message of its own')):

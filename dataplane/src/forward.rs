@@ -30,6 +30,10 @@ pub const WANTED_HEADER: HeaderName = HeaderName::from_static("x-qag-plan-wanted
 /// On a call forwarded after its rate limits were counted here: which buckets, and what they said (ADR 0032) - Python
 /// doesn't count them again, and takes it only beside the secret.
 pub const COUNTED_HEADER: HeaderName = HeaderName::from_static("x-qag-rate-counted");
+/// On the data plane's own calls to Python's internal endpoints (post_json()) - never on one it relays, since clean()
+/// takes it off whatever a client sends. The secret says a call came through the data plane; this says the data plane
+/// itself made it: Python answers /internal/dataplane/* only beside both.
+pub const OWN_HEADER: HeaderName = HeaderName::from_static("x-qag-own");
 
 /// Headers that describe one connection, not the message: never passed on (RFC 9110, 7.6.1), nor any the
 /// `Connection` header names.
@@ -146,6 +150,7 @@ impl Forwarder {
             .header(SECRET_HEADER, self.secret.clone())
             .header(VERSION_HEADER, VERSION)
             .header(PEER_HEADER, "127.0.0.1")
+            .header(OWN_HEADER, "1")
             .body(
                 Full::new(Bytes::from(json))
                     .map_err(|never| match never {})
@@ -187,16 +192,18 @@ pub fn peer_text(peer: IpAddr) -> String {
 
 /// The headers only the data plane and Python say to each other: removed from what a client sends, so only this
 /// process can speak for itself, and from what Python answers. Python's own `X-QAG-CSRF` passes, as any other.
-const OURS: [HeaderName; 6] = [
+const OURS: [HeaderName; 7] = [
     SECRET_HEADER,
     PEER_HEADER,
     PLAN_HEADER,
     WANTED_HEADER,
     VERSION_HEADER,
     COUNTED_HEADER,
+    OWN_HEADER,
 ];
 
-/// Remove hop-by-hop headers, and the data plane's own (`OURS`).
+/// Remove hop-by-hop headers, and the data plane's own (`OURS`) - spelt with `_` for `-` too: a WSGI server may read
+/// `X_QAG_Own` as `X-QAG-Own` (gunicorn before 22 did), so that spelling would reach Python as the real one.
 pub fn clean(headers: &mut HeaderMap) {
     let named: Vec<HeaderName> = headers
         .get_all(header::CONNECTION)
@@ -205,7 +212,21 @@ pub fn clean(headers: &mut HeaderMap) {
         .flat_map(|value| value.split(','))
         .filter_map(|name| HeaderName::from_bytes(name.trim().as_bytes()).ok())
         .collect();
-    for name in named.iter().chain(HOP_BY_HOP.iter()).chain(OURS.iter()) {
+    let underscored: Vec<HeaderName> = headers
+        .keys()
+        .filter(|name| name.as_str().contains('_'))
+        .filter(|name| {
+            let dashed = name.as_str().replace('_', "-");
+            OURS.iter().any(|ours| ours.as_str() == dashed)
+        })
+        .cloned()
+        .collect();
+    for name in named
+        .iter()
+        .chain(HOP_BY_HOP.iter())
+        .chain(OURS.iter())
+        .chain(underscored.iter())
+    {
         headers.remove(name);
     }
 }
@@ -237,7 +258,15 @@ mod tests {
     #[test]
     fn a_client_never_sends_the_data_plane_s_own_headers() {
         let mut headers = HeaderMap::new();
-        for name in ["x-qag-dataplane", "X-QAG-Peer", "x-qag-plan"] {
+        for name in [
+            "x-qag-dataplane",
+            "X-QAG-Peer",
+            "x-qag-plan",
+            "x-qag-own",
+            "X_QAG_Own",
+            "x_qag_rate_counted",
+            "x_qag-dataplane",
+        ] {
             headers.insert(
                 HeaderName::from_bytes(name.as_bytes()).unwrap(),
                 HeaderValue::from_static("spoofed"),

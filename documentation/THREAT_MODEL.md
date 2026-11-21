@@ -476,9 +476,16 @@ only when started: nothing changes for a deployment that doesn't. It isn't in th
   with the schema its trace was made from. Plans live in the data plane's memory only.
 - **One shared secret ties the two processes together.** `QUERYAPIGATE_DATAPLANE_SECRET`, at least 16 characters,
   goes in `X-QAG-Dataplane` on every request the data plane forwards; Python compares it in constant time. The data
-  plane removes `X-QAG-Dataplane`, `X-QAG-Peer` and `X-QAG-Plan` from anything a client sends, and Python's
-  outermost WSGI layer removes the first two again before anything else reads or logs a request. Without the secret, Python
-  gives no plan, ignores `X-QAG-Peer`, and answers 404 at `/internal/dataplane/runs`.
+  plane removes `X-QAG-Dataplane`, `X-QAG-Peer`, `X-QAG-Plan` and `X-QAG-Own` from anything a client sends - spelt
+  with `_` for `-` too, which some WSGI servers read as the same header - and Python's outermost WSGI layer removes
+  them again before anything else reads or logs a request. Without the secret, Python gives no plan and ignores
+  `X-QAG-Peer`.
+- **Its own endpoints are its own.** Every call the data plane relays carries the secret, so the secret alone says
+  only that a call came through it. Its own calls - `/internal/dataplane/runs` and `/internal/dataplane/lease` - carry
+  `X-QAG-Own` beside it, which no relayed call can; Python answers 404 there to anything else. Before 0.52 the secret
+  was enough, so any client that could reach the data plane could write run history, events and metrics, raise
+  rate-limit alerts for any workspace's keys, and take the run store's id blocks until new processes got none (found
+  in the boundary review of 2026-11-20).
 - **The client's address is the client's.** With the secret, `X-QAG-Peer` carries the client's own socket address,
   and Python takes it as the real peer before `ProxyFix`. So open-access mode's loopback rule, a key's `allowed_ips`
   and `QUERYAPIGATE_TRUST_PROXY` judge the client, not the data plane's loopback connection. A peer that isn't an IP
@@ -489,8 +496,8 @@ only when started: nothing changes for a deployment that doesn't. It isn't in th
   `sql_mode`). Each PostgreSQL message ends with `RESET ALL`. The differential test sends hostile strings for exactly
   this.
 - **Its runs are recorded by Python.** The data plane reports each served run to `/internal/dataplane/runs`, with the
-  secret, and Python writes its history, event and metrics. Python trusts those entries: whoever holds the secret
-  can write run history. Runs the data plane can't queue, and reports Python doesn't take, are counted as dropped in
+  secret and `X-QAG-Own`, and Python writes its history, event and metrics. Python trusts those entries: whoever
+  holds the secret can write run history - the data plane, and nothing that only reaches it. Runs the data plane can't queue, and reports Python doesn't take, are counted as dropped in
   `/metrics`, never lost silently. On SIGTERM it sends what it still holds before it exits, for up to 10 seconds, as
   Python's own history writer flushes at exit; a hard kill loses up to one flush interval of runs, as Python's does.
 - **Resource use before the key is checked is bounded.** The data plane reads a request's body itself only when it
