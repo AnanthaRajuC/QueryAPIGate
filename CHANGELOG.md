@@ -49,8 +49,22 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-11-21
+
+Security fixes from a second review of the workspace boundary, and `queryapigate mcp` and `queryapigate events` no
+longer lose their last runs when stopped. **Upgrade if anyone but a server administrator runs ad-hoc SQL:** through a
+SQLite, DuckDB, H2 or JDBC connection - the bundled examples' included - they could name a `database` that opened any
+file the server can read, this server's store among them, and with writes on make themselves `owner`. That needs no
+workspaces and no special setup; since 0.17.0. **If you run the Rust data plane,** any client could write run history
+and take the run store's leases through it - upgrade the data plane and Python together, as the image does. **If you
+use workspaces,** seven fixes keep a workspace's members, agents and secrets inside it: among them, an agent signed in
+to the MCP server through OAuth acted in `default`, and an owner by membership could send another team's secret to a
+host of their own (see *Security*).
+
 ### Changed
 
+- **The image:** the data plane is built with Rust 1.100.0 (from 1.99.0). Releases are signed with cosign v3.1.4
+  (from v3.1.3).
 - **CI:** the upgrade fixtures from 0.51.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.51.0.
 
@@ -3606,7 +3620,8 @@ First public release, restructured from the original single-file application.
 - JSON column order is preserved; Decimal, date and driver-specific number types serialise correctly.
 - Concurrent saves can no longer lose a version.
 
-[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.51.0...HEAD
+[Unreleased]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.52.0...HEAD
+[0.52.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.1...v0.51.0
 [0.50.1]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.50.0...v0.50.1
 [0.50.0]: https://github.com/AnanthaRajuC/QueryAPIGate/compare/v0.49.0...v0.50.0
