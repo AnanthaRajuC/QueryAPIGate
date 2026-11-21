@@ -425,7 +425,8 @@ def execute_agent_write(sql, connection_name, params, max_affected_rows, timeout
     return result, affected
 
 
-def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None, mask=None):
+def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', allowed_tables=None, mask=None,
+               database=None):
     """Like execute_sql, but for the whole result rather than one page - and, unlike execute_sql, always
     read-only regardless of QUERYAPIGATE_ALLOW_WRITES or the caller's own permission. A large export has no
     business mutating data, and forcing this sidesteps a lot of incidental complexity around commit timing
@@ -433,18 +434,20 @@ def stream_sql(sql, connection_name, params=None, timeout=None, key_name='-', al
     what that already involves per dialect without adding writes into the mix too.
 
     ``allowed_tables`` is a key's own narrower allow-list of tables it may query, if it has one - see
-    ``sqltools.validate_sql()``/``tableguard.py``.
+    ``sqltools.validate_sql()``/``tableguard.py``. ``database`` is execute_sql()'s: another database on the same
+    server, for a server database only (with_database()).
 
     Returns (columns, rows): ``columns`` is available immediately (the underlying generator is primed once
     to get it, surfacing a connection or SQL error here just like execute_sql does), ``rows`` is a lazy
     generator - the connection checked out (or freshly opened) for it is released only once that generator
     is exhausted, errors, or a client disconnect closes it early (see runners._make_stream_runner).
     """
-    details = _sql_connection(connection_name)
+    details = with_database(_sql_connection(connection_name), database)
     default_catalog, default_schema = _table_defaults(details)
     sql = validate_sql(sql, dialect=details['db'], allow_writes=False, allowed_tables=allowed_tables,
                        default_catalog=default_catalog, default_schema=default_schema)
-    masked = masking.prepare(mask, sql, connection_name, details['db'])  # before the query runs, as execute_sql's
+    # before the query runs, as execute_sql's
+    masked = masking.prepare(mask, sql, connection_name, details['db'], database)
     timeout = limits.timeout(timeout)
     row_limit = limits.rows(config.stream_max_rows())  # read now, in the request: the rows are read after it returns
     slot = limits.acquire(timeout)  # held until the last row is read - _drain() or _Rows.close() releases it
