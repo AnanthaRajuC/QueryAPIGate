@@ -121,8 +121,10 @@ class ResultSetDTO:
         return Response(ET.tostring(root, encoding='unicode', method='xml'), mimetype='application/xml')
 
     def to_yaml(self):
-        return Response(yaml.safe_dump(self.as_dicts(), default_flow_style=False, sort_keys=False,
-                                       allow_unicode=True),
+        # PyYAML's safe dumper has dates and datetimes but no time of day: a TIME column was a 500. As text, the
+        # same ISO form JSON gives it.
+        rows = [{k: v.isoformat() if isinstance(v, time) else v for k, v in row.items()} for row in self.as_dicts()]
+        return Response(yaml.safe_dump(rows, default_flow_style=False, sort_keys=False, allow_unicode=True),
                         mimetype='application/x-yaml')
 
     def to_xlsx(self):

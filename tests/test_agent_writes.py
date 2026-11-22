@@ -360,3 +360,27 @@ class CapabilityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ListFilterTests(AgentWriteTestCase):
+    def insert(self, request_id, status, created_at, expires_at):
+        from queryapigate import db
+        with db.transaction() as conn:
+            conn.execute("INSERT INTO write_requests (id, query_name, version, caller, status, created_at, expires_at, "
+                         "details_json) VALUES (?, 'close_ticket', 1, 'agent', ?, ?, ?, '{}')",
+                         (request_id, status, created_at, expires_at))
+
+    def test_a_status_is_filtered_before_the_limit_not_after(self):
+        import time
+
+        from queryapigate import agentwrites
+        later = time.time() + 3600
+        self.insert('old-pending', 'pending', '2026-01-01 00:00:00', later)
+        self.insert('old-lapsed', 'pending', '2026-01-01 00:00:01', time.time() - 60)
+        for n in range(200):  # newer than both: the newest 200 of every status hid them
+            self.insert(f'done-{n:03}', 'done', f'2026-06-01 00:00:{n % 60:02}', later)
+        self.assertEqual([r['id'] for r in agentwrites.list_requests('pending')], ['old-pending'])
+        self.assertEqual([r['id'] for r in agentwrites.list_requests('expired')], ['old-lapsed'])
+        self.assertEqual(len(agentwrites.list_requests('done')), 200)
+        res = self.client.get('/api/v1/write-requests?status=pending', headers=ADMIN)
+        self.assertEqual([r['id'] for r in res.get_json()['items']], ['old-pending'])

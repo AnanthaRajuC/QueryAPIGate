@@ -54,6 +54,49 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 - **CI:** the upgrade fixtures from 0.52.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.52.0.
 
+### Fixed
+
+Found in a review of what 1.0.0-rc1 would freeze.
+
+- **A saved query read through the Management API lost its parameters' `example` and `embed`.** The v1 parameter
+  rule gave every other rule but those two, so saving back what was read - by a client, configuration as code's export
+  or a bundle - dropped them, and `config diff` couldn't see a change to them. Both are given now, `embed` in the
+  OpenAPI document too. Since 0.40.0.
+- **`GET /api/v1/write-requests?status=pending` could leave out requests still waiting for approval.** It took the
+  newest 200 of every status, then filtered: past 200 newer requests, an older pending one wasn't listed. The status
+  is filtered first now - `expired` included, which is a pending or approved request past its time. Since 0.21.0.
+- **`queryapigate admins create` with a bad `--expires` created the administrator without a token,** and exited 1 - so
+  running it again failed on the name. `--expires` is checked first now, and a date already past is refused rather
+  than issuing a token that has already expired. Since 0.16.0.
+- **`format=yaml` on a result with a time-of-day column was a 500.** A `TIME` is written as text, as JSON writes it.
+  Since 0.7.0.
+- **`queryapigate config diff` exited 2 - its "there are changes" - on a mistyped flag or a store it couldn't open,**
+  so a CI drift check read either as drift. Every failure of a `config` command exits 1 now, as documented. Since
+  0.27.0.
+
+### Security
+
+Found in a review of what 1.0.0-rc1 would freeze.
+
+- **A saved query's own column masking and MCP exposure were lost when it was copied: unmasked, and listed over MCP
+  again.** Configuration as code couldn't hold a query's `mask` or `mcp` - a file was refused with them, an export left
+  them out, the diff didn't compare them - and applying a file that changed a masked query's SQL published a version
+  with no mask, listed over MCP. A collection bundle left both out too, though the documentation said it carried
+  them. And a new version added without `mcp` - the Console's editor never sends it - put a query an administrator
+  had taken off MCP back on. Files and bundles carry both now; a file that leaves them out, and a new version that
+  doesn't name `mcp`, keep the query's own. **If you've applied a configuration file, imported a bundle or saved a new
+  version from the Console since 0.40.0,** check the `mask` and `mcp` of the queries it touched.
+- **`DELETE /api/v1/history?caller=...&dry_run=1` erased the caller's history instead of counting it.** Only `true`
+  meant a dry run: `1`, `yes` or `True` - anything else - ran the erasure. `dry_run` is `true` or `false` now, and
+  anything else a 400, as `/config/apply`'s already was. Since 0.29.0.
+- **Settings returned a URL's password in `env_value`.** The syslog receiver's and the OpenTelemetry endpoints' rows
+  showed the URL redacted, but gave it whole for the ".env" copy - to every role that reads Settings, an auditor's
+  included. A value holding a URL with a password is never given now. Since 0.25.0.
+- **`${QAG_API_KEY}` could be read as a connection's secret.** It is the owner's key `config diff` and `config apply
+  --server` read, and `QAG_*` is what config export names passwords and the documentation suggests allowing in
+  `QUERYAPIGATE_SECRET_ENV_VARS` - so where both are in one environment, an administrator could send that key to a
+  host of theirs as a password. It is refused like the server's own settings now. Since 0.27.0.
+
 ## [0.52.0] - 2026-11-21
 
 Security fixes from a second review of the workspace boundary, and `queryapigate mcp` and `queryapigate events` no

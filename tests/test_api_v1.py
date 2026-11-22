@@ -657,3 +657,40 @@ class DeprecationTests(V1TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FoundInTheFreezeReviewTests(V1TestCase):
+    """Bugs the pre-rc1 review of the frozen surfaces found (2026-11-22)."""
+
+    def test_a_new_version_keeps_the_querys_mcp_unless_it_names_it(self):
+        self.create(publish=True, mcp=False)
+        query = self.add_version(publish=True).get_json()  # the Console's editor never sends mcp
+        self.assertEqual([v['mcp'] for v in query['versions']], [False, False])
+        query = self.add_version(publish=True, mcp=True).get_json()
+        self.assertEqual(query['versions'][-1]['mcp'], True)
+
+    def test_a_parameters_example_reads_back_as_it_was_saved(self):
+        self.create(sql='SELECT title FROM film WHERE film_id = :id',
+                    parameters={'id': {'type': 'integer', 'example': 2}})
+        version = self.call('get', '/api/v1/queries/films/versions/1', '/api/v1/queries/{name}/versions/{version}',
+                            200).get_json()
+        self.assertEqual(version['parameters']['id'], {'type': 'integer', 'required': True, 'example': 2})
+
+    def test_forgetting_counts_only_on_dry_run_true_and_refuses_anything_else(self):
+        self.create(publish=True)
+        self.assertEqual(self.client.get('/q/films', headers=ADMIN).status_code, 200)
+        history.flush()
+        for word in ('1', 'yes', 'True', 'on'):
+            res = self.client.delete(f'/api/v1/history?caller=admin&dry_run={word}', headers=ADMIN)
+            self.assertEqual(res.status_code, 400, word)
+        counted = self.client.delete('/api/v1/history?caller=admin&dry_run=true', headers=ADMIN).get_json()
+        self.assertEqual(counted['runs'], 1)  # still there to count: nothing was erased
+        self.assertEqual(self.client.delete('/api/v1/history?caller=admin', headers=ADMIN).get_json()['runs'], 1)
+
+    def test_settings_never_give_a_urls_password(self):
+        url = 'tls://siem-user:p4ss@siem.example:6514'
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_SYSLOG_URL': url}):
+            res = self.call('get', '/api/v1/settings', '/api/v1/settings', 200)
+        self.assertNotIn('p4ss', res.get_data(as_text=True))
+        rows = {r['env']: r for s in res.get_json()['items'] for r in s['rows']}
+        self.assertIsNone(rows['QUERYAPIGATE_AUDIT_SYSLOG_URL']['env_value'])

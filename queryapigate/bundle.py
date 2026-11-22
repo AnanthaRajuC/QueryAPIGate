@@ -1,7 +1,8 @@
 """Collection bundles: a collection's queries as one portable JSON document (``queryapigate collection export``)
 and back into a home folder (``... import``) - for moving a set of queries between environments or sharing
 them. A bundle carries *definitions only*: the latest version of each query's SQL, description, tags, declared
-parameters, default connection name and cache TTL. Never execution history, API keys, roles or connection
+parameters, default connection name and cache TTL - and its query-level mask and MCP exposure, which a query would
+otherwise arrive without, unmasked and listed over MCP. Never execution history, API keys, roles or connection
 details (a connection is referenced by name and must exist where the bundle is imported).
 
 Import is held to exactly the rules saving a query is - every entry goes through
@@ -20,7 +21,7 @@ POLICIES = ('fail', 'skip', 'new-version')
 # ignores is a field whose loss nobody notices.
 ENTRY_FIELDS = {'name', 'sql_query', 'query_type', 'mongo_collection', 'mongo_filter', 'mongo_projection',
                 'mongo_sort', 'author', 'description', 'tags', 'query_parameters', 'connection_name',
-                'cache_ttl', 'column_descriptions', 'agent_writes', 'max_affected_rows'}
+                'cache_ttl', 'column_descriptions', 'agent_writes', 'max_affected_rows', 'mask', 'mcp'}
 
 
 def export_bundle(collection):

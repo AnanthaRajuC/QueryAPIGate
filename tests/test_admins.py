@@ -220,6 +220,17 @@ class CliTests(AdminTestCase):
         code, out, _ = self.run_cli('admins', 'list')
         self.assertIn('ci-deploy  developer', out)
 
+    def test_a_bad_or_past_expiry_is_refused_before_anything_is_written(self):
+        for expires, message in (('tomorrow', "isn't a date: give YYYY-MM-DD, or never"),
+                                 ('2020-01-01', 'has already passed')):
+            code, _, err = self.run_cli('admins', 'create', 'alice', '--role', 'owner', '--expires', expires)
+            self.assertEqual(code, 1, expires)
+            self.assertIn(message, err)
+        self.assertEqual(admins.list_admins(), [])  # not created without its token
+        code, _, _ = self.run_cli('admins', 'create', 'alice', '--role', 'owner',
+                                  '--expires', date.today().isoformat())  # valid through the end of today
+        self.assertEqual(code, 0)
+
     def test_errors_are_reported(self):
         code, _, err = self.run_cli('admins', 'token', 'nobody')
         self.assertEqual(code, 1)

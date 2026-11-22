@@ -1629,6 +1629,14 @@ class ValueCoercionTests(unittest.TestCase):
         with create_app().test_request_context():
             self.assertIn('a: 1', dto.to_yaml().get_data(as_text=True))
 
+    def test_yaml_writes_a_time_of_day_as_json_does(self):  # PyYAML's safe dumper has none: it was a 500
+        from datetime import date, time
+        dto = ResultSetDTO([(time(9, 30, 5), date(2026, 1, 2))], ['at', 'day'])
+        with create_app().test_request_context():
+            text = dto.to_yaml().get_data(as_text=True)
+        import yaml
+        self.assertEqual(yaml.safe_load(text), [{'at': '09:30:05', 'day': date(2026, 1, 2)}])
+
 
 class NamedQueryTests(ApiTestCase):
     def test_get_query_string_params_and_default_connection(self):

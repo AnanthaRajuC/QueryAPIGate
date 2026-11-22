@@ -133,6 +133,10 @@ class AllowListTests(SecretTestCase):
     def test_a_provider_there_is_none_of_and_the_servers_own_settings(self):
         self.assertIn("no secret provider 'gcp-sm'", self.refused('${gcp-sm:projects/p/secrets/s}'))
         self.assertIn("one of this server's own settings", self.refused('${QUERYAPIGATE_API_KEY}'))
+        # the owner's key `config apply --server` reads - though QAG_* is what config export names passwords
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'QAG_*'}):
+            self.assertIn("one of this server's own settings", self.refused('${QAG_API_KEY}'))
+            self.assertEqual(secretrefs.check_value('${QAG_WAREHOUSE_PASSWORD}'), None)
 
     def test_checked_again_when_used_in_case_the_list_shrank(self):
         path = self.secret('pw', 'x')

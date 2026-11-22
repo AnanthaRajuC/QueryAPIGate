@@ -39,17 +39,21 @@ SECRET = '<stored secret>'  # a password the store holds as a value (literal or 
 CHANGED = '<changed>'  # how a diff shows a key's secret hash changing
 MAX_PROBLEMS = 50
 _FAILED = object()  # what _Problems.check() returns for a check that raised
+_NOT_GIVEN = object()  # a query file shape's mask or mcp the file left out (_KEPT_UNLESS_GIVEN)
 
 _HASH_RE = re.compile(r'^[0-9a-f]{64}$')
 _VAR_UNSAFE_RE = re.compile(r'[^A-Z0-9]+')
 # The fields an object of each kind may carry in a file - the API's create fields, less what a file can't hold.
 _QUERY_FIELDS = frozenset({'name', 'description', 'author', 'tags', 'query_type', 'sql', 'connection_name',
                            'parameters', 'cache_ttl', 'columns', 'agent_writes', 'max_affected_rows', 'collection',
-                           'mongo_collection', 'mongo_filter', 'mongo_projection', 'mongo_sort'})
+                           'mask', 'mcp', 'mongo_collection', 'mongo_filter', 'mongo_projection', 'mongo_sort'})
 # What a saved query's definition is compared on - its v1 shape (query_service.to_version()), less what isn't its
-# definition (version, status, timestamps) and `author`, compared only when the file gives one.
+# definition (version, status, timestamps) and `author`, compared only when the file gives one - as `mask` and `mcp`
+# are: a file that leaves them out keeps the query's own (_KEPT_UNLESS_GIVEN), so a file written before it could hold
+# them never takes a query's masking off or puts it back on MCP.
 _QUERY_COMPARED = ('description', 'tags', 'query_type', 'sql', 'mongo', 'connection_name', 'parameters', 'cache_ttl',
-                   'columns', 'agent_writes', 'max_affected_rows')
+                   'columns', 'agent_writes', 'max_affected_rows', 'mask', 'mcp')
+_KEPT_UNLESS_GIVEN = ('mask', 'mcp')
 _KEY_FIELDS = frozenset({'name', 'role', 'active', 'expires_at', 'secret_sha256', *access.GRANT_FIELDS})
 _ROLE_FIELDS = frozenset({'name', *access.GRANT_FIELDS, *access.ROLE_ONLY_FIELDS})
 
@@ -318,6 +322,9 @@ def _query_from_file(where, entry, problems):
     shape = _query_shape(fields, None if collection is definitions.NO_COLLECTION_GIVEN else collection)
     if 'author' not in entry:
         shape['author'] = None  # not compared: an apply records 'config' as the author of what it writes
+    for field in _KEPT_UNLESS_GIVEN:
+        if field not in entry:
+            shape[field] = _NOT_GIVEN  # not compared: an apply keeps the query's own
     return shape
 
 
@@ -483,6 +490,12 @@ def current(kinds=KINDS, examples=False):
 # What applying the file would change
 # --------------------------------------------------------------------------------------
 
+def _not_given(query):
+    """The fields of a query's file shape that the file left out, and so aren't compared."""
+    return (*(('author',) if query['author'] is None else ()),
+            *(field for field in _KEPT_UNLESS_GIVEN if query[field] is _NOT_GIVEN))
+
+
 def _changes(before, after, ignore=()):
     """{field: {'from', 'to'}} for every field that differs."""
     fields = (set(before) | set(after)) - set(ignore)
@@ -557,9 +570,9 @@ def _change(kind, name, before, after, prune_items=False):
                          'above it')
         if before is not None and stored is None:
             return {'kind': kind, 'name': name, 'action': 'update', 'notes': notes + ['has no published version'],
-                    'fields': _changes({}, after, ignore=('author',) if after['author'] is None else ())}
+                    'fields': _changes({}, after, ignore=_not_given(after))}
         before = stored
-        ignore = ('author',) if after['author'] is None else ()
+        ignore = _not_given(after)
     elif kind == 'api_keys':
         fields = _key_fields(after)
         if before is None:
@@ -778,7 +791,8 @@ def _apply_query(change, entry, after, before, actor, digest):
         query_service.create({**body, 'collection': after['collection'], 'publish': True}, actor)
         return
     if set(change['fields']) - {'collection'}:
-        query_service.add_version(name, {**{k: v for k, v in body.items() if k != 'name'}, 'publish': True}, actor)
+        query_service.add_version(name, {**{k: v for k, v in body.items() if k != 'name'}, 'publish': True}, actor,
+                                  keep=_KEPT_UNLESS_GIVEN)
     stored = store.read_collection(store.load_versions(name, with_history=False))
     if after['collection'] != stored:
         access_change = collection_admin.access_change(stored, after['collection'])
@@ -969,9 +983,11 @@ def _query_entry(name, content):
         entry['sql'] = shape['sql']
     if data.get('query_parameters'):
         entry['parameters'] = {param: _parameter(spec) for param, spec in data['query_parameters'].items()}
-    for field in ('cache_ttl', 'columns', 'agent_writes', 'max_affected_rows'):
+    for field in ('cache_ttl', 'columns', 'agent_writes', 'max_affected_rows', 'mask'):
         if shape.get(field) not in (None, {}, []):
             entry[field] = shape[field]
+    if shape['mcp'] is False:
+        entry['mcp'] = False
     return entry
 
 

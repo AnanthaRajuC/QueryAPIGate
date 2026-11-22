@@ -875,7 +875,8 @@ def forget_history():
     """Delete every run by `caller` - a person, jwt:<subject>, or a key - and its usage counts (ADR 0016). Recorded in
     the audit log by the caller's hash, not its name."""
     caller = request.args.get('caller')
-    return jsonify(history.forget(caller, caller_key_name(), dry_run=request.args.get('dry_run') == 'true')), 200
+    # true or false, else 400 - never "anything but true": ?dry_run=1 meant to count must not erase
+    return jsonify(history.forget(caller, caller_key_name(), dry_run=_flag('dry_run'))), 200
 
 
 @bp.route('/audit', methods=['GET'])

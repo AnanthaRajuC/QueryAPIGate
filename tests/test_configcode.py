@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,6 +15,7 @@ import yaml
 
 from queryapigate import apikeys, cli, configcode, db, descriptions, destinations, exports, store
 from queryapigate.services import connections
+from queryapigate.services import queries as query_service
 
 KEY_HASH = hashlib.sha256(b'sk_partner').hexdigest()
 
@@ -415,6 +417,18 @@ class CliTests(ConfigTestCase):
         code, _, err = self.cli('config', 'diff', '-', stdin=text.replace('${LEGACY_PASSWORD}', 'plain'))
         self.assertEqual(code, 1)
         self.assertIn('1 problem(s) in the file:\n  connections[legacy]: password must be a ${VAR} reference', err)
+
+    def test_a_mistyped_flag_or_an_unreachable_store_is_a_failure_not_changes(self):
+        # 2 is "there are changes": a CI drift check must never read either of these as drift
+        path = os.path.join(self.tmp.name, 'queryapigate.yaml')
+        self.assertEqual(self.cli('config', 'export', '--out', path)[0], 0)
+        self.assertEqual(self.cli('config', 'diff', '--bogus', path)[0], 1)
+        self.assertEqual(self.cli('config', 'diff')[0], 1)
+        unreachable = sqlite3.OperationalError('unable to open database file')  # one of db.Error's
+        with mock.patch.object(db, 'init_schema', side_effect=unreachable):
+            code, _, err = self.cli('config', 'diff', path)
+        self.assertEqual(code, 1)
+        self.assertIn('cannot open the metadata database', err)
 
     def test_new_key_prints_a_secret_and_its_hash(self):
         code, out, _ = self.cli('config', 'new-key')
@@ -1032,3 +1046,62 @@ class RealServerTests(unittest.TestCase):
         self.assertEqual(self.role()['rate_limit'], '60/minute')
         self.assertEqual(self.cli('diff').returncode, 0)
         self.assertEqual(os.listdir(self.cli_home), [], 'the CLI opened a store of its own')
+
+
+class MaskAndMcpTests(ConfigTestCase):
+    """A query's own `mask` and `mcp` go wherever its definition does: written out, compared, applied - and a file
+    that leaves them out keeps the query's own, so applying a file written before it could hold them never takes a
+    query's masking off or puts it back on MCP."""
+    MASK = [{'column': 'revenue.month', 'action': 'hash'}]
+
+    def setUp(self):
+        super().setUp()
+        self.build()
+        query_service.add_version('monthly_revenue', {
+            'sql': 'SELECT month, revenue\nFROM revenue WHERE month >= :since', 'author': 'ana',
+            'description': 'Revenue per month', 'tags': ['finance'], 'connection_name': 'warehouse',
+            'parameters': {'since': {'type': 'string', 'pattern': '^[0-9-]+$'}}, 'cache_ttl': 300,
+            'mask': self.MASK, 'mcp': False, 'publish': True}, 't')
+
+    def published(self):
+        content = store.load_versions('monthly_revenue')
+        return content[str(store.read_published(content))]
+
+    def entry(self, doc):
+        return next(e for e in doc['queries'] if e['name'] == 'monthly_revenue')
+
+    def test_they_are_written_out_and_applied_back_as_no_change(self):
+        _, doc, _, _ = self.exported()
+        self.assertEqual((self.entry(doc)['mask'], self.entry(doc)['mcp']), (self.MASK, False))
+        self.assertEqual(configcode.diff(doc), {'changes': [], 'not_in_file': []})
+
+    def test_a_file_without_them_keeps_the_querys_own(self):
+        _, doc, _, _ = self.exported()
+        entry = self.entry(doc)
+        del entry['mask'], entry['mcp']
+        self.assertEqual(configcode.diff(doc), {'changes': [], 'not_in_file': []})
+        entry['sql'] = 'SELECT month FROM revenue WHERE month >= :since'
+        change = next(c for c in configcode.diff(doc)['changes'] if c['name'] == 'monthly_revenue')
+        self.assertEqual(list(change['fields']), ['sql'])
+        configcode.apply(doc)
+        self.assertEqual((self.published()['sql_query'], self.published()['mask'], self.published()['mcp']),
+                         (entry['sql'], self.MASK, False))
+
+    def test_a_file_that_gives_them_changes_them(self):
+        _, doc, _, _ = self.exported()
+        entry = self.entry(doc)
+        entry['mask'], entry['mcp'] = [], True
+        change = next(c for c in configcode.diff(doc)['changes'] if c['name'] == 'monthly_revenue')
+        self.assertEqual(change['fields'], {'mask': {'from': self.MASK, 'to': []}, 'mcp': {'from': False, 'to': True}})
+        configcode.apply(doc)
+        self.assertEqual((self.published().get('mask'), self.published().get('mcp', True)), (None, True))
+
+    def test_a_parameters_example_and_embed_are_part_of_its_definition(self):
+        _, doc, _, _ = self.exported()
+        self.entry(doc)['parameters']['since'] = {'type': 'string', 'pattern': '^[0-9-]+$', 'example': '2026-01'}
+        change = next(c for c in configcode.diff(doc)['changes'] if c['name'] == 'monthly_revenue')
+        self.assertEqual(list(change['fields']), ['parameters'])
+        configcode.apply(doc)
+        _, again, _, _ = self.exported()
+        self.assertEqual(self.entry(again)['parameters']['since']['example'], '2026-01')
+        self.assertEqual(configcode.diff(again), {'changes': [], 'not_in_file': []})

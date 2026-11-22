@@ -35,6 +35,12 @@ def parameter_rule(spec):
     for key in _OPTIONAL_RULES:
         if rule[key] is not None:
             out[key] = rule[key]
+    # example and embed too, so a definition read back and saved again - by a client, config export or diff, or a
+    # bundle - keeps every rule it had. An example has its own flag: it may be any value, null among them.
+    if rule['has_example']:
+        out['example'] = rule['example']
+    if rule['embed']:
+        out['embed'] = True
     return out
 
 
@@ -229,15 +235,34 @@ def create(data, caller):
     return number
 
 
-def add_version(name, data, caller):
+def _base_version(content):
+    """The version a new one is written over: the published one, or else the newest."""
+    number = store.read_published(content)
+    if number is None:
+        numbers = store.version_numbers(content)
+        number = max(numbers) if numbers else None
+    return content.get(str(number)) or {} if number is not None else {}
+
+
+def add_version(name, data, caller, keep=('mcp',)):
     """The next version of an existing query - a draft unless ``publish`` is true. Its collection is the query's,
-    changed through update() rather than here."""
-    name, _ = load(name)
+    changed through update() rather than here.
+
+    A field in ``keep`` that the body leaves out is the query's own - its published version's, or else its newest
+    one's - not the default. `mcp` is by default: it's switched in place (PATCH .../versions/{n}), not with the
+    definition, so a new version that doesn't name it - the Console's editor never does - mustn't put a query an
+    administrator took off MCP back on. Configuration as code keeps `mask` the same way."""
+    name, content = load(name)
     if isinstance(data, dict) and ('name' in data or 'collection' in data):
         raise ApiError("A new version can't change the query's name or collection - PATCH the query for its "
                        'collection', code='invalid_body')
     publish = _publish_flag(data)
-    fields, _ = definitions.validate_definition(_legacy_body(data, name, caller))
+    body = _legacy_body(data, name, caller)
+    base = _base_version(content)
+    for field in keep:
+        if field not in data:
+            body[field] = base.get(field, True) if field == 'mcp' else base.get(field)
+    fields, _ = definitions.validate_definition(body)
     _, number = store.save_version(name, fields, publish=publish)
     store.record_audit(caller, 'save_query', name, {'version': number, 'connection_name': fields.get('connection_name'),
                                                    'published': publish})

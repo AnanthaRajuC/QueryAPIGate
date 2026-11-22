@@ -571,11 +571,19 @@ DEFAULT_TOKEN_DAYS = 90
 
 
 def _token_expiry(value):
-    """--expires: a date, 'never', or (default) DEFAULT_TOKEN_DAYS from today."""
+    """--expires: a date, 'never', or (default) DEFAULT_TOKEN_DAYS from today. Checked before anything is written -
+    a token valid through a day already gone is refused, not issued expired."""
     if value == 'never':
         return None
     if value is None:
         return (datetime.now() + timedelta(days=DEFAULT_TOKEN_DAYS)).strftime('%Y-%m-%d')
+    try:
+        day = datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        raise ApiError(f"--expires {value!r} isn't a date: give YYYY-MM-DD, or never", code='invalid_body') from None
+    if day < datetime.now().date():
+        raise ApiError(f'--expires {value} has already passed: a token is valid through the end of the day it names',
+                       code='invalid_body')
     return value
 
 
@@ -604,9 +612,10 @@ def _admins_command(action):
 
 @_admins_command
 def _admins_create(args):
+    expires_at = _token_expiry(args.expires)  # before the administrator is: a bad date mustn't leave one with no token
     admin = admins.create_admin(args.name, args.role, email=args.email, created_by='cli')
     store.record_audit('cli', 'create_admin', admin['name'], {'role': admin['role'], 'email': admin['email']})
-    token, secret = admins.issue_token(admin['name'], label=args.label, expires_at=_token_expiry(args.expires))
+    token, secret = admins.issue_token(admin['name'], label=args.label, expires_at=expires_at)
     store.record_audit('cli', 'issue_admin_token', admin['name'], {'token': token['id'], 'label': token['label'],
                                                                     'expires_at': token['expires_at']})
     print(f"Created administrator {admin['name']} ({admin['role']}).")
@@ -1038,9 +1047,22 @@ def build_parser():
     return parser
 
 
+def _is_config(argv):
+    """Whether the command line names a `config` command - whose every failure exits 1 (_config_command), since
+    `config diff` exits 2 for "there are changes": a mistyped flag or an unreachable store in a CI drift check
+    mustn't read as drift."""
+    words = sys.argv[1:] if argv is None else argv
+    return next((word for word in words if not word.startswith('-')), None) == 'config'
+
+
 def main(argv=None):
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as stop:  # argparse's usage error, 2 - for a config command, 1
+        if stop.code == 2 and _is_config(argv):
+            return 1
+        raise
     if args.command is None:
         args = parser.parse_args(['serve', *(argv or [])])
     if getattr(args, 'home', None):
@@ -1049,6 +1071,7 @@ def main(argv=None):
         return args.func(args)  # nothing of this home's: no store opened, so none made in a CI checkout
     if getattr(args, 'func', None) is _init:  # the one command that makes a home: the store below opens inside it
         config.home().mkdir(parents=True, exist_ok=True)
+    setup_failed = 1 if args.command == 'config' else 2  # see _is_config()
     try:
         config.check_database_url()
         db.init_schema()
@@ -1056,14 +1079,14 @@ def main(argv=None):
         store.refuse_legacy_home()
     except ValueError as error:
         print(f'queryapigate: {error}', file=sys.stderr)
-        return 2
+        return setup_failed
     except db.Error as error:  # e.g. QUERYAPIGATE_DATABASE_URL names a server that isn't reachable
         print(f'queryapigate: cannot open the metadata database {db.describe()}: {error}'.rstrip(), file=sys.stderr)
-        return 2
+        return setup_failed
     workspace = getattr(args, 'workspace', None)
     if workspace is not None and not workspaces.exists(workspace):
         print(f"queryapigate: no workspace named '{workspace}' - create it first "
               '(POST /api/v1/workspaces, or the Console)', file=sys.stderr)
-        return 2
+        return setup_failed
     with scope.using(workspace):
         return args.func(args)
