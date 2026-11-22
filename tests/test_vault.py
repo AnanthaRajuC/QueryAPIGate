@@ -356,7 +356,7 @@ class RealVaultTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         host, port = os.environ['QUERYAPIGATE_TEST_VAULT_PG'].rsplit(':', 1)
         self.connection = {'name': 'warehouse', 'db': 'postgres', 'host': host, 'port': int(port),
-                           'database': 'postgres', 'sslmode': 'disable',
+                           'database': 'postgres', 'options': {'sslmode': 'disable'},
                            'credentials': {'source': 'vault-database', 'role': 'qag-short'}}
         self.env = {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_VAULT_ADDR': REAL,
                     'QUERYAPIGATE_VAULT_TOKEN': os.environ.get('QUERYAPIGATE_TEST_VAULT_TOKEN', 'root'),

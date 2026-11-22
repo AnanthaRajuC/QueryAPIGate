@@ -126,6 +126,8 @@ otherwise be kept until 2.0.
 
 ### Changed
 
+- **The data plane's `url` crate is 2.5.9,** for RUSTSEC-2026-0592 (a stack overflow in `Url::origin()` on nested
+  `blob:` URLs, which the data plane doesn't parse - `cargo audit` fails the build on any advisory).
 - **Over MCP, `describe_table` doesn't count toward a usage quota,** as `list_tables` didn't - schema discovery, no
   data delivered - and neither is refused once a quota is used up.
 - **CI:** the upgrade fixtures from 0.52.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the

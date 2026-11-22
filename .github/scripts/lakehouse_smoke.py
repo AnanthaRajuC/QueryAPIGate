@@ -53,7 +53,7 @@ check('a table outside the agent\'s list is refused', status == 403 and body.get
 status, _, body = call('/execute_sql', AGENT, {'connection_name': 'lakehouse', 'sql': 'DELETE FROM orders'})
 check('a write is refused', body.get('code') == 'read_only', body)
 check("the partner's one query works", call('/q/revenue_by_month?year=1996', PARTNER)[0] == 200)
-check('and nothing else', call('/q/top_accounts', PARTNER)[2].get('code') == 'connection_forbidden')
+check('and nothing else', call('/q/top_accounts', PARTNER)[2].get('code') == 'query_not_found')  # as if not there
 
 
 async def tools():
