@@ -206,7 +206,9 @@ jobs:
     # dependency, and every extra a stable feature needs (ADR 0017). DuckDB 1.2 is the first that can lock a
     # connection to its paths, sqlglot 25.2 the first masking's tracing works on, mcp 1.21.1 the first that imports
     # beside the pydantic pip installs with it, psycopg2-binary 2.9.5 the first with wheels for Python 3.11,
-    # opentelemetry 1.27 the oldest tracing (stable since 0.50) is tested with.
+    # opentelemetry 1.27 the oldest tracing (stable since 0.50) is tested with. mysql-connector-python 9.1.0 the first
+    # past CVE-2024-21272, clickhouse-driver 0.2.4 the first with wheels for Python 3.11, gunicorn 23 the first past
+    # its request-smuggling fixes, cryptography 41 what the FIPS image's distribution ships (rc1, E).
     # tests/test_dependency_floors.py keeps these pins equal to pyproject.toml's minimums.
     name: Tests (oldest supported dependencies)
     # ubuntu-24.04, not -latest (BACKLOG #105): on 26.04 the PostgreSQL client is 18, whose pg_restore sets
@@ -231,6 +233,22 @@ jobs:
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:  # mysql-connector-python's floor, against a real server
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: pw
+          MYSQL_DATABASE: it
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -ppw" --health-interval 5s --health-timeout 5s --health-retries 20
+      clickhouse:  # clickhouse-driver's floor, against a real server
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_PASSWORD: pw
+        ports: ["9000:9000"]
+        options: >-
+          --health-cmd "wget --spider -q localhost:8123/ping" --health-interval 5s --health-timeout 5s
+          --health-retries 20
     env:
       QUERYAPIGATE_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
@@ -243,12 +261,24 @@ jobs:
           pip install -e ".[dev]" "Flask==3.0.0" "Werkzeug==3.0.0" "PyYAML==6.0.1" "openpyxl==3.1.0"
           "duckdb==1.2.0" "sqlglot==25.2.0" "mcp==1.21.1" "PyJWT[crypto]==2.14.0" "redis==5.0.0"
           "psycopg2-binary==2.9.5" "pymongo==4.0" "opentelemetry-sdk==1.27.0"
-          "opentelemetry-exporter-otlp-proto-http==1.27.0"
+          "opentelemetry-exporter-otlp-proto-http==1.27.0" "mysql-connector-python==9.1.0" "clickhouse-driver==0.2.4"
+          "gunicorn==23.0.0" "cryptography==41.0.0"
       - run: python -m unittest discover -s tests -t . -v
       - name: MongoDB at pymongo's floor, against a real server
         run: python -m unittest tests.test_integration.MongoTests -v
         env:
           QUERYAPIGATE_IT_MONGO: '{"host": "localhost", "port": 27017, "database": "it"}'
+      - name: MySQL and ClickHouse at their drivers' floors, against real servers
+        run: python -m unittest tests.test_integration.MySQLTests tests.test_integration.ClickHouseTests -v
+        env:
+          QUERYAPIGATE_IT_MYSQL: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
+          QUERYAPIGATE_IT_CLICKHOUSE: '{"host": "localhost", "port": 9000, "user": "default", "password": "pw", "database": "default"}'
+      - name: gunicorn at its floor serves the app with its config
+        run: |
+          export QUERYAPIGATE_HOME="$(mktemp -d)" QUERYAPIGATE_BIND=127.0.0.1:5099
+          gunicorn --workers 1 --worker-class gthread -c python:queryapigate.gunicorn_conf "queryapigate.app:create_app()" &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5099/health && exit 0; sleep 1; done
+          exit 1
       - name: Again, on a PostgreSQL store
         run: python -m unittest discover -s tests -t . -v
         env:
