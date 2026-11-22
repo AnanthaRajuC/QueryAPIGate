@@ -1,12 +1,14 @@
 # API reference
 
 Base URL when running locally: `http://127.0.0.1:5000`. The same information is available interactively at `/docs`
-and as an OpenAPI document at `/openapi.json`.
+and as an OpenAPI document at `/openapi.json`. Each fixed operation there has an `operationId` - its endpoint's name,
+such as `create_connection` or `execute_sql` - covered by the compatibility promise, so a generated client's method
+names stay; a saved query's is `run_` and its name, `run_<name>_post` for its POST form.
 
 If the server has any key configured - `QUERYAPIGATE_API_KEY` or a scoped key created through `/api/v1/api-keys` - send it
 with every request as `X-API-Key: <key>` (`/health`, `/docs`, `/console` and `/openapi.json` are always public, and
-`/metrics` unless `QUERYAPIGATE_METRICS_TOKEN` is set; `/openapi.json`'s saved-query section still varies with who's
-asking). See
+`/metrics` has its own rule - [Observability](#observability); `/openapi.json`'s saved-query section still varies with
+who's asking). See
 [Authentication and permissions](#authentication-and-permissions).
 
 | Endpoint | Method | Purpose |
@@ -17,7 +19,7 @@ asking). See
 | [`/catalog`](#the-api-catalogue) | GET | The saved queries this caller can reach, and the terms they're offered under |
 | [`/events`](#live-events-server-sent-events) | GET | Live events: every run, as it happens (Server-Sent Events) |
 | [`/api/v1/...`](#management-api-v1) | GET, POST, PATCH, DELETE | The Management API: saved queries, connections, API keys, roles, collections, history, audit, settings and more (admin only) |
-| `/health` | GET | `{"status": "ok", "version": "...", "time_zone": "Asia/Kolkata", "utc_offset": "+05:30"}` - the zone every timestamp the server returns is in (`time_zone` is `null` when the server can't name it) |
+| `/health` | GET | `{"status": "ok", "version": "...", "time_zone": "Asia/Kolkata", "utc_offset": "+05:30"}` - the server's zone: the one the Management API's RFC 3339 timestamps carry the offset of, and the one other timestamps (run events, `/catalog`) are in (`time_zone` is `null` when the server can't name it) |
 | [`/metrics`](#observability) | GET | Prometheus text-format metrics |
 
 ## Common query parameters
@@ -36,8 +38,31 @@ whatever `page_size` is, and `LIMIT 25` with `page_size=10` gives pages of 10, 1
 Every form is understood: `LIMIT n [OFFSET m]`, `LIMIT m, n`, `LIMIT ALL`, `OFFSET m` alone, and
 `[OFFSET m ROWS] FETCH FIRST n ROWS ONLY`. Each number may be a bound `:parameter`, whose value must then be a
 non-negative whole number. A `LIMIT` inside a subquery, a string or a comment is left alone. Responses carry
-`X-Page`, `X-Page-Size` and `X-Has-More` (`true` when another page exists). A query that returns no rows answers
-`{"message": "No results returned"}`.
+`X-Page`, `X-Page-Size` and `X-Has-More` (`true` when another page exists). A query that returns no rows - a write
+among them - answers the format's own empty document, `200`, `X-Row-Count: 0`: `[]` in JSON and YAML, a CSV or TSV of
+the header row alone, an empty NDJSON body, `<data />`, a sheet or Parquet file with the columns and no rows (a result
+with no columns at all - a write, a Mongo find that matched nothing - is an empty CSV, and can't be Parquet:
+`400 invalid_format`). Before 1.0 it was `{"message": "No results returned"}` in every format.
+
+### How values are written
+
+A value keeps what it is, in every format:
+
+| Database type | JSON and NDJSON | CSV, TSV, XML |
+|---|---|---|
+| Timestamp with a time zone (`TIMESTAMPTZ`) | ISO 8601 with its fraction and offset: `"2026-11-22T12:03:10.123456+05:30"` | `2026-11-22 12:03:10.123456+05:30` |
+| Timestamp without one (`TIMESTAMP`, `DATETIME`) | `"2026-11-22 12:03:10"`, with `.ffffff` when it has a fraction | the same |
+| `DECIMAL`, `NUMERIC` | a number with the database's exact digits: `12345678901234567890.123456789`, `-12.50`; `NaN` and infinities, which JSON has no number for, as strings | the same digits |
+| Binary (`BLOB`, `BYTEA`, `VARBINARY`) | base64: `"SGVsbG8="` | base64 |
+
+A timestamp with a zone is written in the database session's zone, with that offset. YAML writes timestamps and
+decimals as YAML does (a decimal as its float); a sheet has no time zones or decimals, so it holds the timestamp's wall
+time and the decimal as a number; Parquet keeps the database's own types. A JSON parser that reads every number as a
+float (JavaScript's `JSON.parse`) still rounds a long decimal: parse it as a decimal to keep it. A masked column's
+`hash` is the same as before: it's taken from the database's value, not from how it's written.
+
+Before 1.0 a timestamp with a zone lost its offset and fraction in JSON, a decimal was a float, and binary was its
+bytes read as UTF-8, every invalid byte lost.
 
 ## Execute SQL
 
@@ -267,7 +292,12 @@ database that nothing reports - no Debezium, not through QueryAPIGate - is still
 
 ## Parameter rules
 
-`query_parameters` maps each parameter name to its type, or to an object of rules:
+`query_parameters` maps each parameter name to its type, or to an object of rules. A parameter is sent beside the
+arguments that control a call, so it can't be named `format`, `page`, `page_size`, `connection_name`, `version`,
+`timeout`, `stream`, `approval` or `idempotency_key`, nor start with `_` (kept for controls to come) - in
+`query_parameters` or as a `:name` in the SQL. Such a query is refused when it's saved (`400 invalid_body`); one saved
+before 1.0 still runs. A saved query's own name is listed over MCP as a tool, which limits names too
+([MCP](MCP.md#whats-exposed)).
 
 ~~~json
 {
@@ -334,6 +364,16 @@ tag.
 - **Optimistic concurrency.** Reading a query returns an `ETag`. Send it back as `If-Match` on a change and the
   change is refused with `412 precondition_failed` if the query changed in the meantime, through any route.
 - **Unknown fields are refused** (`unknown_field`), so a typo never silently does nothing.
+- **Lists that grow are paged** - `/history`, `/audit`, `/write-requests`: `limit`, and the response's
+  `next_cursor`, sent back as `cursor` for the next page (`null` on the last). Every other list is complete in one
+  answer - what an administrator configures (queries, connections, deleted connections, keys, roles), or a window
+  with its own `limit` (an export's newest `runs`). Paging may be added to one later, opt-in: without `limit`, still
+  the whole list.
+- **Timestamps are RFC 3339 with the server's offset** - `"created_at": "2026-11-22T12:03:10+05:30"` - the instant
+  they name, whatever zone the client is in. A calendar date stays a date: a key's or token's `expires_at`
+  (`2026-12-31`, valid through the end of that day). A time a filter takes (`since`, `until`) may be RFC 3339 with any
+  offset or `Z`, or the server's own local `YYYY-MM-DD HH:MM:SS`, or a date. Before 1.0 every timestamp was the
+  server's local wall-clock time with no offset, as the store keeps it.
 
 ### Queries
 
@@ -395,7 +435,7 @@ Every change is audited exactly as the legacy routes audit theirs. A password ap
 | `GET /api/v1/api-keys` | Every key's grants (`connections`, `queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`, `max_concurrent`, `query_timeout`, `max_rows`, `quota`), `effective_limits` (each against the server's now), `usage_this_period` (with a quota), `active`, `expires_at` and `expired`, `created_at`, `created_from_role`, `last_used_at` and live `usage`; after a rotation, `previous_expires_at` (the old secret works until then) and `previous_last_used_at`. Never secrets. |
 | `POST /api/v1/api-keys` | Create one, from explicit grants or from a `role` (whose grants are copied once; no grant fields then). The response's `secret` is the only time it is ever shown, and is sent with `Cache-Control: no-store`. 409 `key_exists`, 404 `role_not_found`. |
 | `GET /api/v1/api-keys/{name}` | One key. |
-| `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. Honours `If-Match`. |
+| `PATCH /api/v1/api-keys/{name}` | Change some grants, `expires_at` or `active` (`false` revokes it at once); `null` clears an optional field. `connections`, `queries`, `collections`, `allow_writes` and `active` have nothing to clear to: `null` is a `400 invalid_body` (`[]` or `false` says it). Honours `If-Match`. |
 | `POST /api/v1/api-keys/{name}/rotate` | Reissue its secret: the response carries the new `secret`, shown this once (`Cache-Control: no-store`), and the old one keeps working for `grace_minutes` (default 60, at most 10080 - a week; 0 stops it at once). Name, grants, expiry and history stay; `active`, expiry, `allowed_ips` and the rate limit apply to both secrets alike. 409 `key_rotation_pending` while an old secret from the last rotation still works. Audited as `rotate_api_key`. |
 | `DELETE /api/v1/api-keys/{name}/previous` | Stop the old secret now, before its grace period ends. 404 `previous_secret_not_found` when none works. Audited as `end_previous_secret`. |
 | `DELETE /api/v1/api-keys/{name}` | Revoke and remove it: anything still using it stops working immediately. |
@@ -413,7 +453,7 @@ secret.
 | `GET /api/v1/me` | Who you are: `name`, `role`, `via` (`token`, `break-glass`, `open`), your role's `capabilities`, and `data_access` (whether you may run SQL). Any administrator. |
 | `GET /api/v1/administrators` | Every administrator: `name`, `role`, `email`, `active`, `created_at`, `created_by`, `last_seen_at`, `tokens` (how many). Owners only. |
 | `POST /api/v1/administrators` | Create one: `{"name": "alice", "role": "developer", "email": "alice@corp.com"}`. 409 `admin_exists`, or `name_taken` for an API key's name. Owners only. |
-| `GET`, `PATCH`, `DELETE /api/v1/administrators/{name}` | One administrator; change `role`, `email` or `active` (`false` stops all their tokens at once); remove them with their tokens. Honours `If-Match`. 409 `last_owner` when the change would leave no active owner and `QUERYAPIGATE_API_KEY` isn't set. |
+| `GET`, `PATCH`, `DELETE /api/v1/administrators/{name}` | One administrator; change `role`, `email` or `active` (`false` stops all their tokens at once; `null` is a 400); remove them with their tokens. Honours `If-Match`. 409 `last_owner` when the change would leave no active owner and `QUERYAPIGATE_API_KEY` isn't set. |
 | `GET /api/v1/administrators/{name}/tokens` | Their tokens: `id`, `label`, `created_at`, `expires_at`, `expired`, `last_used_at` - never the secret. |
 | `POST /api/v1/administrators/{name}/tokens` | Issue one: `{"label": "laptop", "expires_at": "2027-01-01"}` (both optional; no `expires_at`, no expiry). The response's `secret` (`qagadm_...`) is the only time it is shown, sent with `Cache-Control: no-store`. |
 | `DELETE /api/v1/administrators/{name}/tokens/{id}` | Revoke one; their other tokens keep working. |
@@ -442,7 +482,7 @@ and those `workspaces`.
 |---|---|
 | `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller, its events and its usage counts (`dry_run=true` counts them; anything but `true` or `false` is a 400, never an erasure). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
-| `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
+| `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). Paged: `limit` entries (1-1000, default 1000), and `next_cursor` - send it as `cursor` for the next page; `null` on the last. |
 | `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance`. |
 | `GET /api/v1/audit/verify` | Walk the audit log's hash chain from its anchor: `{"intact": true, "first_seq", "last_seq", "keyed", ...}`, or `{"intact": false, "break": {"seq", "action", "timestamp", "problem"}}` - `problem` is `changed`, `changed_before`, `missing`, `out_of_order` or `unkeyed_after_keyed`. |
 
@@ -604,9 +644,11 @@ queryapigate collection import reporting.json --dry-run
 queryapigate collection import reporting.json --on-conflict skip
 ~~~
 
-A bundle (`"format": "queryapigate-collection"`, `"format_version": 1`) holds the **latest version of each
+A bundle (`"format": "queryapigate-collection"`, `"format_version": 2`) holds the **latest version of each
 query's definition** - SQL, description, tags, declared parameters, default connection name, `cache_ttl`, any
-query-level `mask`, and `mcp` exposure - and nothing else: no execution history, no API keys or roles, no connection details (a connection is referenced by
+query-level `mask`, and `mcp` exposure - each query in the fields `POST /api/v1/queries` and a configuration file
+take (`sql`, `parameters`, `columns`; `collection` is the bundle's). Version 1, written before 1.0, named them as
+the store does (`sql_query`, `query_parameters`, `column_descriptions`); an import reads either. Nothing else: no execution history, no API keys or roles, no connection details (a connection is referenced by
 name and must exist where you import; missing ones are reported as a warning).
 
 Import is held to exactly the rules saving a query is, and is all-or-nothing up to the point of writing: the
@@ -694,8 +736,8 @@ Write `${VAR}` references in block style, as above: inside `{...}` on one line, 
 - **No secret is ever in it.** A connection's or destination's `password` must be a `${VAR}` reference, expanded where
   the server runs; a value is refused. An API key carries `secret_sha256`, the hash the store keeps - required for a
   new key, and a different one is a new secret. An export turns a password the store held as a value into a reference
-  named for it (`${QAG_LEGACY_PASSWORD}`) and lists the variables to set - and, if `QUERYAPIGATE_SECRET_ENV_VARS` is
-  set, for it to allow (`QAG_*`); applying that file reads the password from
+  named for it (`${QAG_LEGACY_PASSWORD}`) and lists the variables to set, and for `QUERYAPIGATE_SECRET_ENV_VARS` to
+  allow (`QAG_*`) - without it, no `${VAR}` is read; applying that file reads the password from
   the server's environment from then on, and the diff says so.
 - **A key's `role` stays live**: `role: partner` means the key has `partner`'s grants, so a change to the role in the
   file changes its keys too (through the API, a role is a template copied once).
@@ -859,7 +901,7 @@ show the reference as written.
 
 | Reference | Resolved from |
 |---|---|
-| `${VAR}` | The server's environment - only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists, when it's set. |
+| `${VAR}` | The server's environment - only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists. Unset, none. |
 | `${file:/run/secrets/warehouse}` | A file - what the Secrets Store CSI driver, Docker secrets and Vault Agent write. Read again as soon as it changes, so a password rotated in place is used by the next connection; one trailing newline is dropped; at most 64 KiB. |
 | `${vault:secret/data/warehouse#password}` | A field of a secret in Vault's KV engine, version 1 or 2: the path as Vault's API names it (`secret/data/...` for version 2), `#`, the field. |
 | `${aws-sm:prod/warehouse#password}` | An AWS Secrets Manager secret, by name or ARN - with `#field`, that field of its JSON; without, the whole string. Experimental: [below](#secrets-and-credentials-from-aws). |
@@ -877,9 +919,10 @@ reference, and nor are the credentials it may itself run with - `AWS_*`, `AZURE_
 `VAULT_*` and `KUBERNETES_*` - which reach far more than one connection's secret. Nor, through `${file:...}`, is a
 file one of them names (`QUERYAPIGATE_SECRET_KEY_FILE`, `QUERYAPIGATE_VAULT_TOKEN_FILE`,
 `AWS_WEB_IDENTITY_TOKEN_FILE`...), the Kubernetes and EKS service account tokens, or anything under `/proc` - whatever
-`QUERYAPIGATE_SECRET_FILE_DIRS` allows. `${VAR}` reads any other variable
-until `QUERYAPIGATE_SECRET_ENV_VARS` lists the ones it may: names, or prefixes ending in `*`
-(`WAREHOUSE_PASSWORD,QAG_*`). Set it: while references are in use without it, the server says so at startup.
+`QUERYAPIGATE_SECRET_FILE_DIRS` allows. `${VAR}` reads only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists:
+names, or prefixes ending in `*` (`WAREHOUSE_PASSWORD,QAG_*`). Unset, it reads none - before 1.0 it read any other
+variable - and while connections or destinations reference one without it, the server logs an error at startup naming
+the setting that brings them back.
 
 **It fails closed.** A resolved value is kept for at most `QUERYAPIGATE_SECRET_CACHE_SECONDS` (default 300) and
 fetched again a little before that. If its provider fails then, the value it gave before is used until its time is
@@ -1177,7 +1220,9 @@ only to revoke it (`DELETE /api/v1/api-keys/<name>`) and create a new one.
 The `201` response is the key's grants and state plus its `secret` (`sk_...`), shown this once and sent with
 `Cache-Control: no-store`.
 
-`connections` may be omitted (or `"*"`) for every connection, or an empty list to block all of them.
+`connections` is required: a list of connection names, `"*"` for every connection, or `[]` for none (the key runs
+only the saved queries and collections it's granted). Left out, it's a `400 invalid_body` - before 1.0 it meant every
+connection. A key created from a `role` takes the role's.
 `GET /api/v1/api-keys` lists keys (name, grants, active, expiry, created_at, `created_from_role`, `last_used_at` -
 never the hash or secret). Each entry also carries a live `usage` object -
 `{"queries": ..., "errors": ..., "rows": ...}` - the same live, in-process aggregation `GET /api/v1/connections`
@@ -1203,6 +1248,11 @@ authorizes the specific named saved query, not the connection behind it - and on
 connection**: a request that names a different one with `?connection_name=` (or that supplies one for a query with
 no default) is `403` unless the key also holds a real grant on that connection. This applies equally to a
 [collection grant](#granting-access-to-a-collection).
+
+A saved query a key can't run at all - no `queries`, collection or connection grant reaches it - answers `404
+query_not_found`, word for word as a name that was never used, over REST, MCP and live queries: a key can't find out
+which names exist (before 1.0 it was a `403` naming the query's connection). Administrators, who can list every query,
+still get the `403`.
 
 ~~~json
 {"name": "acme-corp", "connections": [], "queries": ["monthly_revenue", "active_users"], "allow_writes": false}
@@ -1284,7 +1334,7 @@ every connection in the pool. Three more grant fields, on keys and roles ([ADR 0
 give one caller less than the server allows - each **narrows** the server's own limit, never widens it:
 
 ~~~json
-{"name": "acme-corp", "queries": ["monthly_revenue"], "max_concurrent": 2, "query_timeout": 5, "max_rows": 500}
+{"name": "acme-corp", "connections": [], "queries": ["monthly_revenue"], "max_concurrent": 2, "query_timeout": 5, "max_rows": 500}
 ~~~
 
 | Field | What it limits | Effective |
@@ -1312,12 +1362,13 @@ Partner and data-product contracts are written in quotas - "100,000 calls a mont
 role can carry one:
 
 ~~~json
-{"name": "acme-corp", "queries": ["monthly_revenue"], "quota": {"calls": 100000, "rows": 10000000, "per": "month"}}
+{"name": "acme-corp", "connections": [], "queries": ["monthly_revenue"], "quota": {"calls": 100000, "rows": 10000000, "per": "month"}}
 ~~~
 
 - **Per caller, per calendar period:** `per` is `day` or `month`, in the server's time zone. A key has its own
   counter; signed-in users get their role's quota **each**, counted per user. Either count may be left out, not both.
-- **What counts:** successful calls that return data - saved queries, ad-hoc SQL, MCP tool calls (not `list_tables`),
+- **What counts:** successful calls that return data - saved queries, ad-hoc SQL, MCP tool calls (not `list_tables`
+  or `describe_table`, schema discovery - nor are they refused once a quota is used up),
   cached responses - and the rows they return (a page's `X-Row-Count`; a stream's rows as they leave, however it
   ends). An agent's [write request](MCP.md#write-tools-agents-that-write-approved-by-a-person) counts as a call when
   it's made, with no rows. Refused calls don't: unauthorised, invalid, over a limit, or a database error. Nor does
@@ -1637,6 +1688,9 @@ where encoding cost can rival query time but was previously invisible, folded in
 between total request latency and query latency.
 
 `GET /metrics` serves [Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/).
+It needs no API key. With `QUERYAPIGATE_METRICS_TOKEN` set, a scraper sends `Authorization: Bearer <the token>`;
+without one, a server that needs a credential answers only a client on its own machine (a loopback address - before
+1.0, anyone who could reach it), and an administrator who may observe reads it from anywhere.
 It's open to whoever can reach it unless **`QUERYAPIGATE_METRICS_TOKEN`** is set (at least 16 characters): then it
 answers `401` to anyone but a scraper sending `Authorization: Bearer <the token>` and an administrator whose role may
 observe - the Console's Metrics screen. Set it wherever the server is reachable from outside: the labels name your API
@@ -2225,7 +2279,7 @@ only (it shows every key's activity). `GET /api/v1/queries/{name}/history` is th
 | `query`, `version` | Only this saved query (and version). |
 | `status` | `success` or `error`. |
 | `key` | Only runs made with this API key (`admin` for the admin key). |
-| `since`, `until` | `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`, in the server's local time; `since` inclusive, `until` exclusive. |
+| `since`, `until` | RFC 3339 (`2026-11-22T06:33:10Z`, any offset), `YYYY-MM-DD HH:MM:SS` in the server's local time, or `YYYY-MM-DD`; `since` inclusive, `until` exclusive. |
 | `limit` | Runs per page, 1-1000 (default 100). |
 | `cursor` | The previous page's `next_cursor`. |
 
@@ -2302,7 +2356,7 @@ both and the entry. Change, remove, insert or reorder an entry, and every hash f
   `audit_key_rotated`. Keep the old key listed for as long as entries signed with it are kept.
 - **The rolling cap still applies:** the chain's anchor remembers the newest entry trimmed, so the oldest kept must
   follow it - removing entries from the start isn't mistaken for a trim.
-- **Checking it:** `queryapigate audit verify` (exit 0 intact, 1 broken) or `GET /api/v1/audit/verify`, which name the
+- **Checking it:** `queryapigate audit verify` (exit 0 intact, 1 broken, 2 can't be checked) or `GET /api/v1/audit/verify`, which name the
   first entry that doesn't verify; `queryapigate audit verify --file` checks a copy on its own - an export file, or
   what your SIEM received, as JSON lines or as the syslog lines a receiver writes - whose entries carry `seq`,
   `prev_hash` and `hash` too. Delivery to a SIEM is at least once, so its copy may hold an entry twice, or out of
@@ -2540,7 +2594,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `claim_missing` | 403 | The sign-in token lacks a claim the query needs |
 | `claim_binding_required` | 403 | The caller's role has `require_claim_binding`, and the query takes no parameter from the sign-in token |
 | `forbidden` | 403 | Any other refusal |
-| `query_not_found` | 404 | No such saved query |
+| `query_not_found` | 404 | No such saved query - or none this caller may run |
 | `mcp_disabled` | 404 | The saved query exists but isn't exposed as an MCP tool (its `mcp` is off); it still serves over REST |
 | `version_not_found` | 404 | No such version - or a draft, to a key that can't see drafts |
 | `not_published` | 404 | The query has no published version |

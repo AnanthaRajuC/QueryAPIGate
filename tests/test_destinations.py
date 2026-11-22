@@ -43,6 +43,7 @@ class DestinationApiTests(V1TestCase):
         self.assertEqual([a for a, _ in audit], ['create_destination', 'update_destination', 'delete_destination'])
         self.assertNotIn('s3cret', repr(audit))
 
+    @mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'DEST_SECRET'})
     def test_a_secret_is_a_var_reference_or_encrypted(self):
         self.create(password='${DEST_SECRET}')
         self.assertEqual(self.call('get', f'{LIST}/local', ONE, 200).get_json()['password'], '${DEST_SECRET}')
@@ -136,7 +137,7 @@ class WriterTests(unittest.TestCase):
 class S3DestinationTests(V1TestCase):
     def test_a_probe_written_to_a_bucket_prefix_and_no_further(self):
         endpoint, key, secret, bucket = os.environ['QUERYAPIGATE_TEST_S3'].split(',')
-        with mock.patch.dict(os.environ, {'TEST_S3_SECRET': secret}):
+        with mock.patch.dict(os.environ, {'TEST_S3_SECRET': secret, 'QUERYAPIGATE_SECRET_ENV_VARS': 'TEST_S3_SECRET'}):
             self.call('post', LIST, LIST, 201, json={
                 'name': 'bucket', 'url': f's3://{bucket}/queryapigate-test/exports/', 'user': key,
                 'password': '${TEST_S3_SECRET}', 'endpoint': endpoint, 'url_style': 'path', 'use_ssl': False,

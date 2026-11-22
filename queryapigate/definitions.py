@@ -1,6 +1,6 @@
 """Validation of a saved-query definition - shared by everything that creates one (``POST /api/v1/queries``
 and ``queryapigate collection import``), so a query is held to the same rules however it arrives."""
-from . import masking, mongotools, sqltools, store
+from . import masking, mongotools, sqltools, store, toolnames
 from . import params as param_rules
 from .errors import ApiError
 
@@ -115,6 +115,7 @@ def validate_definition(data):
         used = set(mongotools.placeholder_names(mongo_filter))
     else:
         used = set(sqltools.placeholder_names(data['sql_query']))
+    toolnames.check_parameters({*query_parameters, *used})
     unused = sorted(set(query_parameters) - used)
     if unused:
         where = 'the filter' if query_type == 'mongo' else 'sql_query'

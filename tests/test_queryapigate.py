@@ -125,9 +125,17 @@ class ExecuteSqlTests(ApiTestCase):
         self.assertEqual(xml.get_data(as_text=True), '<data><item><_1_id>1</_1_id></item></data>')
 
     def test_empty_result(self):
+        # rc1 (B5): each format's own empty document - before, {"message": "No results returned"} in every format
         res = self.run_sql('SELECT * FROM actor WHERE actor_id < 0')
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.get_json(), {'message': 'No results returned'})
+        self.assertEqual((res.get_json(), res.headers['X-Row-Count']), ([], '0'))
+        for fmt, mimetype, body in (('csv', 'text/csv', 'actor_id,name,born\r\n'),
+                                    ('tsv', 'text/tab-separated-values', 'actor_id\tname\tborn\r\n'),
+                                    ('ndjson', 'application/x-ndjson', ''), ('yaml', 'application/x-yaml', '[]\n'),
+                                    ('xml', 'application/xml', '<data />')):
+            with self.subTest(fmt=fmt):
+                res = self.run_sql('SELECT * FROM actor WHERE actor_id < 0', f'?format={fmt}')
+                self.assertEqual((res.status_code, res.mimetype, res.get_data(as_text=True)), (200, mimetype, body))
 
     def test_non_select_statements_are_paged_without_limit_rewriting(self):
         # EXPLAIN can't take a LIMIT clause, so it is fetched whole and sliced instead
@@ -178,7 +186,7 @@ class ReadOnlyTests(ApiTestCase):
     def test_writes_can_be_enabled(self):
         os.environ['QUERYAPIGATE_ALLOW_WRITES'] = '1'
         res = self.run_sql("INSERT INTO actor VALUES (99, 'New', '2000-01-01')")
-        self.assertEqual(res.get_json(), {'message': 'No results returned'})
+        self.assertEqual(res.get_json(), [])  # no rows - an array, as every result is
         rows = self.run_sql('SELECT name FROM actor WHERE actor_id = 99').get_json()
         self.assertEqual(rows, [{'name': 'New'}])
 
@@ -1638,6 +1646,50 @@ class ValueCoercionTests(unittest.TestCase):
         self.assertEqual(yaml.safe_load(text), [{'at': '09:30:05', 'day': date(2026, 1, 2)}])
 
 
+    def test_values_keep_what_they_are_in_every_format(self):
+        # rc1 (B6): a TIMESTAMPTZ lost its offset and fraction, a DECIMAL(38,9) became a float, binary was read as UTF-8
+        import json
+        from datetime import datetime, timedelta, timezone
+        from decimal import Decimal
+        from io import BytesIO
+
+        import yaml
+        from openpyxl import load_workbook
+        zone = timezone(timedelta(hours=5, minutes=30))
+        row = (datetime(2026, 11, 22, 12, 3, 10, 123456, tzinfo=zone), datetime(2026, 11, 22, 12, 3, 10, 500000),
+               datetime(2026, 11, 22, 12, 3, 10), Decimal('12345678901234567890.123456789'), Decimal('-12.50'),
+               Decimal('NaN'), b'\xff\x00\xfe\x80', memoryview(b'Hello'))
+        columns = ['tz', 'fraction', 'plain', 'big', 'scale', 'nan', 'blob', 'bytea']
+        dto = ResultSetDTO([row], columns)
+        with create_app().test_request_context():
+            body = dto.to_json().get_data(as_text=True)
+            ndjson = dto.to_ndjson().get_data(as_text=True)
+            csv_text = dto.to_csv().get_data(as_text=True)
+            xml_text = dto.to_xml().get_data(as_text=True)
+            loaded = yaml.safe_load(dto.to_yaml().get_data(as_text=True))[0]
+            sheet = load_workbook(BytesIO(dto.to_xlsx().get_data())).active
+        self.assertEqual(body, '[{"tz":"2026-11-22T12:03:10.123456+05:30","fraction":"2026-11-22 12:03:10.500000",'
+                               '"plain":"2026-11-22 12:03:10","big":12345678901234567890.123456789,"scale":-12.50,'
+                               '"nan":"NaN","blob":"/wD+gA==","bytea":"SGVsbG8="}]\n')
+        self.assertEqual(ndjson, body[1:-2] + '\n')
+        exact = json.loads(body, parse_float=Decimal)[0]
+        self.assertEqual((exact['big'], exact['scale']), (row[3], row[4]))
+        self.assertIn('2026-11-22 12:03:10.123456+05:30,2026-11-22 12:03:10.500000,2026-11-22 12:03:10,'
+                      '12345678901234567890.123456789,-12.50,NaN,/wD+gA==,SGVsbG8=', csv_text)
+        self.assertIn('<big>12345678901234567890.123456789</big>', xml_text)
+        self.assertEqual((loaded['tz'], loaded['blob']), (row[0], '/wD+gA=='))
+        self.assertEqual(str(loaded['big']), '1.2345678901234567e+19')  # YAML has no decimals: its float, as written
+        self.assertEqual([c.value for c in sheet[2]][:3], [datetime(2026, 11, 22, 12, 3, 10, 123000),  # Excel: ms
+                                                          datetime(2026, 11, 22, 12, 3, 10, 500000),
+                                                          datetime(2026, 11, 22, 12, 3, 10)])
+
+    def test_a_value_shaped_like_the_marker_stays_a_string(self):
+        from decimal import Decimal
+        dto = ResultSetDTO([('\ufdd012\ufdd0', '12', Decimal('5'))], ['a', 'b', 'c'])
+        with create_app().test_request_context():
+            self.assertEqual(dto.to_json().get_data(as_text=True), '[{"a":"\\ufdd012\\ufdd0","b":"12","c":5}]\n')
+
+
 class NamedQueryTests(ApiTestCase):
     def test_get_query_string_params_and_default_connection(self):
         self.save('by_id', sql='SELECT name FROM actor WHERE actor_id = :id',
@@ -1794,6 +1846,26 @@ class StreamingTests(ApiTestCase):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_STREAM_MAX_ROWS': 'not-a-number'}):
             self.assertRaises(ValueError, create_app)
 
+    def test_a_setting_that_used_to_fall_back_silently_is_refused_at_startup(self):
+        # rc1 (B3): each of these ran with its default, or the opposite of what was meant
+        for name, bad, good in (('QUERYAPIGATE_QUERY_TIMEOUT', '5m', '2.5'), ('QUERYAPIGATE_QUERY_TIMEOUT', '-1', '0'),
+                                ('QUERYAPIGATE_SLOW_QUERY_THRESHOLD', 'slow', '0'),
+                                ('QUERYAPIGATE_POOL_SIZE', '-2', '0'), ('QUERYAPIGATE_POOL_IDLE_TIMEOUT', '0', '30'),
+                                ('QUERYAPIGATE_METADATA_CACHE_TTL', 'nan', '5'),
+                                ('QUERYAPIGATE_TRUST_PROXY', 'true', '1'), ('QUERYAPIGATE_MAX_PAGE_SIZE', '0', '50'),
+                                ('QUERYAPIGATE_ALLOW_WRITES', 'enabled', 'yes'),
+                                ('QUERYAPIGATE_AUDIT_OTLP', 'enabled', 'off'),
+                                ('QUERYAPIGATE_DEBUG', 'verbose', '0'), ('QUERYAPIGATE_JSON_LOGS', 'json', 'true'),
+                                ('QUERYAPIGATE_LIVE_QUERIES', 'enable', '1'),
+                                ('QUERYAPIGATE_LOG_REQUESTS', 'disabled', 'off')):
+            with self.subTest(name=name, value=bad), mock.patch.dict(os.environ, {name: bad}):
+                with self.assertRaises(ValueError) as caught:
+                    config.check_settings()
+                self.assertIn(f"{name} must be", str(caught.exception))
+                self.assertIn(f"not '{bad}'", str(caught.exception))
+            with mock.patch.dict(os.environ, {name: good}):
+                config.check_settings()
+
     def test_saved_query_stream_history_reflects_the_truncated_row_count(self):
         self.save('capped', sql='SELECT * FROM actor ORDER BY actor_id', connection_name='lite')
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_STREAM_MAX_ROWS': '4'}):
@@ -1874,6 +1946,7 @@ class StreamingTests(ApiTestCase):
 
 
 class ConnectionSecretsTests(ApiTestCase):
+    @mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'IT_*'})
     def test_env_var_references_are_expanded_for_use_and_left_visible_in_listing(self):
         write_connections({'env': {'db': 'sqlite', 'database': '${IT_DB_PATH}', 'password': '${IT_PW}',
                                    'active': True}})
@@ -1893,6 +1966,7 @@ class ConnectionSecretsTests(ApiTestCase):
             create_app()
         self.assertTrue(any('plain' in line and 'literal password' in line for line in logs.output))
 
+    @mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'IT_*'})
     def test_an_env_var_reference_does_not_trigger_the_warning(self):
         write_connections({'env': {'db': 'sqlite', 'database': self.db_path,
                                    'password': '${IT_PW}', 'active': True}})
@@ -2125,7 +2199,7 @@ class MongoQueryTests(ApiTestCase):
         scoped = self.client.post('/api/v1/api-keys', json={'name': 'scoped', 'connections': []}, headers=admin)
         key = scoped.get_json()['secret']
         res = self.client.get('/q/orders', headers={'X-API-Key': key})
-        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.status_code, 404)
 
     def test_openapi_and_catalog_list_a_saved_mongo_query(self):
         save_query(self.client, {

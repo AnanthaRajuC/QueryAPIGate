@@ -361,7 +361,7 @@ class KeyRateLimitTests(AppTestCase):
     def test_malformed_rate_limit_is_rejected_with_a_message_naming_the_right_field(self):
         os.environ.setdefault('QUERYAPIGATE_API_KEY', 'admin-key')
         client = self.client()
-        res = client.post('/api/v1/api-keys', json={'name': 'bad', 'rate_limit': 'fast'},
+        res = client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'bad', 'rate_limit': 'fast'},
                           headers={'X-API-Key': 'admin-key'})
         self.assertEqual(res.status_code, 400)
         self.assertIn('rate_limit must look like', res.get_json()['error'])

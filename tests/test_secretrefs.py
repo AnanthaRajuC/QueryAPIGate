@@ -167,10 +167,16 @@ class EnvironmentAllowListTests(SecretTestCase):
             self.assertEqual(caught.exception.code, 'connection_misconfigured')
             self.assertNotIn("'k'", caught.exception.message)
 
-    def test_unset_any_other_variable_is_reachable(self):
+    def test_unset_no_variable_is_reachable(self):
+        # rc1 (B2): deny by default, as every other allow-list - unset, it used to mean any variable
         with mock.patch.dict(os.environ, {'WAREHOUSE_PASSWORD': 'pw'}):
-            secretrefs.check_value('${WAREHOUSE_PASSWORD}')
-            self.assertEqual(secretrefs.expand('${WAREHOUSE_PASSWORD}'), 'pw')
+            message = self.refused('${WAREHOUSE_PASSWORD}')
+            self.assertIn("${WAREHOUSE_PASSWORD} can't be read: QUERYAPIGATE_SECRET_ENV_VARS is unset", message)
+            with self.assertRaises(ApiError) as caught:
+                secretrefs.expand('${WAREHOUSE_PASSWORD}')
+        self.assertEqual(caught.exception.code, 'connection_misconfigured')
+        self.assertIn('QUERYAPIGATE_SECRET_ENV_VARS is unset', caught.exception.message)
+        self.assertNotIn('pw', caught.exception.message)
 
     def test_set_only_what_it_lists(self):
         env = {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_PASSWORD, QAG_*', 'WAREHOUSE_PASSWORD': 'pw',
@@ -182,7 +188,7 @@ class EnvironmentAllowListTests(SecretTestCase):
             self.assertIn("isn't one of QUERYAPIGATE_SECRET_ENV_VARS", self.refused('${WAREHOUSE_PASSWORD_2}'))
 
     def test_checked_again_when_used_in_case_the_list_shrank(self):
-        with mock.patch.dict(os.environ, {'DB_ADMIN_PW': 'root'}):
+        with mock.patch.dict(os.environ, {'DB_ADMIN_PW': 'root', 'QUERYAPIGATE_SECRET_ENV_VARS': 'DB_ADMIN_PW'}):
             connections.create({'name': 'c', 'db': 'mysql', 'host': 'h', 'password': '${DB_ADMIN_PW}'}, 't')
             with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*'}), \
                     self.assertRaises(ApiError) as caught:
@@ -207,13 +213,16 @@ class EnvironmentAllowListTests(SecretTestCase):
         import logging
 
         from queryapigate import app
-        with mock.patch.dict(os.environ, {'WAREHOUSE_PASSWORD': 'pw'}):
+        # saved while it was allowed (or before 1.0, when unset allowed any): the log names the setting to keep it
+        with mock.patch.dict(os.environ, {'WAREHOUSE_PASSWORD': 'pw', 'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*'}):
             connections.create({'name': 'c', 'db': 'mysql', 'host': 'h', 'password': '${WAREHOUSE_PASSWORD}'}, 't')
         log = logging.getLogger('queryapigate')
         with self.assertLogs(log, level=logging.WARNING) as logs:
             log.warning('marker')
             app.warn_env_references()
-        self.assertIn('reference environment variables (WAREHOUSE_PASSWORD)', ' '.join(logs.output))
+        self.assertTrue(logs.output[1].startswith('ERROR:'), logs.output)
+        self.assertIn('reference environment variables (WAREHOUSE_PASSWORD)', logs.output[1])
+        self.assertIn('set QUERYAPIGATE_SECRET_ENV_VARS=WAREHOUSE_PASSWORD', logs.output[1])
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*'}), \
                 self.assertLogs(log, level=logging.WARNING) as logs:
             log.warning('marker')

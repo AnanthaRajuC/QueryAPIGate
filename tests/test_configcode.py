@@ -24,7 +24,8 @@ class ConfigTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        env = {'QUERYAPIGATE_HOME': self.tmp.name}
+        env = {'QUERYAPIGATE_HOME': self.tmp.name,  # ${VAR} is refused unless listed (rc1, B2)
+               'QUERYAPIGATE_SECRET_ENV_VARS': 'WAREHOUSE_*,LEGACY_*,BUCKET_SECRET,PARTNER_*,QAG_*,VAR'}
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -36,7 +37,8 @@ class ConfigTestCase(unittest.TestCase):
         """A server with one of everything, its passwords ${VAR} references: two connections, a destination, a role and
         a key from it, a key of its own, queries in and out of a collection, descriptions, an export."""
         connections.create({'name': 'warehouse', 'db': 'postgres', 'host': 'db1', 'port': 5432, 'user': 'ro',
-                            'password': '${WAREHOUSE_PASSWORD}', 'database': 'analytics', 'sslmode': 'require'}, 't')
+                            'password': '${WAREHOUSE_PASSWORD}', 'database': 'analytics',
+                            'options': {'sslmode': 'require'}}, 't')
         connections.create({'name': 'legacy', 'db': 'mysql', 'host': 'old', 'user': 'app',
                             'password': '${LEGACY_PASSWORD}'}, 't')
         destinations.create('bucket', {'url': 's3://drop/daily/', 'user': 'AKIA', 'password': '${BUCKET_SECRET}'})
@@ -157,7 +159,7 @@ class ExportTests(ConfigTestCase):
                                                               'description': 'YYYY-MM'}]})
         self.assertEqual(doc['exports'][0]['path'], 'revenue/{date}.csv')
         warehouse = next(c for c in doc['connections'] if c['name'] == 'warehouse')
-        self.assertEqual(warehouse['sslmode'], 'require')  # a driver option, flat as the API takes it
+        self.assertEqual(warehouse['options'], {'sslmode': 'require'})  # a driver option, as the API takes it
 
     def test_sql_over_several_lines_is_a_block(self):
         self.build()
@@ -329,7 +331,7 @@ class RefusalTests(ConfigTestCase):
                          {'name': 'server', 'db': 'mysql', 'password': '${QUERYAPIGATE_API_KEY}'},
                          {'name': 'nodb'}],
             destinations=[{'name': 'b', 'url': 's3://x/', 'password': 'literal'}],
-            roles=[{'name': 'r', 'rate_limit': 'often'}, {'name': 'r'}],
+            roles=[{'name': 'r', 'rate_limit': 'often'}, {'name': 'r', 'connections': []}],
             queries=[{'name': 'q', 'sql': 'SELECT :a', 'description': 'd', 'parameters': {'b': 'int'}},
                      {'name': 'unknown', 'sql': 'SELECT 1', 'description': 'd', 'publish': True}],
             api_keys=[{'name': 'k', 'role': 'r', 'connections': '*', 'secret_sha256': 'not-a-hash'}],
@@ -341,6 +343,7 @@ class RefusalTests(ConfigTestCase):
             ('destinations[b]', 'password must be a ${VAR} reference'),
             ('roles[r]', 'is listed twice'),
             ('roles[r]', 'rate_limit'),
+            ('roles[r]', 'connections is required'),
             ('queries[q]', 'query_parameters declares b'),
             ('queries[unknown]', 'unknown field(s): publish'),
             ('api_keys[k]', 'secret_sha256 must be the SHA-256'),
@@ -352,7 +355,7 @@ class RefusalTests(ConfigTestCase):
     def test_references_must_exist_in_the_file_or_on_the_server(self):
         problems = self.problems(self.file(
             queries=[{'name': 'q', 'sql': 'SELECT 1', 'description': 'd', 'connection_name': 'nowhere'}],
-            roles=[{'name': 'r', 'collections': ['nothing']}],
+            roles=[{'name': 'r', 'connections': [], 'collections': ['nothing']}],
             api_keys=[{'name': 'k', 'role': 'ghost', 'secret_sha256': KEY_HASH}],
             descriptions={'nowhere': [{'table': 't', 'description': 'd'}]},
             exports=[{'name': 'e', 'query': 'q2', 'destination': 'd', 'path': 'x.csv'}]))
@@ -369,7 +372,7 @@ class RefusalTests(ConfigTestCase):
             connections=[{'name': 'new', 'db': 'sqlite', 'database': 'x.db'}],
             queries=[{'name': 'q', 'sql': 'SELECT 1', 'description': 'd', 'connection_name': 'new',
                       'collection': 'fresh'}],
-            roles=[{'name': 'r', 'collections': ['fresh']}],
+            roles=[{'name': 'r', 'connections': [], 'collections': ['fresh']}],
             api_keys=[{'name': 'k', 'role': 'r', 'secret_sha256': KEY_HASH}]))
         self.assertEqual(len(result['changes']), 4)
 
@@ -377,6 +380,18 @@ class RefusalTests(ConfigTestCase):
         problems = self.problems(self.file(api_keys=[{'name': 'k', 'connections': []}]))
         self.assertEqual(problems, ['api_keys[k]: a new key needs secret_sha256 - `queryapigate config new-key` makes '
                                     'a secret and prints its hash'])
+
+    def test_a_key_or_role_names_its_connections(self):
+        # rc1 (B1): left out, connections used to mean every connection
+        problems = self.problems(self.file(roles=[{'name': 'r'}],
+                                           api_keys=[{'name': 'k', 'secret_sha256': KEY_HASH}]))
+        self.assertEqual(problems, [
+            'roles[r]: connections is required: a list of connection names, [] for none (saved queries only), or "*" '
+            'for every connection',
+            'api_keys[k]: connections is required: a list of connection names, [] for none (saved queries only), or '
+            '"*" for every connection'])
+        bound = configcode.diff(self.file(roles=[{'name': 'bound', 'queries': [], 'require_claim_binding': True}]))
+        self.assertEqual([c['action'] for c in bound['changes']], ['create'])
 
     def test_an_existing_key_keeps_its_secret_without_one(self):
         apikeys.create_key('k', connections=[])

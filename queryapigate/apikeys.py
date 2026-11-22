@@ -232,6 +232,15 @@ def _upsert(conn, name, entry, workspace=None):
           entry.get('expires_at'), entry.get('created_at') or store.now(), json.dumps(details)))
 
 
+def require_connections(connections):
+    """A new key or role names its connections (rc1, B1): left out, it used to mean every connection - the widest
+    grant there is, given by silence, while every other grant left out gives nothing. Stored keys and roles keep
+    what they hold; only a create (the API, the CLI, a configuration file) is refused."""
+    if connections is None:
+        raise ApiError('connections is required: a list of connection names, [] for none (saved queries only), or '
+                       f'"{ALL_CONNECTIONS}" for every connection', code='invalid_body')
+
+
 def _normalize_connections(connections):
     if connections in (None, ALL_CONNECTIONS):
         return ALL_CONNECTIONS

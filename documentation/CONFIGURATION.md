@@ -1,6 +1,9 @@
 # Configuration
 
-Everything is configured through environment variables (all optional):
+Everything is configured through environment variables (all optional). Each is checked at startup: a value the server
+can't read - `QUERYAPIGATE_QUERY_TIMEOUT=5m`, `QUERYAPIGATE_TRUST_PROXY=true`, `QUERYAPIGATE_LOG_REQUESTS=disabled` -
+stops it with a message naming the setting, rather than running with the default. A yes/no setting takes `1`/`0`,
+`true`/`false`, `yes`/`no` or `on`/`off`.
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -28,7 +31,7 @@ Everything is configured through environment variables (all optional):
 | `QUERYAPIGATE_METADATA_CACHE_TTL` | `0` | Seconds the API key, saved query and connection a request reads from the store are reused, instead of read again each time - see [Performance](PERFORMANCE.md#the-metadata-cache). A change made through this server is seen at once; one made through another instance up to this long later. `0` turns it off. |
 | `QUERYAPIGATE_QUERY_TIMEOUT` | `30` | Seconds a query may run before it is cancelled (HTTP 504). `0` disables the limit. A request can lower it with `?timeout=`, never raise it. |
 | `QUERYAPIGATE_HOST` / `QUERYAPIGATE_PORT` | `127.0.0.1` / `5000` | Bind address for `queryapigate serve`. |
-| `QUERYAPIGATE_DEBUG` | off | Flask debug mode. Never enable on a reachable host. |
+| `QUERYAPIGATE_DEBUG` | off | Flask debug mode (`queryapigate serve --debug`), with Werkzeug's interactive debugger, which runs code typed into an error page. Only with a loopback `--host` (`127.0.0.1`, `localhost`, `::1`): on any other, `serve` refuses to start. |
 | `QUERYAPIGATE_H2_JAR` | bundled | Path to a different H2 JDBC jar. |
 | `QUERYAPIGATE_SECRET_KEY` | unset | A Fernet key encrypting connection passwords at rest. Off by default (stored as given); needs `queryapigate[encryption]`. A malformed value stops startup. |
 | `QUERYAPIGATE_JSON_LOGS` | off | Emit one JSON object per log line, tagged with the request ID, instead of plain text. |

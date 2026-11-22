@@ -14,7 +14,12 @@ ADMIN = {'X-API-Key': 'admin-key'}
 
 
 def later(minutes):
-    return (datetime.now() + timedelta(minutes=minutes)).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now().astimezone() + timedelta(minutes=minutes)
+
+
+def local(stamp):
+    """An API timestamp (RFC 3339, rc1 B7) as the store's local wall-clock time."""
+    return datetime.fromisoformat(stamp).astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 
 class RotationTestCase(unittest.TestCase):
@@ -63,21 +68,21 @@ class RotateTests(RotationTestCase):
         self.assertEqual(res.headers['Cache-Control'], 'no-store')
         self.assertTrue(self.works(new))
         self.assertTrue(self.works(self.old))
-        self.assertTrue(later(59) < body['previous_expires_at'] <= later(60))  # 60 minutes by default
+        self.assertTrue(later(59) < datetime.fromisoformat(body['previous_expires_at']) <= later(60))  # 60 by default
         for field in ('name', 'connections', 'allowed_ips', 'created_at', 'expires_at', 'active'):
             self.assertEqual(body[field], before[field])
         self.assertEqual(self.audit('rotate_api_key')[0]['changes'],
-                         {'grace_minutes': 60, 'previous_expires_at': body['previous_expires_at']})
+                         {'grace_minutes': 60, 'previous_expires_at': local(body['previous_expires_at'])})
         self.assertNotIn(new, repr(store.read_audit_log()))
 
     def test_the_old_secret_stops_the_second_its_grace_ends(self):
         until = self.rotate(grace_minutes=5).get_json()['previous_expires_at']
         stamp = '%Y-%m-%d %H:%M:%S'
-        just_before = (datetime.strptime(until, stamp) - timedelta(seconds=1)).strftime(stamp)
+        just_before = (datetime.strptime(local(until), stamp) - timedelta(seconds=1)).strftime(stamp)
         with mock.patch.object(store, 'now', return_value=just_before):
             self.assertTrue(self.works(self.old))
             self.assertEqual(self.key()['previous_expires_at'], until)
-        with mock.patch.object(store, 'now', return_value=until):
+        with mock.patch.object(store, 'now', return_value=local(until)):
             self.assertFalse(self.works(self.old))
             self.assertIsNone(self.key()['previous_expires_at'])  # over: nothing works, so nothing to show
 
@@ -99,7 +104,7 @@ class RotateTests(RotationTestCase):
         self.assertIsNone(ended.get_json()['previous_expires_at'])
         self.assertFalse(self.works(self.old))
         self.assertEqual(self.audit('end_previous_secret')[0]['changes'],
-                         {'was_valid_until': first['previous_expires_at']})
+                         {'was_valid_until': local(first['previous_expires_at'])})
         self.rotate()
 
     def test_after_the_grace_a_new_rotation_is_allowed(self):

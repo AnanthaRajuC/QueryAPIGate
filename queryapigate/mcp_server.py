@@ -38,6 +38,7 @@ from . import (
     scope,
     sqltools,
     store,
+    toolnames,
 )
 from .errors import ApiError, code_for
 
@@ -55,10 +56,13 @@ def _in_callers_workspace(position):
         return inner
     return wrap
 
-# A saved query can never be named these - list_tools_for() skips a colliding saved query rather than
-# hiding one of these two fixed tools, since a caller relies on list_tables/execute_sql always meaning the
-# same thing.
-RESERVED_TOOL_NAMES = frozenset({'list_tables', 'execute_sql', 'describe_table'})
+# A saved query can never be listed as these - list_tools_for() skips one stored before the rule rather than hiding a
+# fixed tool, since a caller relies on list_tables/execute_sql always meaning the same thing. New ones are refused at
+# save, with the names kept for tools to come (toolnames.py).
+RESERVED_TOOL_NAMES = toolnames.BUILTIN_TOOLS
+# Neither counts toward a usage quota, nor is refused by one used up (rc1, B16: describe_table counted, list_tables
+# didn't): they say what's there, not what's in it - REST's /connections/<name>/schema doesn't count either.
+SCHEMA_TOOLS = frozenset({'list_tables', 'describe_table'})
 log = logging.getLogger('queryapigate')
 
 # Generic result-envelope outputSchemas, deliberately not per-query/per-column: a saved query's actual result
@@ -156,8 +160,8 @@ def list_tools_for(permission):
     and missed by another" - this is that same call, so MCP tool listing is no exception either). Computed
     fresh on every call, never cached: two different API keys reach different queries."""
     tools = []
-    for name, _number, data, collection in store.live_versions():
-        if name in RESERVED_TOOL_NAMES or not _is_runnable(data):
+    for tool, name, data, collection in _saved_query_tools():
+        if not _is_runnable(data):
             continue
         if data.get('mcp') is False:  # exposure turned off for this query (BACKLOG #54); default is on
             continue
@@ -166,7 +170,7 @@ def list_tools_for(permission):
             continue
         if is_read_only(data):
             tools.append({
-                'name': name,
+                'name': tool,
                 'description': data.get('description') or name,
                 'inputSchema': input_schema(data),
                 'outputSchema': output_schema(data),
@@ -174,8 +178,34 @@ def list_tools_for(permission):
                 'idempotentHint': True,
             })
         elif agent_may_write(permission, name, data):
-            tools.append(write_tool(name, data))
+            tools.append({**write_tool(name, data), 'name': tool})
     return tools + fixed_tools_for(permission)
+
+
+def _saved_query_tools():
+    """(tool name, query name, data, collection) for every published saved query listed over MCP: its tool name is
+    toolnames.tool_name() of its name (rc1, B17). New names that collide are refused at save; of two stored before
+    that, the query named exactly as the tool is listed, else the first by name - the one call_tool_for() runs. One
+    named like a built-in tool isn't listed."""
+    chosen = {}
+    for name, _number, data, collection in sorted(store.live_versions(), key=lambda found: found[0]):
+        tool = toolnames.tool_name(name)
+        if tool in RESERVED_TOOL_NAMES:
+            continue
+        if tool not in chosen or name == tool:
+            chosen[tool] = (tool, name, data, collection)
+    return sorted(chosen.values(), key=lambda found: found[1])
+
+
+def query_for_tool(tool):
+    """The saved query a tools/call names: the query of that exact name - every name already a valid tool name, and
+    clients that called a query by its own name before 1.0 - else the one listed under it (_saved_query_tools())."""
+    if store.saved_query_exists(tool) or toolnames.tool_name(tool) != tool:
+        return tool
+    for listed, name, _data, _collection in _saved_query_tools():
+        if listed == tool:
+            return name
+    return tool
 
 
 def agent_may_write(permission, name, data):
@@ -329,6 +359,7 @@ def call_tool_for(flask_app, permission, name, arguments):
     except (TypeError, ValueError):
         page_size = config.mcp_max_rows()
     query_string = urllib.parse.urlencode({**arguments, 'format': 'json', 'page_size': page_size})
+    name = query_for_tool(name)
 
     with flask_app.test_request_context(f'/q/{name}', method='GET', query_string=query_string):
         from . import app as app_module  # deferred: app.py imports Flask, a heavier import than this
@@ -344,8 +375,7 @@ def call_tool_for(flask_app, permission, name, arguments):
             structured = g.agent_write_result
             return {'content': [{'type': 'text', 'text': json.dumps(structured, default=str)}],
                     'structuredContent': structured}
-        # REST answers no rows with {"message": "No results returned"}; a tool's rows are a list (its outputSchema)
-        rows = response.get_json() if response.headers.get('X-Row-Count') != '0' else []
+        rows = response.get_json()  # a list (its outputSchema) - [] for none, as REST answers since rc1
         structured = {'rows': rows, 'truncated': response.headers.get('X-Has-More') == 'true'}
         return _rows_result(structured)
 
@@ -568,6 +598,8 @@ def call_as(flask_app, permission, name, arguments, started=None, headers=None):
         if verdict is not None and not verdict.allowed:
             result = _error(f'Rate limit exceeded for this API key - retry after {verdict.retry_after}s', 429,
                             retry_after=verdict.retry_after)
+        elif name in SCHEMA_TOOLS:  # schema discovery: no data delivered, so outside quotas, as REST's /schema is
+            result = dispatch_tool_call(flask_app, permission, name, arguments)
         else:
             try:
                 quotas.check(permission)  # usage quotas (ADR 0011): an agent's calls count like any other
@@ -575,7 +607,7 @@ def call_as(flask_app, permission, name, arguments, started=None, headers=None):
                 result = _error(error.message, error.status, error.code, **error.extra)
             else:
                 result = dispatch_tool_call(flask_app, permission, name, arguments)
-                if not result.get('isError') and name != 'list_tables':  # table names aren't data delivered
+                if not result.get('isError'):
                     quotas.count(permission, len((result.get('structuredContent') or {}).get('rows') or []))
         if span is not None and result.get('isError'):
             code = (result.get('structuredContent') or {}).get('code')
@@ -775,7 +807,7 @@ def build_asgi_app(flask_app):
             yield
 
     async def metrics_endpoint(request):
-        if not metrics.authorized(request.headers.get('authorization')):
+        if not metrics.authorized(request.headers.get('authorization'), request.scope.get(SOCKET_PEER)):
             return JSONResponse({'error': metrics.UNAUTHORIZED, 'code': 'unauthorized'}, status_code=401,
                                 headers={'WWW-Authenticate': 'Bearer realm="metrics"'})
         return PlainTextResponse(metrics.render(flask_app.extensions.get('queryapigate_cache')),

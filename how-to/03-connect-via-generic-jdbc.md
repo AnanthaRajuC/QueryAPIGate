@@ -21,30 +21,33 @@ below is real. The vendor examples at the end come from each vendor's documentat
 
 ## Step 1: Test the details
 
-A `jdbc` connection takes `jar`, `driver_class` and `jdbc_url` instead of `host`/`port`/`database`:
+A `jdbc` connection takes `jar`, `driver_class` and `jdbc_url` - driver options, under `options` - instead of
+`host`/`port`/`database`:
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/connections/test -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "db": "jdbc",
-  "jar": "/opt/jdbc/h2-2.2.224.jar",
-  "driver_class": "org.h2.Driver",
-  "jdbc_url": "jdbc:h2:tcp://localhost:9093/inventory",
-  "user": "sa", "password": "${INVENTORY_PASSWORD}"
+  "user": "sa", "password": "${INVENTORY_PASSWORD}",
+  "options": {
+    "jar": "/opt/jdbc/h2-2.2.224.jar",
+    "driver_class": "org.h2.Driver",
+    "jdbc_url": "jdbc:h2:tcp://localhost:9093/inventory"
+  }
 }'
 # {"elapsed_ms": 359.1}
 ```
 
 The first connection is slow - the JVM starts. `${INVENTORY_PASSWORD}` is read from the server's environment, as for
-any connection.
+any connection - one `QUERYAPIGATE_SECRET_ENV_VARS` lists (`QUERYAPIGATE_SECRET_ENV_VARS=INVENTORY_PASSWORD`); unset, none is read.
 
 ## Step 2: Save it, and query
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' -d '{
   "name": "inventory", "db": "jdbc",
-  "jar": "/opt/jdbc/h2-2.2.224.jar", "driver_class": "org.h2.Driver",
-  "jdbc_url": "jdbc:h2:tcp://localhost:9093/inventory",
-  "user": "sa", "password": "${INVENTORY_PASSWORD}", "active": true
+  "user": "sa", "password": "${INVENTORY_PASSWORD}", "active": true,
+  "options": {"jar": "/opt/jdbc/h2-2.2.224.jar", "driver_class": "org.h2.Driver",
+              "jdbc_url": "jdbc:h2:tcp://localhost:9093/inventory"}
 }'
 
 curl -X POST http://127.0.0.1:5000/execute_sql -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \

@@ -95,7 +95,7 @@ class StoreAccessTests(unittest.TestCase):
     def test_a_duckdb_connection_cant_read_the_store_through_allowed_paths(self):
         res = self.client.post('/api/v1/connections', headers={'X-API-Key': 'admin-key'},
                                json={'name': 'lake', 'db': 'duckdb', 'database': ':memory:', 'active': True,
-                                     'allowed_paths': [self.tmp.name + '/']})
+                                     'options': {'allowed_paths': [self.tmp.name + '/']}})
         self.assertEqual((res.status_code, res.get_json()['code']), (403, 'store_not_allowed'))
 
     def test_a_server_database_skips_the_path_checks(self):

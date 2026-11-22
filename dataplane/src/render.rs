@@ -3,6 +3,7 @@
 //! Decline, for a type or value this doesn't reproduce exactly; the call is then forwarded, and Python answers it.
 //! Tested against Python's own bodies for the same values on real servers: tests/render_vectors.jsonl.
 
+use base64::Engine as _;
 use hmac::{KeyInit, Mac};
 use serde_json::Value as Json;
 use sha2::Sha256;
@@ -45,15 +46,16 @@ enum Py {
     /// An int, as its digits (any size)
     Int(String),
     Float(f64),
-    /// A Decimal: the float formats._cell() turns it into, and str() of it (decimal_str()), what `hash` takes
-    Decimal(f64, String),
+    /// A Decimal: str() of it (decimal_str()) - what JSON writes, as an exact number (rc1), and what `hash` takes
+    Decimal(String),
     Str(String),
-    /// Bytes, or PostgreSQL bytea, which psycopg2 hands over as a memoryview: JSON and masking._hash() both decode it
-    /// as bytes, and `mask` nulls it
+    /// Bytes, or PostgreSQL bytea, which psycopg2 hands over as a memoryview: JSON writes it as base64 (rc1),
+    /// masking._hash() decodes it as UTF-8, and `mask` nulls it
     Bytes(Vec<u8>),
     /// A date or time: its isoformat(), what both str() and JSON give
     Iso(String),
-    /// A datetime: JSON's '%Y-%m-%d %H:%M:%S' (str() is longer, so it can't be hashed)
+    /// A datetime as JSON writes it (formats.timestamp_text(), rc1): 'YYYY-MM-DD HH:MM:SS[.ffffff]' without a zone,
+    /// ISO 8601 with its offset with one ('T', and str() has ' ', so it isn't hashed here)
     DateTime(String),
     /// A timedelta: str() of it, what JSON gives too
     Delta(String),
@@ -273,22 +275,22 @@ fn offset(t: &str) -> Out<String> {
     Ok(out)
 }
 
-/// A timestamp, with or without its zone: JSON's '%Y-%m-%d %H:%M:%S', in the session's zone as the server wrote it.
+/// A timestamp as formats.timestamp_text() writes it, in the session's zone as the server wrote it: without a zone,
+/// 'YYYY-MM-DD HH:MM:SS[.ffffff]'; with one, isoformat() - its fraction and offset kept (rc1).
 fn timestamp(t: &str, with_zone: bool) -> Out<String> {
-    match t {
-        "infinity" => return Ok("9999-12-31 23:59:59".into()),
-        "-infinity" => return Ok("0001-01-01 00:00:00".into()),
-        _ => {}
+    if t.ends_with("infinity") {
+        return Err(Decline); // Python's, which has its own (datetime.max)
     }
     let (day, time) = t.split_once(' ').ok_or(Decline)?;
     let day = date(day)?;
     let (iso, rest) = clock(time)?;
     if with_zone {
-        offset(rest)?;
+        Ok(format!("{day}T{iso}{}", offset(rest)?))
     } else if !rest.is_empty() {
-        return Err(Decline);
+        Err(Decline)
+    } else {
+        Ok(format!("{day} {iso}"))
     }
-    Ok(format!("{day} {}", &iso[..8]))
 }
 
 /// str() of a timedelta of `micros` microseconds: `[-]D day[s], H:MM:SS[.ffffff]`, normalised as Python does.
@@ -427,9 +429,7 @@ fn value(dialect: Dialect, kind: &str, bytes: &[u8]) -> Out<Py> {
             integer(bytes)?
         }
         (Postgres, "FLOAT4" | "FLOAT8") | (Mysql, "FLOAT" | "DOUBLE") => Py::Float(float(bytes)?),
-        (Postgres, "NUMERIC") | (Mysql, "DECIMAL") => {
-            Py::Decimal(float(bytes)?, decimal_str(text(bytes)?)?)
-        }
+        (Postgres, "NUMERIC") | (Mysql, "DECIMAL") => Py::Decimal(decimal_str(text(bytes)?)?),
         (Postgres, "BOOL") => match bytes {
             b"t" => Py::Bool(true),
             b"f" => Py::Bool(false),
@@ -506,7 +506,7 @@ fn python_str(value: &Py) -> Out<String> {
             }
         }
         Py::Float(f) => pyfmt::repr(*f),
-        Py::Decimal(_, text) => text.clone(),
+        Py::Decimal(text) => text.clone(),
         Py::None | Py::DateTime(_) | Py::Dumped(_) => return Err(Decline),
     })
 }
@@ -545,18 +545,60 @@ fn hash(value: Py, key: &[u8]) -> Out<Py> {
     ))
 }
 
-/// formats._cell() and json_default(), written as json.dumps() writes them.
+/// formats._cell() and formats.dumps_rows(), written as json.dumps() writes them.
 fn write(value: &Py, out: &mut String) {
     match value {
         Py::None => out.push_str("null"),
         Py::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Py::Int(digits) => out.push_str(digits),
-        Py::Float(f) | Py::Decimal(f, _) => json_float(*f, out),
+        Py::Float(f) => json_float(*f, out),
+        // exact, as the database gave it (rc1); NaN, which JSON has no number for, a string
+        Py::Decimal(text) if json_number(text) => out.push_str(text),
+        Py::Decimal(text) => json_string(text, out),
         Py::Str(s) | Py::Iso(s) | Py::DateTime(s) | Py::Delta(s) | Py::Dumped(s) => {
             json_string(s, out)
         }
-        Py::Bytes(b) => json_string(&String::from_utf8_lossy(b), out),
+        Py::Bytes(b) => {
+            out.push('"');
+            out.push_str(&base64::engine::general_purpose::STANDARD.encode(b));
+            out.push('"');
+        }
     }
+}
+
+/// Whether `text` is a JSON number - formats._JSON_NUMBER.
+fn json_number(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = usize::from(b.first() == Some(&b'-'));
+    let digits = |i: &mut usize| {
+        let start = *i;
+        while *i < b.len() && b[*i].is_ascii_digit() {
+            *i += 1;
+        }
+        *i - start
+    };
+    let start = i;
+    match digits(&mut i) {
+        0 => return false,
+        n if n > 1 && b[start] == b'0' => return false,
+        _ => {}
+    }
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        if digits(&mut i) == 0 {
+            return false;
+        }
+    }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+            i += 1;
+        }
+        if digits(&mut i) == 0 {
+            return false;
+        }
+    }
+    i == b.len()
 }
 
 /// formats._unique(): a repeated name gets `_2`, `_3`, ...
@@ -587,7 +629,7 @@ pub fn body(
 ) -> Out<String> {
     let rows = &output.rows[..rows.min(output.rows.len())];
     if rows.is_empty() {
-        return Ok("{\"message\":\"No results returned\"}\n".into());
+        return Ok("[]\n".into()); // as Python's jsonify([]) - since rc1, not a {"message": ...} object
     }
     if let Some((actions, traced)) = actions
         && (traced != output.columns.len() || actions.len() != traced)

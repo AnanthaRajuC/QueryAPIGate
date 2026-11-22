@@ -184,7 +184,7 @@ class VerificationTests(JwtTestCase):
         self.assertEqual(res.status_code, 401)  # a wrong key never falls through to the token
 
     def test_the_role_s_grants_apply(self):
-        self.assertEqual(self.client.get('/q/all_orders', headers=bearer(token())).status_code, 403)
+        self.assertEqual(self.client.get('/q/all_orders', headers=bearer(token())).status_code, 404)
         self.assertEqual(self.client.get('/api/v1/connections', headers=bearer(token())).status_code, 403)
 
     def test_a_token_mapping_to_no_existing_role_is_refused(self):
@@ -197,7 +197,7 @@ class VerificationTests(JwtTestCase):
             value = token(app_metadata={'roles': ['unknown', 'analyst']})
             self.assertEqual(len(self.items(self.client.get('/q/all_orders', headers=bearer(value)))), 4)
             fallback = token()  # no role claim: QUERYAPIGATE_JWT_ROLE
-            self.assertEqual(self.client.get('/q/all_orders', headers=bearer(fallback)).status_code, 403)
+            self.assertEqual(self.client.get('/q/all_orders', headers=bearer(fallback)).status_code, 404)
 
     def test_issuer_and_audience_are_enforced_when_set(self):
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_JWT_ISSUER': 'https://login.example.com/',

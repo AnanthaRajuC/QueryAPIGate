@@ -493,7 +493,7 @@ class HistoryAndAuditTests(V1TestCase):
 
     def test_audit_newest_first_with_filters(self):
         self.create('films')
-        self.call('post', '/api/v1/roles', '/api/v1/roles', 201, json={'name': 'analyst'})
+        self.call('post', '/api/v1/roles', '/api/v1/roles', 201, json={'name': 'analyst', 'connections': []})
         self.call('delete', '/api/v1/roles/analyst', '/api/v1/roles/{name}', 204)
         log = self.call('get', '/api/v1/audit', '/api/v1/audit', 200).get_json()
         self.assertEqual([e['action'] for e in log['items']][:2], ['delete_role', 'create_role'])
@@ -661,6 +661,91 @@ if __name__ == '__main__':
 
 class FoundInTheFreezeReviewTests(V1TestCase):
     """Bugs the pre-rc1 review of the frozen surfaces found (2026-11-22)."""
+
+    def test_a_field_a_body_doesnt_take_is_refused_not_ignored(self):
+        # rc1 (B8): a connection's unknown field became a driver option (bogus: 201); page in a run's body was dropped
+        res = self.client.post('/api/v1/connections', headers=ADMIN,
+                               json={'name': 'x', 'db': 'sqlite', 'database': ':memory:', 'bogus': 1})
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'unknown_field'))
+        self.assertIn('a driver option goes under options', res.get_json()['error'])
+        res = self.client.post('/api/v1/connections', headers=ADMIN, json={
+            'name': 'x', 'db': 'sqlite', 'database': ':memory:', 'options': {'readonly': True}})
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
+        self.create(publish=True)
+        for path, body in (('/execute_sql', {'sql': 'SELECT 1', 'connection_name': 'lite', 'page': 2}),
+                           ('/q/films', {'page_size': 5}), ('/q/films', {'stream': True}),
+                           ('/execute_sql', {'sql': 'SELECT 1', 'connection_name': 'lite', 'sqll': 'x'})):
+            with self.subTest(path=path, body=body):
+                res = self.client.post(path, headers=ADMIN, json=body)
+                self.assertEqual((res.status_code, res.get_json()['code']), (400, 'unknown_field'))
+        res = self.client.post('/q/films', headers=ADMIN, json={'page_size': 5})
+        self.assertIn('page_size go in the query string', res.get_json()['error'])
+
+    def test_timestamps_are_rfc_3339_with_the_offset_out_and_in(self):
+        # rc1 (B7): the store's local wall-clock time, 2026-11-22 12:03:10, named no zone
+        import re
+        from datetime import datetime, timedelta, timezone
+        stamp = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?[+-]\d{2}:\d{2}$')
+        query = self.create(publish=True)
+        self.assertRegex(query['versions'][0]['created_at'], stamp)
+        key = self.client.post('/api/v1/api-keys', headers=ADMIN, json={
+            'name': 'k', 'connections': [], 'expires_at': '2999-01-01'}).get_json()
+        self.assertRegex(key['created_at'], stamp)
+        self.assertEqual(key['expires_at'], '2999-01-01')  # a date stays a date
+        self.assertRegex(self.client.get('/api/v1/audit', headers=ADMIN).get_json()['items'][0]['timestamp'], stamp)
+        self.assertEqual(self.client.get('/q/films', headers=ADMIN).status_code, 200)
+        history.flush()
+        ran = self.client.get('/api/v1/history', headers=ADMIN).get_json()['items'][0]['executed_at']
+        self.assertRegex(ran, stamp)
+        moment = datetime.fromisoformat(ran)
+        for since, found in ((moment, 1), (moment + timedelta(seconds=1), 0)):
+            for text in (since.isoformat(), since.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')):
+                with self.subTest(since=text):
+                    res = self.client.get('/api/v1/history', headers=ADMIN, query_string={'since': text})
+                    self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+                    self.assertEqual(len(res.get_json()['items']), found)
+
+    def test_the_audit_log_pages_with_a_cursor(self):
+        # rc1 (B13): limit + cursor + next_cursor - before, every entry the log kept, in one answer
+        for n in range(5):
+            self.assertEqual(self.client.post('/api/v1/roles', headers=ADMIN, json={
+                'name': f'r{n}', 'connections': []}).status_code, 201)
+        everything = self.client.get('/api/v1/audit', headers=ADMIN).get_json()
+        self.assertIsNone(everything['next_cursor'])
+        seen, cursor = [], None
+        while True:
+            page = self.client.get('/api/v1/audit', headers=ADMIN, query_string={
+                'limit': 2, 'action': 'create_role', **({'cursor': cursor} if cursor else {})}).get_json()
+            self.assertLessEqual(len(page['items']), 2)
+            seen += [e['target'] for e in page['items']]
+            cursor = page['next_cursor']
+            if cursor is None:
+                break
+        self.assertEqual(seen, ['r4', 'r3', 'r2', 'r1', 'r0'])
+        self.assertEqual(page['total'], everything['total'])  # what the log holds, as before
+        res = self.client.get('/api/v1/audit', headers=ADMIN, query_string={'cursor': 'nope'})
+        self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_filter'))
+
+    def test_a_null_a_patch_cant_clear_is_refused_not_ignored(self):
+        # rc1 (B15): {"queries": null} answered 200 and did nothing, while {"rate_limit": null} cleared
+        body = {'name': 'k', 'connections': ['lite'], 'queries': ['films'], 'rate_limit': '5/minute'}
+        self.assertEqual(self.client.post('/api/v1/api-keys', json=body, headers=ADMIN).status_code, 201)
+        self.assertEqual(self.client.post('/api/v1/roles', json={'name': 'r', 'connections': []},
+                                          headers=ADMIN).status_code, 201)
+        self.assertEqual(self.client.post('/api/v1/administrators', json={'name': 'ada', 'role': 'developer'},
+                                          headers=ADMIN).status_code, 201)
+        for path, field in (('/api/v1/api-keys/k', 'queries'), ('/api/v1/api-keys/k', 'connections'),
+                            ('/api/v1/api-keys/k', 'collections'), ('/api/v1/api-keys/k', 'allow_writes'),
+                            ('/api/v1/api-keys/k', 'active'), ('/api/v1/roles/r', 'connections'),
+                            ('/api/v1/roles/r', 'queries'), ('/api/v1/administrators/ada', 'active')):
+            with self.subTest(path=path, field=field):
+                res = self.client.patch(path, json={field: None}, headers=ADMIN)
+                self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_body'))
+                self.assertIn(f"{field} can't be null - leave it out", res.get_json()['error'])
+        key = self.client.get('/api/v1/api-keys/k', headers=ADMIN).get_json()
+        self.assertEqual((key['queries'], key['connections']), (['films'], ['lite']))
+        cleared = self.client.patch('/api/v1/api-keys/k', json={'rate_limit': None}, headers=ADMIN).get_json()
+        self.assertIsNone(cleared['rate_limit'])  # one that can be cleared still is
 
     def test_a_new_version_keeps_the_querys_mcp_unless_it_names_it(self):
         self.create(publish=True, mcp=False)

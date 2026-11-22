@@ -554,7 +554,7 @@ class EventServer:
                 await _respond(writer, 200, {'status': 'ok'}, allow_origin)
             elif path == '/metrics' and method == 'GET':
                 from . import metrics
-                if metrics.authorized(headers.get('authorization')):
+                if metrics.authorized(headers.get('authorization'), (writer.get_extra_info('peername') or (None,))[0]):
                     await _respond_text(writer, 200, self.render_metrics())
                 else:
                     await _respond(writer, 401, {'error': metrics.UNAUTHORIZED}, allow_origin)

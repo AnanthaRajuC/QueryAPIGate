@@ -62,6 +62,7 @@ queries:
     cache_ttl: 300
 roles:
   - name: partner
+    connections: []                   # no ad-hoc SQL: the queries in its collections only
     collections: [finance]
     rate_limit: 60/minute
     quota: {calls: 10000, per: month}

@@ -3,7 +3,8 @@
 **Time:** 20 minutes. **You'll end up with:** QueryAPIGate's metrics collected by Prometheus, the bundled Grafana
 dashboard showing traffic, errors, latency and per-connection load, and a few alert rules worth starting with.
 
-QueryAPIGate serves Prometheus metrics at `/metrics` - no key needed - and ships a Grafana dashboard built on them.
+QueryAPIGate serves Prometheus metrics at `/metrics` - no API key needed; a Prometheus on another machine sends
+`QUERYAPIGATE_METRICS_TOKEN` as a bearer token - and ships a Grafana dashboard built on them.
 The Console's **Metrics** screen shows the same numbers as a snapshot; Prometheus adds history, trends and alerting.
 
 [![The Metrics screen: stat tiles for requests, error rate, active queries, pool and rate limiting, bars for requests by status and queries by connection, and a per-connection latency table](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/metrics.png)
@@ -59,8 +60,9 @@ Scrape **each process** separately. The numbers are per process, in memory, rese
 resets in `rate()` and `increase()`. If you run `queryapigate mcp` or `queryapigate events`, add their ports (5001,
 5002) as targets too: each serves its own `/metrics`. MCP traffic appears with `method="MCP"`.
 
-Keep `/metrics` away from the internet: it's public on QueryAPIGate by design (so Prometheus needs no key), and it
-names your connections and keys. Restrict it at the proxy - see
+Keep `/metrics` away from the internet: it names your connections and keys. Without a token, a server that needs a
+credential answers only clients on its own machine - a proxy there among them - so set the token, and restrict it at
+the proxy - see
 [Put QueryAPIGate behind a reverse proxy](23-put-it-behind-a-reverse-proxy.md) - or scrape over a private network.
 
 ## Step 3: Import the dashboard

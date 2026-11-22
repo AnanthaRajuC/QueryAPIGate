@@ -20,8 +20,8 @@ POST /api/v1/connections
 {"name": "sales", "db": "sqlite", "database": "${SALES_DB}"}
 ```
 
-Each server sets `SALES_DB` to its own database. (A password is a reference the same way - `${WAREHOUSE_PASSWORD}` -
-and a file refuses one that isn't.)
+Each server sets `SALES_DB` to its own database, and `QUERYAPIGATE_SECRET_ENV_VARS=SALES_DB` - a `${VAR}` is read only if listed. (A
+password is a reference the same way - `${WAREHOUSE_PASSWORD}` - and a file refuses one that isn't.)
 
 ## Step 2: Dev's setup, as a file in git
 

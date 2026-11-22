@@ -28,6 +28,7 @@ services:
     environment:
       QUERYAPIGATE_API_KEY: demo-key                   # change it - or drop this line to run without authentication
       DEMO_DB_PASSWORD: demo                           # the demo connection's password is stored as ${DEMO_DB_PASSWORD}
+      QUERYAPIGATE_SECRET_ENV_VARS: DEMO_DB_PASSWORD   # the variables ${VAR} may read - unset, none
       QUERYAPIGATE_RATE_LIMIT: 120/minute
       # Reuse the key, saved query and connection a call reads for 5 s instead of reading the store every time
       # (documentation/PERFORMANCE.md#the-metadata-cache). Safe with one instance: a change through the API or Console

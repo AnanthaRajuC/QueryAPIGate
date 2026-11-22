@@ -123,7 +123,7 @@ class EncryptionRoundTripTests(AppTestCase):
 
     def test_an_env_var_reference_is_never_encrypted(self):
         client = create_app().test_client()
-        with mock.patch.dict(os.environ, {'PW': 'secret'}):
+        with mock.patch.dict(os.environ, {'PW': 'secret', 'QUERYAPIGATE_SECRET_ENV_VARS': 'PW'}):
             put_connections(client, {'a': {
                 'db': 'sqlite', 'database': self.db_path, 'password': '${PW}', 'active': True}},
                 headers=self.admin_headers)

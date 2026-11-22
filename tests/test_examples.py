@@ -406,8 +406,8 @@ class RolesEndToEndTests(ExamplesTestCase):
         key = self.key_from('example-partner')
         self.assertEqual(self.client.get('/q/example_film_lookup?film_id=1', headers=key).status_code, 200)
         self.assertEqual(self.client.get('/q/example_film_search?text=Harbor', headers=key).status_code, 200)
-        self.assertEqual(self.client.get('/q/example_top_films', headers=key).status_code, 403)
-        self.assertEqual(self.client.get('/q/example_all_rentals', headers=key).status_code, 403)
+        self.assertEqual(self.client.get('/q/example_top_films', headers=key).status_code, 404)
+        self.assertEqual(self.client.get('/q/example_all_rentals', headers=key).status_code, 404)
 
     def test_a_partner_key_cannot_be_redirected_or_run_ad_hoc_sql(self):
         key = self.key_from('example-partner')

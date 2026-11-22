@@ -37,20 +37,23 @@ def _bucket_index(elapsed):
     return bisect.bisect_left(_BUCKETS, elapsed)
 
 
-def authorized(authorization):
-    """Whether a request may read /metrics: always, unless QUERYAPIGATE_METRICS_TOKEN is set - then only with
-    `Authorization: Bearer <that token>`. The Helm chart sets one, since its ingress would otherwise publish the
-    counts, and the key, query and connection names in their labels (ADR 0017's review). REST's and the MCP server's
-    /metrics both ask this."""
-    from . import config
+def authorized(authorization, peer):
+    """Whether a request may read /metrics. With QUERYAPIGATE_METRICS_TOKEN set, only with `Authorization: Bearer <that
+    token>` - the Helm chart sets one, since its ingress would otherwise publish the counts, and the key, query and
+    connection names in their labels (ADR 0017's review). Unset, a server that needs a credential answers only a client
+    on this machine (``peer``, the connection's real address, is loopback - rc1, B9: before, anyone who could reach it);
+    an open server answers anyone, as it answers everything. REST's, the MCP server's and the events server's /metrics
+    all ask this."""
+    from . import apikeys, config, governance
     token = config.metrics_token()
     if token is None:
-        return True
+        return governance.is_loopback(peer) or not apikeys.auth_required()
     scheme, _, supplied = (authorization or '').strip().partition(' ')
     return scheme.lower() == 'bearer' and hmac.compare_digest(supplied.strip().encode(), token.encode())
 
 
-UNAUTHORIZED = 'Unauthorized - /metrics needs its token (QUERYAPIGATE_METRICS_TOKEN)'
+UNAUTHORIZED = ('Unauthorized - /metrics needs its token (QUERYAPIGATE_METRICS_TOKEN), or, without one, a client on '
+                'this machine')
 
 
 ADMINISTRATOR_VIAS = ('sso', 'token', 'break-glass')  # how a named administrator signs in (admins.permission_for())

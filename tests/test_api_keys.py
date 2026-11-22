@@ -40,7 +40,7 @@ class AppTestCase(unittest.TestCase):
         # wrongly throttled by an earlier test's write.
         apikeys._last_recorded_use.clear()
 
-    def create_key(self, name='scoped', connections=None, allow_writes=False, queries=None, expires_at=None,
+    def create_key(self, name='scoped', connections='*', allow_writes=False, queries=None, expires_at=None,
                    allowed_ips=None, allowed_write_ops=None, allowed_tables=None):
         res = self.client.post('/api/v1/api-keys', json={'name': name, 'connections': connections,
                                                    'allow_writes': allow_writes, 'queries': queries,
@@ -75,12 +75,14 @@ class ApiKeyCrudTests(AppTestCase):
 
     def test_duplicate_name_is_rejected(self):
         self.create_key('dup')
-        self.assertEqual(self.client.post('/api/v1/api-keys', json={'name': 'dup'}, headers=self.admin_headers)
+        self.assertEqual(self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'dup'},
+                                          headers=self.admin_headers)
                          .status_code, 409)
 
     def test_invalid_name_is_rejected(self):
         for name in ('bad/name!', '', None):
-            res = self.client.post('/api/v1/api-keys', json={'name': name}, headers=self.admin_headers)
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': name},
+                                   headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, name)
 
     def test_malformed_connections_is_rejected(self):
@@ -169,16 +171,33 @@ class ConnectionScopingTests(AppTestCase):
                                    headers={'X-API-Key': key})
             self.assertEqual(res.status_code, 200, conn)
 
-    def test_omitted_connections_defaults_to_wildcard(self):
-        key = self.create_key('default-access', connections=None)
+    def test_connections_must_be_named_when_a_key_or_role_is_created(self):
+        # rc1 (B1): left out, connections used to mean every connection - the widest grant, given by silence
+        for path, body in (('/api/v1/api-keys', {'name': 'silent'}), ('/api/v1/roles', {'name': 'silent'}),
+                           ('/api/v1/api-keys', {'name': 'silent', 'connections': None})):
+            res = self.client.post(path, json=body, headers=self.admin_headers)
+            self.assertEqual(res.status_code, 400, (path, body))
+            self.assertEqual(res.get_json()['code'], 'invalid_body')
+            self.assertIn('connections is required', res.get_json()['error'])
+        listed = self.client.get('/api/v1/api-keys', headers=self.admin_headers).get_data(as_text=True)
+        self.assertNotIn('silent', listed)
+        key = self.create_key('every-connection', connections='*')
         res = self.client.post('/execute_sql', json={'sql': 'SELECT * FROM t', 'connection_name': 'b'},
                                headers={'X-API-Key': key})
         self.assertEqual(res.status_code, 200)
+        # a claim-bound role still needs none: it reaches no connection, and [] is its default
+        res = self.client.post('/api/v1/roles', json={'name': 'bound', 'queries': [], 'require_claim_binding': True},
+                               headers=self.admin_headers)
+        self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 
     def test_saved_query_execution_is_scoped_too(self):
         self.save_query('q', connection_name='b')
         key = self.create_key('reporting', connections=['a'])
-        self.assertEqual(self.client.get('/q/q', headers={'X-API-Key': key}).status_code, 403)
+        # rc1 (B12): one it can't run is one that doesn't exist - a 403 told it the name was taken
+        res, never = (self.client.get(f'/q/{name}', headers={'X-API-Key': key}) for name in ('q', 'never'))
+        self.assertEqual((res.status_code, never.status_code), (404, 404))
+        self.assertEqual(res.get_json()['error'], "Saved query 'q' not found")
+        self.assertEqual(res.get_json()['code'], never.get_json()['code'])
         self.assertEqual(self.client.get('/q/q', headers=self.admin_headers).status_code, 200)
 
     def test_schema_endpoint_is_scoped(self):
@@ -202,7 +221,7 @@ class QueryScopingTests(AppTestCase):
         self.save_query('monthly_revenue', connection_name='a')
         self.save_query('internal_only', connection_name='a')
         key = self.create_key('external', connections=[], queries=['monthly_revenue'])
-        self.assertEqual(self.client.get('/q/internal_only', headers={'X-API-Key': key}).status_code, 403)
+        self.assertEqual(self.client.get('/q/internal_only', headers={'X-API-Key': key}).status_code, 404)
 
     def test_a_query_scoped_key_still_cannot_run_ad_hoc_sql_on_the_same_connection(self):
         self.save_query('monthly_revenue', connection_name='a')
@@ -232,7 +251,8 @@ class QueryScopingTests(AppTestCase):
         self.assertEqual(res.status_code, 403)  # connection 'b' itself is still not granted
 
     def test_malformed_queries_is_rejected(self):
-        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': 'not-a-list-or-wildcard'},
+        res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'queries': 'not-a-list-or-wildcard'},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
@@ -334,17 +354,20 @@ class PerQueryWriteCurationTests(AppTestCase):
         self.assertEqual(res.status_code, 403)
 
     def test_a_duplicate_query_name_is_rejected(self):
-        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': ['a', {'name': 'a'}]},
+        res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'queries': ['a', {'name': 'a'}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_an_entry_missing_a_name_is_rejected(self):
-        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': [{'allow_writes': True}]},
+        res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'queries': [{'allow_writes': True}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_an_entry_with_unexpected_fields_is_rejected(self):
-        res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'queries': [{'name': 'a', 'extra': 1}]},
+        res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'queries': [{'name': 'a', 'extra': 1}]},
                                headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
@@ -401,7 +424,8 @@ class KeyExpiryTests(AppTestCase):
 
     def test_malformed_expiry_is_rejected(self):
         for bad in ('not-a-date', '2026/10/15', '2026-13-40', 15):
-            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'expires_at': bad},
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'expires_at': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
@@ -542,7 +566,8 @@ class IpAllowlistTests(AppTestCase):
 
     def test_malformed_allowed_ips_is_rejected(self):
         for bad in ('203.0.113.5', 123, ['not-an-ip'], ['203.0.113.5/99']):
-            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_ips': bad},
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'allowed_ips': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
@@ -623,7 +648,8 @@ class AllowedWriteOpsTests(AppTestCase):
 
     def test_malformed_allowed_write_ops_is_rejected(self):
         for bad in ('insert', 123, [1, 2], ['']):
-            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_write_ops': bad},
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'allowed_write_ops': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 
@@ -695,7 +721,8 @@ class AllowedTablesTests(AppTestCase):
 
     def test_malformed_allowed_tables_is_rejected(self):
         for bad in ('t', 123, [1, 2], ['']):
-            res = self.client.post('/api/v1/api-keys', json={'name': 'x', 'allowed_tables': bad},
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'x',
+                                                         'allowed_tables': bad},
                                    headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, bad)
 

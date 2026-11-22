@@ -39,8 +39,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/destinations -H "X-API-Key: $TOKEN" -H
   `account_id`), or a local folder - which must sit inside one the operator set in `QUERYAPIGATE_EXPORT_DIRS`, never
   the server's own home. For an S3-compatible service, add `endpoint`, `"url_style":
   "path"` and `"use_ssl": false` without TLS.
-- The secret is stored like a connection password: here a `${ACME_SECRET_KEY}` reference to the server's environment;
-  a typed one is masked in every response and encrypted with `QUERYAPIGATE_SECRET_KEY`.
+- The secret is stored like a connection password: here a `${ACME_SECRET_KEY}` reference to the server's environment,
+  which `QUERYAPIGATE_SECRET_ENV_VARS` must list; a typed one is masked in every response and encrypted with `QUERYAPIGATE_SECRET_KEY`.
 - **Nothing can be written outside the prefix.** Every write goes through a DuckDB connection locked to it - no path,
   parameter or file name can reach `s3://acme-exchange/other-partner/`; DuckDB refuses. Still give the credentials
   write access to that prefix only: two locks.

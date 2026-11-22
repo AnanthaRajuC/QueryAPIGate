@@ -51,7 +51,8 @@ class AppTestCase(unittest.TestCase):
         return self.client.patch(f'/api/v1/queries/{name}', json={'collection': collection}, headers=self.admin)
 
     def make_key(self, name, **fields):
-        res = self.client.post('/api/v1/api-keys', json={'name': name, **fields}, headers=self.admin)
+        body = {'name': name, **({} if 'role' in fields else {'connections': '*'}), **fields}
+        res = self.client.post('/api/v1/api-keys', json=body, headers=self.admin)
         self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         return {'X-API-Key': res.get_json()['secret']}
 
@@ -215,8 +216,8 @@ class GrantTests(AppTestCase):
         key = self.make_key('partner', connections=[], collections=['reporting'])
         self.assertEqual(self.call('rep1', key), 200)
         self.assertEqual(self.call('rep2', key), 200)  # reaches it whatever connection it sits on
-        self.assertEqual(self.call('other', key), 403)
-        self.assertEqual(self.call('loose', key), 403)
+        self.assertEqual(self.call('other', key), 404)
+        self.assertEqual(self.call('loose', key), 404)
 
     def test_a_collection_never_grants_ad_hoc_sql(self):
         key = self.make_key('partner', connections=[], collections=['reporting'])
@@ -232,20 +233,21 @@ class GrantTests(AppTestCase):
 
     def test_the_grant_is_live(self):
         key = self.make_key('partner', connections=[], collections=['reporting'])
-        self.assertEqual(self.call('loose', key), 403)
+        self.assertEqual(self.call('loose', key), 404)
         self.move('loose', 'reporting')
         self.assertEqual(self.call('loose', key), 200)
         self.move('loose', None)
-        self.assertEqual(self.call('loose', key), 403)
+        self.assertEqual(self.call('loose', key), 404)
 
     def test_grants_are_additive_with_queries_and_connections(self):
         key = self.make_key('mixed', connections=[], queries=['loose'], collections=['reporting'])
-        self.assertEqual([self.call(n, key) for n in ('rep1', 'loose', 'other')], [200, 200, 403])
+        self.assertEqual([self.call(n, key) for n in ('rep1', 'loose', 'other')], [200, 200, 404])
         key = self.make_key('mixed2', connections=['a'], collections=['reporting'])
         self.assertEqual([self.call(n, key) for n in ('rep1', 'rep2', 'other', 'loose')], [200, 200, 200, 200])
 
     def test_unknown_collection_is_rejected_and_lists_the_real_ones(self):
-        res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'collections': ['reportng']}, headers=self.admin)
+        res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'k', 'collections': ['reportng']},
+                               headers=self.admin)
         self.assertEqual(res.status_code, 400)
         message = res.get_json()['error']
         self.assertIn('reportng', message)
@@ -253,13 +255,14 @@ class GrantTests(AppTestCase):
 
     def test_malformed_grants_are_rejected(self):
         for value in ('*', 'reporting', ['Reporting'], ['reporting', 'reporting'], [1], {'a': 1}):
-            res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'collections': value}, headers=self.admin)
+            res = self.client.post('/api/v1/api-keys', json={'connections': '*', 'name': 'k', 'collections': value},
+                                   headers=self.admin)
             self.assertEqual(res.status_code, 400, value)
         self.assertNotIn('k', self.keys())
 
     def test_an_empty_collection_grant_is_inert_not_a_wildcard(self):
         key = self.make_key('none', connections=[], collections=[])
-        self.assertEqual(self.call('rep1', key), 403)
+        self.assertEqual(self.call('rep1', key), 404)
 
     def test_update_replaces_and_only_new_names_must_exist(self):
         self.make_key('k', connections=[], collections=['reporting'])
@@ -306,13 +309,16 @@ class RoleTests(AppTestCase):
         self.assertEqual(listed['created_from_role'], 'partner')
 
     def test_role_validation_matches_key_validation(self):
-        res = self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['nope']}, headers=self.admin)
+        res = self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'r', 'collections': ['nope']},
+                               headers=self.admin)
         self.assertEqual(res.status_code, 400)
-        res = self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['Bad']}, headers=self.admin)
+        res = self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'r', 'collections': ['Bad']},
+                               headers=self.admin)
         self.assertEqual(res.status_code, 400)
 
     def test_a_role_and_explicit_collections_cannot_be_combined(self):
-        self.client.post('/api/v1/roles', json={'name': 'partner', 'collections': ['reporting']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'partner', 'collections': ['reporting']},
+                         headers=self.admin)
         res = self.client.post('/api/v1/api-keys', json={'name': 'k', 'role': 'partner', 'collections': ['reporting']},
                                headers=self.admin)
         self.assertEqual(res.status_code, 400)
@@ -331,7 +337,7 @@ class RoleTests(AppTestCase):
         self.make_key('k', role='partner')  # must not fail on the role's now-empty collection
 
     def test_update_role_collections(self):
-        self.client.post('/api/v1/roles', json={'name': 'partner'}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'partner'}, headers=self.admin)
         res = self.client.patch('/api/v1/roles/partner', json={'collections': ['reporting']}, headers=self.admin)
         self.assertEqual(res.status_code, 200)
         self.assertEqual(self.roles()['partner']['collections'],
@@ -423,7 +429,8 @@ class DescribeTests(AppTestCase):
         self.save('q2', collection='reporting')
         self.save('q3')
         self.make_key('k', collections=['reporting'])
-        self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['reporting']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'r', 'collections': ['reporting']},
+                         headers=self.admin)
         data = self.collections()
         self.assertEqual(data['collections'], {'reporting': {'queries': ['q1', 'q2'], 'keys': ['k'], 'roles': ['r']}})
         self.assertEqual(data['uncollected'], ['q3'])
@@ -446,7 +453,8 @@ class RenameTests(AppTestCase):
         self.save('q2', collection='old')
         self.save('q3', collection='keep')
         self.key = self.make_key('k', connections=[], collections=['old'])
-        self.client.post('/api/v1/roles', json={'name': 'r', 'collections': ['old']}, headers=self.admin)
+        self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'r', 'collections': ['old']},
+                         headers=self.admin)
 
     def rename(self, old, new, **extra):
         return self.client.patch(f'/api/v1/collections/{old}', json={'name': new, **extra}, headers=self.admin)
@@ -569,6 +577,28 @@ class RouteDocumentationTests(AppTestCase):
                 if method not in documented.get(path, set()):
                     missing.append(f'{method} {rule.rule}')
         self.assertEqual(missing, [])
+
+    def test_every_fixed_operation_has_a_stable_operation_id(self):
+        # rc1 (B18): added later, they'd rename every generated client's methods
+        spec = self.client.get('/openapi.json').get_json()
+        ids = {(path, method): operation.get('operationId') for path, item in spec['paths'].items()
+               for method, operation in item.items() if method != 'parameters'}
+        self.assertEqual([op for op, found in ids.items() if not found], [])
+        self.assertEqual(len(set(ids.values())), len(ids))
+        for op, expected in ((('/api/v1/connections', 'post'), 'create_connection'),
+                             (('/api/v1/api-keys/{name}', 'patch'), 'update_api_key'),
+                             (('/execute_sql', 'post'), 'execute_sql'), (('/health', 'get'), 'health'),
+                             (('/connections/{name}/schema', 'get'), 'api_connection_schema'),
+                             (('/api/v1/connections/{name}/schema', 'get'), 'v1_connection_schema'),
+                             (('/q/{name}', 'post'), 'run_named_query_post')):
+            self.assertEqual(ids.get(op), expected, op)
+        # a saved query's own id never takes a fixed one's
+        self.assertEqual(self.client.post('/api/v1/queries', headers=self.admin, json={
+            'name': 'named_query', 'connection_name': 'a', 'description': 'd', 'sql': 'SELECT 1',
+            'publish': True}).status_code, 201)
+        spec = self.client.get('/openapi.json', headers=self.admin).get_json()
+        self.assertEqual(spec['paths']['/q/named_query']['get']['operationId'], 'run_named_query_')
+        self.assertEqual(spec['paths']['/q/{name}']['get']['operationId'], 'run_named_query')
 
     def test_frontend_openapi_json_is_up_to_date(self):
         from pathlib import Path

@@ -4,17 +4,21 @@
 default - instead of handing out the admin key (which can manage connections, saved queries and other
 keys, in addition to running any SQL) to every integration that just needs to run queries.
 
-## The footgun to avoid first
+## Say which connections, always
 
 ```bash
 curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H 'Content-Type: application/json' \
   -d '{"name": "oops"}'
 ```
 
-**Verified, and genuinely surprising the first time:** a key created with no `connections` field at all
-gets access to **every** connection on the server, not none - it comes back as `"connections": "*"`. Confirmed directly: a key created with just
-`{"name": "oops"}` could immediately run SQL against a connection it was never told about. Omitting a field
-here means "unrestricted," not "no access" - always pass `connections` explicitly, even if it's `[]`.
+```json
+{"error": "connections is required: a list of connection names, [] for none (saved queries only), or \"*\" for every connection", "code": "invalid_body"}
+```
+
+A key names its connections when it's created: a list, `[]` for none (it runs only the saved queries and collections
+it's granted), or `"*"` for every one. Before 1.0, leaving the field out gave **every** connection - the widest grant,
+by silence - so a key made as `{"name": "oops"}` could run SQL anywhere. Keys made that way keep `"*"`: check
+`GET /api/v1/api-keys` for any you didn't mean.
 
 ## The right way: explicit and scoped
 

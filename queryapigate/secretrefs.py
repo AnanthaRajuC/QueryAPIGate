@@ -83,9 +83,15 @@ def env_refusal(name):
     if name.upper().startswith(CREDENTIAL_PREFIXES):
         return 'is a cloud, Vault or Kubernetes credential the server itself may use'
     allowed = config.secret_env_vars()
-    if allowed and not any(name == a or (a.endswith('*') and name.startswith(a[:-1])) for a in allowed):
+    if not allowed:  # deny by default (rc1, B2), as every other allow-list is: unset, it used to mean any variable
+        return UNSET_REFUSAL
+    if not any(name == a or (a.endswith('*') and name.startswith(a[:-1])) for a in allowed):
         return "isn't one of QUERYAPIGATE_SECRET_ENV_VARS"
     return None
+
+
+UNSET_REFUSAL = ("can't be read: QUERYAPIGATE_SECRET_ENV_VARS is unset, and no ${VAR} is read without it - set it to "
+                 'the variables connections and destinations use (names, or prefixes ending in *)')
 
 
 def env_variables(objects):
@@ -426,6 +432,8 @@ def check_value(value):
         provider, what, variable = match.groups()
         if variable is not None:
             reason = env_refusal(variable)
+            if reason == UNSET_REFUSAL:
+                raise ApiError(f'${{{variable}}} {reason}', code='invalid_body')
             if reason:
                 raise ApiError(f"${{{variable}}} {reason} and can't be referenced - use a variable of its own for the "
                                'secret', code='invalid_body')
@@ -643,6 +651,8 @@ def expand(value):
         provider, what, variable = match.groups()
         if variable is not None:
             reason = env_refusal(variable)
+            if reason == UNSET_REFUSAL:
+                raise ApiError(f'${{{variable}}} {reason}', 500, code='connection_misconfigured')
             if reason:
                 raise ApiError(f"${{{variable}}} {reason} and can't be referenced by a connection or destination", 500,
                                code='connection_misconfigured')

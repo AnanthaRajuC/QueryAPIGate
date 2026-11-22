@@ -43,6 +43,11 @@ def _serve(args):
         print(f'queryapigate: {error}', file=sys.stderr)
         return 2
     args.port = args.port or config.port_setting('QUERYAPIGATE_PORT', 5000)  # checked by create_app() above
+    if args.debug and args.host not in LOOPBACK_HOSTS:
+        # Werkzeug's debugger runs any Python a visitor types into an error page (rc1, B10): never on a reachable host
+        print(f'queryapigate: --debug (QUERYAPIGATE_DEBUG) runs an interactive debugger that executes code from the '
+              f'browser - it serves only {", ".join(LOOPBACK_HOSTS)}, not {args.host}', file=sys.stderr)
+        return 2
     if args.host not in LOOPBACK_HOSTS and not config.api_key():
         logging.getLogger('queryapigate').warning(
             'Listening on %s without QUERYAPIGATE_API_KEY set: in open-access mode the server answers only local '
@@ -598,15 +603,16 @@ def _admins_command(action):
     """`queryapigate admins ...` - runs against the store directly, with no server and no key, so the first owner
     can be created (and a locked-out one given a new token) by whoever runs commands on the server."""
     def run(args):
+        if not _settings_ok(f'admins {args.action}'):
+            return 2
         try:
-            config.check_settings()
             return action(args)
         except ApiError as error:
             print(f'queryapigate admins {args.action}: {error.message}', file=sys.stderr)
             return 1
         except (OSError, ValueError) as error:
             print(f'queryapigate admins {args.action}: {error}', file=sys.stderr)
-            return 2
+            return 1
     return run
 
 
@@ -649,8 +655,9 @@ def _admins_list(args):
 def _exports_command(action):
     """`queryapigate exports ...` - straight against the store, no server: what cron on the host runs."""
     def run(args):
+        if not _settings_ok(f'exports {args.action}'):
+            return 2
         try:
-            config.check_settings()
             return action(args)
         except ApiError as error:
             print(f'queryapigate exports {args.action}: {error.message}', file=sys.stderr)
@@ -720,8 +727,9 @@ def _handler():
 def _history_forget(args):
     """`queryapigate history forget CALLER`: delete a person's runs, events and usage counts (ADR 0016)."""
     from . import history
+    if not _settings_ok('history forget'):
+        return 2
     try:
-        config.check_settings()
         found = history.forget(args.caller, 'cli', dry_run=args.dry_run)
     except (ApiError, ValueError) as error:
         print(f'queryapigate history forget: {getattr(error, "message", error)}', file=sys.stderr)
@@ -737,10 +745,13 @@ def _history_forget(args):
 
 def _runs_copy(args):
     """`queryapigate runs copy-to-clickhouse`: this store's run history into the run store (ADR 0029 §6)."""
+    if not _settings_ok('runs copy-to-clickhouse'):
+        return 2
+    if not runstore.enabled():
+        print('queryapigate runs copy-to-clickhouse: QUERYAPIGATE_RUN_STORE_URL is not set - there is no run store to '
+              'copy to', file=sys.stderr)
+        return 2
     try:
-        config.check_settings()
-        if not runstore.enabled():
-            raise ValueError('QUERYAPIGATE_RUN_STORE_URL is not set - there is no run store to copy to')
         copied = runstore.copy_history()
     except (ValueError, runstore.RunStoreError) as error:
         print(f'queryapigate runs copy-to-clickhouse: {error}', file=sys.stderr)
@@ -751,11 +762,13 @@ def _runs_copy(args):
 
 def _runs_leave(args):
     """`queryapigate runs leave-clickhouse`: keep runs in the metadata store again (ADR 0029 §6)."""
+    if not _settings_ok('runs leave-clickhouse'):
+        return 2
+    if not runstore.enabled():
+        print('queryapigate runs leave-clickhouse: set QUERYAPIGATE_RUN_STORE_URL to the run store being left: its '
+              'newest event id is read from it', file=sys.stderr)
+        return 2
     try:
-        config.check_settings()
-        if not runstore.enabled():
-            raise ValueError('set QUERYAPIGATE_RUN_STORE_URL to the run store being left: its newest event id is read '
-                             'from it')
         newest = runstore.leave()
     except (ValueError, runstore.RunStoreError) as error:
         print(f'queryapigate runs leave-clickhouse: {error}', file=sys.stderr)
@@ -837,7 +850,7 @@ def build_parser():
     serve.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
     serve.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_PORT, or 5000 - read in _serve()
     serve.add_argument('--debug', action='store_true', default=config.env_flag('QUERYAPIGATE_DEBUG'),
-                       help='Flask debug mode - never use on a reachable host')
+                       help='Flask debug mode, with an interactive debugger - only on a loopback --host')
     serve.set_defaults(func=_serve)
 
     mcp_parser = commands.add_parser('mcp', help='start an MCP server exposing read-only saved queries as '
@@ -1045,6 +1058,17 @@ def build_parser():
                          help='the workspace whose queries, connections, keys and exports this acts on '
                               '(default: default)')
     return parser
+
+
+def _settings_ok(command):
+    """check_settings(), saying what's wrong: a command exits 2 for a bad setting (usage or setup - EXIT CODES in the
+    CLI reference), 1 when it runs and fails."""
+    try:
+        config.check_settings()
+    except ValueError as error:
+        print(f'queryapigate {command}: {error}', file=sys.stderr)
+        return False
+    return True
 
 
 def _is_config(argv):

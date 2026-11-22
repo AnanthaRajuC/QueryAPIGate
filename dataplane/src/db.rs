@@ -519,9 +519,11 @@ pub struct Output {
     pub rows: Vec<Vec<Option<Vec<u8>>>>,
 }
 
-/// Column names and types, and each value's bytes as `bytes` reads them from the row's raw value.
+/// Column names and types (as `kind` names them), and each value's bytes as `bytes` reads them from the row's raw
+/// value.
 fn collect<R: Row>(
     rows: Vec<R>,
+    kind: impl Fn(&<R::Database as sqlx::Database>::TypeInfo) -> String,
     bytes: impl Fn(<R::Database as sqlx::Database>::ValueRef<'_>) -> Option<Vec<u8>>,
 ) -> Output
 where
@@ -532,7 +534,7 @@ where
         .map(|row| {
             row.columns()
                 .iter()
-                .map(|c| (c.name().to_string(), c.type_info().name().to_string()))
+                .map(|c| (c.name().to_string(), kind(c.type_info())))
                 .collect()
         })
         .unwrap_or_default();
@@ -553,6 +555,34 @@ where
 /// A PostgreSQL value's text, as the simple-query protocol sent it.
 fn postgres_bytes(raw: sqlx::postgres::PgValueRef<'_>) -> Option<Vec<u8>> {
     raw.as_bytes().ok().map(<[u8]>::to_vec)
+}
+
+/// A PostgreSQL column's type, as sqlx names it.
+fn postgres_kind(info: &sqlx::postgres::PgTypeInfo) -> String {
+    info.name().to_string()
+}
+
+/// A MySQL column's type, as sqlx names it - but a string's as a string unless its collation is `binary` (63): sqlx
+/// names one by the BINARY flag, which a `_bin` collation sets too (`JSON_UNQUOTE()`, a `utf8mb4_bin` TEXT), while
+/// the Python driver reads only `binary` as bytes - and renders those as base64 (rc1), so the two must agree.
+fn mysql_kind(info: &sqlx::mysql::MySqlTypeInfo) -> String {
+    let name = info.name();
+    let binary_named = matches!(
+        name,
+        "VARBINARY" | "BINARY" | "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB"
+    );
+    match (binary_named, mysql_collation(info)) {
+        (true, Some(63)) | (false, _) => name.to_string(),
+        (true, Some(_)) => "TEXT".into(), // a string's bytes, read as UTF-8 as Python reads them
+        (true, None) => "UNKNOWN".into(), // nothing to tell them apart by: declined, Python answers
+    }
+}
+
+/// The column's collation id. sqlx keeps it to itself but for its Debug form, `collation: Collation(63)`.
+fn mysql_collation(info: &sqlx::mysql::MySqlTypeInfo) -> Option<u16> {
+    let debug = format!("{info:?}");
+    let rest = &debug[debug.find("collation: Collation(")? + "collation: Collation(".len()..];
+    rest[..rest.find(')')?].parse().ok()
 }
 
 /// A MySQL value's text, as the text protocol sent it: `&[u8]`'s decoding hands the bytes over as they are, whatever
@@ -591,7 +621,7 @@ pub async fn run(
                         _ => Failure::Database(error.to_string()),
                     }
                 })?;
-            collect(rows, postgres_bytes)
+            collect(rows, postgres_kind, postgres_bytes)
         }
         Pool::Mysql { pool, mariadb } => {
             let timeout = timeout.filter(|t| *t > 0.0);
@@ -649,7 +679,7 @@ pub async fn run(
                         _ => Failure::Database(error.to_string()),
                     },
                 )?;
-            collect(rows, mysql_bytes)
+            collect(rows, mysql_kind, mysql_bytes)
         }
     };
     if !statement.paginated {

@@ -40,7 +40,8 @@ class AppTestCase(unittest.TestCase):
                 .get_json()['items']}
 
     def create_role(self, name='reporting', **fields):
-        res = self.client.post('/api/v1/roles', json={'name': name, **fields}, headers=self.admin_headers)
+        body = {'name': name, **({} if fields.get('require_claim_binding') else {'connections': '*'}), **fields}
+        res = self.client.post('/api/v1/roles', json=body, headers=self.admin_headers)
         self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         return res.get_json()
 
@@ -62,18 +63,20 @@ class RoleCrudTests(AppTestCase):
 
     def test_duplicate_name_is_rejected(self):
         self.create_role('reporting')
-        res = self.client.post('/api/v1/roles', json={'name': 'reporting'}, headers=self.admin_headers)
+        res = self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'reporting'},
+                               headers=self.admin_headers)
         self.assertEqual(res.status_code, 409)
 
     def test_invalid_name_is_rejected(self):
         for name in ('bad/name!', '', None):
-            res = self.client.post('/api/v1/roles', json={'name': name}, headers=self.admin_headers)
+            res = self.client.post('/api/v1/roles', json={'connections': '*', 'name': name}, headers=self.admin_headers)
             self.assertEqual(res.status_code, 400, name)
 
     def test_malformed_fields_are_rejected(self):
         res = self.client.post('/api/v1/roles', json={'name': 'x', 'connections': 'a'}, headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
-        res = self.client.post('/api/v1/roles', json={'name': 'x', 'rate_limit': 'garbage'}, headers=self.admin_headers)
+        res = self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'x', 'rate_limit': 'garbage'},
+                               headers=self.admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_update_of_an_unknown_role_is_404(self):
@@ -103,7 +106,8 @@ class RoleCrudTests(AppTestCase):
         scoped = res.get_json()['secret']
         headers = {'X-API-Key': scoped}
         self.assertEqual(self.client.get('/api/v1/roles', headers=headers).status_code, 403)
-        self.assertEqual(self.client.post('/api/v1/roles', json={'name': 'x'}, headers=headers).status_code, 403)
+        self.assertEqual(self.client.post('/api/v1/roles', json={'connections': '*', 'name': 'x'},
+                                          headers=headers).status_code, 403)
         self.assertEqual(self.client.patch('/api/v1/roles/x', json={}, headers=headers).status_code, 403)
         self.assertEqual(self.client.delete('/api/v1/roles/x', headers=headers).status_code, 403)
 

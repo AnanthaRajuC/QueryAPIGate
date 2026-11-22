@@ -144,7 +144,7 @@ class ValidationTests(FilesTestCase):
                        {'use_ssl': 'no'}, {'auto_views': 'yes'}):
             with self.subTest(fields=fields):
                 res = self.client.post('/api/v1/connections', headers=ADMIN,
-                                       json={'name': 'x', 'db': 'duckdb', 'database': ':memory:', **fields})
+                                       json={'name': 'x', 'db': 'duckdb', 'database': ':memory:', 'options': fields})
                 self.assertEqual(res.status_code, 400, res.get_data(as_text=True))
                 self.assertEqual(res.get_json()['code'], 'invalid_body')
 
@@ -382,7 +382,7 @@ class S3FilesTests(FilesTestCase):
                        "URL_STYLE 'path', USE_SSL false, REGION 'us-east-1')")
         writer.execute(f"COPY (SELECT range AS id FROM range(7)) TO 's3://{bucket}/queryapigate-test/a/x.parquet'")
         writer.execute(f"COPY (SELECT 1 AS id) TO 's3://{bucket}/queryapigate-test/b/y.parquet'")
-        with mock.patch.dict(os.environ, {'TEST_S3_SECRET': secret}):
+        with mock.patch.dict(os.environ, {'TEST_S3_SECRET': secret, 'QUERYAPIGATE_SECRET_ENV_VARS': 'TEST_S3_SECRET'}):
             self.connect(allowed_paths=[f's3://{bucket}/queryapigate-test/a/'], user=key,
                          password='${TEST_S3_SECRET}', endpoint=endpoint, url_style='path', use_ssl=False,
                          region='us-east-1')

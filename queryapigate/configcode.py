@@ -195,7 +195,7 @@ def _connection_from_file(where, entry, problems):
     if not connections._NAME_RE.match(name):
         problems.add(where, "a connection name is 1-100 letters, digits, spaces, '.', '_' or '-'")
         return None
-    fields = problems.check(where, connections._fields, entry)  # options may be given flat, or under `options`
+    fields = problems.check(where, connections._fields, entry)  # driver options under `options`, as the API takes them
     if fields is _FAILED:
         return None
     if 'db' not in fields:
@@ -233,9 +233,10 @@ def _destination_from_store(destination):
 
 
 def _grants_from_file(where, entry, problems):
+    named = problems.check(where, apikeys.require_connections, entry.get('connections'))
     fields = {field: entry.get(field) for field in access.GRANT_FIELDS}
-    grants = problems.check(where, apikeys.normalize_grants, **fields)
-    return None if grants is _FAILED else access._grants(grants)
+    grants = problems.check(where, apikeys.normalize_grants, **fields)  # the rest checked too: every problem at once
+    return None if grants is _FAILED or named is _FAILED else access._grants(grants)
 
 
 def _role_from_file(where, entry, problems):
@@ -1014,8 +1015,13 @@ def export(kinds=KINDS, examples=False):
             if 'password' in entry:
                 entry['password'] = _secret(entry['password'], f'connection {name}', _variable(name, 'password'),
                                             variables)
-            entry.update({k: v for k, v in sorted(details.items())
-                          if k not in (*entry, 'created_at', 'updated_at', 'example', 'password')})
+            from .services import connections
+            entry.update({k: details[k] for k in connections.TOP_FIELDS if k not in entry and k in details
+                          and k != 'password'})
+            options = {k: v for k, v in sorted(details.items())
+                       if k not in (*entry, *connections.TOP_FIELDS, 'created_at', 'updated_at', 'example')}
+            if options:
+                entry['options'] = options
             doc['connections'].append(entry)
     if 'destinations' in kinds:
         doc['destinations'] = []

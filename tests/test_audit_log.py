@@ -36,7 +36,8 @@ class AppTestCase(unittest.TestCase):
         self.assertIn(res.status_code, (200, 201), res.get_data(as_text=True))
 
     def create_key(self, name='scoped', **fields):
-        res = self.client.post('/api/v1/api-keys', json={'name': name, **fields}, headers=self.admin_headers)
+        res = self.client.post('/api/v1/api-keys', json={'name': name, 'connections': '*', **fields},
+                               headers=self.admin_headers)
         self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         return res.get_json()['secret']
 
@@ -150,6 +151,7 @@ class ConnectionAuditTests(AppTestCase):
         self.assertEqual(res.status_code, 400)
         self.assertEqual(self.entries()[0]['action'], 'create_connection')  # no delete entry was ever added
 
+    @mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'SOME_VAR'})
     def test_an_env_var_password_reference_is_shown_as_written(self):
         self.create_connection('a', password='${SOME_VAR}')
         entry = self.entries()[0]

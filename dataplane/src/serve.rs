@@ -1556,6 +1556,12 @@ impl Call {
         if object.contains_key("version") || object.contains_key("connection_name") {
             return None;
         }
+        if object
+            .keys()
+            .any(|k| !matches!(k.as_str(), "params" | "placeholders" | "format" | "timeout"))
+        {
+            return None; // a field Python refuses (unknown_field, since rc1) - its answer to give
+        }
 
         // format: json only (get_output_format())
         let format = match arg("format").filter(|f| !f.is_empty()) {

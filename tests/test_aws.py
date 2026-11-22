@@ -14,6 +14,7 @@ from unittest import mock
 from queryapigate import alerts, aws, db, runners, secretrefs, store
 from queryapigate.errors import ApiError
 from queryapigate.services import connections
+from tests.helpers import connection_body
 
 try:
     import boto3
@@ -111,8 +112,10 @@ class RdsIamTests(AwsTestCase):
     HOST = 'reporting.abc123.eu-west-1.rds.amazonaws.com'
 
     def connection(self, **extra):
-        return {'name': 'rds', 'db': 'postgres', 'host': self.HOST, 'port': 5432, 'user': 'reporting',
-                'database': 'analytics', 'sslmode': 'verify-full', 'credentials': {'source': 'aws-rds-iam'}, **extra}
+        fields = {'name': 'rds', 'db': 'postgres', 'host': self.HOST, 'port': 5432, 'user': 'reporting',
+                  'database': 'analytics', 'sslmode': 'verify-full', 'credentials': {'source': 'aws-rds-iam'}, **extra}
+        # driver options under `options` (rc1, B8); one given as None is left out
+        return connection_body({k: v for k, v in fields.items() if v is not None or k not in ('sslmode', 'ssl_ca')})
 
     def test_the_token_is_the_password_for_the_connections_own_user(self):
         connections.create(self.connection(), 't')

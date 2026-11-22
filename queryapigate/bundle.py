@@ -5,6 +5,10 @@ parameters, default connection name and cache TTL - and its query-level mask and
 otherwise arrive without, unmasked and listed over MCP. Never execution history, API keys, roles or connection
 details (a connection is referenced by name and must exist where the bundle is imported).
 
+**Format version 2** (rc1, B14) writes each query as the Management API and a configuration file name its fields -
+`sql`, `parameters`, `columns` - where version 1 wrote the stored names `sql_query`, `query_parameters`,
+`column_descriptions`. An export is version 2; an import reads either.
+
 Import is held to exactly the rules saving a query is - every entry goes through
 ``definitions.validate_definition()`` - and is all-or-nothing up to the point of writing: the whole bundle is
 validated and checked for conflicts first, so a problem in the tenth query stops the import before the first is
@@ -15,26 +19,32 @@ from . import definitions, store
 from .errors import ApiError
 
 FORMAT = 'queryapigate-collection'
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+READS = (1, 2)
 POLICIES = ('fail', 'skip', 'new-version')
-# Everything an entry may carry. Anything else is an error rather than silently dropped: a field the importer
+# Everything an entry may carry - in version 2, a configuration file's query (configcode._QUERY_FIELDS) less its
+# collection, which is the bundle's. Anything else is an error rather than silently dropped: a field the importer
 # ignores is a field whose loss nobody notices.
+# Version 1's, the stored names:
 ENTRY_FIELDS = {'name', 'sql_query', 'query_type', 'mongo_collection', 'mongo_filter', 'mongo_projection',
                 'mongo_sort', 'author', 'description', 'tags', 'query_parameters', 'connection_name',
                 'cache_ttl', 'column_descriptions', 'agent_writes', 'max_affected_rows', 'mask', 'mcp'}
 
 
+def _entry_fields_v2():
+    from . import configcode
+    return configcode._QUERY_FIELDS - {'collection'}
+
+
 def export_bundle(collection):
+    from . import configcode
     store.validate_collection_name(collection)
     queries = []
-    for name, _, data, member_of in store.live_versions():
+    for name, _, _, member_of in store.live_versions():
         if member_of != collection:
             continue
-        entry = {'name': name}
-        for field in sorted(ENTRY_FIELDS - {'name'}):
-            if data.get(field) not in (None, {}, []):
-                entry[field] = data[field]
-        queries.append(entry)
+        content = store.load_versions(store.resolve_saved_file(name))
+        queries.append({k: v for k, v in configcode._query_entry(name, content).items() if k != 'collection'})
     if not queries:
         raise ApiError(f"Collection '{collection}' not found or empty", 404, code='collection_not_found')
     return {'format': FORMAT, 'format_version': FORMAT_VERSION, 'collection': collection, 'exported_at': store.now(),
@@ -45,9 +55,11 @@ def _parse(bundle, collection_override):
     """Validate a decoded bundle; return (collection, [(name, fields)])."""
     if not isinstance(bundle, dict) or bundle.get('format') != FORMAT:
         raise ApiError(f"Not a QueryAPIGate collection bundle (expected format '{FORMAT}')", code='invalid_bundle')
-    if bundle.get('format_version') != FORMAT_VERSION:
-        raise ApiError(f"Unsupported bundle format_version {bundle.get('format_version')!r} "
-                       f'(this version reads {FORMAT_VERSION})', code='invalid_bundle')
+    version = bundle.get('format_version')
+    if version not in READS or isinstance(version, bool):
+        raise ApiError(f"Unsupported bundle format_version {version!r} (this version reads 1 and 2)",
+                       code='invalid_bundle')
+    allowed = ENTRY_FIELDS if version == 1 else _entry_fields_v2()
     collection = collection_override or bundle.get('collection')
     store.validate_collection_name(collection)
     entries = bundle.get('queries')
@@ -59,14 +71,18 @@ def _parse(bundle, collection_override):
             raise ApiError(f'Query #{position} has no name', code='invalid_bundle')
         name = entry['name']
         try:
-            extra = sorted(set(entry) - ENTRY_FIELDS)
+            extra = sorted(set(entry) - allowed)
             if extra:
                 raise ApiError(f"unexpected field(s): {', '.join(extra)}", code='invalid_bundle')
             store.saved_path_for_name(name)
             if name in seen:
                 raise ApiError('listed more than once in the bundle', code='invalid_bundle')
-            fields, _ = definitions.validate_definition({**{k: v for k, v in entry.items() if k != 'name'},
-                                                         'filename': name})
+            if version == 1:
+                body = {**{k: v for k, v in entry.items() if k != 'name'}, 'filename': name}
+            else:  # the Management API's names, read as it reads them
+                from .services import queries as query_service
+                body = query_service._legacy_body({**entry, 'author': entry.get('author') or 'import'}, name, 'cli')
+            fields, _ = definitions.validate_definition(body)
         except ApiError as error:
             raise ApiError(f"Query '{name}': {error.message}", error.status, code=error.code) from None
         seen.add(name)

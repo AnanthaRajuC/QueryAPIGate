@@ -15,6 +15,9 @@ WAREHOUSE = {'db': 'postgres', 'host': 'warehouse.internal', 'database': 'sales'
 class SecretReferenceTests(IsolationTestCase):
     def setUp(self):
         super().setUp()
+        allowed = mock.patch.dict('os.environ', {'QUERYAPIGATE_SECRET_ENV_VARS': 'TEAM_*'})  # unset, none (rc1, B2)
+        allowed.start()
+        self.addCleanup(allowed.stop)
         admins.create_admin('lead', None)  # no server-wide role: team-b's owner, by membership
         self.ok('put', '/api/v1/workspaces/team-b/members/lead', json={'role': 'owner'})
         self.lead = {'X-API-Key': admins.issue_token('lead')[1]}

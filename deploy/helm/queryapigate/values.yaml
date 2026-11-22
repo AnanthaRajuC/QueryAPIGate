@@ -55,7 +55,8 @@ config: {}
 # Configuration as code (ADR 0014): connections, queries, roles, keys' grants and the rest as one file,
 # applied by the API server as it starts - once per file. Changing it rolls the pods, and the first new one applies it;
 # one that can't be applied doesn't start, and the pods still serving keep what they have. No secret goes in the file:
-# passwords are ${VAR} references to variables in the Secret, keys are their secret_sha256.
+# passwords are ${VAR} references to variables in the Secret, keys are their secret_sha256. List those variables in
+# QUERYAPIGATE_SECRET_ENV_VARS (`config`, above): unset, no ${VAR} is read.
 configAsCode:
   enabled: false
   file: ""               # the file itself, inline - or --set-file configAsCode.file=queryapigate.yaml
@@ -157,7 +158,8 @@ vaultToken:
 # /metrics needs a bearer token (QUERYAPIGATE_METRICS_TOKEN): its labels name your API keys, queries and connections,
 # and the ingress would otherwise publish them. The chart makes one in a Secret of its own (<release>-metrics) - kept
 # across upgrades - and the ServiceMonitor sends it. Rendering without the cluster (helm template, Argo CD) can't see
-# the one already made, so give your own there: existingSecret. Off: /metrics is open to whatever can reach the pods.
+# the one already made, so give your own there: existingSecret. Off: /metrics answers only the pod itself (loopback)
+# once the server needs a credential.
 metricsAuth:
   enabled: true
   existingSecret: ""   # a Secret of yours with the token (at least 16 characters) under `key`

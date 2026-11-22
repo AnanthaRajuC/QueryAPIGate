@@ -20,7 +20,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 }'
 ```
 
-Needs `pip install "queryapigate[mongo]"`. `user`/`password` are optional - omit both for an
+The server reads `${MONGO_USER}` and `${MONGO_PASSWORD}` from its environment, and only those its
+`QUERYAPIGATE_SECRET_ENV_VARS` lists: `QUERYAPIGATE_SECRET_ENV_VARS=MONGO_*`. Needs `pip install "queryapigate[mongo]"`. `user`/`password` are optional - omit both for an
 unauthenticated local instance, as this guide's own examples do. `database` selects which database `find()`
 runs against per call; unlike the SQL dialects, it isn't part of the driver's own connection string.
 

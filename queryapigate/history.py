@@ -473,12 +473,24 @@ _DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$')
 MAX_PAGE = 1000
 
 
+_RFC3339_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$')
+
+
 def _time_bound(value, label):
+    """A date, a time in the server's own zone, or (rc1, B7) RFC 3339 with an offset - what the API now returns -
+    as the store's local 'YYYY-MM-DD HH:MM:SS' (to the second: a fraction is dropped)."""
     if value is None or value == '':
         return None
+    if isinstance(value, str) and _RFC3339_RE.match(value):
+        try:
+            moment = datetime.fromisoformat(value.replace('z', 'Z').replace('t', 'T'))
+        except ValueError:
+            raise ApiError(f'{label} is not a real date or time', code='invalid_filter') from None
+        return moment.astimezone().strftime(TIME_FORMAT)
     value = value.replace('T', ' ')
     if not _DATE_RE.match(value):
-        raise ApiError(f"{label} must be a date (YYYY-MM-DD) or a time (YYYY-MM-DD HH:MM:SS)", code='invalid_filter')
+        raise ApiError(f"{label} must be a date (YYYY-MM-DD), a time (YYYY-MM-DD HH:MM:SS) or RFC 3339 "
+                       '(2026-11-22T12:03:10+05:30)', code='invalid_filter')
     try:
         datetime.strptime(value, TIME_FORMAT if ' ' in value else '%Y-%m-%d')
     except ValueError:

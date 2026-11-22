@@ -334,8 +334,8 @@ class SubscribeTests(LiveTestCase):
 
     def test_a_key_that_may_not_run_it_is_refused_as_GET_q_would_be(self):
         stream = self.subscribe('/live/film?id=1', key=self.alice)
-        self.assertEqual(stream.status, 403)
-        self.assertEqual(stream.body()['code'], 'connection_forbidden')
+        self.assertEqual(stream.status, 404)
+        self.assertEqual(stream.body()['code'], 'query_not_found')
         self.assertEqual(self.subscribe('/live/film?id=1', key='wrong').status, 401)
         self.assertEqual(self.subscribe('/live/nope').status, 404)
 

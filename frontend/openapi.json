@@ -810,6 +810,11 @@
             },
             "type": "array"
           },
+          "next_cursor": {
+            "description": "Send as cursor for the next page; null on the last.",
+            "nullable": true,
+            "type": "string"
+          },
           "retention": {
             "description": "The log keeps this many entries (QUERYAPIGATE_AUDIT_LOG_LIMIT).",
             "type": "integer"
@@ -821,6 +826,7 @@
         },
         "required": [
           "items",
+          "next_cursor",
           "total",
           "actions",
           "retention"
@@ -1439,11 +1445,17 @@
         ]
       },
       "ConnectionInput": {
-        "additionalProperties": true,
+        "additionalProperties": false,
         "properties": {
           "active": {
             "default": true,
             "type": "boolean"
+          },
+          "credentials": {
+            "additionalProperties": true,
+            "description": "Short-lived credentials instead of a password: {\"source\": \"aws-rds-iam\"}.",
+            "nullable": true,
+            "type": "object"
           },
           "database": {
             "nullable": true,
@@ -1463,6 +1475,7 @@
           },
           "options": {
             "additionalProperties": true,
+            "description": "Driver options (sslmode, jdbc_url, allowed_paths, ...) - any other field is refused (unknown_field). On PATCH, merged in; null removes one.",
             "type": "object"
           },
           "password": {
@@ -4033,10 +4046,16 @@
               "$ref": "#/components/schemas/WriteRequest"
             },
             "type": "array"
+          },
+          "next_cursor": {
+            "description": "Send as cursor for the next page; null on the last.",
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
-          "items"
+          "items",
+          "next_cursor"
         ],
         "type": "object"
       }
@@ -4058,6 +4077,7 @@
   "paths": {
     "/api/v1/administrators": {
       "get": {
+        "operationId": "list_administrators",
         "responses": {
           "200": {
             "content": {
@@ -4116,6 +4136,7 @@
         ]
       },
       "post": {
+        "operationId": "create_administrator",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4204,6 +4225,7 @@
     },
     "/api/v1/administrators/{name}": {
       "delete": {
+        "operationId": "delete_administrator",
         "parameters": [
           {
             "in": "path",
@@ -4294,6 +4316,7 @@
         ]
       },
       "get": {
+        "operationId": "get_administrator",
         "parameters": [
           {
             "in": "path",
@@ -4370,6 +4393,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_administrator",
         "parameters": [
           {
             "in": "path",
@@ -4487,6 +4511,7 @@
     },
     "/api/v1/administrators/{name}/tokens": {
       "get": {
+        "operationId": "list_admin_tokens",
         "parameters": [
           {
             "in": "path",
@@ -4555,6 +4580,7 @@
         ]
       },
       "post": {
+        "operationId": "issue_admin_token",
         "parameters": [
           {
             "in": "path",
@@ -4635,6 +4661,7 @@
     },
     "/api/v1/administrators/{name}/tokens/{token_id}": {
       "delete": {
+        "operationId": "revoke_admin_token",
         "parameters": [
           {
             "in": "path",
@@ -4706,6 +4733,7 @@
     },
     "/api/v1/alerts": {
       "get": {
+        "operationId": "list_alerts",
         "responses": {
           "200": {
             "content": {
@@ -4766,6 +4794,7 @@
     },
     "/api/v1/api-keys": {
       "get": {
+        "operationId": "list_api_keys",
         "responses": {
           "200": {
             "content": {
@@ -4824,6 +4853,7 @@
         ]
       },
       "post": {
+        "operationId": "create_api_key",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4912,6 +4942,7 @@
     },
     "/api/v1/api-keys/{name}": {
       "delete": {
+        "operationId": "delete_api_key",
         "parameters": [
           {
             "in": "path",
@@ -4992,6 +5023,7 @@
         ]
       },
       "get": {
+        "operationId": "get_api_key",
         "parameters": [
           {
             "in": "path",
@@ -5068,6 +5100,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_api_key",
         "parameters": [
           {
             "in": "path",
@@ -5176,6 +5209,7 @@
     "/api/v1/api-keys/{name}/previous": {
       "delete": {
         "description": "404 `previous_secret_not_found` when no old secret works.",
+        "operationId": "end_previous_secret",
         "parameters": [
           {
             "in": "path",
@@ -5255,6 +5289,7 @@
     "/api/v1/api-keys/{name}/rotate": {
       "post": {
         "description": "Name, grants, expiry and history stay the same; `allowed_ips`, expiry and the rate limit apply to both secrets alike (ADR 0009). Audited as `rotate_api_key`.",
+        "operationId": "rotate_api_key",
         "parameters": [
           {
             "in": "path",
@@ -5362,6 +5397,7 @@
     },
     "/api/v1/audit": {
       "get": {
+        "operationId": "list_audit",
         "parameters": [
           {
             "in": "query",
@@ -5396,6 +5432,24 @@
             "description": "A server-wide role's filter: one workspace's entries. A role in a workspace always reads that workspace's only.",
             "in": "query",
             "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The last page's next_cursor.",
+            "in": "query",
+            "name": "cursor",
             "schema": {
               "type": "string"
             }
@@ -5461,6 +5515,7 @@
     },
     "/api/v1/audit/delivery": {
       "get": {
+        "operationId": "audit_delivery",
         "responses": {
           "200": {
             "content": {
@@ -5575,6 +5630,7 @@
     },
     "/api/v1/audit/verify": {
       "get": {
+        "operationId": "verify_audit",
         "responses": {
           "200": {
             "content": {
@@ -5635,6 +5691,7 @@
     },
     "/api/v1/cache/entries": {
       "delete": {
+        "operationId": "clear_cache",
         "responses": {
           "204": {
             "description": "Cleared"
@@ -5686,6 +5743,7 @@
         ]
       },
       "get": {
+        "operationId": "list_cache_entries",
         "responses": {
           "200": {
             "content": {
@@ -5746,6 +5804,7 @@
     },
     "/api/v1/cache/entries/{key}": {
       "delete": {
+        "operationId": "delete_cache_entry",
         "parameters": [
           {
             "in": "path",
@@ -5807,6 +5866,7 @@
         ]
       },
       "get": {
+        "operationId": "get_cache_entry",
         "parameters": [
           {
             "in": "path",
@@ -5879,6 +5939,7 @@
     "/api/v1/cdc-sources": {
       "get": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "list_cdc_sources",
         "responses": {
           "200": {
             "content": {
@@ -5939,6 +6000,7 @@
       },
       "post": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog. The secret is generated, never given. 409 `cdc_source_exists` for a name taken - here, or by QUERYAPIGATE_CDC_SOURCES. Audited as `create_cdc_source`, without the secret.",
+        "operationId": "create_cdc_source",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6029,6 +6091,7 @@
     "/api/v1/cdc-sources/{name}": {
       "delete": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "delete_cdc_source",
         "parameters": [
           {
             "in": "path",
@@ -6121,6 +6184,7 @@
       },
       "get": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "get_cdc_source",
         "parameters": [
           {
             "in": "path",
@@ -6199,6 +6263,7 @@
       },
       "patch": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog. 409 `cdc_source_managed` for a source from QUERYAPIGATE_CDC_SOURCES.",
+        "operationId": "update_cdc_source",
         "parameters": [
           {
             "in": "path",
@@ -6318,6 +6383,7 @@
     "/api/v1/cdc-sources/{name}/previous": {
       "delete": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "end_cdc_source_previous_secret",
         "parameters": [
           {
             "in": "path",
@@ -6398,6 +6464,7 @@
     "/api/v1/cdc-sources/{name}/rotate": {
       "post": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog. A post signed with either secret is accepted until then, so Debezium can be restarted with the new one at any point. Audited as `rotate_cdc_source_secret`.",
+        "operationId": "rotate_cdc_source",
         "parameters": [
           {
             "in": "path",
@@ -6506,6 +6573,7 @@
     },
     "/api/v1/collections": {
       "get": {
+        "operationId": "list_collections",
         "responses": {
           "200": {
             "content": {
@@ -6566,6 +6634,7 @@
     },
     "/api/v1/collections/{name}": {
       "patch": {
+        "operationId": "rename_collection",
         "parameters": [
           {
             "in": "path",
@@ -6667,6 +6736,7 @@
     },
     "/api/v1/collections/{name}/postman": {
       "get": {
+        "operationId": "collection_postman",
         "parameters": [
           {
             "in": "path",
@@ -6739,6 +6809,7 @@
     "/api/v1/config/apply": {
       "post": {
         "description": "In one transaction: every change is made through the same rules as the rest of this API and audited (`via: config`), under one `config_applied` entry with the file's hash. A problem at any step changes nothing. Owners only (`config.apply`).",
+        "operationId": "config_apply",
         "parameters": [
           {
             "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
@@ -6828,6 +6899,7 @@
     "/api/v1/config/diff": {
       "post": {
         "description": "The file as JSON, or as YAML with `Content-Type: application/yaml`. A file with problems answers 400 `invalid_config`, listing every one in `problems`. Owners only (`config.apply`).",
+        "operationId": "config_diff",
         "parameters": [
           {
             "description": "Also delete what a file manages and this one no longer has - never what was made in the Console or this API.",
@@ -6909,6 +6981,7 @@
     "/api/v1/config/managed": {
       "get": {
         "description": "With `locked` (QUERYAPIGATE_CONFIG_LOCKED), changing any of these through this API answers 409 `config_managed`.",
+        "operationId": "config_managed",
         "responses": {
           "200": {
             "content": {
@@ -6969,6 +7042,7 @@
     },
     "/api/v1/connections": {
       "get": {
+        "operationId": "list_connections",
         "responses": {
           "200": {
             "content": {
@@ -7027,6 +7101,7 @@
         ]
       },
       "post": {
+        "operationId": "create_connection",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7115,6 +7190,7 @@
     },
     "/api/v1/connections/databases": {
       "post": {
+        "operationId": "connection_databases",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7195,6 +7271,7 @@
     },
     "/api/v1/connections/deleted": {
       "get": {
+        "operationId": "deleted_connections",
         "responses": {
           "200": {
             "content": {
@@ -7255,6 +7332,7 @@
     },
     "/api/v1/connections/test": {
       "post": {
+        "operationId": "test_connection",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7335,6 +7413,7 @@
     },
     "/api/v1/connections/{name}": {
       "delete": {
+        "operationId": "delete_connection",
         "parameters": [
           {
             "in": "path",
@@ -7433,6 +7512,7 @@
         ]
       },
       "get": {
+        "operationId": "get_connection",
         "parameters": [
           {
             "in": "path",
@@ -7509,6 +7589,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_connection",
         "parameters": [
           {
             "in": "path",
@@ -7616,6 +7697,7 @@
     },
     "/api/v1/connections/{name}/descriptions": {
       "get": {
+        "operationId": "list_descriptions",
         "parameters": [
           {
             "in": "path",
@@ -7685,6 +7767,7 @@
       },
       "patch": {
         "description": "`table` null is the connection's own notes (up to 20,000 characters); `column` null the table's description; a column's or table's is up to 2,000.",
+        "operationId": "update_descriptions",
         "parameters": [
           {
             "in": "path",
@@ -7796,6 +7879,7 @@
     "/api/v1/connections/{name}/descriptions/import": {
       "post": {
         "description": "PostgreSQL, MySQL, ClickHouse and DuckDB. A description written by a person is kept unless overwrite is true.",
+        "operationId": "import_descriptions",
         "parameters": [
           {
             "in": "path",
@@ -7883,6 +7967,7 @@
     },
     "/api/v1/connections/{name}/schema": {
       "get": {
+        "operationId": "v1_connection_schema",
         "parameters": [
           {
             "in": "path",
@@ -7962,6 +8047,7 @@
     },
     "/api/v1/destinations": {
       "get": {
+        "operationId": "list_destinations",
         "responses": {
           "200": {
             "content": {
@@ -8020,6 +8106,7 @@
         ]
       },
       "post": {
+        "operationId": "create_destination",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8108,6 +8195,7 @@
     },
     "/api/v1/destinations/test": {
       "post": {
+        "operationId": "test_destination_fields",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8178,6 +8266,7 @@
     },
     "/api/v1/destinations/{name}": {
       "delete": {
+        "operationId": "delete_destination",
         "parameters": [
           {
             "in": "path",
@@ -8268,6 +8357,7 @@
         ]
       },
       "get": {
+        "operationId": "get_destination",
         "parameters": [
           {
             "in": "path",
@@ -8344,6 +8434,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_destination",
         "parameters": [
           {
             "in": "path",
@@ -8451,6 +8542,7 @@
     },
     "/api/v1/destinations/{name}/test": {
       "post": {
+        "operationId": "test_destination",
         "parameters": [
           {
             "in": "path",
@@ -8521,6 +8613,7 @@
     },
     "/api/v1/examples": {
       "delete": {
+        "operationId": "unload_examples",
         "responses": {
           "200": {
             "content": {
@@ -8579,6 +8672,7 @@
         ]
       },
       "get": {
+        "operationId": "examples_status",
         "responses": {
           "200": {
             "content": {
@@ -8637,6 +8731,7 @@
         ]
       },
       "post": {
+        "operationId": "load_examples",
         "responses": {
           "200": {
             "content": {
@@ -8707,6 +8802,7 @@
     },
     "/api/v1/exports": {
       "get": {
+        "operationId": "list_exports",
         "responses": {
           "200": {
             "content": {
@@ -8765,6 +8861,7 @@
         ]
       },
       "post": {
+        "operationId": "create_export",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8853,6 +8950,7 @@
     },
     "/api/v1/exports/{name}": {
       "delete": {
+        "operationId": "delete_export",
         "parameters": [
           {
             "in": "path",
@@ -8933,6 +9031,7 @@
         ]
       },
       "get": {
+        "operationId": "get_export",
         "parameters": [
           {
             "in": "path",
@@ -9009,6 +9108,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_export",
         "parameters": [
           {
             "in": "path",
@@ -9116,6 +9216,7 @@
     },
     "/api/v1/exports/{name}/runs": {
       "get": {
+        "operationId": "list_export_runs",
         "parameters": [
           {
             "in": "path",
@@ -9192,6 +9293,7 @@
         ]
       },
       "post": {
+        "operationId": "run_export",
         "parameters": [
           {
             "in": "path",
@@ -9283,6 +9385,7 @@
     "/api/v1/history": {
       "delete": {
         "description": "For a request to erase a person's data (ADR 0016). Recorded in the audit log as `forget_caller`, by the caller's SHA-256, not its name. Their quota's count for the period starts again. Owners only (`history.forget`).",
+        "operationId": "forget_history",
         "parameters": [
           {
             "description": "A key name, or jwt:<subject> for a signed-in person.",
@@ -9360,6 +9463,7 @@
         ]
       },
       "get": {
+        "operationId": "search_history",
         "parameters": [
           {
             "in": "query",
@@ -9494,6 +9598,7 @@
     },
     "/api/v1/instances": {
       "get": {
+        "operationId": "list_instances",
         "responses": {
           "200": {
             "content": {
@@ -9554,6 +9659,7 @@
     },
     "/api/v1/mcp/status": {
       "get": {
+        "operationId": "mcp_status",
         "responses": {
           "200": {
             "content": {
@@ -9614,6 +9720,7 @@
     },
     "/api/v1/mcp/tools": {
       "get": {
+        "operationId": "mcp_tools",
         "responses": {
           "200": {
             "content": {
@@ -9674,6 +9781,7 @@
     },
     "/api/v1/me": {
       "get": {
+        "operationId": "me",
         "responses": {
           "200": {
             "content": {
@@ -9734,6 +9842,7 @@
     },
     "/api/v1/queries": {
       "get": {
+        "operationId": "list_queries",
         "parameters": [
           {
             "description": "Matches name, description or a tag.",
@@ -9828,6 +9937,7 @@
         ]
       },
       "post": {
+        "operationId": "create_query",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9916,6 +10026,7 @@
     },
     "/api/v1/queries/validate": {
       "post": {
+        "operationId": "validate_query",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9986,6 +10097,7 @@
     },
     "/api/v1/queries/{name}": {
       "delete": {
+        "operationId": "delete_query",
         "parameters": [
           {
             "in": "path",
@@ -10066,6 +10178,7 @@
         ]
       },
       "get": {
+        "operationId": "get_query",
         "parameters": [
           {
             "in": "path",
@@ -10142,6 +10255,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_query",
         "parameters": [
           {
             "in": "path",
@@ -10255,6 +10369,7 @@
     },
     "/api/v1/queries/{name}/history": {
       "get": {
+        "operationId": "query_history",
         "parameters": [
           {
             "in": "path",
@@ -10379,6 +10494,7 @@
     },
     "/api/v1/queries/{name}/publish": {
       "post": {
+        "operationId": "publish_query",
         "parameters": [
           {
             "in": "path",
@@ -10494,6 +10610,7 @@
     },
     "/api/v1/queries/{name}/unpublish": {
       "post": {
+        "operationId": "unpublish_query",
         "parameters": [
           {
             "in": "path",
@@ -10591,6 +10708,7 @@
     },
     "/api/v1/queries/{name}/versions": {
       "post": {
+        "operationId": "add_version",
         "parameters": [
           {
             "in": "path",
@@ -10698,6 +10816,7 @@
     },
     "/api/v1/queries/{name}/versions/{version}": {
       "delete": {
+        "operationId": "delete_version",
         "parameters": [
           {
             "in": "path",
@@ -10804,6 +10923,7 @@
         ]
       },
       "get": {
+        "operationId": "get_version",
         "parameters": [
           {
             "in": "path",
@@ -10880,6 +11000,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_version",
         "parameters": [
           {
             "in": "path",
@@ -11004,6 +11125,7 @@
     },
     "/api/v1/queries/{name}/versions/{version}/flow": {
       "get": {
+        "operationId": "version_flow",
         "parameters": [
           {
             "in": "path",
@@ -11082,6 +11204,7 @@
     },
     "/api/v1/roles": {
       "get": {
+        "operationId": "list_roles",
         "responses": {
           "200": {
             "content": {
@@ -11140,6 +11263,7 @@
         ]
       },
       "post": {
+        "operationId": "create_role",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11228,6 +11352,7 @@
     },
     "/api/v1/roles/{name}": {
       "delete": {
+        "operationId": "delete_role",
         "parameters": [
           {
             "in": "path",
@@ -11308,6 +11433,7 @@
         ]
       },
       "get": {
+        "operationId": "get_role",
         "parameters": [
           {
             "in": "path",
@@ -11384,6 +11510,7 @@
         ]
       },
       "patch": {
+        "operationId": "update_role",
         "parameters": [
           {
             "in": "path",
@@ -11491,6 +11618,7 @@
     },
     "/api/v1/settings": {
       "get": {
+        "operationId": "get_settings",
         "responses": {
           "200": {
             "content": {
@@ -11552,6 +11680,7 @@
     "/api/v1/settings/rekey": {
       "post": {
         "description": "All or nothing, in one transaction; running it again is harmless. Owners only (`secrets.rotate`). Recorded in the audit log as `rekey`, with counts only.",
+        "operationId": "rekey",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11638,6 +11767,7 @@
     },
     "/api/v1/usage/agents": {
       "get": {
+        "operationId": "agent_usage",
         "parameters": [
           {
             "description": "A date or a time, inclusive; default 24 hours ago.",
@@ -11727,6 +11857,7 @@
     },
     "/api/v1/usage/quotas": {
       "get": {
+        "operationId": "quota_usage",
         "responses": {
           "200": {
             "content": {
@@ -11788,6 +11919,7 @@
     "/api/v1/workspaces": {
       "get": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "list_workspaces",
         "responses": {
           "200": {
             "content": {
@@ -11848,6 +11980,7 @@
       },
       "post": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "create_workspace",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11938,6 +12071,7 @@
     "/api/v1/workspaces/{name}": {
       "delete": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "delete_workspace",
         "parameters": [
           {
             "in": "path",
@@ -12011,6 +12145,7 @@
       },
       "get": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "get_workspace",
         "parameters": [
           {
             "in": "path",
@@ -12089,6 +12224,7 @@
       },
       "patch": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "update_workspace",
         "parameters": [
           {
             "in": "path",
@@ -12179,6 +12315,7 @@
     "/api/v1/workspaces/{name}/members": {
       "get": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "list_workspace_members",
         "parameters": [
           {
             "in": "path",
@@ -12251,6 +12388,7 @@
     "/api/v1/workspaces/{name}/members/{admin}": {
       "delete": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "remove_workspace_member",
         "parameters": [
           {
             "in": "path",
@@ -12323,6 +12461,7 @@
       },
       "put": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog.",
+        "operationId": "set_workspace_member",
         "parameters": [
           {
             "in": "path",
@@ -12413,12 +12552,31 @@
     },
     "/api/v1/write-requests": {
       "get": {
+        "operationId": "list_write_requests",
         "parameters": [
           {
             "description": "pending, approved, running, done, failed, rejected or expired.",
             "in": "query",
             "name": "status",
             "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The last page's next_cursor.",
+            "in": "query",
+            "name": "cursor",
             "schema": {
               "type": "string"
             }
@@ -12484,6 +12642,7 @@
     },
     "/api/v1/write-requests/{id}": {
       "get": {
+        "operationId": "get_write_request",
         "parameters": [
           {
             "in": "path",
@@ -12554,6 +12713,7 @@
     },
     "/api/v1/write-requests/{id}/approve": {
       "post": {
+        "operationId": "approve_write_request",
         "parameters": [
           {
             "in": "path",
@@ -12624,6 +12784,7 @@
     },
     "/api/v1/write-requests/{id}/reject": {
       "post": {
+        "operationId": "reject_write_request",
         "parameters": [
           {
             "in": "path",
@@ -12710,6 +12871,7 @@
     },
     "/auth/session": {
       "get": {
+        "operationId": "auth_session",
         "responses": {
           "200": {
             "content": {
@@ -12764,6 +12926,7 @@
     },
     "/auth/sso/callback": {
       "get": {
+        "operationId": "auth_callback",
         "responses": {
           "302": {
             "description": "To the Console - signed in, or with sso_error saying why not"
@@ -12781,6 +12944,7 @@
     },
     "/auth/sso/login": {
       "get": {
+        "operationId": "auth_login",
         "parameters": [
           {
             "description": "The Console page to land on - only ever a /console/ path.",
@@ -12809,6 +12973,7 @@
     },
     "/auth/sso/logout": {
       "post": {
+        "operationId": "auth_logout",
         "responses": {
           "200": {
             "content": {
@@ -12846,6 +13011,7 @@
     "/catalog": {
       "get": {
         "description": "Not just what /openapi.json already documents (parameters, description, connection) but the governance half it has no field for: whether a response can be cached and for how long, whether this specific caller can write through this query (may differ per query - see per-query write curation under Authentication and permissions), and this caller's own rate limit alongside the server-wide one. Scoped the same way /openapi.json already scopes its saved-query list - a query this caller cannot reach through /q/<name> is never listed here either. Requires authentication like any other functional endpoint (unlike /openapi.json, this is never public), since the whole point is answering \"what can *I* use.\"",
+        "operationId": "catalog",
         "responses": {
           "200": {
             "content": {
@@ -12992,6 +13158,7 @@
     "/connections/{name}/schema": {
       "get": {
         "description": "'database' browses a different database on the same server than the connection's own configured one (admin only; a scoped key gets 403 on it, even one granted this connection) - Run SQL's own database picker, not a new grant.",
+        "operationId": "api_connection_schema",
         "parameters": [
           {
             "in": "path",
@@ -13096,6 +13263,7 @@
     "/connections/{name}/table_ddl": {
       "get": {
         "description": "Only 'mysql', 'sqlite' and 'clickhouse' connections support this - Postgres has no single-statement DDL dump, H2/DuckDB are unverified here, and Mongo has no DDL at all. 'database' is the same admin-only database-override as the schema endpoint above.",
+        "operationId": "connection_table_ddl",
         "parameters": [
           {
             "in": "path",
@@ -13169,6 +13337,7 @@
     "/events": {
       "get": {
         "description": "One `data: {...}` line per event as it happens - today a run, `query.run`, of a saved query or of ad-hoc SQL - what keeps the admin UI's Home screen live. Any authenticated key may connect: the admin key sees every event; a scoped key sees only the runs it made itself (its own personal activity feed, filtered by API key name). The filters narrow that, never widen it; they combine with AND.",
+        "operationId": "stream_events",
         "parameters": [
           {
             "description": "Only events of this type, e.g. query.run.",
@@ -13265,6 +13434,7 @@
     },
     "/execute_mongo": {
       "post": {
+        "operationId": "execute_mongo",
         "parameters": [
           {
             "in": "query",
@@ -13415,6 +13585,7 @@
     },
     "/execute_sql": {
       "post": {
+        "operationId": "execute_sql",
         "parameters": [
           {
             "in": "query",
@@ -13567,6 +13738,7 @@
     },
     "/health": {
       "get": {
+        "operationId": "health",
         "responses": {
           "200": {
             "content": {
@@ -13613,6 +13785,7 @@
     "/ingest/cdc/{source}": {
       "post": {
         "description": "**Experimental** - may change in any minor release, noted in the changelog. Debezium Server's HTTP sink posts its change events here - one, or a batch - signed with Standard Webhooks using the source's secret (/api/v1/cdc-sources, or QUERYAPIGATE_CDC_SOURCES); outside the `default` workspace, at /w/{workspace}/ingest/cdc/{source}. No API key or token is accepted; an unknown source and a bad signature both answer 404 `cdc_source_not_found`. The changes are reduced to the tables they touched and stored as one `table.changed` event, with no row data, before the 204; live queries reading those tables are re-run. Only with QUERYAPIGATE_LIVE_QUERIES on.",
+        "operationId": "ingest_cdc",
         "parameters": [
           {
             "in": "path",
@@ -13667,6 +13840,7 @@
     },
     "/metrics": {
       "get": {
+        "operationId": "metrics",
         "responses": {
           "200": {
             "content": {
@@ -13687,6 +13861,7 @@
     },
     "/q/{name}": {
       "get": {
+        "operationId": "run_named_query",
         "parameters": [
           {
             "in": "query",
@@ -13823,6 +13998,7 @@
         }
       ],
       "post": {
+        "operationId": "run_named_query_post",
         "parameters": [
           {
             "in": "query",

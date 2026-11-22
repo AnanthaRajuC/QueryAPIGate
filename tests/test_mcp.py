@@ -6,6 +6,7 @@ install - they're plain Python/Flask, exercised directly here. A real end-to-end
 installed."""
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -260,6 +261,68 @@ class ListToolsForTests(McpTestCase):
         self.assertTrue(tool['idempotentHint'])
 
 
+class ReservedNamesTests(McpTestCase):
+    """rc1 (B4, B17): the names a control argument or built-in tool added later would take over, refused now; and a
+    saved query listed under a name LLM APIs accept."""
+
+    def refused(self, filename, code, words, sql='SELECT * FROM t ORDER BY id', **extra):
+        res = save_query(self.client, {'author': 'a', 'description': 'd', 'sql_query': sql, 'filename': filename,
+                                       'connection_name': 'a', **extra}, headers=self.admin_headers)
+        self.assertEqual(res.status_code, 400, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['code'], code)
+        self.assertIn(words, res.get_json()['error'])
+
+    def test_a_parameter_cant_be_named_like_a_control_argument(self):
+        for name in ('page', 'page_size', 'timeout', 'version', 'stream', 'format', 'connection_name', 'approval',
+                     'idempotency_key', '_later'):
+            with self.subTest(name=name):
+                self.refused('q', 'invalid_body', f"{name} can't be a parameter's name",
+                             sql=f'SELECT * FROM t WHERE id = :{name}')  # used in the SQL, declared or not
+        self.refused('q', 'invalid_body', "timeout can't be a parameter's name", sql='SELECT * FROM t WHERE id = :id',
+                     query_parameters={'id': 'int', 'timeout': 'int'})
+        self.save('fine', sql='SELECT * FROM t WHERE id = :page_number')  # only the exact names, and a leading _
+
+    def test_a_query_cant_take_a_built_in_or_reserved_tool_name(self):
+        for name in ('list_tables', 'execute_sql', 'describe_table', 'list_queries', 'search_queries', 'list.tables'):
+            with self.subTest(name=name):
+                self.refused(name, 'invalid_name', 'kept for a built-in MCP tool')
+
+    def test_a_query_is_listed_under_a_tool_name_llm_apis_accept(self):
+        self.save('monthly revenue')
+        self.save('Umsätze.2026')
+        self.save('x' * 100)
+        tools = [t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)]
+        self.assertIn('monthly_revenue', tools)
+        self.assertIn('Ums_tze_2026', tools)
+        self.assertIn('x' * 64, tools)
+        self.assertTrue(all(re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', t) for t in tools), tools)
+        rows = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'monthly_revenue', {})['structuredContent']['rows']
+        self.assertEqual(len(rows), 5)
+        # a client that called it by the query's own name before 1.0 still can
+        rows = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'monthly revenue', {})['structuredContent']['rows']
+        self.assertEqual(len(rows), 5)
+
+    def test_a_new_query_whose_tool_name_is_taken_is_refused(self):
+        self.save('monthly revenue')
+        self.refused('monthly.revenue', 'invalid_name', "listed over MCP as monthly_revenue, as the saved query "
+                                                        "'monthly revenue' is")
+        self.refused('monthly_revenue', 'invalid_name', 'listed over MCP as monthly_revenue')
+        self.save('monthly revenue')  # a new version of the same query is not a new name
+
+    def test_one_stored_before_the_rule_still_runs_and_isnt_listed_over_a_fixed_tool(self):
+        with mock.patch('queryapigate.toolnames.check_new_query'):
+            self.save('execute_sql')
+            self.save('a.b', sql='SELECT 1 AS one')
+            self.save('a_b', sql='SELECT 2 AS two')
+        self.assertEqual(self.client.get('/q/execute_sql', headers=self.admin_headers).status_code, 200)
+        tools = [t['name'] for t in mcp_server.list_tools_for(apikeys.OPEN)]
+        self.assertEqual(tools.count('execute_sql'), 1)  # the fixed tool, not the query
+        self.assertEqual(tools.count('a_b'), 1)
+        # the query named exactly as the tool is the one listed, and the one a call runs
+        result = mcp_server.call_tool_for(self.app, apikeys.OPEN, 'a_b', {})
+        self.assertEqual(result['structuredContent']['rows'], [{'two': 2}])
+
+
 class CallToolForTests(McpTestCase):
     def test_returns_the_same_rows_as_the_rest_endpoint(self):
         self.save('q1')
@@ -354,7 +417,7 @@ class GovernanceParityTests(McpTestCase):
         if not result.get('isError'):
             return 200
         text = result['content'][0]['text']
-        return 429 if 'Rate limit' in text else 401 if 'Unauthorized' in text else 403
+        return 429 if 'Rate limit' in text else 401 if 'Unauthorized' in text else 404 if 'not found' in text else 403
 
     def test_the_same_outcome_over_both_front_doors(self):
         for transport in ('rest', 'mcp'):
@@ -362,7 +425,7 @@ class GovernanceParityTests(McpTestCase):
             allowed = self.key(f'{transport}-allowed', connections=['a'], rate_limit='2/minute')
             denied = self.key(f'{transport}-denied', connections=[])
             self.assertEqual(call(allowed, 'q1'), 200, transport)
-            self.assertEqual(call(denied, 'q1'), 403, transport)
+            self.assertEqual(call(denied, 'q1'), 404, transport)
             self.assertEqual(call('wrong-key', 'q1'), 401, transport)
             self.assertEqual(call(allowed, 'q1'), 200, transport)
             self.assertEqual(call(allowed, 'q1'), 429, transport)  # its own 2/minute

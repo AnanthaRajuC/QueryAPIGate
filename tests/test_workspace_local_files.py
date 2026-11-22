@@ -5,6 +5,7 @@ import json
 import os
 
 from queryapigate import admins
+from tests.helpers import connection_body
 from tests.test_api_v1 import ADMIN
 from tests.test_workspace_config_cli import FILE
 from tests.test_workspace_isolation import B, IsolationTestCase
@@ -31,6 +32,7 @@ class LocalFileTests(IsolationTestCase):
                        {'db': 'h2', 'database': 'mem:scratch'},
                        {'db': 'jdbc', 'jdbc_url': 'jdbc:sqlite:' + self.elsewhere, 'jar': '/tmp/driver.jar'}):
             with self.subTest(fields=fields):
+                fields = connection_body(fields)  # driver options under `options`
                 self.refused('post', f'{B}/api/v1/connections', json={'name': 'grab', **fields})
                 self.refused('post', f'{B}/api/v1/connections/test', json=fields)  # a probe opens it too
                 self.refused('post', f'{B}/api/v1/connections/databases', json=fields)
@@ -59,7 +61,7 @@ class LocalFileTests(IsolationTestCase):
 
     def test_remote_storage_and_server_databases_are_a_workspaces_own(self):
         self.ok('post', f'{B}/api/v1/connections', status=201, headers=self.lead, json={
-            'name': 'lake', 'db': 'duckdb', 'database': ':memory:', 'allowed_paths': ['s3://bucket/data/']})
+            'name': 'lake', 'db': 'duckdb', 'database': ':memory:', 'options': {'allowed_paths': ['s3://bucket/data/']}})
         self.ok('post', f'{B}/api/v1/connections', status=201, headers=self.lead, json={
             'name': 'warehouse', 'db': 'postgres', 'host': 'db.internal', 'database': 'sales', 'active': False})
 
@@ -67,7 +69,7 @@ class LocalFileTests(IsolationTestCase):
         folder = os.path.join(self.tmp.name, 'files')
         os.mkdir(folder)
         self.ok('post', f'{B}/api/v1/connections', status=201, json={
-            'name': 'files', 'db': 'duckdb', 'database': ':memory:', 'allowed_paths': [folder + '/']})
+            'name': 'files', 'db': 'duckdb', 'database': ':memory:', 'options': {'allowed_paths': [folder + '/']}})
         self.ok('patch', f'{B}/api/v1/connections/lite', json={'database': self.b_db})
 
 

@@ -43,9 +43,9 @@ curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H '
  "allow_writes": false, ..., "secret": "sk_VPMGNkB-u-eFXOLORjQ2QDfbANebkVrFlC9imS7XBXg"}
 ```
 
-**`"connections": []` is the important part.** Leaving `connections` out entirely means *every* connection (see
-[Set up your first scoped API key](13-set-up-a-scoped-api-key.md#the-footgun-to-avoid-first)) - the opposite of what
-you want. Copy the `secret` now; it is shown this once.
+**`"connections": []` is the important part:** no connection, so no ad-hoc SQL - only the query it's granted. It's
+required: a key names its connections (see
+[Set up your first scoped API key](13-set-up-a-scoped-api-key.md#say-which-connections-always)). Copy the `secret` now; it is shown this once.
 
 ## Step 3: Check what it can and can't do
 
