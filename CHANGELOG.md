@@ -64,6 +64,11 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 What 1.0.0-rc1 freezes, decided in the review of the frozen surfaces: each changes a default or a shape that would
 otherwise be kept until 2.0.
 
+- **Three extras' minimum versions are raised,** the last time before 1.0 one can be (ADR 0017), and each is now
+  tested at its minimum in CI, against a real server where it has one: `mysql-connector-python>=9.1.0` (was 8.0 -
+  9.0.0 and earlier have CVE-2024-21272), `clickhouse-driver>=0.2.4` (was 0.2 - the first with wheels for Python
+  3.11), `gunicorn>=23` (was 21 - 22 and 23 fixed request smuggling, CVE-2024-1135 and CVE-2024-6827; the image
+  already runs 26). `cryptography>=41` stays, for the FIPS image's distribution, and is tested at 41 now too.
 - **A new API key or role names its `connections`.** Left out, it meant every connection - the widest grant, given by
   silence, while every other grant left out gives nothing. It's `400 invalid_body` now, through the API and in a
   configuration file: a list, `[]` for none (saved queries and collections only), or `"*"` for every one. A key made

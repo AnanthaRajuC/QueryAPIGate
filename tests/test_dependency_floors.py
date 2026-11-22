@@ -15,7 +15,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLOORS = {'Flask': None, 'Werkzeug': None, 'PyYAML': None, 'openpyxl': None,
           'duckdb': 'duckdb', 'sqlglot': 'flow', 'mcp': 'mcp', 'PyJWT': 'jwt', 'redis': 'redis',
           'psycopg2-binary': 'postgres',  # the PostgreSQL store, and live events' notifications (ADR 0021)
-          'pymongo': 'mongo', 'opentelemetry-sdk': 'otel', 'opentelemetry-exporter-otlp-proto-http': 'otel'}
+          'pymongo': 'mongo', 'opentelemetry-sdk': 'otel', 'opentelemetry-exporter-otlp-proto-http': 'otel',
+          # rc1 (E): the stable connections' drivers, the server, and encryption at rest
+          'mysql-connector-python': 'mysql', 'clickhouse-driver': 'clickhouse', 'gunicorn': 'server',
+          'cryptography': 'encryption'}
 
 
 def _project():
