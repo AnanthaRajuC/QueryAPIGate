@@ -140,7 +140,7 @@ pub fn target(dialect: &str, details: &str, secret_keys: &[String]) -> Option<Ta
     })
 }
 
-/// store._decrypt_password(): Fernet, with whichever of QUERYAPIGATE_SECRET_KEY's keys opens it.
+/// store._decrypt_password(): Fernet, with whichever of QUERYAPIGATE_ENCRYPTION_KEY's keys opens it.
 fn decrypt(token: &str, keys: &[String]) -> Option<String> {
     keys.iter().find_map(|key| {
         let fernet = fernet::Fernet::new(key)?;

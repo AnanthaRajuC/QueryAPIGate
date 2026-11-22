@@ -577,12 +577,12 @@ graduated in 0.49, with the protections above.
 
 Connection passwords in the store can be a literal string, an
 `"${ENV_VAR}"` reference resolved from the process environment at load time (never written back to disk),
-or - with `QUERYAPIGATE_SECRET_KEY` set - Fernet-encrypted at rest. Encryption is **opt-in, not the
+or - with `QUERYAPIGATE_ENCRYPTION_KEY` set - Fernet-encrypted at rest. Encryption is **opt-in, not the
 default**; without a secret key, a connection password is only as protected as the file/volume it sits in.
 The key itself must be kept outside `QUERYAPIGATE_HOME` and out of version control - there is no recovery
 path for an encrypted password without it, by design, the same property that makes it real encryption
 rather than obfuscation. API responses always mask stored passwords regardless of how they're stored. The key can
-be rotated without taking a connection down (ADR 0009): `QUERYAPIGATE_SECRET_KEY` lists the new key first and the old
+be rotated without taking a connection down (ADR 0009): `QUERYAPIGATE_ENCRYPTION_KEY` lists the new key first and the old
 one after it, `queryapigate rekey` re-encrypts every stored password under the new one in a single transaction (all or
 nothing), and the old key is then removed. A key suspected leaked is replaced the same way; backups taken before the
 rekey still open with the old key, so they need retiring with it.
@@ -732,7 +732,7 @@ to be sent whatever it fetches. So:
 - **IAM tokens and Vault credentials are passwords**: `aws-rds-iam` is refused without TLS, and a PostgreSQL or
   MySQL connection's TLS settings now reach its driver (before 0.28 they were dropped).
 - **The Vault token, AppRole secret ID and the chart's projected token** are the server's to protect like
-  `QUERYAPIGATE_SECRET_KEY`. Vault's policy for that identity is the outer limit of what any reference can reach -
+  `QUERYAPIGATE_ENCRYPTION_KEY`. Vault's policy for that identity is the outer limit of what any reference can reach -
   keep it to the paths and roles connections need. The same goes for the IAM role.
 - **Leases are revoked when a process stops** (on SIGTERM too), so a stopped instance's database users don't linger;
   one that crashes leaves them to their TTL.
@@ -745,7 +745,7 @@ Looked at: each allow-list checked when saved and again when used, and Vault pat
 `reporting` prefix doesn't reach `reporting-admin`); a file opened at the path that was checked; the cache failing
 closed, and a failing provider asked at most every 10 seconds; the Vault token's sign-in and renewal, a forbidden
 answer signing in again only once; what an error tells whom. **Found, and fixed:** a `${file:...}` could read the server's own secrets wherever they were files inside an allowed
-folder - `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet` beside `QUERYAPIGATE_SECRET_FILE_DIRS=/run/secrets`, as
+folder - `QUERYAPIGATE_ENCRYPTION_KEY_FILE=/run/secrets/fernet` beside `QUERYAPIGATE_SECRET_FILE_DIRS=/run/secrets`, as
 the docs suggest - and so have the server's key sent to an administrator's host as a password; and, with a broad
 folder, `/proc/self/environ` or the service account's token. And `secret_unavailable` told any caller the reference
 and Vault's own answer. AWS (`${aws-sm:...}`, `aws-rds-iam`) stays experimental, tested only against a stand-in.
@@ -850,7 +850,7 @@ Everything lives in a single SQLite file, `queryapigate.db`, inside `QUERYAPIGAT
 (with passwords plaintext, `${VAR}`-referenced, or Fernet-encrypted per the setting above), saved queries
 and every version's full SQL text, execution history (including row counts), API key *hashes* (never
 secrets) and grants, roles, administrators and their admin tokens' *hashes*, and the audit log. Protecting this one file - filesystem permissions, backup
-encryption, who can reach the volume - is entirely the operator's responsibility; `QUERYAPIGATE_SECRET_KEY`
+encryption, who can reach the volume - is entirely the operator's responsibility; `QUERYAPIGATE_ENCRYPTION_KEY`
 only ever covers connection passwords, not the rest of what the database holds.
 
 ### MCP server

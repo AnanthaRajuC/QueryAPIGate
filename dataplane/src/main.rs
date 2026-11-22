@@ -210,7 +210,10 @@ async fn probe_digests(secret: &str, query: &str) -> Result<String, String> {
 async fn probe_query(input: &str) -> String {
     use serde_json::{Value, json};
     let input: Value = serde_json::from_str(input).expect("a JSON request");
-    let keys: Vec<String> = std::env::var("QUERYAPIGATE_SECRET_KEY")
+    let keys: Vec<String> = std::env::var("QUERYAPIGATE_ENCRYPTION_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| std::env::var("QUERYAPIGATE_SECRET_KEY").ok())
         .unwrap_or_default()
         .split(',')
         .map(|k| k.trim().to_string())

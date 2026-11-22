@@ -1,12 +1,12 @@
 """Rotating the key passwords are encrypted with at rest (ADR 0009, BACKLOG #90).
 
-QUERYAPIGATE_SECRET_KEY may list several keys, comma-separated: the first encrypts, every one decrypts
+QUERYAPIGATE_ENCRYPTION_KEY may list several keys, comma-separated: the first encrypts, every one decrypts
 (store._get_fernet()). `report()` says which listed key each stored value is under; `rekey()` re-encrypts every value
 under the first key, so the others can then be removed:
 
-1. QUERYAPIGATE_SECRET_KEY=new,old on every instance, restarted one by one;
+1. QUERYAPIGATE_ENCRYPTION_KEY=new,old on every instance, restarted one by one;
 2. `queryapigate rekey` (or POST /api/v1/settings/rekey);
-3. QUERYAPIGATE_SECRET_KEY=new.
+3. QUERYAPIGATE_ENCRYPTION_KEY=new.
 
 What's covered is every `enc:` value the store holds - ENCRYPTED, by table and field. A new encrypted field joins by
 being listed there. Hashed secrets (API keys, admin tokens) aren't encrypted, so rotation doesn't touch them.
@@ -55,7 +55,7 @@ def _values(conn):
 
 def _require_keys():
     if not config.secret_keys():
-        raise ApiError('QUERYAPIGATE_SECRET_KEY is not set - there is no key to encrypt with', 409,
+        raise ApiError('QUERYAPIGATE_ENCRYPTION_KEY is not set - there is no key to encrypt with', 409,
                        code='secret_key_required')
 
 
@@ -90,7 +90,7 @@ def describe(value):
 def _refuse_undecryptable(found):
     if found:
         names = ', '.join(describe(v) for v in found)
-        raise ApiError(f'No key in QUERYAPIGATE_SECRET_KEY decrypts the secret of {names} - nothing was changed. '
+        raise ApiError(f'No key in QUERYAPIGATE_ENCRYPTION_KEY decrypts the secret of {names} - nothing was changed. '
                        'Add the key it was encrypted with (after the first), or enter that password again, then run '
                        'rekey again', 409, code='password_undecryptable', values=found)
 
@@ -130,6 +130,6 @@ def rekey(actor, via=None):
 
 
 def check():
-    """report(), for `rekey --check` and POST /api/v1/settings/rekey with `check` - refusing without any key."""
+    """report(), for `rekey --dry-run` and POST /api/v1/settings/rekey with `check` - refusing without any key."""
     _require_keys()
     return report()

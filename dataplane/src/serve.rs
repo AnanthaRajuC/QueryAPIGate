@@ -186,7 +186,10 @@ impl Settings {
             admin_key: get("QUERYAPIGATE_API_KEY")
                 .map(|k| k.trim().to_string())
                 .filter(|k| !k.is_empty()),
-            secret_keys: get("QUERYAPIGATE_SECRET_KEY")
+            // config.secret_keys(): QUERYAPIGATE_ENCRYPTION_KEY, or its old name (rc1)
+            secret_keys: get("QUERYAPIGATE_ENCRYPTION_KEY")
+                .filter(|k| !k.trim().is_empty())
+                .or_else(|| get("QUERYAPIGATE_SECRET_KEY"))
                 .unwrap_or_default()
                 .split(',')
                 .map(|k| k.trim().to_string())
@@ -1676,6 +1679,24 @@ mod tests {
         let limited =
             Settings::from(|name| (name == "QUERYAPIGATE_RATE_LIMIT").then(|| "10/minute".into()));
         assert!(limited.forward_everything.is_some());
+    }
+
+    #[test]
+    fn the_encryption_key_by_its_name_or_its_old_one() {
+        let keys = |new: Option<&str>, old: Option<&str>| {
+            let (new, old) = (new.map(str::to_string), old.map(str::to_string));
+            Settings::from(move |name| match name {
+                "QUERYAPIGATE_ENCRYPTION_KEY" => new.clone(),
+                "QUERYAPIGATE_SECRET_KEY" => old.clone(),
+                _ => None,
+            })
+            .secret_keys
+        };
+        assert_eq!(keys(Some("a, b"), None), ["a", "b"]);
+        assert_eq!(keys(None, Some("c")), ["c"]);
+        assert_eq!(keys(Some(" "), Some("c")), ["c"]);
+        assert_eq!(keys(Some("a"), Some("a")), ["a"]);
+        assert!(keys(None, None).is_empty());
     }
 
     #[test]

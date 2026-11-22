@@ -182,7 +182,7 @@ export const ALERT_TABS: { id: string; label: string; kinds: Alert['kind'][]; ab
     label: 'Encryption key',
     kinds: ['encryption_key_rotation_incomplete'],
     about:
-      'A rotation of QUERYAPIGATE_SECRET_KEY that is not finished: passwords still encrypted with an old key (run ' +
+      'A rotation of QUERYAPIGATE_ENCRYPTION_KEY that is not finished: passwords still encrypted with an old key (run ' +
       'queryapigate rekey), or old keys still listed once nothing uses them.',
   },
   {

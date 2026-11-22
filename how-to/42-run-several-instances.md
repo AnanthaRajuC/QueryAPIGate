@@ -14,7 +14,7 @@ manifests on a local cluster (kind), each with a real PostgreSQL store, Redis an
 | **A PostgreSQL store** (`QUERYAPIGATE_DATABASE_URL`) | connections, saved queries and versions, keys, roles, history and the audit log, shared - SQLite volumes per instance would make separate servers |
 | **Redis** (`QUERYAPIGATE_REDIS_URL`) | rate limits and the response cache, shared - without it each instance counts and caches on its own, and an alert says so |
 | **`queryapigate events`** for live events | it reads every instance's runs from the store; route `/events` to it |
-| **The same secrets everywhere** | `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_SECRET_KEY`, any `${VAR}` a connection uses and `QUERYAPIGATE_SECRET_ENV_VARS` |
+| **The same secrets everywhere** | `QUERYAPIGATE_API_KEY`, `QUERYAPIGATE_ENCRYPTION_KEY`, any `${VAR}` a connection uses and `QUERYAPIGATE_SECRET_ENV_VARS` |
 | **One gunicorn worker per container** | the image's default - scale with containers, not workers, so each `/metrics` is one process |
 
 ## Option A: Docker Compose

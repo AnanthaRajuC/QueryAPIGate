@@ -372,7 +372,7 @@ Docker image; elsewhere it's downloaded on first use, or install it ahead with
 | Field | Meaning |
 |---|---|
 | `allowed_paths` | `s3://`, `gs://` (or `gcs://`) and `r2://` prefixes ending in `/`; `http(s)://` **files** - a web address must name one file, because a web server resolves `..` in a URL and a prefix couldn't stop that |
-| `user`, `password` | the access key id and secret - stored like any connection password: masked, encrypted with `QUERYAPIGATE_SECRET_KEY`, or a `${VAR}` reference. Leave both out for public files |
+| `user`, `password` | the access key id and secret - stored like any connection password: masked, encrypted with `QUERYAPIGATE_ENCRYPTION_KEY`, or a `${VAR}` reference. Leave both out for public files |
 | `storage` | `s3` (default, also any S3-compatible service), `gcs` (HMAC keys) or `r2` |
 | `region`, `endpoint`, `url_style`, `use_ssl` | as DuckDB's S3 settings: `endpoint` and `url_style: "path"` for an S3-compatible service such as MinIO; `account_id` for R2 |
 

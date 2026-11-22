@@ -726,6 +726,18 @@ class FoundInTheFreezeReviewTests(V1TestCase):
         res = self.client.get('/api/v1/audit', headers=ADMIN, query_string={'cursor': 'nope'})
         self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_filter'))
 
+    def test_a_bad_whole_number_has_the_code_of_what_it_is(self):
+        # rc1 (D6): page=abc was invalid_request, page=0 invalid_paging
+        self.create(publish=True)
+        for path, code in (('/q/films?page=abc', 'invalid_paging'), ('/q/films?page_size=1.5', 'invalid_paging'),
+                           ('/q/films?version=two', 'invalid_version'),
+                           ('/api/v1/history?limit=many', 'invalid_filter'),
+                           ('/api/v1/history?version=x', 'invalid_filter'),
+                           ('/api/v1/queries/films/history?limit=x', 'invalid_filter')):
+            with self.subTest(path=path):
+                res = self.client.get(path, headers=ADMIN)
+                self.assertEqual((res.status_code, res.get_json()['code']), (400, code))
+
     def test_a_null_a_patch_cant_clear_is_refused_not_ignored(self):
         # rc1 (B15): {"queries": null} answered 200 and did nothing, while {"rate_limit": null} cleared
         body = {'name': 'k', 'connections': ['lite'], 'queries': ['films'], 'rate_limit': '5/minute'}

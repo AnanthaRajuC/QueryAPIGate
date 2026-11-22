@@ -1,8 +1,8 @@
 """The Management API, version 1: /api/v1/... (ADR 0001, BACKLOG #72).
 
 A versioned, resource-oriented interface to QueryAPIGate's own configuration - built for the Console, and usable
-by anything else (scripts, Terraform, GitOps, other platforms). Built one resource at a time; the legacy routes
-each one replaces keep working, marked deprecated. Conventions, the same on every resource:
+by anything else (scripts, Terraform, GitOps, other platforms). The legacy routes it replaced were removed in 0.15.
+Conventions, the same on every resource:
 
 - Administrators only (it manages the server's configuration): each operation is allowed to the roles whose
   capabilities include it (adminroles.py, ADR 0003) - `403 admin_only` for any other caller, `403 role_forbidden`
@@ -288,9 +288,9 @@ def query_history(name):
     """This query's runs, newest first, paged with a cursor - GET /history scoped to one query."""
     name, _ = queries.load(name)
     args = request.args
-    limit = get_int(args.get('limit'), 'limit')
+    limit = get_int(args.get('limit'), 'limit', 'invalid_filter')
     entries, next_cursor = history.search(
-        query=name, version=get_int(args.get('version'), 'version'), status=args.get('status'),
+        query=name, version=get_int(args.get('version'), 'version', 'invalid_filter'), status=args.get('status'),
         key=args.get('key'), since=args.get('since'), until=args.get('until'),
         limit=50 if limit is None else limit, cursor=args.get('cursor'))
     return jsonify({'items': entries, 'next_cursor': next_cursor}), 200
@@ -705,7 +705,8 @@ def run_export(name):
 
 @bp.route('/exports/<name>/runs', methods=['GET'])
 def list_export_runs(name):
-    return jsonify({'items': export_service.runs(name, limit=get_int(request.args.get('limit'), 'limit') or 50)}), 200
+    limit = get_int(request.args.get('limit'), 'limit', 'invalid_filter') or 50
+    return jsonify({'items': export_service.runs(name, limit=limit)}), 200
 
 
 # --------------------------------------------------------------------------------------
@@ -903,9 +904,10 @@ def search_history():
     """Every run - of a saved query, or ad-hoc SQL - newest first, paged with a cursor. Filters: kind (saved or
     adhoc), query, version, status, key, since (inclusive) and until (exclusive) - a date or a time."""
     args = request.args
-    limit = get_int(args.get('limit'), 'limit')
+    limit = get_int(args.get('limit'), 'limit', 'invalid_filter')
     entries, next_cursor = history.search(
-        query=args.get('query'), version=get_int(args.get('version'), 'version'), status=args.get('status'),
+        query=args.get('query'), version=get_int(args.get('version'), 'version', 'invalid_filter'),
+        status=args.get('status'),
         key=args.get('key'), since=args.get('since'), until=args.get('until'),
         limit=100 if limit is None else limit, cursor=args.get('cursor'), kind=args.get('kind'))
     return jsonify({'items': entries, 'next_cursor': next_cursor}), 200
@@ -971,7 +973,7 @@ def quota_usage():
 
 @bp.route('/settings/rekey', methods=['POST'])
 def rekey():
-    """Re-encrypt every stored password under QUERYAPIGATE_SECRET_KEY's first key (ADR 0009) - or, with `check`,
+    """Re-encrypt every stored password under QUERYAPIGATE_ENCRYPTION_KEY's first key (ADR 0009) - or, with `check`,
     only report which key each is under."""
     from . import rekey as rekeying
     check = get_json_body(required=False).get('check', False)

@@ -123,7 +123,7 @@ def import_bundle(bundle, on_conflict='fail', collection_override=None, dry_run=
     if blocked:
         hint = ('use --on-conflict skip to leave existing queries alone, or new-version to add a version'
                 if on_conflict == 'fail' else 'move it out of that collection first, or use --on-conflict skip')
-        raise ApiError(f"Nothing imported. Already exists: {', '.join(blocked)} - {hint}", 409)
+        raise ApiError(f"Nothing imported. Already exists: {', '.join(blocked)} - {hint}", 409, code='query_exists')
     known = store.read_connections()
     missing = sorted({f['connection_name'] for _, f in created + new_versions if f.get('connection_name')
                       and f['connection_name'] not in known})

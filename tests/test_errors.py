@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def raised_codes():
     """Every code literal given to ApiError(code=...), mcp_server._error(..., code), jwtauth.McpRefusal(status, code,
-    ...) or an events-server body."""
+    ...), app.get_int(value, label, code) or an events-server body."""
     found = set()
     for path in glob.glob(os.path.join(ROOT, 'queryapigate', '**', '*.py'), recursive=True):
         with open(path) as f:
@@ -32,6 +32,8 @@ def raised_codes():
                     values.append(node.args[2])
             elif isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'McpRefusal' and len(node.args) > 1:
                 values = [node.args[1]]
+            elif isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'get_int' and len(node.args) > 2:
+                values = [node.args[2]]  # app.get_int(value, label, code)
             elif isinstance(node, ast.Dict):
                 values = [v for k, v in zip(node.keys, node.values, strict=False)
                           if isinstance(k, ast.Constant) and k.value == 'code']

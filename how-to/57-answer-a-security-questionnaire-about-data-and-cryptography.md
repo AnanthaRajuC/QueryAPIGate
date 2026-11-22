@@ -5,7 +5,7 @@ security questionnaire (SIG, CAIQ, or your customer's own) - each backed by what
 does, checked on it, not taken on trust.
 
 Every command and output below was run against a real server: gunicorn with the image's configuration, encryption at
-rest on (`QUERYAPIGATE_SECRET_KEY`), and people signing in with JWTs (`QUERYAPIGATE_JWT_SECRET`), calling a saved
+rest on (`QUERYAPIGATE_ENCRYPTION_KEY`), and people signing in with JWTs (`QUERYAPIGATE_JWT_SECRET`), calling a saved
 query that takes a customer's email address. The reference throughout is
 [Where data goes](../documentation/DATA_PROTECTION.md).
 
@@ -57,7 +57,7 @@ A connection's password, as the store's file holds it:
 warehouse password, as stored: enc:gAAAAABqzQLfRV4CV5r8TOcz0G3Q0nJWxsBk_3tW...
 ```
 
-Fernet - AES-128 and HMAC-SHA256 - under `QUERYAPIGATE_SECRET_KEY`, kept outside the store; API keys and admin tokens
+Fernet - AES-128 and HMAC-SHA256 - under `QUERYAPIGATE_ENCRYPTION_KEY`, kept outside the store; API keys and admin tokens
 are only ever stored as SHA-256 hashes. The answer: *credentials at rest are encrypted or hashed; the store itself
 (configuration and run history, no query results) should sit on an encrypted volume or database, which is the
 platform's* - QueryAPIGate doesn't encrypt the whole file. Or keep passwords out of the store entirely: references to
@@ -73,7 +73,7 @@ QUERYAPIGATE_HISTORY_RETENTION_DAYS: per-version limit
 QUERYAPIGATE_HISTORY_ADHOC_SQL: text
 QUERYAPIGATE_AUDIT_LOG_LIMIT: 500
 QUERYAPIGATE_ACCESS_LOG_QUERY: off
-QUERYAPIGATE_SECRET_KEY: enabled
+QUERYAPIGATE_ENCRYPTION_KEY: enabled
 ```
 
 And what a run's history keeps:

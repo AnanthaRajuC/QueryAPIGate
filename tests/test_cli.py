@@ -239,6 +239,23 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(self.run_cli(['admins', 'create'])[0], 2)  # usage
 
 
+class ReferenceTests(unittest.TestCase):
+    def test_the_cli_reference_is_the_parser(self):
+        # rc1 (D2): documentation/CLI.md is written from the parser - the CLI's snapshot, seen changing in review
+        from queryapigate import clidoc
+        with open(clidoc.TARGET, encoding='utf-8') as f:
+            committed = f.read()
+        self.assertEqual(committed, clidoc.render(),
+                         'documentation/CLI.md is out of date - run: python -m queryapigate.clidoc')
+
+    def test_it_doesnt_depend_on_the_settings_it_runs_with(self):
+        from queryapigate import clidoc
+        plain = clidoc.render()
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOST': '0.0.0.0', 'QUERYAPIGATE_DEBUG': '1'}):
+            self.assertEqual(clidoc.render(), plain)
+        self.assertIn('| `--host` `HOST` | the address to listen on (QUERYAPIGATE_HOST) (default `127.0.0.1`) |', plain)
+
+
 class DebugTests(unittest.TestCase):
     def test_the_debugger_serves_only_a_loopback_host(self):
         # rc1 (B10): Werkzeug's interactive debugger runs code typed into an error page

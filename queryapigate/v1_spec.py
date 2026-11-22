@@ -52,7 +52,7 @@ SCHEMAS = {
                                                       'is listed in API.md under Errors.'},
             'request_id': {'type': 'string', 'description': 'Matches the X-Request-Id header and the server log.'},
             'trace_id': {'type': 'string', 'description': "With tracing on: the request's trace, to find it in the "
-                                                          'tracing backend (experimental, ADR 0010).'},
+                                                          'tracing backend (ADR 0010).'},
             'errors': {'type': 'object', 'additionalProperties': {'type': 'string'},
                        'description': 'Per-parameter problems, when the parameter rules were invalid.'},
             'detail': {'type': 'string', 'description': "The database driver's own message, where there is one."},
@@ -280,10 +280,10 @@ SCHEMAS = {
     },
     'EncryptionKeys': {
         'type': 'object', 'required': ['keys', 'values', 'by_key', 'under_old_keys', 'undecryptable'],
-        'description': 'The passwords stored encrypted, by the key in QUERYAPIGATE_SECRET_KEY each is under '
+        'description': 'The passwords stored encrypted, by the key in QUERYAPIGATE_ENCRYPTION_KEY each is under '
                        '(ADR 0009).',
         'properties': {
-            'keys': {'type': 'integer', 'description': 'How many keys QUERYAPIGATE_SECRET_KEY lists.'},
+            'keys': {'type': 'integer', 'description': 'How many keys QUERYAPIGATE_ENCRYPTION_KEY lists.'},
             'values': {'type': 'integer',
                        'description': "Encrypted secrets stored - connections' and destinations' passwords, CDC "
                                       "sources' signing secrets."},
@@ -1381,8 +1381,8 @@ PATHS = {
                    {'200': _ok(_ref('QuotaCounterList'))}),
     },
     '/api/v1/settings/rekey': {
-        'post': _op('Re-encrypt every stored password under the first key in QUERYAPIGATE_SECRET_KEY, so the others '
-                    'can be removed - or, with `check`, only say how many are under each key',
+        'post': _op('Re-encrypt every stored password under the first key in QUERYAPIGATE_ENCRYPTION_KEY, so the '
+                    'others can be removed - or, with `check`, only say how many are under each key',
                     {'200': _ok(_ref('EncryptionKeys')),
                      '409': {'description': 'No key is set (`secret_key_required`), or a password no listed key '
                                             'decrypts (`password_undecryptable`, nothing changed)',

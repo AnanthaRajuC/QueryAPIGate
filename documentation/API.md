@@ -146,7 +146,7 @@ DuckDB in steady memory ([ADR 0004](adr/0004-exports-to-object-storage.md)). Two
 
 **A destination** is where exports may write: an `s3://`, `gs://` or `r2://` prefix, or a local folder (only inside
 `QUERYAPIGATE_EXPORT_DIRS`, and never the server's home), and the credentials to write there - stored like a connection password (masked, `${VAR}`, or encrypted with
-`QUERYAPIGATE_SECRET_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can be
+`QUERYAPIGATE_ENCRYPTION_KEY`). Every write goes through a DuckDB connection locked to that prefix, so nothing can be
 written anywhere else.
 
 ~~~json
@@ -190,7 +190,8 @@ step: [deliver a daily file to a partner's bucket](https://github.com/AnanthaRaj
 Scheduling stays with cron, a Kubernetes CronJob or Airflow. Each run is in run history (`transport: "export"`,
 with the destination, the object and the watermark), and the `export_failing` alert fires while an export's newest
 run failed. Owners and admins define destinations and exports (`destinations.write`, `exports.write`) - that decides
-who receives data; a developer may run one (`exports.run`); every administrator can read them.
+who receives data; a developer may run one (`exports.run`); every administrator can read them - destinations
+included, through `exports.read`: a destination exists for its exports, so there is no `destinations.read` of its own.
 
 ## Save a query
 
@@ -224,7 +225,9 @@ next version (see [Management API (v1)](#management-api-v1)):
 `GET /q/film_by_id?id=7&format=csv` - query-string arguments other than `format`, `page`, `page_size`,
 `connection_name` and `version` become parameters.
 
-`POST /q/film_by_id` - the JSON body may contain `params`, `connection_name`, `version` and `format`:
+`POST /q/film_by_id` - the JSON body may contain `params`, `connection_name`, `version`, `format` and `timeout`
+(anything else is refused, `unknown_field`). `placeholders`, the same as `params`, is deprecated since 1.0.0 and may
+be removed in 2.0.0 - send `params`:
 
 ~~~json
 {"params": {"id": 7}, "connection_name": "examples", "version": 1}
@@ -292,10 +295,10 @@ database that nothing reports - no Debezium, not through QueryAPIGate - is still
 
 ## Parameter rules
 
-`query_parameters` maps each parameter name to its type, or to an object of rules. A parameter is sent beside the
-arguments that control a call, so it can't be named `format`, `page`, `page_size`, `connection_name`, `version`,
-`timeout`, `stream`, `approval` or `idempotency_key`, nor start with `_` (kept for controls to come) - in
-`query_parameters` or as a `:name` in the SQL. Such a query is refused when it's saved (`400 invalid_body`); one saved
+`parameters` (`query_parameters` in the store and a version-1 bundle) maps each parameter name to its type, or to an
+object of rules. A parameter is sent beside the arguments that control a call, so it can't be named `format`, `page`,
+`page_size`, `connection_name`, `version`, `timeout`, `stream`, `approval` or `idempotency_key`, nor start with `_`
+(kept for controls to come) - in `parameters` or as a `:name` in the SQL. Such a query is refused when it's saved (`400 invalid_body`); one saved
 before 1.0 still runs. A saved query's own name is listed over MCP as a tool, which limits names too
 ([MCP](MCP.md#whats-exposed)).
 
@@ -364,6 +367,10 @@ tag.
 - **Optimistic concurrency.** Reading a query returns an `ETag`. Send it back as `If-Match` on a change and the
   change is refused with `412 precondition_failed` if the query changed in the meantime, through any route.
 - **Unknown fields are refused** (`unknown_field`), so a typo never silently does nothing.
+- **Names.** A list's filter names what it filters by (`GET /api/v1/queries?connection=`); a body field names the
+  object's own field (`connection_name`). "Role" is two things, always said apart: an API key's *role*, a template of
+  grants (`/api/v1/roles`), and an administrator's `role`, what they may do (owner, admin, developer, auditor). The
+  routes outside `/api/v1` keep their original snake_case (`/execute_sql`).
 - **Lists that grow are paged** - `/history`, `/audit`, `/write-requests`: `limit`, and the response's
   `next_cursor`, sent back as `cursor` for the next page (`null` on the last). Every other list is complete in one
   answer - what an administrator configures (queries, connections, deleted connections, keys, roles), or a window
@@ -514,7 +521,7 @@ Clearing the cache is housekeeping, not a change, so it is not audited.
 |---|---|
 | `GET /api/v1/usage/quotas` | Every caller's `calls` and `rows` for this day and this month - what [usage quotas](#usage-quotas) count. |
 | `GET /api/v1/settings` | The server's effective configuration, as sections (`id`, `title`, `description`, `rows`). Each row has the `env` variable, its displayed `value`, its `source` (`env` or `default`) and `env_value`, the raw value for a `.env` export. A secret's `value` only says whether it is configured, and its `env_value` is always null. Read-only: change settings in the environment and restart. |
-| `POST /api/v1/settings/rekey` | Re-encrypt every stored password (connections and destinations) under the first key in `QUERYAPIGATE_SECRET_KEY`, so the others can be removed - all in one transaction, or nothing when one can't be decrypted. `{"check": true}` only reports: `keys`, `values`, `by_key` (how many under each listed key, in order), `under_old_keys`, `undecryptable`; a rekey adds `rekeyed`. Owners only (`secrets.rotate`); audited as `rekey`, counts only. See [Rotating the key](#rotating-the-key). |
+| `POST /api/v1/settings/rekey` | Re-encrypt every stored password (connections and destinations) under the first key in `QUERYAPIGATE_ENCRYPTION_KEY`, so the others can be removed - all in one transaction, or nothing when one can't be decrypted. `{"check": true}` only reports: `keys`, `values`, `by_key` (how many under each listed key, in order), `under_old_keys`, `undecryptable`; a rekey adds `rekeyed`. Owners only (`secrets.rotate`); audited as `rekey`, counts only. See [Rotating the key](#rotating-the-key). |
 | `GET /api/v1/mcp/status` | `{reachable, port}`: whether something answers on the MCP server's port. A plain TCP connect, run only when you ask. |
 | `GET /api/v1/mcp/tools` | What `tools/list` returns for an unrestricted caller: each tool's `name`, `description`, `kind` (`ad-hoc` or `saved query`), `params` and `read_only`. Computed in this process, so it works whether or not `queryapigate mcp` is running. |
 
@@ -828,7 +835,7 @@ audit log). `POST /api/v1/connections/test` tries a connection without saving it
 for the connection fields.
 
 A `${VAR}` password reference is expanded from the environment at connection time and never written to disk as
-plaintext. A literal password is encrypted at rest when `QUERYAPIGATE_SECRET_KEY` is set (see
+plaintext. A literal password is encrypted at rest when `QUERYAPIGATE_ENCRYPTION_KEY` is set (see
 [Encryption at rest](#encryption-at-rest-for-connection-passwords) below); without that variable it is stored
 as given, in `queryapigate.db` on disk, not just masked in API responses. The server logs a startup
 warning naming any connection whose password is still a literal string with no protection at all, so a
@@ -837,31 +844,31 @@ enforcement.
 
 ### Encryption at rest for connection passwords
 
-Set `QUERYAPIGATE_SECRET_KEY` to a Fernet key (`python -c "from cryptography.fernet import Fernet;
+Set `QUERYAPIGATE_ENCRYPTION_KEY` to a Fernet key (`python -c "from cryptography.fernet import Fernet;
 print(Fernet.generate_key().decode())"`) and every literal connection password - existing ones immediately at
 startup, new ones the moment they're saved - is encrypted before it touches disk, decrypted only in memory at
 the instant a connection is actually opened. Needs the `cryptography` package
 (`pip install "queryapigate[encryption]"`, included in `[all]`); a clear error at startup names the missing package
-if `QUERYAPIGATE_SECRET_KEY` is set without it. A `${VAR}` reference is untouched either way - it was never a
+if `QUERYAPIGATE_ENCRYPTION_KEY` is set without it. A `${VAR}` reference is untouched either way - it was never a
 secret stored in the file to begin with.
 
 An encrypted password is masked the same as a literal one in `GET /api/v1/connections/{name}` and the audit log
 (`********`) - the stored ciphertext itself is never returned to a client. Losing or rotating
-`QUERYAPIGATE_SECRET_KEY` fails clearly rather than quietly: a connection whose password can't be decrypted
+`QUERYAPIGATE_ENCRYPTION_KEY` fails clearly rather than quietly: a connection whose password can't be decrypted
 returns a `500` naming the problem, and the server logs a startup warning if encrypted passwords exist on
 disk but no key is configured to read them - the same "fail closed, say why" precedent `expires_at` and
 `rate_limit` already follow for a key's own malformed data. There is no way to recover an encrypted password
-without the key that encrypted it; keep `QUERYAPIGATE_SECRET_KEY` itself somewhere safe, outside
+without the key that encrypted it; keep `QUERYAPIGATE_ENCRYPTION_KEY` itself somewhere safe, outside
 `QUERYAPIGATE_HOME` and outside version control, the same way you would any other credential.
 
 #### Rotating the key
 
-`QUERYAPIGATE_SECRET_KEY` takes several keys, comma-separated ([ADR 0009](adr/0009-key-rotation.md)): the first
+`QUERYAPIGATE_ENCRYPTION_KEY` takes several keys, comma-separated ([ADR 0009](adr/0009-key-rotation.md)): the first
 encrypts, every one decrypts. Restart with `<new-key>,<old-key>`, run `queryapigate rekey` (or
 `POST /api/v1/settings/rekey`) to re-encrypt every stored password - connections' and destinations' - under the new
-key, then restart with `<new-key>` alone. `queryapigate rekey --check` only reports how many are under each key. Until
+key, then restart with `<new-key>` alone. `queryapigate rekey --dry-run` (or `--check`, its name before 1.0) only reports how many are under each key. Until
 the old keys are gone, startup logs a warning and the `encryption_key_rotation_incomplete` alert says what's left. Each
-listed key is validated at startup, by its place in the list (*Key 2 of 2 in QUERYAPIGATE_SECRET_KEY must be a valid
+listed key is validated at startup, by its place in the list (*Key 2 of 2 in QUERYAPIGATE_ENCRYPTION_KEY must be a valid
 Fernet key*). Step by step, with several instances:
 [How to encrypt passwords at rest](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md#changing-the-key).
 
@@ -917,7 +924,7 @@ A reference outside is refused when it's saved (`invalid_body`), and again when 
 (`connection_misconfigured`). The server's own `QUERYAPIGATE_*` and `OTEL_*` settings are never reachable, by any
 reference, and nor are the credentials it may itself run with - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
 `VAULT_*` and `KUBERNETES_*` - which reach far more than one connection's secret. Nor, through `${file:...}`, is a
-file one of them names (`QUERYAPIGATE_SECRET_KEY_FILE`, `QUERYAPIGATE_VAULT_TOKEN_FILE`,
+file one of them names (`QUERYAPIGATE_ENCRYPTION_KEY_FILE`, `QUERYAPIGATE_VAULT_TOKEN_FILE`,
 `AWS_WEB_IDENTITY_TOKEN_FILE`...), the Kubernetes and EKS service account tokens, or anything under `/proc` - whatever
 `QUERYAPIGATE_SECRET_FILE_DIRS` allows. `${VAR}` reads only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists:
 names, or prefixes ending in `*` (`WAREHOUSE_PASSWORD,QAG_*`). Unset, it reads none - before 1.0 it read any other
@@ -968,7 +975,7 @@ Settings shows how each provider this instance has used last answered.
 
 **The server's own secrets, from files.** Each setting that is a secret - `QUERYAPIGATE_API_KEY`, `_SECRET_KEY`,
 `_DATABASE_URL`, `_REDIS_URL`, `_AUDIT_KEY`, `_MASK_KEY`, `_JWT_SECRET`, `_SSO_CLIENT_SECRET` - can be read from a
-file instead, with `_FILE` added: `QUERYAPIGATE_SECRET_KEY_FILE=/run/secrets/fernet`. Read at startup, as the variable
+file instead, with `_FILE` added: `QUERYAPIGATE_ENCRYPTION_KEY_FILE=/run/secrets/fernet`. Read at startup, as the variable
 would be; setting both is refused. Settings says which came from a file.
 
 #### Secrets and credentials from AWS
@@ -1044,8 +1051,8 @@ alone; deactivating the administrator stops them all.
 
 | Role | May |
 |---|---|
-| `owner` | everything, including administrators and re-encrypting stored passwords under a new key |
-| `admin` | everything but administrators and re-encrypting passwords: connections, API keys and roles, saved queries, cache, examples, settings |
+| `owner` | everything, including administrators, re-encrypting stored passwords under a new key, applying a configuration file and forgetting a person's history |
+| `admin` | everything but administrators, re-encrypting passwords, applying a configuration file and forgetting history: connections, API keys and roles, saved queries, cache, examples, settings |
 | `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes, and no moves that give a key or role new reach |
 | `auditor` | read only: queries, connections, API keys and roles, the audit log, history, alerts, instances, settings. No SQL at all |
 
@@ -1340,7 +1347,7 @@ give one caller less than the server allows - each **narrows** the server's own 
 | Field | What it limits | Effective |
 |---|---|---|
 | `max_concurrent` (1-1000) | queries this caller has running at once - from when one is sent until its last row is read, so a stream or a large export holds its slot as long as it runs; REST, ad-hoc SQL and MCP tools all count, a cached response and a live `/events` stream don't | over it: `429 too_many_concurrent`, `Retry-After: 1` - not queued |
-| `query_timeout` (seconds, 0.1-86400) | how long one query may run | the smallest of this, the saved query version's own `timeout`, `?timeout=` and `QUERYAPIGATE_QUERY_TIMEOUT` |
+| `query_timeout` (seconds, 0.1-86400) | how long one query may run | the smallest of this, the call's `timeout` and `QUERYAPIGATE_QUERY_TIMEOUT` |
 | `max_rows` (1-10,000,000) | rows one call returns | the smaller of this and the server's limit for that kind of call: a page is cut to it (pages of `max_rows`, `X-Has-More`), a stream stops there, an MCP result is `truncated` |
 
 - **With several instances**, `max_concurrent` is counted in Redis (`QUERYAPIGATE_REDIS_URL`), one count for all of
@@ -1441,7 +1448,7 @@ Access tab's "Query flow" diagram already uses; a query is rejected with `500` i
 has `allowed_tables` set, rather than silently letting the query through unchecked). Checked against every
 table a statement actually touches - joins, subqueries and CTEs are all resolved correctly (a CTE's own name
 is never mistaken for a real table), including the target table of a bare `DELETE`/`UPDATE`/`INSERT`. Only
-supported for `mysql`, `postgres`, `clickhouse`, `sqlite` and `duckdb`
+supported for `mysql`, `postgres`, `clickhouse`, `sqlite`, `duckdb` and `trino`
 connections, the dialects QueryAPIGate can actually parse for this - **a table-restricted key used against an
 `h2` or `jdbc` connection is refused on every query, with a `403` naming the unsupported connection type, never
 silently left unrestricted.** On a `mongo` connection the list is the collections the key may `find()` in - one
@@ -1523,9 +1530,10 @@ saved queries only. The step by step: [hide personal data from a partner or an A
 Creating several keys with the same shape of grants - the same connections, the same curated queries, the
 same rate limit - means repeating that shape by hand each time. A named role, managed through `/api/v1/roles`
 (admin only, stored separately from keys), is a reusable *template* for exactly that: `connections`,
-`allow_writes`, `queries`, `collections`, `rate_limit`, `allowed_ips`, `allowed_write_ops` and
-`allowed_tables`, the same fields a key itself carries (deliberately excluding `expires_at`, which is
-inherently per-key, not something a shared template should dictate).
+`queries`, `collections`, `allow_writes`, `allowed_write_ops`, `allowed_tables`, `rate_limit`, `allowed_ips`,
+`mask`, `max_concurrent`, `query_timeout`, `max_rows` and `quota` - the same grants a key itself carries - and, for
+signed-in users only, `require_claim_binding`. It deliberately excludes `expires_at`, which is inherently per-key,
+not something a shared template should dictate.
 
 ~~~json
 {"name": "reporting", "connections": ["reporting-db"], "allow_writes": false, "rate_limit": "200/hour"}
@@ -1607,9 +1615,9 @@ can't multiply its series.) A request carrying `X-API-Key` is judged on that key
 can only ever see the caller's data - there is nothing in the request to change:
 
 ~~~json
-{"filename": "my_orders",
- "sql_query": "SELECT * FROM orders WHERE customer_id = :customer_id ORDER BY created_at DESC",
- "query_parameters": {"customer_id": {"type": "str", "from_claim": "sub"}}}
+{"name": "my_orders", "description": "The caller's own orders", "connection_name": "shop",
+ "sql": "SELECT * FROM orders WHERE customer_id = :customer_id ORDER BY created_at DESC",
+ "parameters": {"customer_id": {"type": "str", "from_claim": "sub"}}}
 ~~~
 
 - A signed-in user who sends `customer_id` anyway gets `400`; a token without the claim gets `403`.
@@ -1756,11 +1764,11 @@ similarity. The embedding is computed on the server, so a caller - or an AI agen
 never sees or chooses the vector, exactly as a [`from_claim`](#signed-in-users-jwt) value is the server's to set.
 
 ```json
-{"filename": "find_articles", "connection_name": "docs_pg",
- "sql_query": "SELECT id, title FROM article ORDER BY embedding <=> CAST(:q AS vector) LIMIT :k",
- "query_parameters": {"q": {"type": "str", "embed": true, "description": "What to search for, in your own words",
-                            "example": "comfortable running shoes"},
-                      "k": {"type": "int", "default": 5, "max": 50}}}
+{"name": "find_articles", "description": "Articles about what you describe", "connection_name": "docs_pg",
+ "sql": "SELECT id, title FROM article ORDER BY embedding <=> CAST(:q AS vector) LIMIT :k",
+ "parameters": {"q": {"type": "str", "embed": true, "description": "What to search for, in your own words",
+                      "example": "comfortable running shoes"},
+                "k": {"type": "int", "default": 5, "max": 50}}}
 ```
 
 Turn it on with an OpenAI-compatible embeddings endpoint:
@@ -2029,7 +2037,7 @@ POST /api/v1/cdc-sources
 ```
 
 - **The secret is generated** - `whsec_` and 32 random bytes, never chosen by the caller - and shown **only in that
-  response**: give it to Debezium straight away. It is stored encrypted with `QUERYAPIGATE_SECRET_KEY` when that's
+  response**: give it to Debezium straight away. It is stored encrypted with `QUERYAPIGATE_ENCRYPTION_KEY` when that's
   set, as connection passwords are.
 - **`server_name`**, optional, is Debezium's `topic.prefix`: a change from another server is refused.
 - **`ingest_path`** is where Debezium posts: `/ingest/cdc/<name>`, or `/w/<workspace>/ingest/cdc/<name>` for a
@@ -2145,7 +2153,7 @@ already reported or dismissed. `target` names what to fix: a `key`, `query`, `co
 | `export_failing` | warning | An export's newest run failed - nothing new reaches its destination until one succeeds |
 | `rate_limits_not_shared` | warning | Redis failed a rate-limit check in the last ten minutes, so this process is counting limits on its own |
 | `key_unused` | info | An active key unused for `QUERYAPIGATE_ALERT_KEY_UNUSED_DAYS` (default 90) |
-| `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_SECRET_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
+| `encryption_key_rotation_incomplete` | warning, info | `QUERYAPIGATE_ENCRYPTION_KEY` lists several keys: passwords are still under an old one (warning - run `queryapigate rekey`), or none are and the old keys can be removed (info) |
 | `audit_delivery_behind` | warning, critical | An audit log output to a SIEM is more than five minutes behind (critical while delivery is also failing); the entries wait, past the rolling cap |
 | `secret_provider_failing` | critical | A secret provider - a file, Vault, AWS - has failed for five minutes in this instance; connections taking a secret from it work only while what it gave before is within its time |
 | `audit_chain_broken` | critical | The audit log's hash chain doesn't verify: an entry was changed, removed, inserted or reordered (checked every 5 minutes) |
@@ -2348,7 +2356,7 @@ Since 0.25 ([ADR 0012](adr/0012-tamper-evident-audit-log-and-siem.md)) each entr
 both and the entry. Change, remove, insert or reorder an entry, and every hash from there on stops matching.
 
 - **Keyed, or not.** With `QUERYAPIGATE_AUDIT_KEY` set (32 characters or more, kept outside the store like
-  `QUERYAPIGATE_SECRET_KEY`), each `hash` is `hmac-sha256:...`: someone who can write to the store but hasn't the key
+  `QUERYAPIGATE_ENCRYPTION_KEY`), each `hash` is `hmac-sha256:...`: someone who can write to the store but hasn't the key
   can't re-sign an edit. Without it, `sha256:...` - consistent, but anyone with the store can recompute every hash
   after an edit; Settings says which is in effect. Setting a key is recorded (`audit_key_set`), and from then on an
   unkeyed entry - or a chain re-written unkeyed from the start - is a break.
@@ -2546,7 +2554,8 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `invalid_body` | 400 | The request body isn't valid JSON, isn't an object, or has a field with a wrong value |
 | `unknown_field` | 400 | The body has a field this route doesn't take |
 | `invalid_name` | 400 | A query, key, role, collection or connection name with characters it can't have |
-| `invalid_paging` | 400 | `page`/`page_size` not positive, or `page_size` over `QUERYAPIGATE_MAX_PAGE_SIZE` |
+| `invalid_paging` | 400 | `page`/`page_size` not a positive whole number, or `page_size` over `QUERYAPIGATE_MAX_PAGE_SIZE` |
+| `invalid_version` | 400 | A run's `version` isn't a whole number |
 | `invalid_format` | 400 | An unsupported `format` |
 | `invalid_timeout` | 400 | `timeout` isn't a positive number of seconds |
 | `invalid_stream` | 400 | `stream=true` with a format it can't stream, or with `page`/`page_size` |
@@ -2650,7 +2659,7 @@ An error with no more specific code gets the one for its status: `invalid_reques
 | `query_failed` | 500 | The database rejected the query (`detail` has why, where shown) |
 | `driver_missing` | 500 | The database driver isn't installed on the server, or is too old (DuckDB before 1.2) |
 | `connection_misconfigured` | 400, 500 | The connection's settings are incomplete (no database file, a missing environment variable, JDBC fields) |
-| `secret_key_required`, `password_undecryptable` | 500, 409 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_SECRET_KEY` is unset, or lists no key it was encrypted with (500). From `POST /api/v1/settings/rekey`: no key is set, or a stored password no listed key decrypts - nothing changed, `values` names them (409) |
+| `secret_key_required`, `password_undecryptable` | 500, 409 | An encrypted connection password can't be decrypted: `QUERYAPIGATE_ENCRYPTION_KEY` is unset, or lists no key it was encrypted with (500). From `POST /api/v1/settings/rekey`: no key is set, or a stored password no listed key decrypts - nothing changed, `values` names them (409) |
 | `table_check_unavailable` | 500 | `allowed_tables` needs the `sqlglot` package, which isn't installed |
 | `masking_unavailable` | 500 | Column masking needs the `sqlglot` package (`queryapigate[flow]`), which isn't installed |
 | `internal_error` | 500 | Anything unexpected; the log has the traceback under `request_id` |

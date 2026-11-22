@@ -259,3 +259,56 @@ class ModuleLevelTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EncryptionKeyNameTests(unittest.TestCase):
+    """rc1 (C1): QUERYAPIGATE_ENCRYPTION_KEY is the key's name - QUERYAPIGATE_SECRET_KEY, read as a Flask session key,
+    is still read, and the two must agree."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ('QUERYAPIGATE_ENCRYPTION_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_ENCRYPTION_KEY_FILE'):
+            os.environ.pop(name, None)
+        self.new, self.old = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+
+    def test_either_name_encrypts(self):
+        for name in ('QUERYAPIGATE_ENCRYPTION_KEY', 'QUERYAPIGATE_SECRET_KEY'):
+            with self.subTest(name=name), mock.patch.dict(os.environ, {name: f'{self.new},{self.old}'}):
+                config.check_settings()
+                self.assertEqual(config.secret_keys(), [self.new, self.old])
+                token = store._encrypt_password('pw')
+                self.assertEqual(Fernet(self.new.encode()).decrypt(token[4:].encode()), b'pw')
+
+    def test_both_names_must_agree(self):
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ENCRYPTION_KEY': self.new,
+                                          'QUERYAPIGATE_SECRET_KEY': self.new}):
+            config.check_settings()
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ENCRYPTION_KEY': self.new,
+                                          'QUERYAPIGATE_SECRET_KEY': self.old}), \
+                self.assertRaises(ValueError) as caught:
+            config.check_settings()
+        self.assertIn('both set, to different keys', str(caught.exception))
+
+    def test_from_a_file(self):
+        path = os.path.join(self.tmp.name, 'key')
+        with open(path, 'w') as f:
+            f.write(self.new + '\n')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_ENCRYPTION_KEY_FILE': path}):
+            try:
+                config.check_settings()
+                self.assertEqual(config.secret_keys(), [self.new])
+            finally:
+                os.environ.pop('QUERYAPIGATE_ENCRYPTION_KEY', None)
+                config._from_files.pop('QUERYAPIGATE_ENCRYPTION_KEY', None)
+
+    def test_settings_name_the_one_in_use(self):
+        def shown():
+            rows = [row for section in config.describe_settings() for row in section['rows']]
+            return next(row['env'] for row in rows if row['label'] == 'Encryption at rest')
+        self.assertEqual(shown(), 'QUERYAPIGATE_ENCRYPTION_KEY')
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_KEY': self.old}):
+            self.assertEqual(shown(), 'QUERYAPIGATE_SECRET_KEY')

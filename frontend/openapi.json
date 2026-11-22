@@ -1831,7 +1831,7 @@
         "type": "object"
       },
       "EncryptionKeys": {
-        "description": "The passwords stored encrypted, by the key in QUERYAPIGATE_SECRET_KEY each is under (ADR 0009).",
+        "description": "The passwords stored encrypted, by the key in QUERYAPIGATE_ENCRYPTION_KEY each is under (ADR 0009).",
         "properties": {
           "by_key": {
             "description": "How many are under each listed key, in order: the first encrypts.",
@@ -1841,7 +1841,7 @@
             "type": "array"
           },
           "keys": {
-            "description": "How many keys QUERYAPIGATE_SECRET_KEY lists.",
+            "description": "How many keys QUERYAPIGATE_ENCRYPTION_KEY lists.",
             "type": "integer"
           },
           "rekeyed": {
@@ -3762,7 +3762,7 @@
             "type": "number"
           },
           "trace_id": {
-            "description": "With tracing on: the request's trace, to find it in the tracing backend (experimental, ADR 0010).",
+            "description": "With tracing on: the request's trace, to find it in the tracing backend (ADR 0010).",
             "type": "string"
           }
         },
@@ -11759,7 +11759,7 @@
             "description": "No key is set (`secret_key_required`), or a password no listed key decrypts (`password_undecryptable`, nothing changed)"
           }
         },
-        "summary": "Re-encrypt every stored password under the first key in QUERYAPIGATE_SECRET_KEY, so the others can be removed - or, with `check`, only say how many are under each key",
+        "summary": "Re-encrypt every stored password under the first key in QUERYAPIGATE_ENCRYPTION_KEY, so the others can be removed - or, with `check`, only say how many are under each key",
         "tags": [
           "Management API v1"
         ]
@@ -12871,6 +12871,7 @@
     },
     "/auth/session": {
       "get": {
+        "description": "**The Console's own sign-in** - outside the compatibility promise: it may change in any release.",
         "operationId": "auth_session",
         "responses": {
           "200": {
@@ -12921,11 +12922,13 @@
         "summary": "Whether SSO is on, and the Console session's administrator and CSRF token",
         "tags": [
           "Console sign-in"
-        ]
+        ],
+        "x-internal": true
       }
     },
     "/auth/sso/callback": {
       "get": {
+        "description": "**The Console's own sign-in** - outside the compatibility promise: it may change in any release.",
         "operationId": "auth_callback",
         "responses": {
           "302": {
@@ -12939,11 +12942,13 @@
         "summary": "Where the identity provider sends the person back: starts a Console session",
         "tags": [
           "Console sign-in"
-        ]
+        ],
+        "x-internal": true
       }
     },
     "/auth/sso/login": {
       "get": {
+        "description": "**The Console's own sign-in** - outside the compatibility promise: it may change in any release.",
         "operationId": "auth_login",
         "parameters": [
           {
@@ -12968,11 +12973,13 @@
         "summary": "Console sign-in through SSO: redirects to the identity provider (ADR 0007)",
         "tags": [
           "Console sign-in"
-        ]
+        ],
+        "x-internal": true
       }
     },
     "/auth/sso/logout": {
       "post": {
+        "description": "**The Console's own sign-in** - outside the compatibility promise: it may change in any release.",
         "operationId": "auth_logout",
         "responses": {
           "200": {
@@ -13005,7 +13012,8 @@
         "summary": "Ends the Console session (needs X-QAG-CSRF)",
         "tags": [
           "Console sign-in"
-        ]
+        ],
+        "x-internal": true
       }
     },
     "/catalog": {
@@ -13482,6 +13490,15 @@
               "minimum": 0,
               "type": "number"
             }
+          },
+          {
+            "description": "The whole result, written as rows arrive rather than one page - csv, tsv, ndjson or parquet (QUERYAPIGATE_STREAM_MAX_ROWS caps it).",
+            "in": "query",
+            "name": "stream",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -13529,6 +13546,43 @@
                     "type": "object"
                   },
                   "type": "array"
+                }
+              },
+              "application/vnd.apache.parquet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/tab-separated-values": {
+                "schema": {
+                  "type": "string"
                 }
               }
             },
@@ -13633,6 +13687,15 @@
               "minimum": 0,
               "type": "number"
             }
+          },
+          {
+            "description": "The whole result, written as rows arrive rather than one page - csv, tsv, ndjson or parquet (QUERYAPIGATE_STREAM_MAX_ROWS caps it).",
+            "in": "query",
+            "name": "stream",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -13682,6 +13745,43 @@
                     "type": "object"
                   },
                   "type": "array"
+                }
+              },
+              "application/vnd.apache.parquet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/tab-separated-values": {
+                "schema": {
+                  "type": "string"
                 }
               }
             },
@@ -13911,6 +14011,15 @@
             }
           },
           {
+            "description": "The whole result, written as rows arrive rather than one page - csv, tsv, ndjson or parquet (QUERYAPIGATE_STREAM_MAX_ROWS caps it).",
+            "in": "query",
+            "name": "stream",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "connection_name",
             "schema": {
@@ -13934,6 +14043,43 @@
                     "type": "object"
                   },
                   "type": "array"
+                }
+              },
+              "application/vnd.apache.parquet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/tab-separated-values": {
+                "schema": {
+                  "type": "string"
                 }
               }
             },
@@ -14046,6 +14192,15 @@
               "minimum": 0,
               "type": "number"
             }
+          },
+          {
+            "description": "The whole result, written as rows arrive rather than one page - csv, tsv, ndjson or parquet (QUERYAPIGATE_STREAM_MAX_ROWS caps it).",
+            "in": "query",
+            "name": "stream",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -14060,15 +14215,20 @@
                     "type": "string"
                   },
                   "params": {
-                    "description": "Alias of placeholders.",
-                    "type": "object"
-                  },
-                  "placeholders": {
                     "description": "Values for :name (bound) and {name} (text) parameters.",
                     "type": "object"
                   },
+                  "placeholders": {
+                    "deprecated": true,
+                    "description": "Deprecated since 1.0.0, may be removed in 2.0.0: the same as params.",
+                    "type": "object"
+                  },
+                  "timeout": {
+                    "description": "Seconds the query may run - as the timeout query argument.",
+                    "type": "number"
+                  },
                   "version": {
-                    "description": "Saved version to run (default: latest).",
+                    "description": "Saved version to run (default: the published one).",
                     "type": "integer"
                   }
                 },
@@ -14076,7 +14236,7 @@
               }
             }
           },
-          "required": true
+          "required": false
         },
         "responses": {
           "200": {
@@ -14087,6 +14247,43 @@
                     "type": "object"
                   },
                   "type": "array"
+                }
+              },
+              "application/vnd.apache.parquet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/tab-separated-values": {
+                "schema": {
+                  "type": "string"
                 }
               }
             },

@@ -50,7 +50,7 @@ def prepare(query, raw_params, connection=None):
     version, saved = store.select_version(store.load_versions(path), None)
     connection_name = connection or saved.get('connection_name')
     if not connection_name:
-        raise ApiError('Connection name is missing - set one on the saved query')
+        raise ApiError('Connection name is missing - set one on the saved query', code='connection_required')
     if saved.get('query_type') == 'mongo':
         filter_doc = saved.get('mongo_filter') or {}
         used = set(mongotools.placeholder_names(filter_doc))

@@ -71,7 +71,7 @@ open. More on proxies: [Put QueryAPIGate behind a reverse proxy](23-put-it-behin
 
 ```bash
 QUERYAPIGATE_API_KEY=<openssl rand -hex 32>
-QUERYAPIGATE_SECRET_KEY=<a Fernet key - see guide 22>
+QUERYAPIGATE_ENCRYPTION_KEY=<a Fernet key - see guide 22>
 WAREHOUSE_PASSWORD=<your database's password>
 ```
 
@@ -83,7 +83,7 @@ chmod 600 .env
 isn't optional in a container: with no key (or administrator, JWT or MCP OAuth) the server runs in open-access mode,
 which answers only local clients - and from inside a container the caller's address is the Docker or pod network,
 not loopback, so every real request is refused `403 open_access_remote` until you set one.
-`QUERYAPIGATE_SECRET_KEY` encrypts connection passwords in the store
+`QUERYAPIGATE_ENCRYPTION_KEY` encrypts connection passwords in the store
 ([guide 22](22-encrypt-passwords-at-rest.md)); keep a copy in your secret manager.
 
 ## Step 2: Start it
@@ -106,7 +106,7 @@ The image already runs as a non-root user, under gunicorn with one worker and ei
 
 Open `https://api.example.com/console`, enter the admin key, and add a connection under **Connections** - with the
 password as `${WAREHOUSE_PASSWORD}` (with `WAREHOUSE_PASSWORD` and `QUERYAPIGATE_SECRET_ENV_VARS=WAREHOUSE_PASSWORD` in the
-container's environment), or typed in (it's encrypted, since `QUERYAPIGATE_SECRET_KEY` is set). Then
+container's environment), or typed in (it's encrypted, since `QUERYAPIGATE_ENCRYPTION_KEY` is set). Then
 create scoped keys for whatever will call the API ([guide 13](13-set-up-a-scoped-api-key.md)) - the admin key
 shouldn't leave your team.
 

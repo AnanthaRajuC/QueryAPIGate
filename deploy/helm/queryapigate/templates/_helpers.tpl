@@ -103,7 +103,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 {{- end -}}
 {{- /* config is plain env in the Deployment, read by anyone who can get deployments: no secrets there. */ -}}
-{{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_DATAPLANE_SECRET" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
+{{- range $name := list "QUERYAPIGATE_API_KEY" "QUERYAPIGATE_ENCRYPTION_KEY" "QUERYAPIGATE_SECRET_KEY" "QUERYAPIGATE_DATABASE_URL" "QUERYAPIGATE_DATAPLANE_SECRET" "QUERYAPIGATE_REDIS_URL" "QUERYAPIGATE_AUDIT_KEY" "QUERYAPIGATE_MASK_KEY" "QUERYAPIGATE_JWT_SECRET" "QUERYAPIGATE_SSO_CLIENT_SECRET" "OTEL_EXPORTER_OTLP_HEADERS" "OTEL_EXPORTER_OTLP_TRACES_HEADERS" "OTEL_EXPORTER_OTLP_LOGS_HEADERS" -}}
 {{- if hasKey $.Values.config $name -}}
 {{- fail (printf "%s is a secret: put it in your existingSecret or secret.values, not config - config is plain text in the Deployment." $name) -}}
 {{- end -}}

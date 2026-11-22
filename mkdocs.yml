@@ -20,6 +20,7 @@ nav:
   - Features: documentation/FEATURES.md
   - Installation: documentation/INSTALLATION_AND_SETUP.md
   - Configuration: documentation/CONFIGURATION.md
+  - Command line: documentation/CLI.md
   - Deployment (Docker): documentation/DEPLOYMENT.md
   - Performance: documentation/PERFORMANCE.md
   - A Rust data plane (v5, 0.44): documentation/PERFORMANCE_V5.md

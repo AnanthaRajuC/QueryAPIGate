@@ -52,7 +52,7 @@ Two more things to know:
   the time to the name yourself if you run it more often (`--out "/exports/{name}_$(date +%H%M).csv"` - in a crontab,
   write each `%` as `\%`).
 - **The scheduler's environment must have what the server's has**: `QUERYAPIGATE_HOME` (or
-  `QUERYAPIGATE_DATABASE_URL`), `QUERYAPIGATE_SECRET_KEY` if passwords are [encrypted](22-encrypt-passwords-at-rest.md),
+  `QUERYAPIGATE_DATABASE_URL`), `QUERYAPIGATE_ENCRYPTION_KEY` if passwords are [encrypted](22-encrypt-passwords-at-rest.md),
   any `${VAR}` a connection's password refers to and `QUERYAPIGATE_SECRET_ENV_VARS`, and the database drivers. cron in particular starts with an almost
   empty environment.
 
@@ -129,7 +129,7 @@ spec:
               command: ["queryapigate", "export", "example_rentals_since", "--out", "/exports/{name}_{date}.csv"]
               envFrom:
                 - secretRef:
-                    name: queryapigate-env      # QUERYAPIGATE_DATABASE_URL, QUERYAPIGATE_SECRET_KEY, ...
+                    name: queryapigate-env      # QUERYAPIGATE_DATABASE_URL, QUERYAPIGATE_ENCRYPTION_KEY, ...
               volumeMounts:
                 - name: exports
                   mountPath: /exports

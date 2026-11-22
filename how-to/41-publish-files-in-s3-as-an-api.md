@@ -32,7 +32,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 - `user` and `password` are the access key ID and secret. The secret is handled like any connection password -
   here a `${LAKE_SECRET_KEY}` reference to the server's environment, which `QUERYAPIGATE_SECRET_ENV_VARS` must list; a typed one is
   masked and, with
-  `QUERYAPIGATE_SECRET_KEY`, encrypted ([guide 22](22-encrypt-passwords-at-rest.md)). Leave both out for a public bucket.
+  `QUERYAPIGATE_ENCRYPTION_KEY`, encrypted ([guide 22](22-encrypt-passwords-at-rest.md)). Leave both out for a public bucket.
 - `allowed_paths`, `region`, `views` and the rest below are driver options, inside `options`.
 - For an S3-compatible service (MinIO, SeaweedFS, Ceph), add `"endpoint": "minio.internal:9000"` and
   `"url_style": "path"` (and `"use_ssl": false` without TLS). For Google Cloud Storage use `"storage": "gcs"` with HMAC

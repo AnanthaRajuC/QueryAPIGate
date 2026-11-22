@@ -81,7 +81,7 @@ The practice restore above found two of these the hard way - a query on a SQLite
 |---|---|
 | The databases QueryAPIGate connects to - including SQLite and DuckDB files in `QUERYAPIGATE_HOME` | back them up in their own right |
 | Environment variables connections refer to (`${WAREHOUSE_PASSWORD}`) | keep them with your other secrets |
-| `QUERYAPIGATE_SECRET_KEY` | without it, [encrypted passwords](22-encrypt-passwords-at-rest.md) can't be read - keep it in your secret manager, **not** next to the backup |
+| `QUERYAPIGATE_ENCRYPTION_KEY` | without it, [encrypted passwords](22-encrypt-passwords-at-rest.md) can't be read - keep it in your secret manager, **not** next to the backup |
 | `QUERYAPIGATE_API_KEY` (the admin key) | it's configuration, not data |
 | Scoped API key secrets | only hashes are stored: keys keep working after a restore, but a lost secret can't be recovered from a backup |
 | The Redis response cache | nothing to do - it refills |

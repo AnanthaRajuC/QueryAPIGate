@@ -35,7 +35,7 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 
 | Table | Holds | Personal data | Kept for | Read by |
 |---|---|---|---|---|
-| `connections` | Each connection's settings; its password encrypted (`QUERYAPIGATE_SECRET_KEY`) or a reference | - | Until deleted | `connections.read` (passwords masked) |
+| `connections` | Each connection's settings; its password encrypted (`QUERYAPIGATE_ENCRYPTION_KEY`) or a reference | - | Until deleted | `connections.read` (passwords masked) |
 | `saved_queries`, `saved_query_versions` | Saved queries and every version: SQL, parameters, descriptions, the author's name | Author | Until deleted | `queries.read` |
 | `descriptions` | Descriptions of tables and columns, and who wrote each | Administrator's name | Until changed | `connections.read`; agents |
 | `execution_history` | Each run: when, which query and version, the caller, the transport, rows, time, status, QueryAPIGate's error message; an ad-hoc run's parameter *names* and its SQL as `QUERYAPIGATE_HISTORY_ADHOC_SQL` says (`text`, `hash`, `none`) | Caller | The newest `QUERYAPIGATE_HISTORY_LIMIT` runs per version and `QUERYAPIGATE_HISTORY_ADHOC_LIMIT` ad-hoc runs - or `QUERYAPIGATE_HISTORY_RETENTION_DAYS` days; `QUERYAPIGATE_HISTORY_SAMPLE_RATE` keeps only a share | `observe` |
@@ -49,7 +49,7 @@ role's capabilities allow ([Administrators and admin roles](API.md#administrator
 | `sso_logins` | A sign-in under way: its state and PKCE verifier | - | 10 minutes | - |
 | `write_requests` | An agent's write: its arguments, who asked, who approved or rejected it, the result | Caller, approver; the arguments may be personal | 30 days | `writes.approve` |
 | `destinations`, `exports` | Where exports go, with credentials encrypted or as references; each export's watermark - the last value of its incremental column it delivered | The watermark may be a value | Until deleted | `exports.read` (secrets masked) |
-| `cdc_sources` | Each Debezium Server that reports changes for live queries ([ADR 0033](adr/0033-live-queries.md)): its name, connection and `server_name`, its signing secret - encrypted with `QUERYAPIGATE_SECRET_KEY` when set - and the one before a rotation, and when a post last arrived | - | Until deleted; the old secret until its grace period ends or the next rotation | `connections.read` (never a secret) |
+| `cdc_sources` | Each Debezium Server that reports changes for live queries ([ADR 0033](adr/0033-live-queries.md)): its name, connection and `server_name`, its signing secret - encrypted with `QUERYAPIGATE_ENCRYPTION_KEY` when set - and the one before a rotation, and when a post last arrived | - | Until deleted; the old secret until its grace period ends or the next rotation | `connections.read` (never a secret) |
 | `instances` | Each running process: host name, process id, version | - | 1 day after it stops | `observe` |
 | `config_managed`, `config_applied` | What a configuration file manages, and each file applied, by its hash (ADR 0014) | - | Until deleted | `observe` |
 | `server_secrets` | Keys the server makes for itself - masking's `hash` key, unless `QUERYAPIGATE_MASK_KEY` is set | - | For the store's life | - |
@@ -142,7 +142,7 @@ isn't - MD5, SHA-1, BLAKE2, or `random` for anything that must be unpredictable.
 
 | Protects | Algorithm | Through |
 |---|---|---|
-| Connection and destination passwords at rest (`QUERYAPIGATE_SECRET_KEY`) | Fernet: AES-128-CBC and HMAC-SHA256 | `cryptography` |
+| Connection and destination passwords at rest (`QUERYAPIGATE_ENCRYPTION_KEY`) | Fernet: AES-128-CBC and HMAC-SHA256 | `cryptography` |
 | API keys, admin tokens, Console sessions, sign-in state - stored as hashes | SHA-256 | `hashlib` |
 | The audit log's chain (`QUERYAPIGATE_AUDIT_KEY`) | HMAC-SHA256 (SHA-256 without a key) | `hmac`, `hashlib` |
 | Column masking's `hash` | HMAC-SHA256 | `hmac` |

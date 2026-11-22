@@ -15,11 +15,20 @@ _PAGE_PARAMS = [
     {'name': 'timeout', 'in': 'query', 'schema': {'type': 'number', 'minimum': 0, 'exclusiveMinimum': True},
      'description': 'Seconds the query may run before it is cancelled (504). Can lower, never raise, the server '
                     'limit QUERYAPIGATE_QUERY_TIMEOUT (default 30; 0 disables the server limit).'},
+    {'name': 'stream', 'in': 'query', 'schema': {'type': 'boolean', 'default': False},
+     'description': 'The whole result, written as rows arrive rather than one page - csv, tsv, ndjson or parquet '
+                    '(QUERYAPIGATE_STREAM_MAX_ROWS caps it).'},
 ]
 _ROWS = {'description': 'The requested page. Header X-Has-More says whether another page follows.',
          'headers': {'X-Page': {'schema': {'type': 'integer'}}, 'X-Page-Size': {'schema': {'type': 'integer'}},
                      'X-Has-More': {'schema': {'type': 'string', 'enum': ['true', 'false']}}},
-         'content': {'application/json': {'schema': {'type': 'array', 'items': {'type': 'object'}}}}}
+         'content': {'application/json': {'schema': {'type': 'array', 'items': {'type': 'object'}}},
+                     **{mimetype: {'schema': {'type': 'string'}} for mimetype in (
+                         'application/x-ndjson', 'text/csv', 'text/tab-separated-values', 'application/xml',
+                         'application/x-yaml')},
+                     **{mimetype: {'schema': {'type': 'string', 'format': 'binary'}} for mimetype in (
+                         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         'application/vnd.apache.parquet')}}}
 _ERRORS = {c: {'$ref': '#/components/responses/Error'} for c in ('400', '401', '403', '404', '429', '500', '504')}
 _QUERY_ENTRY_SCHEMA = {'oneOf': [
     {'type': 'string', 'description': 'A saved-query name - read access only.'},
@@ -42,9 +51,11 @@ def _body(properties, required):
 _EXEC_PROPS = {
     'connection_name': {'type': 'string'},
     'format': {'type': 'string'},
-    'placeholders': {'type': 'object', 'description': 'Values for :name (bound) and {name} (text) parameters.'},
-    'params': {'type': 'object', 'description': 'Alias of placeholders.'},
-    'version': {'type': 'integer', 'description': 'Saved version to run (default: latest).'},
+    'params': {'type': 'object', 'description': 'Values for :name (bound) and {name} (text) parameters.'},
+    'placeholders': {'type': 'object', 'deprecated': True,
+                     'description': 'Deprecated since 1.0.0, may be removed in 2.0.0: the same as params.'},
+    'version': {'type': 'integer', 'description': 'Saved version to run (default: the published one).'},
+    'timeout': {'type': 'number', 'description': 'Seconds the query may run - as the timeout query argument.'},
 }
 
 
@@ -105,7 +116,8 @@ def _saved_query_paths(queries, taken=frozenset()):
                       'schema': {'type': 'string', **({'default': query['connection_name']}
                                                       if has_default_connection else {})}}
         common = [connection, {'name': 'version', 'in': 'query', 'schema': {'type': 'integer'},
-                               'description': f"Saved version to run (default: latest, currently {query['version']})."},
+                               'description': f"Saved version to run (default: the published one, "
+                                              f"{query['version']})."},
                   _FORMAT_PARAM, *_PAGE_PARAMS]
         summary = query.get('description') or f'Run the saved query {name}'
         tags = query.get('tags')
@@ -191,7 +203,7 @@ def build_spec(version, saved_queries=None, jwt=None):
                         'responses': {'200': _ROWS, **_ERRORS}},
                 'post': {'summary': 'Run a saved query with a JSON body of parameters', 'tags': ['Saved queries'],
                          'parameters': [_FORMAT_PARAM, *_PAGE_PARAMS],
-                         'requestBody': _body(_EXEC_PROPS, []),
+                         'requestBody': {**_body(_EXEC_PROPS, []), 'required': False},  # no body: no params
                          'responses': {'200': _ROWS, **_ERRORS}}},
             '/events': {'get': {
                 'summary': 'Live events (Server-Sent Events)', 'tags': ['Saved queries'],
@@ -368,6 +380,10 @@ def build_spec(version, saved_queries=None, jwt=None):
         operation['description'] = ('**Experimental** - may change in any minor release, noted in the changelog. '
                                     + operation.get('description', '')).strip()
         spec['paths'][path] = {**spec['paths'][path], method: operation}
+    for path in [p for p in spec['paths'] if p.startswith('/auth/')]:  # rc1 (C6): the Console's, not the API's
+        spec['paths'][path] = {method: {**operation, 'x-internal': True, 'description': (
+            "**The Console's own sign-in** - outside the compatibility promise: it may change in any release. "
+            + operation.get('description', '')).strip()} for method, operation in spec['paths'][path].items()}
     ids = operation_ids()
     for path, item in list(spec['paths'].items()):  # copies, as above: v1_spec.PATHS' items are shared
         route = re.sub(r'\{[^}]+\}', '{}', path)

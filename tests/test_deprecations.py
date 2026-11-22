@@ -62,9 +62,31 @@ class MechanismTests(unittest.TestCase):
 
 
 class AnnouncedTests(unittest.TestCase):
-    def test_nothing_is_deprecated_today(self):
-        # When something is, list it here and check the changelog's Deprecated section and API.md name it.
-        self.assertEqual((deprecations.ROUTES, deprecations.OTHER), ({}, {}))
+    def test_what_is_deprecated_is_announced(self):
+        # Each entry named in the changelog's Unreleased (or its release's) Deprecated section, and in API.md.
+        self.assertEqual((deprecations.ROUTES, set(deprecations.OTHER)), ({}, {'placeholders'}))
+        changelog, api = read('CHANGELOG.md'), read('documentation/API.md')
+        sections = re.findall(r'^### Deprecated\n(.*?)(?=^##)', changelog, re.M | re.S)
+        for key in deprecations.OTHER:
+            self.assertTrue(any(f'`{key}`' in section for section in sections), key)
+            self.assertIn(f'`{key}`', api)
+
+    def test_placeholders_still_work_and_say_so(self):
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}), \
+                mock.patch.object(deprecations, '_warned', set()):
+            client = create_app().test_client()
+            save_query(client, body={'filename': 'p', 'description': 'd', 'connection_name': 'lite',
+                                     'sql_query': 'SELECT :n AS n'})
+            data = os.path.join(home, 'data.db')
+            sqlite3.connect(data).close()
+            write_connections({'lite': {'db': 'sqlite', 'database': data, 'active': True}})
+            with self.assertLogs('queryapigate', level=logging.WARNING) as logs:
+                res = client.post('/q/p', json={'placeholders': {'n': 1}})
+            self.assertEqual(res.get_json(), [{'n': 1}])
+            self.assertTrue(any('is deprecated since 1.0.0' in line for line in logs.output), logs.output)
+            spec = client.get('/openapi.json').get_json()
+            self.assertTrue(spec['paths']['/q/{name}']['post']['requestBody']['content']['application/json']
+                            ['schema']['properties']['placeholders']['deprecated'])
 
     def test_the_spec_marks_exactly_the_deprecated_routes(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': home}):

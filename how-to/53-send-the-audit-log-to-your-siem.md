@@ -19,7 +19,7 @@ QUERYAPIGATE_AUDIT_KEY=<that key>
 QUERYAPIGATE_AUDIT_LOG_EXPORT_FILE=/var/log/queryapigate/audit.jsonl   # a copy on disk too
 ```
 
-Keep the key outside the store, as you keep `QUERYAPIGATE_SECRET_KEY`. Every audit entry is then signed with it
+Keep the key outside the store, as you keep `QUERYAPIGATE_ENCRYPTION_KEY`. Every audit entry is then signed with it
 (`hmac-sha256:...`), chained to the one before - someone who can write to the store but hasn't the key can't re-sign an
 edit. Setting it is the chain's first entry here: `audit_key_set`.
 

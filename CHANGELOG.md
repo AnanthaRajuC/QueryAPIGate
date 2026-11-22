@@ -10,15 +10,19 @@ REST API endpoints and response shapes (and their `operationId`s in `/openapi.js
 format (a newer version can always read a database an older version wrote), the API-key/role grant fields,
 the saved-query definition format, the MCP tool contract, and error `code`s (an existing one is never renamed or
 repurposed; new ones may be added). **Not covered** - can change in any release,
-including a patch: the admin UI's internal markup/JS structure, exact error-message or log-line wording,
+including a patch: the admin UI's internal markup/JS structure, the Console's own sign-in routes (`/auth/*`, in
+`/openapi.json` but for the Console alone), exact error-message or log-line wording,
 and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
 `__version__` are public Python API).
 
-**CLI exit codes** are covered, on one convention: `0` it did what was asked, `1` it ran and failed (the query, the
+**The CLI** is covered as [documentation/CLI.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/CLI.md)
+lists it - commands, arguments, choices - with what it writes for a program (`--json`, the files `config export` and
+`collection export` write, an `export`'s data) and its exit codes; what it writes for a person (a summary, a table, a
+message) is not. **CLI exit codes** follow one convention: `0` it did what was asked, `1` it ran and failed (the query, the
 export, the copy), `2` usage or setup - a mistyped flag, a setting the server can't read, a store it can't open, a
 workspace that doesn't exist. A few commands give a code its own meaning, documented with them: `config diff` exits
 `2` for "there are changes" (so every `config` failure is `1`), `audit verify` `1` for a broken chain and `2` when it
-can't be checked, `rekey --check` `1` while a password can't be decrypted.
+can't be checked, `rekey --dry-run` `1` while a password can't be decrypted.
 
 **Python versions** are supported until their upstream end of life (see python.org's release status). Dropping one
 is a minor release, called out under **Breaking** - never a patch.
@@ -124,14 +128,47 @@ otherwise be kept until 2.0.
 - **Every fixed operation in `/openapi.json` has an `operationId`** - its endpoint's name (`create_connection`,
   `execute_sql`) - covered by the compatibility promise, so a generated client's method names are fixed from 1.0.
 
+- **`QUERYAPIGATE_ENCRYPTION_KEY`** (and `_FILE`) names the key passwords are encrypted with at rest.
+  `QUERYAPIGATE_SECRET_KEY`, its name before - read as a Flask session key, and beside settings that are all about
+  secret references - is still read; both set to different keys stops startup. Settings, errors and the docs name the
+  new one, or the old one where only it is set.
+- **`queryapigate rekey --dry-run`**, as every other command that can change nothing says it; `--check` still works.
+- **[documentation/CLI.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/CLI.md), the
+  command-line reference,** written from the CLI's parser (`python -m queryapigate.clidoc`) - every command, argument,
+  choice and default - with what the compatibility promise covers of it and the exit codes. A test fails while the
+  two differ, so the CLI's surface is seen changing in review.
+- **Every setting is in [documentation/CONFIGURATION.md](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/CONFIGURATION.md)** -
+  it listed about 64 of 113 - and a test holds the code, the list and the page together. A `QUERYAPIGATE_*`
+  name that is no setting - a typo, `QUERYAPIGATE_QUERY_TIMEOUTS` - is a warning at startup, rather than ignored
+  while the setting meant runs with its default.
+- **`invalid_version`**, the error code for a run's `version` that isn't a whole number.
 ### Changed
 
+- **A bad whole number has the code of what it is:** `page=abc` is `invalid_paging`, as `page=0` was (it was
+  `invalid_request`), a history or runs `limit` `invalid_filter`. A few more errors that had only their status's
+  code have their own: `connection_required`, `invalid_body`, `invalid_name`, `query_exists`.
+- **Marked experimental where they weren't:** `QUERYAPIGATE_JWT_WORKSPACE_CLAIM` and `QUERYAPIGATE_MCP_WORKSPACE_CLAIM`
+  with workspaces, `QUERYAPIGATE_H2_JAR` with H2 connections, and the CLI's `--workspace`.
+- **`/auth/*`, the Console's own sign-in, is outside the compatibility promise** - in `/openapi.json`, marked
+  `x-internal`, but for the Console alone.
+- **The documentation says what was accepted as named:** the `connection` filter beside the `connection_name` field,
+  the two meanings of "role", reading destinations through `exports.read`, `QAG_API_KEY`, each duration's unit and
+  each `rate`'s (`ALERT_ERROR_RATE` a percent, `HISTORY_SAMPLE_RATE` a fraction). And corrected where it was wrong: no
+  per-version `timeout`, the role fields (13, not 8), the `admin` role's limits, `allowed_tables` on Trino, the
+  stored query fields, `queryapigate runs` no longer experimental, and the OpenAPI document - `stream`, the formats a
+  run answers in, `POST /q/{name}`'s optional body, `version`'s default (the published one, not the latest).
 - **The data plane's `url` crate is 2.5.9,** for RUSTSEC-2026-0592 (a stack overflow in `Url::origin()` on nested
   `blob:` URLs, which the data plane doesn't parse - `cargo audit` fails the build on any advisory).
 - **Over MCP, `describe_table` doesn't count toward a usage quota,** as `list_tables` didn't - schema discovery, no
   data delivered - and neither is refused once a quota is used up.
 - **CI:** the upgrade fixtures from 0.52.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.52.0.
+
+### Deprecated
+
+- **`placeholders` in the body of `POST /q/{name}`** - the same values as `params`, under a second name. It still
+  works, with a warning in the log once per process, and is marked deprecated in `/openapi.json`; it may be removed in
+  2.0.0. Send `params`.
 
 ### Fixed
 
