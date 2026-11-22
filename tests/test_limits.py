@@ -72,7 +72,8 @@ class GrantTests(LimitsTestCase):
             self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_body'), (field, value))
 
     def test_a_role_carries_them_to_the_keys_made_from_it(self):
-        res = self.client.post('/api/v1/roles', headers=ADMIN, json={'name': 'partners', 'queries': ['ids'],
+        res = self.client.post('/api/v1/roles',
+                               headers=ADMIN, json={'connections': '*', 'name': 'partners', 'queries': ['ids'],
                                                                       'max_concurrent': 3, 'max_rows': 5})
         self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
         secret = secret_of(create_key(self.client, ADMIN, name='from-role', role='partners'))
@@ -97,8 +98,8 @@ class RowsAndTimeTests(LimitsTestCase):
 
     def test_ad_hoc_sql_too(self):
         secret = self.key(max_rows=4)
-        res = self.client.post('/execute_sql', headers={'X-API-Key': secret},
-                               json={'connection_name': 'lite', 'sql': 'SELECT id FROM t', 'page_size': 30})
+        res = self.client.post('/execute_sql?page_size=30', headers={'X-API-Key': secret},
+                               json={'connection_name': 'lite', 'sql': 'SELECT id FROM t'})
         self.assertEqual(len(res.get_json()), 4)
 
     def test_query_timeout_is_the_smallest_of_the_key_the_request_and_the_server(self):

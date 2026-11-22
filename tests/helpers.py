@@ -58,11 +58,23 @@ def save_query(client, body, headers=None):
     return res
 
 
+_TOP_FIELDS = ('db', 'active', 'host', 'port', 'user', 'password', 'database', 'credentials')
+
+
+def connection_body(details):
+    """A connection's fields as the API takes them: driver options under `options` (required since rc1, B8)."""
+    options = {**details.get('options', {}),
+               **{k: v for k, v in details.items() if k not in (*_TOP_FIELDS, 'name', 'options')}}
+    return {**{k: v for k, v in details.items() if k in (*_TOP_FIELDS, 'name')}, **({'options': options} if options
+                                                                                       else {})}
+
+
 def put_connections(client, connections, headers=None):
-    """Create or change connections the way PATCH /connections did: {name: {db, host, ...}}. Returns the last
-    response."""
+    """Create or change connections the way PATCH /connections did: {name: {db, host, ...}}, driver options flat or
+    under `options`. Returns the last response."""
     res = None
     for name, details in connections.items():
+        details = connection_body(details)
         if client.get(f'/api/v1/connections/{name}', headers=headers).status_code == 200:
             res = client.patch(f'/api/v1/connections/{name}', json=details, headers=headers)
         else:
@@ -72,6 +84,8 @@ def put_connections(client, connections, headers=None):
 
 def create_key(client, headers=None, **fields):
     """A new API key from its grants (POST /api/v1/api-keys); returns the response - its `secret` is the key."""
+    if 'role' not in fields:
+        fields = {'connections': '*', **fields}  # required since rc1 (B1); '*' is what leaving it out used to mean
     return client.post('/api/v1/api-keys', json=fields, headers=headers)
 
 

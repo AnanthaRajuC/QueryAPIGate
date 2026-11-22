@@ -6,13 +6,19 @@ All notable changes to this project are documented here. The format follows
 ## Versioning and compatibility
 
 **Covered by the version number** - won't change without it being called out here as a breaking change:
-REST API endpoints and response shapes, CLI commands and flags, environment variables, the on-disk storage
+REST API endpoints and response shapes (and their `operationId`s in `/openapi.json`), CLI commands and flags, environment variables, the on-disk storage
 format (a newer version can always read a database an older version wrote), the API-key/role grant fields,
 the saved-query definition format, the MCP tool contract, and error `code`s (an existing one is never renamed or
 repurposed; new ones may be added). **Not covered** - can change in any release,
 including a patch: the admin UI's internal markup/JS structure, exact error-message or log-line wording,
 and anything in `queryapigate/` not re-exported from `queryapigate/__init__.py` (only `create_app` and
 `__version__` are public Python API).
+
+**CLI exit codes** are covered, on one convention: `0` it did what was asked, `1` it ran and failed (the query, the
+export, the copy), `2` usage or setup - a mistyped flag, a setting the server can't read, a store it can't open, a
+workspace that doesn't exist. A few commands give a code its own meaning, documented with them: `config diff` exits
+`2` for "there are changes" (so every `config` failure is `1`), `audit verify` `1` for a broken chain and `2` when it
+can't be checked, `rekey --check` `1` while a password can't be decrypted.
 
 **Python versions** are supported until their upstream end of life (see python.org's release status). Dropping one
 is a minor release, called out under **Breaking** - never a patch.
@@ -49,8 +55,79 @@ sooner, saying why. The list of what is deprecated now is `queryapigate/deprecat
 
 ## [Unreleased]
 
+### Breaking
+
+What 1.0.0-rc1 freezes, decided in the review of the frozen surfaces: each changes a default or a shape that would
+otherwise be kept until 2.0.
+
+- **A new API key or role names its `connections`.** Left out, it meant every connection - the widest grant, given by
+  silence, while every other grant left out gives nothing. It's `400 invalid_body` now, through the API and in a
+  configuration file: a list, `[]` for none (saved queries and collections only), or `"*"` for every one. A key made
+  from a role, and a claim-bound role (`[]`), need none. Keys and roles stored already keep what they hold - check
+  `GET /api/v1/api-keys` for any with `"*"` you didn't mean.
+- **`${VAR}` reads only what `QUERYAPIGATE_SECRET_ENV_VARS` lists - unset, none.** Unset, it read any variable but the
+  server's own settings and credentials, unlike every other allow-list. **Before upgrading, set it** to the variables
+  your connections and destinations reference: a server that has them in use with the list unset logs an error at
+  start naming the setting that keeps them working, and those connections fail until it's set. `queryapigate init`'s
+  example connections no longer reference `${POSTGRES_PASSWORD}` and `${MYSQL_PASSWORD}`.
+- **A setting the server can't read stops it,** as most already did: `QUERYAPIGATE_QUERY_TIMEOUT`,
+  `SLOW_QUERY_THRESHOLD`, `POOL_SIZE`, `POOL_IDLE_TIMEOUT`, `METADATA_CACHE_TTL`, `TRUST_PROXY` (a count, not
+  `true`), `MAX_PAGE_SIZE`, and the yes/no settings `ALLOW_WRITES`, `AUDIT_OTLP`, `DEBUG`, `JSON_LOGS`,
+  `LIVE_QUERIES`, `LOG_REQUESTS`. Each fell back to its default, or meant the opposite: `QUERY_TIMEOUT=5m` ran with
+  30 seconds, `TRUST_PROXY=true` trusted no proxy, `LOG_REQUESTS=disabled` logged every request.
+- **A saved query's parameters can't be named `format`, `page`, `page_size`, `connection_name`, `version`,
+  `timeout`, `stream`, `approval` or `idempotency_key`, or start with `_`** (kept for controls to come): over REST
+  such a parameter could never be sent, over MCP it was taken as the control. **Nor can a new query be named for a
+  built-in MCP tool** (`list_tables`, `execute_sql`, `describe_table`) or one kept for later, or share its tool name
+  with another query (below). Saved ones still run; a new version of one needs the parameter renamed.
+- **An empty result is the format's own empty document** - `[]`, a CSV of its header row, an empty NDJSON body,
+  `<data />` - not `{"message": "No results returned"}` in every format, which contradicted the documented array. A
+  write answers `[]` too. The data plane answers the same.
+- **Result values keep what they are.** In JSON a `TIMESTAMPTZ` is ISO 8601 with its fraction and offset
+  (`2026-11-22T12:03:10.123456+05:30`), not the session zone's wall time to the second; a timestamp without a zone
+  keeps its fraction; a `DECIMAL` is a number with the database's exact digits, not a float's nearest; binary
+  (`BLOB`, `BYTEA`, `VARBINARY`) is base64, not its bytes read as UTF-8; `NaN` is a string, not an invalid bare
+  `NaN`. CSV and XML keep the offset and write binary as base64 too. Masked hashes don't change. Measured on the
+  Python path: a 1000-row page of decimals serialises 15% slower (0.66 ms), others unchanged; the data plane writes
+  the database's digits directly.
+- **Management API timestamps are RFC 3339 with the server's offset** (`2026-11-22T12:03:10+05:30`), not its local
+  wall-clock time with none. Dates stay dates (a key's `expires_at`). `since` and `until` take RFC 3339 too. The
+  store keeps what it did.
+- **A body field an endpoint doesn't take is refused** (`unknown_field`). `POST /api/v1/connections` took any as a
+  driver option - `{"bogus": 1}` answered 201, a typo was saved - so driver options go under `options` now (configuration
+  as code writes them there too); a connection's own fields are `db`, `active`, `host`, `port`, `user`, `password`,
+  `database` and `credentials`. And `/execute_sql`, `/execute_mongo` and `POST /q/{name}` dropped `page`,
+  `page_size` and `stream` from a body without a word: they're the query string's.
+- **`/metrics` without `QUERYAPIGATE_METRICS_TOKEN` answers only a client on the server's own machine** once the
+  server needs a credential - before, anyone who could reach it, and its labels name keys, queries and connections.
+  A Prometheus elsewhere sends the token (the Helm chart's does already).
+- **`serve --debug` (`QUERYAPIGATE_DEBUG`) starts only on a loopback `--host`:** Werkzeug's debugger runs code typed
+  into an error page.
+- **A key or signed-in user gets `404 query_not_found` for a saved query it can't run,** word for word as for one
+  that doesn't exist - a `403` naming the query's connection told it which names exist. Administrators still get the
+  `403`.
+- **A `null` that can't clear a field is a `400`:** on a key's or role's `connections`, `queries`, `collections`,
+  `allow_writes` or `active`, or an administrator's `active`. `{"queries": null}` answered 200 and did nothing.
+- **Over MCP, a saved query is listed under a tool name LLM APIs accept** - `^[a-zA-Z0-9_-]{1,64}$`, every other
+  character as `_`: `monthly revenue` is `monthly_revenue`. A call may still name the query itself.
+- **CLI exit codes follow one convention** - 0 ok, 1 it ran and failed, 2 usage or setup - so `admins`, `exports`,
+  `history forget` and `runs` exit 2 for a bad setting (some exited 1) and `admins` 1 for a failure (it exited 2).
+  Written down under Versioning and compatibility, above.
+- **A collection bundle is `format_version` 2:** each query in the Management API's fields (`sql`, `parameters`,
+  `columns`), not the store's (`sql_query`, `query_parameters`, `column_descriptions`). An import reads 1 and 2.
+
+### Added
+
+- **`GET /api/v1/audit` and `GET /api/v1/write-requests` page:** `limit`, and `next_cursor` to send back as `cursor`.
+  Without `limit`, a page is what the whole answer was (1000 entries, 200 requests), so nothing changes until a log
+  outgrows it.
+- **Every fixed operation in `/openapi.json` has an `operationId`** - its endpoint's name (`create_connection`,
+  `execute_sql`) - covered by the compatibility promise, so a generated client's method names are fixed from 1.0.
+
 ### Changed
 
+- **Over MCP, `describe_table` doesn't count toward a usage quota,** as `list_tables` didn't - schema discovery, no
+  data delivered - and neither is refused once a quota is used up.
 - **CI:** the upgrade fixtures from 0.52.0 are added (SQLite, PostgreSQL and the ClickHouse run store), and the
   rolling-upgrade and Helm checks now start from 0.52.0.
 

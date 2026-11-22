@@ -12,6 +12,6 @@
 		health_interval 10s
 	}
 
-	# /metrics is public on each instance; keep it off the internet - scrape the instances directly instead.
+	# /metrics stays off the internet: scrape each instance directly, with QUERYAPIGATE_METRICS_TOKEN.
 	respond /metrics 403
 }

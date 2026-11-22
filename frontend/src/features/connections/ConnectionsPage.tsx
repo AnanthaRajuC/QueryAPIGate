@@ -449,7 +449,8 @@ function ConnectionFormFields({
   const autoViews = autoViewsChoice ?? isFiles;
   const isDuck = db === 'duckdb';
 
-  /** DuckDB's file-access fields; an emptied one as `empty` (undefined to leave out, null to remove on edit). */
+  /** DuckDB's file-access fields, driver options under `options`; an emptied one as `empty` (undefined to leave out,
+   * null to remove on edit). */
   const duckFields = (empty: null | undefined) => {
     if (!isDuck) return {};
     const list = paths
@@ -465,14 +466,16 @@ function ConnectionFormFields({
       }
     }
     return {
-      allowed_paths: list.length ? list : empty,
-      storage: storage === 's3' ? empty : storage,
-      region: region.trim() || empty,
-      endpoint: endpoint.trim() || empty,
-      url_style: urlStyle || empty,
-      use_ssl: useSsl ? empty : false,
-      auto_views: autoViews ? true : empty,
-      views: parsedViews,
+      options: {
+        allowed_paths: list.length ? list : empty,
+        storage: storage === 's3' ? empty : storage,
+        region: region.trim() || empty,
+        endpoint: endpoint.trim() || empty,
+        url_style: urlStyle || empty,
+        use_ssl: useSsl ? empty : false,
+        auto_views: autoViews ? true : empty,
+        views: parsedViews,
+      },
     };
   };
 

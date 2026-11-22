@@ -23,8 +23,10 @@ what it always did:
 }
 ~~~
 
-Driver settings beyond these (`sslmode`, `jdbc_url`, `jar`, ...) may be sent alongside them or inside an `options`
-object; `GET /api/v1/connections/{name}` returns them under `options`.
+Those, and `credentials`, are a connection's own fields. Every driver setting beyond them (`sslmode`, `jdbc_url`,
+`jar`, `allowed_paths`, ...) goes inside an `options` object, as `GET /api/v1/connections/{name}` returns them - and a
+configuration file writes them. Any other field is refused (`400 unknown_field`): before 1.0 one sent alongside became a
+driver option, so a typo was saved instead of reported.
 
 ## Supported types
 
@@ -146,7 +148,7 @@ distinct connection setting, default 8, `0` disables pooling) and `QUERYAPIGATE_
 | `host` | network databases | Server host |
 | `port` | no | Overrides the driver's default port |
 | `user`, `password` | usually | Credentials |
-| `jar`, `driver_class`, `jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
+| `options.jar`, `options.driver_class`, `options.jdbc_url` | `db: "jdbc"` only | See [Generic JDBC connections](#generic-jdbc-connections) |
 | `options.schema` | no | Trino: the default schema. PostgreSQL: the schema an unqualified `allowed_tables` name means, `public` by default (a table-restricted key's calls run with `search_path` set to it) |
 
 ## Experimental: h2, jdbc and trino
@@ -198,19 +200,21 @@ export works.
 ## Generic JDBC connections
 
 `db: "jdbc"` reaches any database with a JDBC driver - Oracle, SQL Server, DB2, Snowflake and others not covered by
-a dedicated driver above - by generalising the same embedded-JVM approach `h2` already uses. It needs three fields
-instead of `host`/`port`/`database`, since JDBC URL formats vary too much between vendors to build one generically:
+a dedicated driver above - by generalising the same embedded-JVM approach `h2` already uses. It needs three driver
+options instead of `host`/`port`/`database`, since JDBC URL formats vary too much between vendors to build one
+generically:
 
 ~~~json
 {
-    "oracle-reporting": {
-        "db": "jdbc",
+    "name": "oracle-reporting",
+    "db": "jdbc",
+    "user": "readonly",
+    "password": "${ORACLE_PASSWORD}",
+    "active": true,
+    "options": {
         "jar": "/opt/jdbc/ojdbc11.jar",
         "driver_class": "oracle.jdbc.OracleDriver",
-        "jdbc_url": "jdbc:oracle:thin:@//db.internal:1521/ORCLPDB1",
-        "user": "readonly",
-        "password": "${ORACLE_PASSWORD}",
-        "active": true
+        "jdbc_url": "jdbc:oracle:thin:@//db.internal:1521/ORCLPDB1"
     }
 }
 ~~~
@@ -259,7 +263,7 @@ own table functions - no import step, column types inferred:
 
 ~~~json
 {"name": "files", "db": "duckdb", "database": ":memory:", "active": true,
- "allowed_paths": ["/data/sales/", "/data/reference/countries.csv"]}
+ "options": {"allowed_paths": ["/data/sales/", "/data/reference/countries.csv"]}}
 ~~~
 
 ~~~sql
@@ -282,7 +286,7 @@ reads no files at all** - only its own database.
 **Views** give files a name - for the schema browser, for saved queries, and for `allowed_tables`:
 
 ~~~json
-{"views": {"sales": "SELECT * FROM read_parquet('/data/sales/*.parquet')"}}
+{"options": {"views": {"sales": "SELECT * FROM read_parquet('/data/sales/*.parquet')"}}}
 ~~~
 
 Each is created as a temporary view on every new connection. A key restricted with `allowed_tables: ["sales"]` can
@@ -360,9 +364,9 @@ Docker image; elsewhere it's downloaded on first use, or install it ahead with
 
 ~~~json
 {"name": "lake", "db": "duckdb", "database": ":memory:", "active": true,
- "allowed_paths": ["s3://sales/2026/", "https://data.example.com/prices.parquet"],
- "user": "AKIA...", "password": "${LAKE_SECRET_KEY}", "region": "eu-west-1",
- "views": {"orders": "SELECT * FROM read_parquet('s3://sales/2026/*.parquet')"}}
+ "user": "AKIA...", "password": "${LAKE_SECRET_KEY}",
+ "options": {"allowed_paths": ["s3://sales/2026/", "https://data.example.com/prices.parquet"], "region": "eu-west-1",
+             "views": {"orders": "SELECT * FROM read_parquet('s3://sales/2026/*.parquet')"}}}
 ~~~
 
 | Field | Meaning |
@@ -394,9 +398,9 @@ publish saved queries or views and grant those instead.
 Any string value may contain `${VAR}` references, replaced with the environment variable's value when the connection is
 used (a missing variable is reported as an error naming it). Set `QUERYAPIGATE_SECRET_ENV_VARS` to the variables your
 connections use - names, or prefixes ending in `*`: `REPORTING_PASSWORD,ORACLE_*` - and no other can be referenced.
-Without it, any can but the server's own settings and the credentials it may run with
-([below](API.md#secrets-from-files-and-secrets-managers)), and the server warns at startup while references are in
-use. `GET /api/v1/connections/{name}` masks plain-text passwords as
+Without it, none can (before 1.0, any could but the server's own settings and the credentials it may run with,
+[below](API.md#secrets-from-files-and-secrets-managers)), and the server logs an error at startup while references are in
+use without it. `GET /api/v1/connections/{name}` masks plain-text passwords as
 `********` and shows `${VAR}` references as written. A secret kept in a file - the CSI driver's, Docker's, Vault
 Agent's - is `${file:/run/secrets/name}`, read inside the folders `QUERYAPIGATE_SECRET_FILE_DIRS` allows
 ([Secrets from files and secrets managers](API.md#secrets-from-files-and-secrets-managers)).

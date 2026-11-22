@@ -113,8 +113,9 @@ curl https://api.example.com/health
   have.)
 - **Streaming works:** a 20,000-row `?stream=true` CSV export arrived complete through nginx, and a live event
   arrived over `/events` as soon as a query ran.
-- **`/metrics` is private:** `403` from outside the allowed range. It's public by design on QueryAPIGate itself
-  (no key), so the proxy is the place to restrict it.
+- **`/metrics` is private:** `403` from outside the allowed range. A proxy on the server's own machine connects
+  from a loopback address, which QueryAPIGate answers without `QUERYAPIGATE_METRICS_TOKEN` - so restrict it here, or
+  set the token.
 
 ## Headers: what's left to the proxy
 

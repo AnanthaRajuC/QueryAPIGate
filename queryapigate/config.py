@@ -43,9 +43,9 @@ EXAMPLE_CONNECTIONS = {
         'example-sqlite': {'db': 'sqlite', 'database': 'example.db', 'active': False},
         'example-duckdb': {'db': 'duckdb', 'database': 'example.duckdb', 'active': False},
         'example-postgres': {'db': 'postgres', 'host': 'localhost', 'port': 5432, 'database': 'postgres',
-                             'user': 'postgres', 'password': '${POSTGRES_PASSWORD}', 'active': False},
+                             'user': 'postgres', 'password': '', 'active': False},
         'example-mysql': {'db': 'mysql', 'host': 'localhost', 'port': 3306, 'database': 'mydb',
-                          'user': 'root', 'password': '${MYSQL_PASSWORD}', 'active': False},
+                          'user': 'root', 'password': '', 'active': False},
         'example-clickhouse': {'db': 'clickhouse', 'host': 'localhost', 'port': 9000, 'database': 'default',
                                'user': 'default', 'password': '', 'active': False},
         'example-h2': {'db': 'h2', 'host': 'localhost', 'database': 'test', 'user': 'SA', 'password': '',
@@ -387,6 +387,32 @@ def port_setting(name, default):
     return int(raw)
 
 
+# Flags and numbers that once fell back silently on a value they couldn't read (rc1, B3): QUERY_TIMEOUT=5m ran with 30
+# seconds, TRUST_PROXY=true trusted no proxy, LOG_REQUESTS=disabled logged every request. The functions that read them
+# still fall back - gunicorn and the data plane read some before the app says what's wrong - but the server won't start.
+CHECKED_FLAGS = ('QUERYAPIGATE_ALLOW_WRITES', 'QUERYAPIGATE_AUDIT_OTLP', 'QUERYAPIGATE_DEBUG', 'QUERYAPIGATE_JSON_LOGS',
+                 'QUERYAPIGATE_LIVE_QUERIES', 'QUERYAPIGATE_LOG_REQUESTS')
+
+
+def _whole(raw, low):
+    return raw.isdigit() and int(raw) >= low
+
+
+CHECKED_NUMBERS = {
+    'QUERYAPIGATE_QUERY_TIMEOUT': (lambda raw: _number_in(raw, lambda v: v >= 0),
+                                   'a number of seconds (0 turns the limit off)'),
+    'QUERYAPIGATE_SLOW_QUERY_THRESHOLD': (lambda raw: _number_in(raw, lambda v: v >= 0),
+                                          'a number of seconds (0 turns the warning off)'),
+    'QUERYAPIGATE_POOL_SIZE': (lambda raw: _whole(raw, 0), 'a whole number of connections (0 turns pooling off)'),
+    'QUERYAPIGATE_POOL_IDLE_TIMEOUT': (lambda raw: _number_in(raw, lambda v: v > 0), 'a number of seconds above 0'),
+    'QUERYAPIGATE_METADATA_CACHE_TTL': (lambda raw: _number_in(raw, lambda v: v >= 0),
+                                        'a number of seconds (0 reads the store on every request)'),
+    'QUERYAPIGATE_TRUST_PROXY': (lambda raw: _whole(raw, 0),
+                                 'a count of the proxies in front of the server (0 for none)'),
+    'QUERYAPIGATE_MAX_PAGE_SIZE': (lambda raw: _whole(raw, 1), 'a whole number of rows, at least 1'),
+}
+
+
 def check_settings():
     """Raise ValueError for a malformed setting, so a typo fails at startup instead of silently switching off a
     protection."""
@@ -419,10 +445,15 @@ def check_settings():
     raw = os.environ.get('QUERYAPIGATE_LOAD_EXAMPLES', '').strip().lower()
     if raw not in _FLAG_WORDS:
         raise ValueError(f"QUERYAPIGATE_LOAD_EXAMPLES must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
-    for name in ('QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED', 'QUERYAPIGATE_ACCESS_LOG_QUERY'):
+    for name in ('QUERYAPIGATE_CONFIG_PRUNE', 'QUERYAPIGATE_CONFIG_LOCKED', 'QUERYAPIGATE_ACCESS_LOG_QUERY',
+                 *CHECKED_FLAGS):
         raw = os.environ.get(name, '').strip().lower()
         if raw not in _FLAG_WORDS:
             raise ValueError(f"{name} must be yes or no (or 1/0, true/false, on/off), not '{raw}'")
+    for name, (accept, what) in CHECKED_NUMBERS.items():
+        raw = os.environ.get(name, '').strip()
+        if raw and not accept(raw):
+            raise ValueError(f"{name} must be {what}, not '{raw}'")
     if config_prune() and config_file() is None:
         raise ValueError('QUERYAPIGATE_CONFIG_PRUNE is set but QUERYAPIGATE_CONFIG_FILE is not - prune what, against '
                          'which file?')
@@ -548,9 +579,9 @@ SECRET_ENV_VAR_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\*?')
 
 def secret_env_vars():
     """QUERYAPIGATE_SECRET_ENV_VARS: the environment variables `${VAR}` references may read (ADR 0017) - names, or
-    prefixes ending in `*` (`WAREHOUSE_*`), comma-separated. Unset, any may be read but those secretrefs.py always
-    refuses: the server's own settings, and the cloud, Vault and Kubernetes credentials it may run with. Validated by
-    check_settings()."""
+    prefixes ending in `*` (`WAREHOUSE_*`), comma-separated. Unset, none may be (since rc1; before, any could). Never
+    the ones secretrefs.py always refuses: the server's own settings, and the cloud, Vault and Kubernetes credentials it
+    may run with. Validated by check_settings()."""
     raw = os.environ.get('QUERYAPIGATE_SECRET_ENV_VARS', '')
     return [p.strip() for p in raw.split(',') if p.strip()]
 
@@ -1481,7 +1512,7 @@ def describe_settings():
             row('Environment secrets', 'Variables ${VAR} references may read. Never the server\'s own settings, nor '
                 'the cloud, Vault and Kubernetes credentials it may run with (AWS_*, AZURE_*, ARM_*, GOOGLE_*, GCP_*, '
                 'VAULT_*, KUBERNETES_*).', 'QUERYAPIGATE_SECRET_ENV_VARS',
-                ', '.join(secret_env_vars()) or 'any - set it to the ones your connections use'),
+                ', '.join(secret_env_vars()) or 'none - ${VAR} refused'),
             row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
                 'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
             row('Secret providers', 'How the ones this process has used answered, last.', '',

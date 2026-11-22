@@ -237,7 +237,7 @@ class SavedQueryColumnTests(DescriptionTestCase):
         self.create(sql='SELECT title FROM film', publish=True, collection='films', columns={'title': 'As released'})
         from queryapigate import bundle
         exported = bundle.export_bundle('films')
-        self.assertEqual(exported['queries'][0]['column_descriptions'], {'title': 'As released'})
+        self.assertEqual(exported['queries'][0]['columns'], {'title': 'As released'})
         bundle.import_bundle(exported, on_conflict='new-version')
         imported = store.load_versions('films', with_history=False)
         self.assertEqual(imported['2']['column_descriptions'], {'title': 'As released'})

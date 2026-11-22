@@ -375,9 +375,19 @@ class SlowQueryLogTests(AppTestCase):
 
 
 class MetricsEndpointTests(AppTestCase):
-    def test_public_even_with_an_api_key_set(self):
+    def test_without_a_token_only_a_local_client_once_a_credential_is_needed(self):
+        # rc1 (B9): before, anyone who could reach the server read the counts and the key, query and connection names
+        remote, local = {'REMOTE_ADDR': '203.0.113.9'}, {'REMOTE_ADDR': '127.0.0.1'}
+        self.assertEqual(self.client.get('/metrics', environ_base=remote).status_code, 200)  # an open server: anyone
         os.environ['QUERYAPIGATE_API_KEY'] = 'k3y'
-        self.assertEqual(self.client.get('/metrics').status_code, 200)
+        res = self.client.get('/metrics', environ_base=remote)
+        self.assertEqual(res.status_code, 401)
+        self.assertIn('without one, a client on this machine', res.get_json()['error'])
+        self.assertEqual(self.client.get('/metrics', environ_base=local).status_code, 200)
+        self.assertEqual(self.client.get('/metrics', environ_base={'REMOTE_ADDR': '::1'}).status_code, 200)
+        # an administrator who may observe still reads them from anywhere, as the Console's Metrics screen does
+        self.assertEqual(self.client.get('/metrics', environ_base=remote, headers={'X-API-Key': 'k3y'}).status_code,
+                         200)
 
     def test_with_a_token_set_only_a_request_carrying_it_reads_them(self):
         """QUERYAPIGATE_METRICS_TOKEN (ADR 0017's review): what the Helm chart sets, since its ingress routes /metrics

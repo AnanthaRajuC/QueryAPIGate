@@ -53,6 +53,22 @@ def _check_name(name, what):
         raise ApiError(f"{what} name is 1-100 letters, digits, spaces, '.', '_' or '-'", code='invalid_name')
 
 
+# What a PATCH can't clear (rc1, B15): before, null was taken as "left out" - {"queries": null} answered 200 and did
+# nothing, while {"rate_limit": null} cleared. A field below has no "nothing" to clear to but a value of its own.
+_NOT_NULL = {'connections': '[] for none', 'queries': '[] for none', 'collections': '[] for none',
+             'allow_writes': 'false', 'active': 'false'}
+
+
+def refuse_null(data, fields):
+    """400 for a field of ``fields`` sent as null, which can't be cleared: its meaning is unclear, so nothing's done."""
+    nulls = sorted(field for field in fields if field in data and data[field] is None)
+    if nulls:
+        hints = '; '.join(f'{field}: {_NOT_NULL[field]}' for field in nulls)
+        raise ApiError(f"{', '.join(nulls)} can't be null - leave {'it' if len(nulls) == 1 else 'them'} out to keep "
+                       f"what {'it is' if len(nulls) == 1 else 'they are'}, or give a value ({hints})",
+                       code='invalid_body')
+
+
 def _refuse_unknown(data, allowed):
     if not isinstance(data, dict):
         raise ApiError('The request body must be a JSON object', code='invalid_body')
@@ -109,6 +125,8 @@ def create_key(data, actor):
         raise ApiError(f"An API key named '{name}' already exists", 409, code='key_exists')
     if data.get('role') is not None and data['role'] not in apikeys.list_roles():
         raise ApiError(f"Role '{data['role']}' not found", 404, code='role_not_found')
+    if data.get('role') is None:
+        apikeys.require_connections(data.get('connections'))
     secret = apikeys.create_key(name, role=data.get('role'), expires_at=data.get('expires_at'),
                                 **{field: data.get(field) for field in GRANT_FIELDS})
     store.record_audit(actor, 'create_key', name, apikeys.list_keys().get(name))
@@ -118,6 +136,7 @@ def create_key(data, actor):
 def update_key(name, data, actor):
     """Change some of a key's grants, its expiry or `active` (false revokes it at once); the rest are kept."""
     _refuse_unknown(data, ('active', 'expires_at', *GRANT_FIELDS))
+    refuse_null(data, ('connections', 'queries', 'collections', 'allow_writes', 'active'))
     before = load_key(name)
     clearable = {k: data[k] for k in _CLEARABLE if k in data}
     apikeys.update_key(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),
@@ -194,6 +213,8 @@ def create_role(data, actor):
     _check_name(name, 'A role')
     if name in apikeys.list_roles():
         raise ApiError(f"A role named '{name}' already exists", 409, code='role_exists')
+    if data.get('require_claim_binding') is not True:  # a claim-bound role reaches no connection: [] is its default
+        apikeys.require_connections(data.get('connections'))
     apikeys.create_role(name, connections=data.get('connections'), allow_writes=bool(data.get('allow_writes', False)),
                         queries=data.get('queries'), rate_limit=data.get('rate_limit'),
                         allowed_ips=data.get('allowed_ips'), allowed_write_ops=data.get('allowed_write_ops'),
@@ -207,6 +228,7 @@ def create_role(data, actor):
 
 def update_role(name, data, actor):
     _refuse_unknown(data, (*GRANT_FIELDS, *ROLE_ONLY_FIELDS))
+    refuse_null(data, ('connections', 'queries', 'collections', 'allow_writes'))
     before = load_role(name)
     clearable = {k: data[k] for k in (*_CLEARABLE, *ROLE_ONLY_FIELDS) if k in data and k != 'expires_at'}
     apikeys.update_role(name, connections=data.get('connections'), allow_writes=data.get('allow_writes'),

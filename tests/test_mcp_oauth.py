@@ -408,7 +408,9 @@ class HttpTests(McpOAuthTestCase):
             self.assertEqual(refused.status_code, 401)
             self.assertEqual(refused.headers['WWW-Authenticate'], 'Bearer realm="metrics"')
             self.assertEqual(self.http.get('/metrics', headers={'Authorization': f'Bearer {token}'}).status_code, 200)
-        self.assertEqual(self.http.get('/metrics').status_code, 200)  # unset: open, as before
+        # unset, a server that needs a credential answers only a client on this machine (rc1, B9) - this test client
+        # isn't one ('testclient' is no address)
+        self.assertEqual(self.http.get('/metrics').status_code, 401)
 
     def test_the_protected_resource_metadata(self):
         for path in ('/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'):

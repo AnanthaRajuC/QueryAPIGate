@@ -199,6 +199,64 @@ class LegacySettingsTests(unittest.TestCase):
             self.assertEqual(config.api_key(), 'secret')
 
 
+class ExitCodeTests(unittest.TestCase):
+    """rc1 (B11): 0 ok, 1 it ran and failed, 2 usage or setup - the same bad setting gave 2 in one command, 1 in
+    another."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        env = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def run_cli(self, argv):
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            try:
+                code = cli.main(argv)
+            except SystemExit as stop:  # argparse
+                code = stop.code
+        return code, err.getvalue()
+
+    def test_a_bad_setting_is_2_in_every_command(self):
+        for argv in (['admins', 'list'], ['exports', 'list'], ['history', 'forget', 'someone'],
+                     ['runs', 'copy-to-clickhouse'], ['runs', 'leave-clickhouse'], ['collection', 'export', 'x'],
+                     ['examples', 'status']):
+            with self.subTest(argv=argv), mock.patch.dict(os.environ, {'QUERYAPIGATE_QUERY_TIMEOUT': '5m'}):
+                code, err = self.run_cli(argv)
+                self.assertEqual(code, 2, err)
+                self.assertIn('QUERYAPIGATE_QUERY_TIMEOUT', err)
+
+    def test_a_missing_run_store_is_setup_and_a_failure_is_1(self):
+        for argv in (['runs', 'copy-to-clickhouse'], ['runs', 'leave-clickhouse']):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.run_cli(argv)[0], 2)
+        self.assertEqual(self.run_cli(['admins', 'create', 'ada', '--role', 'owner'])[0], 0)
+        code, err = self.run_cli(['admins', 'create', 'ada', '--role', 'owner'])  # ran, and failed: taken
+        self.assertEqual(code, 1, err)
+        self.assertEqual(self.run_cli(['admins', 'create'])[0], 2)  # usage
+
+
+class DebugTests(unittest.TestCase):
+    def test_the_debugger_serves_only_a_loopback_host(self):
+        # rc1 (B10): Werkzeug's interactive debugger runs code typed into an error page
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for argv, env in ((['serve', '--host', '0.0.0.0', '--debug'], {}),
+                          (['serve', '--host', '10.0.0.5'], {'QUERYAPIGATE_DEBUG': '1'})):
+            err = io.StringIO()
+            with self.subTest(argv=argv), mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp.name, **env}), \
+                    mock.patch('flask.Flask.run') as run, redirect_stderr(err):
+                self.assertEqual(cli.main(argv), 2)
+                run.assert_not_called()
+                self.assertIn('interactive debugger', err.getvalue())
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': tmp.name}), mock.patch('flask.Flask.run') as run, \
+                mock.patch.object(cli, '_exit_cleanly_on_sigterm'):
+            self.assertEqual(cli.main(['serve', '--host', '127.0.0.1', '--debug']), 0)
+            self.assertTrue(run.call_args.kwargs['debug'])
+
+
 class InitTests(unittest.TestCase):
     def test_init_makes_a_home_that_doesn_t_exist_yet(self):
         tmp = tempfile.TemporaryDirectory()

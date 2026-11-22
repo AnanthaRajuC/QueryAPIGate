@@ -15,8 +15,9 @@ A query is reachable if **any** of the three reaches it. Then other fields can s
 `active: false`, a passed `expires_at`, `allowed_ips`, `allowed_tables`, `rate_limit`, and the write rules
 (`allow_writes`, `allowed_write_ops`, `QUERYAPIGATE_ALLOW_WRITES`). The admin key reaches everything.
 
-The one surprise to remember: **a key created without `connections` gets every connection** (`"*"`), not none. See
-[Set up your first scoped API key](13-set-up-a-scoped-api-key.md#the-footgun-to-avoid-first).
+A key names its connections when it's created - `[]` for none, `"*"` for every one. Before 1.0, one created without
+the field got every connection: such keys still have `"*"`. See
+[Set up your first scoped API key](13-set-up-a-scoped-api-key.md#say-which-connections-always).
 
 ## In the Console: the Access map
 

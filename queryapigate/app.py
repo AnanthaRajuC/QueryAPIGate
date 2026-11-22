@@ -160,17 +160,17 @@ def load_examples_at_startup():
 
 
 def warn_env_references():
-    """Once at startup: ${VAR} references in use with no QUERYAPIGATE_SECRET_ENV_VARS - so an administrator may
-    reference any other variable too, but the few secretrefs.py always refuses (ADR 0017)."""
+    """Once at startup: ${VAR} references in use with no QUERYAPIGATE_SECRET_ENV_VARS. Unset, none is read (rc1, B2:
+    before, any could be, but the few secretrefs.py always refuses - ADR 0017), so the connections and destinations that
+    use them fail until it's set: the log names the setting that brings them back."""
     from . import destinations, secretrefs
     if config.secret_env_vars():
         return
     used = secretrefs.env_variables([*store.read_connections().values(), *destinations.list_all()])
     if used:
-        log.warning('Connections and destinations reference environment variables (%s), and '
-                    'QUERYAPIGATE_SECRET_ENV_VARS is unset: an administrator could reference any other variable too, '
-                    "and have the server send it to a host of theirs as a password. Set it to the ones in use.",
-                    ', '.join(used))
+        log.error('Connections and destinations reference environment variables (%s), and QUERYAPIGATE_SECRET_ENV_VARS '
+                  'is unset: no ${VAR} is read without it, so they fail until it is set. To keep them working, set '
+                  'QUERYAPIGATE_SECRET_ENV_VARS=%s', ', '.join(used), ','.join(used))
 
 
 class _CapturePeer:
@@ -647,7 +647,9 @@ def render(result, output_format, page, page_size):
     single serialization span to measure for those (see that function's docstring)."""
     started = time.monotonic()
     with tracing.span(f'serialize {output_format}', attributes={'queryapigate.format': output_format}) as span:
-        response = jsonify({'message': 'No results returned'}) if not result else FORMATTERS[output_format](result)
+        # No rows is the format's own empty document (rc1, B5): [], a header-only CSV, an empty NDJSON body - before, a
+        # {"message": "No results returned"} object in every format, contradicting the documented array.
+        response = FORMATTERS[output_format](result)
         tracing.set_attributes(span, queryapigate__bytes=response.content_length)
     elapsed = time.monotonic() - started
     metrics.observe_serialization(output_format, elapsed)
@@ -817,6 +819,7 @@ def _stream_history(rows, entry, record, permission=None):
 @bp.route('/execute_sql', methods=['POST'])
 def execute_sql_endpoint():
     data = get_json_body()
+    refuse_unknown_body(data, ('sql', 'connection_name', 'database', 'params', 'format', 'timeout', 'mask'))
     if not data.get('sql'):
         raise ApiError('SQL query is missing', code='sql_required')
     if not data.get('connection_name'):
@@ -866,6 +869,8 @@ def execute_mongo_endpoint():
     full stop (BACKLOG #36: MongoDB support is find-only in this version) - unlike /execute_sql there is no
     write permission to check."""
     data = get_json_body()
+    refuse_unknown_body(data, ('collection', 'connection_name', 'filter', 'params', 'format', 'timeout', 'projection',
+                               'sort'))
     if not data.get('collection'):
         raise ApiError('Collection is missing', code='collection_required')
     if not data.get('connection_name'):
@@ -997,6 +1002,44 @@ def bind_embeddings(saved, values, connection_name):
     return values
 
 
+def _refuse_unreachable(path, content):
+    """A saved query this caller can't run at all is one that doesn't exist (rc1, B12): the same 404, with the same
+    message, as a name never used - before, a 403 naming its connection told a key which names exist. Reachable is
+    what can_run_saved() says of its published version - by a `queries` or collection grant, or its connection's -
+    and, for a query with no connection of its own, any connection grant (?connection_name= still needs one). A
+    caller that can reach it still gets a 403 for another connection, or a claim it lacks. An administrator - even an
+    auditor, who runs nothing - lists the names anyway (queries.read), so is told why."""
+    permission = g.permission
+    if permission.admin or permission.role is not None:
+        return
+    name = store.query_name(path)
+    try:
+        _, live = store.select_version(content, None)
+    except ApiError:
+        live = None  # nothing published: a draft, which no caller but an administrator runs - 404 below, as before
+    if live is not None:
+        connection_name = live.get('connection_name')
+        reached_by_connection = (apikeys.can_use(permission, connection_name) if connection_name
+                                 else bool(permission.connections))
+        if (reached_by_connection or apikeys.can_use_query(permission, name)
+                or apikeys.can_use_collection(permission, store.read_collection(content))):
+            return
+    raise ApiError(f"Saved query '{name}' not found", 404, code='query_not_found')
+
+
+_QUERY_STRING_ONLY = ('page', 'page_size', 'stream')
+
+
+def refuse_unknown_body(data, allowed):
+    """A body field the endpoint doesn't read is refused (unknown_field, rc1 B8): before, `page`, `page_size` and
+    `stream` in a body were dropped without a word - they're read from the query string only."""
+    unknown = sorted(set(data) - set(allowed))
+    if unknown:
+        hint = (f" - {', '.join(k for k in unknown if k in _QUERY_STRING_ONLY)} go in the query string"
+                if any(k in _QUERY_STRING_ONLY for k in unknown) else '')
+        raise ApiError(f"Unknown field(s): {', '.join(unknown)}{hint}", code='unknown_field')
+
+
 def run_saved(ref, body, url_params):
     """_run_saved(), in its own span (tracing.py): named once the query is found, never by what the caller sent."""
     with tracing.span('query') as span:
@@ -1013,6 +1056,7 @@ def _run_saved(ref, body, url_params):
     doesn't exist: the same 404 as a version number that was never used, so drafts can't be discovered."""
     path = store.resolve_saved_file(ref, check_exists=False)  # load_versions() 404s the same, one read fewer
     content = store.load_versions(path, with_history=False)
+    _refuse_unreachable(path, content)
     requested = get_int(request.args.get('version') or body.get('version'), 'version')
     if requested is not None and store.is_draft(content, requested) and not g.permission.admin:
         raise ApiError(f'Version {requested} not found', 404, code='version_not_found')
@@ -1255,6 +1299,7 @@ def run_saved_mongo(saved, path, number, ref, connection_name, raw, output_forma
 @bp.route('/q/<name>', methods=['GET', 'POST'])
 def run_named_query(name):
     body = get_json_body(required=False) if request.method == 'POST' else {}
+    refuse_unknown_body(body, ('version', 'connection_name', 'params', 'placeholders', 'format', 'timeout'))
     url_params = {k: v for k, v in request.args.items() if k not in RESERVED_ARGS}
     return run_saved(name, body, url_params)
 
@@ -1491,15 +1536,14 @@ def health():
 
 @bp.route('/metrics', methods=['GET'])
 def metrics_endpoint():
-    """Open, unless QUERYAPIGATE_METRICS_TOKEN is set: then for `Authorization: Bearer <that token>` - a scraper's -
-    or an administrator whose role may observe, as the Console's Metrics screen reads it. What the Helm chart sets,
-    since its ingress would otherwise publish the counts and the key, query and connection names in them (ADR 0017's
-    review)."""
+    """For a scraper (metrics.authorized(): its token, or without one a client on this machine), or an administrator
+    whose role may observe, as the Console's Metrics screen reads it."""
     from . import adminroles
     permission = g.get('permission')
     # every workspace's counts: a server-wide role's to read (ADR 0023)
     observer = adminroles.allows(permission, 'observe') and getattr(permission, 'server_wide', True)
-    if not (observer or metrics.authorized(request.headers.get('Authorization'))):
+    if not (observer or metrics.authorized(request.headers.get('Authorization'),
+                                           request.environ.get('queryapigate.peer_addr'))):
         response = jsonify(error_body(metrics.UNAUTHORIZED, 401))
         response.status_code = 401
         response.headers['WWW-Authenticate'] = 'Bearer realm="metrics"'

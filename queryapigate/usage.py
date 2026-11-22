@@ -169,7 +169,7 @@ def _add_writes(items, since, until):
     is listed too, so a write asked for and rejected isn't invisible."""
     from . import agentwrites
     by_agent = {}
-    for request in agentwrites.list_requests(limit=1000):
+    for request in agentwrites.list_requests(limit=1000)[0]:
         if since <= request['created_at'] < until:
             outcome = 'pending' if request['status'] == 'running' else request['status']
             counts = by_agent.setdefault(request['caller'], dict.fromkeys(WRITE_OUTCOMES, 0))

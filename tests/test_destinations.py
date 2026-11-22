@@ -43,6 +43,7 @@ class DestinationApiTests(V1TestCase):
         self.assertEqual([a for a, _ in audit], ['create_destination', 'update_destination', 'delete_destination'])
         self.assertNotIn('s3cret', repr(audit))
 
+    @mock.patch.dict(os.environ, {'QUERYAPIGATE_SECRET_ENV_VARS': 'DEST_SECRET'})
     def test_a_secret_is_a_var_reference_or_encrypted(self):
         self.create(password='${DEST_SECRET}')
         self.assertEqual(self.call('get', f'{LIST}/local', ONE, 200).get_json()['password'], '${DEST_SECRET}')

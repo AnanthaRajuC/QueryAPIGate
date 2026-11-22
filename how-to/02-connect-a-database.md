@@ -73,7 +73,8 @@ curl -X POST http://127.0.0.1:5000/api/v1/connections -H 'X-API-Key: demo-key' -
 
 Needs the driver: `pip install "queryapigate[postgres]"` (already included if you installed
 `queryapigate[all]` or the published Docker image). `${POSTGRES_PASSWORD}` is a reference to an
-environment variable, resolved when the connection is actually used - keep the real password out of
+environment variable, resolved when the connection is actually used - the server must allow it, with
+`QUERYAPIGATE_SECRET_ENV_VARS=POSTGRES_PASSWORD` (or a list or prefix, `POSTGRES_*`), or it's refused. It keeps the real password out of
 `queryapigate.db` entirely; see [Keep connection passwords out of the store](22-encrypt-passwords-at-rest.md)
 for the alternative (encrypting a literal value instead of using an env reference). Verified for this
 guide against a real PostgreSQL 16 container: connect, test, query all worked as shown.

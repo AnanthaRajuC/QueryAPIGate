@@ -68,7 +68,10 @@ def get(request_id):
     return _row(row)
 
 
-def list_requests(status=None, limit=200):
+def list_requests(status=None, limit=200, cursor=None):
+    """A page of requests, newest first, and the cursor of the next page or None (rc1, B13: before, the newest 200
+    and no way to the rest)."""
+    from .services import audit
     if status not in (None, '') and status not in STATUSES:
         raise ApiError(f"status must be one of: {', '.join(STATUSES)}", code='invalid_filter')
     # Filtered before the limit, not after: the newest `limit` of every status, filtered afterwards, could leave out
@@ -81,11 +84,20 @@ def list_requests(status=None, limit=200):
         where, args = " AND (status = 'expired' OR (status IN ('pending', 'approved') AND expires_at < ?))", [now]
     elif status:
         where, args = ' AND status = ?', [status]
+    if cursor:
+        created, request_id = audit.decode_cursor(
+            cursor, lambda v: isinstance(v, list) and len(v) == 2 and all(isinstance(x, str) for x in v))
+        where += ' AND (created_at < ? OR (created_at = ? AND id < ?))'
+        args += [created, created, request_id]
+    limit = audit.page_limit(limit, 200)
     rows = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ?{where} '
                                    'ORDER BY created_at DESC, id DESC LIMIT ?',
-                                   (scope.current(), *args, max(1, min(int(limit), 1000)))).fetchall()
+                                   (scope.current(), *args, limit + 1)).fetchall()
     found = [_row(r) for r in rows]
-    return [r for r in found if not status or r['status'] == status]
+    more = len(found) > limit
+    found = found[:limit]
+    next_cursor = audit.encode_cursor([rows[limit - 1]['created_at'], rows[limit - 1]['id']]) if more else None
+    return [r for r in found if not status or r['status'] == status], next_cursor
 
 
 def approval_url(request_id):

@@ -60,7 +60,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H '
   "name": "writer", "connections": ["shop"], "allow_writes": true
 }'
 curl 'http://127.0.0.1:5000/q/add_note?body=allowed' -H 'X-API-Key: <writer secret>'
-# {"message": "No results returned"} - a real insert
+# [] - a real insert: no rows come back
 ```
 
 The rule in one sentence: a write actually happens only when **both** the server-wide setting **and** the
@@ -78,7 +78,7 @@ curl -X POST http://127.0.0.1:5000/api/v1/api-keys -H 'X-API-Key: demo-key' -H '
 }'
 
 curl 'http://127.0.0.1:5000/q/add_note?body=via-insert-only-key' -H 'X-API-Key: <insert-only secret>'
-# {"message": "No results returned"} - insert succeeds
+# [] - insert succeeds
 
 curl 'http://127.0.0.1:5000/q/delete_note?id=1' -H 'X-API-Key: <insert-only secret>'
 # {"error": "This API key may only perform these write operations: insert."}
@@ -103,7 +103,7 @@ Verified, all three outcomes real:
 
 ```bash
 curl 'http://127.0.0.1:5000/q/add_note?body=per-query-grant' -H 'X-API-Key: <note-writer secret>'
-# {"message": "No results returned"} - this one named query, writable
+# [] - this one named query, writable
 
 curl 'http://127.0.0.1:5000/q/delete_note?id=1' -H 'X-API-Key: <note-writer secret>'
 # {"error": "This API key is not permitted to use the connection 'shop'"} - a different query, refused

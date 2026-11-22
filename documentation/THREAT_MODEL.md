@@ -361,9 +361,10 @@ This is the part worth being the most precise about, because it's also the part 
   of theirs. **Nor a credential the server itself may run with** - `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`, `GCP_*`,
   `VAULT_*`, `KUBERNETES_*` - which would reach beyond every allow-list (found in the review for 0.30:
   `${AWS_SECRET_ACCESS_KEY}` was accepted, and with it the server's whole AWS identity, not just the secret prefixes
-  `QUERYAPIGATE_AWS_SECRET_PREFIXES` opens). Any other variable is reachable until `QUERYAPIGATE_SECRET_ENV_VARS`
-  lists the ones that may be: **set it**, or a credential under a name no rule knows (`DB_ADMIN_PW`) is an
-  administrator's to send. The server warns at startup while references are in use without it.
+  `QUERYAPIGATE_AWS_SECRET_PREFIXES` opens). Any other variable is reachable only if `QUERYAPIGATE_SECRET_ENV_VARS`
+  lists it; unset, none is (since rc1 - before, any other was, so a credential under a name no rule knows,
+  `DB_ADMIN_PW`, was an administrator's to send). The server logs an error at startup while references are in use
+  without it.
 - **Exports write only under their destination's prefix** (ADR 0004). A destination is a bucket prefix or folder and
   write credentials, stored like a connection password. Each run writes through a fresh DuckDB connection locked the
   same way - `allowed_paths` is exactly the prefix plus the one temporary file the rows were staged in - and object
@@ -972,10 +973,11 @@ Being explicit about these is as important as everything above:
 - **An agent may be steered by what it reads.** Data in results, descriptions and notes all become part of an AI
   agent's context. QueryAPIGate limits what an agent can reach and hides what masking covers; it can't make an agent
   ignore instructions planted in data it is allowed to read.
-- **`/metrics` needs no API key** - a scraper shouldn't hold one - **and is open until `QUERYAPIGATE_METRICS_TOKEN` is
-  set**: then only a request with that bearer token, or an administrator who may observe, reads it. Its labels name
-  API keys, queries and connections (administrators and signed-in users only as `admin` and `jwt`): set the token
-  wherever the server can be reached from outside. The Helm chart does.
+- **`/metrics` needs no API key** - a scraper shouldn't hold one. With `QUERYAPIGATE_METRICS_TOKEN` set, a request
+  with that bearer token, or an administrator who may observe, reads it; without, a server that needs a credential
+  answers only a loopback client (since rc1 - before, anyone who could reach it). Its labels name API keys, queries and
+  connections (administrators and signed-in users only as `admin` and `jwt`). A reverse proxy on the same machine is
+  a loopback client: set the token behind one, or keep `/metrics` off it. The Helm chart sets one.
 
 ## Where to go from here
 

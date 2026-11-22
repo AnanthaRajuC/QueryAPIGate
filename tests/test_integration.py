@@ -162,7 +162,7 @@ class IntegrationBase:
             self.assertIn("'name'", res.get_json()['error'])
         else:
             self.assertEqual(res.status_code, 200, res.get_data(as_text=True))  # and no row: none has a NUL
-            self.assertNotIsInstance(res.get_json(), list)
+            self.assertEqual(res.get_json(), [])
 
     def test_all_formats(self):
         for fmt in ('json', 'ndjson', 'csv', 'tsv', 'xml', 'yaml', 'xlsx'):

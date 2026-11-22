@@ -66,7 +66,7 @@ curl http://127.0.0.1:5000/api/v1/mcp/tools -H 'X-API-Key: demo-key'
 MCP calls show up where REST ones do:
 
 - **Run history** and the Home screen's live feed, with `"transport": "mcp"`.
-- **The MCP process's own `/metrics`** (on its port, no key), with `method="MCP"` and endpoints `mcp.saved_query`,
+- **The MCP process's own `/metrics`** (on its port, no API key - its token, or a client on the same machine), with `method="MCP"` and endpoints `mcp.saved_query`,
   `mcp.execute_sql` and `mcp.list_tables`. The Console's Metrics screen shows the REST server's metrics only - scrape
   both processes to see everything (see [Wire up Prometheus and Grafana](35-wire-up-prometheus-and-grafana.md)).
 

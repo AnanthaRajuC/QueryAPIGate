@@ -70,7 +70,7 @@ class GrantTests(QuotaTestCase):
         usage = key['usage_this_period']
         self.assertEqual((usage['per'], usage['calls'], usage['calls_limit'], usage['rows_limit']),
                          ('month', 0, 5, None))
-        self.assertEqual(usage['resets_at'], quotas.period('month')[2].strftime('%Y-%m-%d %H:%M:%S'))
+        self.assertEqual(usage['resets_at'], quotas.period('month')[2].astimezone().isoformat())  # RFC 3339 (rc1, B7)
         res = self.client.patch('/api/v1/api-keys/partner', headers=ADMIN, json={'quota': None})
         self.assertIsNone(res.get_json()['usage_this_period'])
 
@@ -134,6 +134,11 @@ class CountingTests(QuotaTestCase):
         self.assertFalse(mcp_server.call_as(self.app, permission, 'ids', {}).get('isError'))
         refused = mcp_server.call_as(self.app, permission, 'ids', {})
         self.assertEqual((refused['isError'], refused['structuredContent']['code']), (True, 'quota_exceeded'))
+        # schema discovery is outside it, both tools alike (rc1, B16: describe_table counted, and was refused)
+        for tool, arguments in (('list_tables', {'connection_name': 'lite'}),
+                                ('describe_table', {'connection_name': 'lite', 'table': 't'})):
+            with self.subTest(tool=tool):
+                self.assertFalse(mcp_server.call_as(self.app, permission, tool, arguments).get('isError'))
 
 
     def test_an_mcp_call_with_no_rows_counts_none(self):
@@ -145,7 +150,7 @@ class CountingTests(QuotaTestCase):
                                                                connections=['lite'], quota=quota)))
         self.assertFalse(mcp_server.call_as(self.app, permission, 'none', {}).get('isError'))
         used = quotas.usage('agent', quota)
-        self.assertEqual((used['calls'], used['rows']), (1, 0))  # not 1: REST's "No results returned" isn't a row
+        self.assertEqual((used['calls'], used['rows']), (1, 0))  # an empty page is no row
 
 
 class StoreTests(QuotaTestCase):
@@ -267,7 +272,8 @@ class SignedInUserTests(QuotaTestCase):
     env = {'QUERYAPIGATE_JWT_SECRET': SECRET, 'QUERYAPIGATE_JWT_ROLE': 'mobile'}
 
     def test_a_roles_quota_is_each_users_own(self):
-        res = self.client.post('/api/v1/roles', headers=ADMIN, json={'name': 'mobile', 'queries': ['ids'],
+        res = self.client.post('/api/v1/roles',
+                               headers=ADMIN, json={'connections': '*', 'name': 'mobile', 'queries': ['ids'],
                                                                       'quota': {'calls': 1, 'per': 'day'}})
         self.assertEqual(res.status_code, 201, res.get_data(as_text=True))
 

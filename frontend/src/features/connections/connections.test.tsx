@@ -189,10 +189,12 @@ describe('Connections', () => {
       password: '',
       database: ':memory:',
       active: true,
-      allowed_paths: ['s3://sales/2026/', 'https://x.io/p.csv'],
-      region: 'eu-west-1',
-      use_ssl: false,
-      views: { orders: 'SELECT 1' },
+      options: {
+        allowed_paths: ['s3://sales/2026/', 'https://x.io/p.csv'],
+        region: 'eu-west-1',
+        use_ssl: false,
+        views: { orders: 'SELECT 1' },
+      },
     });
   });
 
@@ -220,8 +222,7 @@ describe('Connections', () => {
       password: '',
       database: ':memory:',
       active: true,
-      allowed_paths: ['/data/lake/'],
-      auto_views: true,
+      options: { allowed_paths: ['/data/lake/'], auto_views: true },
     });
   });
 

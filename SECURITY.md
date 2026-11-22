@@ -74,7 +74,7 @@ documented way to Level 3; it isn't done yet.
   wherever `/metrics` can be reached from outside
   ([guide 58](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/58-keep-the-servers-own-secrets-and-metrics-in.md)).
 - Run only signed releases ([above](#verify-a-release)), by digest.
-- Do not enable `QUERYAPIGATE_DEBUG` on a reachable host.
+- `QUERYAPIGATE_DEBUG` (`serve --debug`) starts only on a loopback `--host`: it runs an interactive debugger.
 - Set `QUERYAPIGATE_RATE_LIMIT` on anything reachable beyond a trusted network; it also throttles API key guessing.
 - Behind a reverse proxy, set `QUERYAPIGATE_TRUST_PROXY` to the number of proxies so limits apply per real client - and
   leave it at `0` when clients connect directly, otherwise they can forge `X-Forwarded-For` to evade the limit.

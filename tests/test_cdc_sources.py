@@ -4,6 +4,7 @@ against it at /ingest/cdc/<name> (/w/<workspace>/... outside `default`); QUERYAP
 import base64
 import json
 import os
+from datetime import datetime
 from unittest import mock
 
 from cryptography.fernet import Fernet
@@ -159,7 +160,8 @@ class IngestTests(CdcSourceTestCase):
         self.post(secret, body=b'[]')  # a heartbeat-like post: nothing changed, but it's connected
         first = self.stored()[1]
         self.assertIsNotNone(first)
-        self.assertEqual(self.call('get', f'{LIST}/shop', ONE, 200).get_json()['last_received_at'], first)
+        self.assertEqual(self.call('get', f'{LIST}/shop', ONE, 200).get_json()['last_received_at'],
+                         datetime.fromisoformat(first).astimezone().isoformat())  # RFC 3339 (rc1, B7)
         with mock.patch.object(db, 'transaction', side_effect=AssertionError('no write within the minute')):
             self.assertEqual(self.post(secret, body=b'[]').status_code, 204)
 

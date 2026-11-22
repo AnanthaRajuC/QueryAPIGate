@@ -273,8 +273,10 @@ SCHEMAS = {
         },
     },
     'WriteRequestList': {
-        'type': 'object', 'required': ['items'],
-        'properties': {'items': {'type': 'array', 'items': _ref('WriteRequest')}},
+        'type': 'object', 'required': ['items', 'next_cursor'],
+        'properties': {'items': {'type': 'array', 'items': _ref('WriteRequest')},
+                       'next_cursor': {'type': 'string', 'nullable': True,
+                                       'description': 'Send as cursor for the next page; null on the last.'}},
     },
     'EncryptionKeys': {
         'type': 'object', 'required': ['keys', 'values', 'by_key', 'under_old_keys', 'undecryptable'],
@@ -722,9 +724,11 @@ SCHEMAS = {
         'properties': {'items': {'type': 'array', 'items': _ref('HistoryEntry')}},
     },
     'AuditLog': {
-        'type': 'object', 'required': ['items', 'total', 'actions', 'retention'],
+        'type': 'object', 'required': ['items', 'next_cursor', 'total', 'actions', 'retention'],
         'properties': {
             'items': {'type': 'array', 'items': _ref('AuditEntry')},
+            'next_cursor': {'type': 'string', 'nullable': True,
+                            'description': 'Send as cursor for the next page; null on the last.'},
             'total': {'type': 'integer', 'description': 'Entries stored, before filtering.'},
             'actions': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Every action in the log.'},
             'retention': {'type': 'integer', 'description': 'The log keeps this many entries '
@@ -903,9 +907,13 @@ SCHEMAS = {
             'user': _NULLABLE_STRING,
             'password': {'type': 'string', 'nullable': True},
             'database': _NULLABLE_STRING,
-            'options': {'type': 'object', 'additionalProperties': True},
+            'credentials': {'type': 'object', 'nullable': True, 'additionalProperties': True,
+                            'description': 'Short-lived credentials instead of a password: {"source": "aws-rds-iam"}.'},
+            'options': {'type': 'object', 'additionalProperties': True,
+                        'description': 'Driver options (sslmode, jdbc_url, allowed_paths, ...) - any other field is '
+                                       'refused (unknown_field). On PATCH, merged in; null removes one.'},
         },
-        'additionalProperties': True,
+        'additionalProperties': False,
     },
     'ConnectionList': {
         'type': 'object', 'required': ['items'],
@@ -1266,7 +1274,11 @@ PATHS = {
         'get': _op('Writes AI agents asked to make over MCP, newest first (ADR 0008)',
                    {'200': _ok(_ref('WriteRequestList'))}, parameters=[
                        {'name': 'status', 'in': 'query', 'required': False, 'schema': {'type': 'string'},
-                        'description': 'pending, approved, running, done, failed, rejected or expired.'}]),
+                        'description': 'pending, approved, running, done, failed, rejected or expired.'},
+                       {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'minimum': 1, 'maximum': 1000,
+                                                                    'default': 200}},
+                       {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'},
+                        'description': "The last page's next_cursor."}]),
     },
     '/api/v1/write-requests/{id}': {
         'get': _op('One write request: who asked, the SQL, the exact arguments, what happened',
@@ -1304,7 +1316,11 @@ PATHS = {
              'description': 'Matches the time, actor or target.'},
             {'name': 'workspace', 'in': 'query', 'schema': {'type': 'string'},
              'description': "A server-wide role's filter: one workspace's entries. A role in a workspace always "
-                            "reads that workspace's only."}]),
+                            "reads that workspace's only."},
+            {'name': 'limit', 'in': 'query', 'schema': {'type': 'integer', 'minimum': 1, 'maximum': 1000,
+                                                         'default': 1000}},
+            {'name': 'cursor', 'in': 'query', 'schema': {'type': 'string'},
+             'description': "The last page's next_cursor."}]),
     },
     '/api/v1/audit/delivery': {
         'get': _op("Each SIEM output's progress: delivered up to which audit entry, how far behind, its last error",

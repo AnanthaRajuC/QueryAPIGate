@@ -358,9 +358,6 @@ class CapabilityTests(unittest.TestCase):
                          {'owner', 'admin'})
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 
 class ListFilterTests(AgentWriteTestCase):
     def insert(self, request_id, status, created_at, expires_at):
@@ -379,8 +376,38 @@ class ListFilterTests(AgentWriteTestCase):
         self.insert('old-lapsed', 'pending', '2026-01-01 00:00:01', time.time() - 60)
         for n in range(200):  # newer than both: the newest 200 of every status hid them
             self.insert(f'done-{n:03}', 'done', f'2026-06-01 00:00:{n % 60:02}', later)
-        self.assertEqual([r['id'] for r in agentwrites.list_requests('pending')], ['old-pending'])
-        self.assertEqual([r['id'] for r in agentwrites.list_requests('expired')], ['old-lapsed'])
-        self.assertEqual(len(agentwrites.list_requests('done')), 200)
+        self.assertEqual([r['id'] for r in agentwrites.list_requests('pending')[0]], ['old-pending'])
+        self.assertEqual([r['id'] for r in agentwrites.list_requests('expired')[0]], ['old-lapsed'])
+        self.assertEqual(len(agentwrites.list_requests('done')[0]), 200)
         res = self.client.get('/api/v1/write-requests?status=pending', headers=ADMIN)
         self.assertEqual([r['id'] for r in res.get_json()['items']], ['old-pending'])
+
+    def test_every_request_is_reached_page_by_page(self):
+        # rc1 (B13): limit + cursor + next_cursor - before, the newest 200 and no way to the rest
+        import time
+        later = time.time() + 3600
+        for n in range(205):
+            self.insert(f'r-{n:03}', 'done', f'2026-06-01 00:{n // 60:02}:{n % 60:02}', later)
+        self.insert('r-tie', 'done', '2026-06-01 00:00:00', later)  # the same second as r-000: the id breaks the tie
+        seen, cursor = [], None
+        while True:
+            res = self.client.get('/api/v1/write-requests', headers=ADMIN,
+                                  query_string={'limit': 50, **({'cursor': cursor} if cursor else {})})
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+            seen += [r['id'] for r in res.get_json()['items']]
+            cursor = res.get_json()['next_cursor']
+            if cursor is None:
+                break
+        self.assertEqual(len(seen), 206)
+        self.assertEqual(len(set(seen)), 206)
+        self.assertEqual(seen[0], 'r-204')
+        default = self.client.get('/api/v1/write-requests', headers=ADMIN).get_json()
+        self.assertEqual(len(default['items']), 200)  # the page it always was
+        self.assertIsNotNone(default['next_cursor'])
+        for query in ({'limit': 0}, {'limit': 1001}, {'cursor': 'nonsense'}):
+            res = self.client.get('/api/v1/write-requests', headers=ADMIN, query_string=query)
+            self.assertEqual((res.status_code, res.get_json()['code']), (400, 'invalid_filter'), query)
+
+
+if __name__ == '__main__':
+    unittest.main()

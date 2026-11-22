@@ -128,6 +128,8 @@ anything in `.env` above):
  "password": "${PROD_DB_PASSWORD}", "database": "app", "active": true}
 ~~~
 
+The server reads only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists - add `QUERYAPIGATE_SECRET_ENV_VARS=PROD_DB_PASSWORD` to `.env` too.
+
 `QUERYAPIGATE_SECRET_KEY` (a Fernet key) additionally encrypts every literal connection password *at rest* in
 `queryapigate.db` itself, independent of the `${VAR}` convention above - worth setting if the volume or its
 backups might be read by someone who shouldn't see connection credentials. Generate one and add it to `.env`
@@ -258,10 +260,10 @@ Then *Dashboards → New → Import* in Grafana, uploading
 [`documentation/grafana-dashboard.json`](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/documentation/grafana-dashboard.json)
 from this repo - panels for request/query rate and latency (p50/p95/p99), error rate, rows returned, active
 queries, pool occupancy and rate-limit rejections, built on exactly the metric names `/metrics` already
-exposes. `/metrics` needs no API key - a scraper shouldn't hold one. It's open to whoever can reach the server,
-until you set `QUERYAPIGATE_METRICS_TOKEN`: then only a request with `Authorization: Bearer <the token>` - and an
-administrator, the Console's Metrics screen - reads it. Set it whenever the server can be reached from outside your
-network: the labels name your API keys, queries and connections.
+exposes. `/metrics` needs no API key - a scraper shouldn't hold one. Set `QUERYAPIGATE_METRICS_TOKEN`, and a request
+with `Authorization: Bearer <the token>` - and an administrator, the Console's Metrics screen - reads it. Without
+one, a server that needs a credential answers only a client on its own machine (before 1.0, whoever could reach it):
+a Prometheus elsewhere needs the token. Its labels name your API keys, queries and connections.
 
 **With several instances, scrape each one** - every process keeps its own counters, as Prometheus expects - and the
 bundled dashboard sums across them. The Console's Metrics screen shows only the instance that served it.

@@ -88,7 +88,7 @@ class EndToEndTests(unittest.TestCase):
                                                               **({'params': params} if params else {})})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
         body = res.get_json()
-        rows = body if isinstance(body, list) else []  # an empty page is {"message": "No results returned"}
+        rows = body  # an empty page is [], as every page
         return [row['i'] for row in rows], res.headers['X-Has-More']
 
     def test_limit_3_returns_3_rows_whatever_the_page_size(self):

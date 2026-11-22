@@ -68,7 +68,7 @@ class BackupRestoreCase(unittest.TestCase):
             'description': 'Films, by title', 'sql': 'SELECT title FROM film ORDER BY title',
             'connection_name': 'lite'})
         secret = self.call(client, 'POST', '/api/v1/api-keys', 201,
-                           json={'name': 'partner', 'collections': ['catalog']})['secret']
+                           json={'name': 'partner', 'connections': '*', 'collections': ['catalog']})['secret']
         self.call(client, 'POST', '/api/v1/roles', 201, json={'name': 'analyst', 'connections': ['lite']})
         self.call(client, 'POST', '/api/v1/api-keys', 201, json={'name': 'temp', 'connections': ['lite']})
         self.call(client, 'DELETE', '/api/v1/api-keys/temp', 204)

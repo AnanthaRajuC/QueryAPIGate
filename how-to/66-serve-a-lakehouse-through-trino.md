@@ -128,7 +128,8 @@ same `allowed_tables` and masking, and every call is in the same run history as 
   limited to the catalogs and schemas it serves, and let `allowed_tables` narrow from there
   ([guide 61](61-connect-to-trino.md#the-outer-boundary-a-scoped-trino-user)).
 - **Secrets.** Here the passwords are in the open and every port is bound to 127.0.0.1. With TLS
-  (`http_scheme: https`), the Trino password is a `${VAR}` reference in the file, never a value.
+  (`http_scheme: https`), the Trino password is a `${VAR}` reference in the file, never a value - its variable listed
+  in `QUERYAPIGATE_SECRET_ENV_VARS`.
 - **Time limits.** `QUERYAPIGATE_QUERY_TIMEOUT`, or a key's own `query_timeout`, cancels a slow query on the Trino
   cluster, not only in QueryAPIGate.
 

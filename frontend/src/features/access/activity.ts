@@ -36,7 +36,8 @@ export function daily(items: Run[]): { counts: number[]; errors: number } {
   const counts = new Array(DAYS).fill(0);
   let errors = 0;
   for (const run of items) {
-    // executed_at is 'YYYY-MM-DD HH:MM:SS' in the server's local time; parse as local.
+    // executed_at is RFC 3339 with the server's offset (an older server: its local 'YYYY-MM-DD HH:MM:SS', read here as
+    // the browser's local time) - either way Date reads it.
     const when = new Date(run.executed_at.replace(' ', 'T'));
     const idx = Math.floor((when.getTime() - start.getTime()) / 86_400_000);
     if (idx >= 0 && idx < DAYS) {

@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 os.environ['QUERYAPIGATE_MASK_KEY'] = 'render-vectors-key'
 
-from flask import Flask, jsonify  # noqa: E402
+from flask import Flask  # noqa: E402
 from test_forwarding import binary  # noqa: E402
 from test_queries import details  # noqa: E402
 
@@ -50,6 +50,8 @@ MYSQL = [
     "CAST('2024-01-02 03:04:05.678' AS DATETIME(3))", "TIME '12:34:56'", "TIME '-01:00:00'", "TIME '76:00:00'",
     "CAST('12:34:56.5' AS TIME(1))", "CAST('{\"a\": 1, \"b\": [1.5]}' AS JSON)", "JSON_OBJECT('k', 'é')",
     "NULL", "CAST(NULL AS SIGNED)", "1.5", "CAST(2024 AS YEAR)",
+    # strings a _bin collation flags BINARY: text to the Python driver, which reads only the binary charset as bytes
+    "JSON_UNQUOTE(JSON_EXTRACT('{\"a\": \"é\"}', '$.a'))", "'abc' COLLATE utf8mb4_bin",
 ]
 MASKED = {  # value -> each action applied to it
     'postgres': ["'jane@example.com'::text", "'@example.com'::text", "'x'::text", "''::text", "'abcd'::text",
@@ -73,7 +75,7 @@ def python_body(dialect, settings, sql, actions):
             columns, rows = masking.apply(list(columns), list(rows), actions)
         result = formats.ResultSetDTO(rows, columns)
         with APP.app_context():
-            response = jsonify({'message': 'No results returned'}) if not result else result.to_json()
+            response = result.to_json()
         return response.get_data(as_text=True)
     except Exception:
         return None

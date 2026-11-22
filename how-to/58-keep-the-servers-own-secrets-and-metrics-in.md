@@ -9,8 +9,9 @@ Two things a server can hand out without anyone meaning it to, both closed in 0.
 - **A connection's `${VAR}` password is read from the server's environment** - and the environment holds more than
   connection passwords: the cloud credentials the server runs with, tokens for other services. An administrator who may
   change connections could point one at a host of theirs and have the server send it one of those as a password.
-- **`/metrics` needs no API key** - a scraper shouldn't hold one - so anyone who can reach the server reads it, and its
-  labels name your API keys, saved queries and connections.
+- **`/metrics` needs no API key** - a scraper shouldn't hold one - and its labels name your API keys, saved queries
+  and connections. Before 1.0 anyone who could reach the server read it; now, without a token, only a client on the
+  server's own machine does.
 
 Every command and output below was run against a real server (`queryapigate serve`), a PostgreSQL 16 database, and
 Prometheus 3.15. The server's environment held the warehouse password, an AWS secret key (standing in for the
@@ -54,22 +55,30 @@ Refused before any connection is tried. `AWS_*`, `AZURE_*`, `ARM_*`, `GOOGLE_*`,
 
 ## List the variables your connections use
 
-What no rule knows about is still reachable: a connection referencing `${DB_ADMIN_PW}` saved (`201`), and at the next
-start the server said so:
+Unset, no `${VAR}` is read at all - the allow-list is deny by default, like every other one. A connection saved with
+`${WAREHOUSE_PASSWORD}` is refused:
 
-```
-WARNING queryapigate: Connections and destinations reference environment variables (DB_ADMIN_PW, WAREHOUSE_PASSWORD),
-and QUERYAPIGATE_SECRET_ENV_VARS is unset: an administrator could reference any other variable too, and have the
-server send it to a host of theirs as a password. Set it to the ones in use.
+```json
+{"error":"${WAREHOUSE_PASSWORD} can't be read: QUERYAPIGATE_SECRET_ENV_VARS is unset, and no ${VAR} is read without it - set it to the variables connections and destinations use (names, or prefixes ending in *)","code":"invalid_body"}
 ```
 
-Set it - names, or prefixes ending in `*` (`WAREHOUSE_*,QAG_*`):
+Before 1.0, unset meant any variable but the ones above. A server upgraded with references in use and the list unset
+says so at startup, and those connections fail until it's set:
+
+```
+ERROR queryapigate: Connections and destinations reference environment variables (DB_ADMIN_PW, WAREHOUSE_PASSWORD),
+and QUERYAPIGATE_SECRET_ENV_VARS is unset: no ${VAR} is read without it, so they fail until it is set. To keep them
+working, set QUERYAPIGATE_SECRET_ENV_VARS=DB_ADMIN_PW,WAREHOUSE_PASSWORD
+```
+
+Set it to the ones that should be reachable - names, or prefixes ending in `*` (`WAREHOUSE_*,QAG_*`) - not
+blindly to every name the log lists:
 
 ```bash
 QUERYAPIGATE_SECRET_ENV_VARS=WAREHOUSE_PASSWORD
 ```
 
-The warning is gone, the warehouse query answers as before, and anything else is refused - when it's saved:
+The warehouse query answers, and anything else is refused - when it's saved:
 
 ```json
 {"error":"${DB_ADMIN_PW} isn't one of QUERYAPIGATE_SECRET_ENV_VARS and can't be referenced - use a variable of its own for the secret","code":"invalid_body"}
@@ -146,8 +155,9 @@ own reads it from that Secret. Rendering the chart without the cluster (`helm te
 
 ## Good to know
 
-- **Neither setting breaks a server on upgrade.** Unset, `${VAR}` reaches what it did (but those credentials), and
-  `/metrics` is open as before. Set both wherever anyone outside your own network can reach the server.
+- **Both changed in 1.0.** Unset, `${VAR}` reads nothing - before, any variable but those credentials - and the
+  startup log names the setting that keeps your connections working. Unset, `/metrics` answers only a client on the
+  server's own machine - before, anyone. A Prometheus elsewhere needs the token.
 - **A refused reference never shows the value**, in the answer or the log - it names the variable.
 - **Other references have their own lists:** `${file:...}` reads only inside `QUERYAPIGATE_SECRET_FILE_DIRS`,
   `${vault:...}` only `QUERYAPIGATE_VAULT_PATHS`, `${aws-sm:...}` only `QUERYAPIGATE_AWS_SECRET_PREFIXES`.

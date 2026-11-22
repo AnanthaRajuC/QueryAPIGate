@@ -1,31 +1,75 @@
-"""Result sets and their output formats (JSON, NDJSON, CSV, TSV, XML, YAML, XLSX, Parquet)."""
+"""Result sets and their output formats (JSON, NDJSON, CSV, TSV, XML, YAML, XLSX, Parquet).
+
+How a value is written (rc1, B6 - each lost information before):
+- a timestamp with a zone (TIMESTAMPTZ) keeps its offset and fraction - in JSON, ISO 8601:
+  `2026-11-22T12:03:10.123456+05:30`; one without stays `2026-11-22 12:03:10`, with `.ffffff` when it has a fraction;
+- a DECIMAL is its exact digits - in JSON, a number written as the database gave it (`1234567890.123456789`), not a
+  float's nearest; NaN and infinities, which JSON has no number for, as strings;
+- binary (BLOB, BYTEA, VARBINARY) is base64 - before, its bytes read as UTF-8, with every invalid byte lost.
+"""
+import base64
 import csv
 import json
 import re
+import secrets
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, time
 from decimal import Decimal
 from io import BytesIO, StringIO
 
 import yaml
-from flask import Response, jsonify
+from flask import Response
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from . import parquet
+from .errors import ApiError
+
+
+def timestamp_text(value):
+    """A datetime as JSON shows it: ISO 8601 with its offset and fraction when it has a zone, else
+    'YYYY-MM-DD HH:MM:SS[.ffffff]'."""
+    return value.isoformat() if value.tzinfo is not None else value.isoformat(sep=' ')
 
 
 def json_default(obj):
-    """``default=`` hook for json.dumps covering the types database drivers return."""
+    """``default=`` hook for json.dumps covering the types database drivers return. A Decimal here is a float - the
+    exact number is for result rows (dumps_rows()); this is for everything else (an export's watermark, a cached
+    value)."""
     if isinstance(obj, datetime):
-        return obj.strftime('%Y-%m-%d %H:%M:%S')
+        return timestamp_text(obj)
     if isinstance(obj, (date, time)):
         return obj.isoformat()
     if isinstance(obj, Decimal):
         return float(obj)
     if isinstance(obj, (bytes, bytearray, memoryview)):
-        return bytes(obj).decode('utf-8', 'replace')
+        return base64.b64encode(bytes(obj)).decode('ascii')
     return str(obj)
+
+
+# A Decimal in a result row, written as the exact number it is: json.dumps can only write a float, so each is dumped as
+# a string marked with a token drawn for this response - which no value in the data can know - and the quotes taken off
+# after. str() of a finite Decimal is always a JSON number ('-12.50', '1E+2', '1.5E-7'); only those are marked.
+
+
+def dumps_rows(value):
+    """json.dumps() of result rows as the API writes them (compact, ASCII): Decimals as exact numbers."""
+    token = []
+
+    def default(obj):
+        if isinstance(obj, Decimal):
+            text = str(obj)
+            if not obj.is_finite():
+                return text  # NaN, Infinity: JSON has no number for them
+            if not token:
+                token.append(secrets.token_hex(8))
+            return f'{token[0]}{text}{token[0]}'
+        return json_default(obj)
+
+    text = json.dumps(value, default=default, separators=(',', ':'))
+    if not token:
+        return text
+    return re.sub(f'"{token[0]}(-?[0-9][0-9.eE+-]*){token[0]}"', r'\1', text)
 
 
 def _unique(names):
@@ -55,13 +99,11 @@ def _cell(value):
     if isinstance(value, str):
         return str(value)
     if isinstance(value, Decimal):
-        return float(value)
+        return value  # exact: CSV and XML write str() of it, JSON its digits (dumps_rows()), YAML a number
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode('utf-8', 'replace')
-    if isinstance(value, datetime):
-        return value.replace(tzinfo=None) if value.tzinfo else value
-    if isinstance(value, (date, time)):
-        return value
+        return base64.b64encode(bytes(value)).decode('ascii')
+    if isinstance(value, (datetime, date, time)):
+        return value  # a zone kept: CSV and XML write str() of it, JSON timestamp_text()
     if isinstance(value, (dict, list)):
         # A Mongo document's nested subdocuments/arrays - JSON-encoded rather than left as a Python repr
         # (which str() would produce and is not valid JSON), even though the exporter that ultimately uses
@@ -94,7 +136,8 @@ class ResultSetDTO:
     def _to_delimited(self, delimiter, mimetype):
         data_io = StringIO()
         writer = csv.writer(data_io, delimiter=delimiter)
-        writer.writerow(self.columns)
+        if self.columns:  # none - a write, a Mongo find that matched nothing - is an empty body, not a blank line
+            writer.writerow(self.columns)
         writer.writerows(self.rows)
         return Response(data_io.getvalue(), mimetype=mimetype)
 
@@ -105,11 +148,11 @@ class ResultSetDTO:
         return self._to_delimited('\t', 'text/tab-separated-values')
 
     def to_json(self):
-        return jsonify(self.as_dicts())
+        return Response(dumps_rows(self.as_dicts()) + '\n', mimetype='application/json')
 
     def to_ndjson(self):
-        lines = (json.dumps(row, default=json_default) for row in self.as_dicts())
-        return Response('\n'.join(lines) + '\n', mimetype='application/x-ndjson')
+        lines = [dumps_rows(row) + '\n' for row in self.as_dicts()]
+        return Response(''.join(lines), mimetype='application/x-ndjson')  # no rows: an empty body
 
     def to_xml(self):
         root = ET.Element('data')
@@ -124,15 +167,15 @@ class ResultSetDTO:
         # PyYAML's safe dumper has dates and datetimes but no time of day: a TIME column was a 500. As text, the
         # same ISO form JSON gives it.
         rows = [{k: v.isoformat() if isinstance(v, time) else v for k, v in row.items()} for row in self.as_dicts()]
-        return Response(yaml.safe_dump(rows, default_flow_style=False, sort_keys=False, allow_unicode=True),
-                        mimetype='application/x-yaml')
+        return Response(yaml.dump(rows, Dumper=_YamlDumper, default_flow_style=False, sort_keys=False,
+                                  allow_unicode=True), mimetype='application/x-yaml')
 
     def to_xlsx(self):
         wb = Workbook()
         ws = wb.active
         ws.append(self.columns)
         for row in self.rows:
-            ws.append([ILLEGAL_CHARACTERS_RE.sub('', v) if isinstance(v, str) else v for v in row])
+            ws.append([_xlsx_cell(v) for v in row])
         excel_data = BytesIO()
         wb.save(excel_data)
         return Response(
@@ -142,8 +185,37 @@ class ResultSetDTO:
         )
 
     def to_parquet(self):
+        if not self.columns:
+            # A Parquet file has a schema, and a result with no columns - a write, a Mongo find that matched nothing -
+            # has none to give it.
+            raise ApiError('This result has no columns, so there is no Parquet file to write - ask for json, ndjson '
+                           'or csv', code='invalid_format')
         return Response(parquet.to_bytes(self.columns, self.raw_rows), mimetype=parquet.MIMETYPE,
                         headers={'Content-Disposition': 'attachment;filename=result.parquet'})
+
+
+class _YamlDumper(yaml.SafeDumper):
+    """safe_dump's, with a Decimal as the exact number it is."""
+
+
+def _yaml_decimal(dumper, value):
+    text = str(value)
+    if value.is_finite():
+        return dumper.represent_scalar('tag:yaml.org,2002:float' if '.' in text or 'E' in text
+                                       else 'tag:yaml.org,2002:int', text)
+    return dumper.represent_str(text)
+
+
+_YamlDumper.add_representer(Decimal, _yaml_decimal)
+
+
+def _xlsx_cell(value):
+    """A sheet has no time zones - a timestamp's wall time, as before - and only plain strings."""
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub('', value)
+    if isinstance(value, (datetime, time)) and value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
 
 
 FORMATTERS = {
@@ -185,7 +257,7 @@ def _stream_delimited(columns, rows, delimiter):
 
 def _stream_ndjson(columns, rows):
     for row in rows:
-        yield json.dumps(dict(zip(columns, (_cell(v) for v in row), strict=False)), default=json_default) + '\n'
+        yield dumps_rows(dict(zip(columns, (_cell(v) for v in row), strict=False))) + '\n'
 
 
 def iter_stream_chunks(output_format, columns, rows):

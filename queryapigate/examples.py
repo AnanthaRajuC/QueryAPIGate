@@ -320,7 +320,7 @@ KEY_NAMES = ROLE_NAMES
 
 
 def _bundle(collection):
-    return {'format': bundle.FORMAT, 'format_version': bundle.FORMAT_VERSION, 'collection': collection,
+    return {'format': bundle.FORMAT, 'format_version': 1, 'collection': collection,  # SCENARIOS' stored field names
             'queries': SCENARIOS[collection]['queries']}
 
 

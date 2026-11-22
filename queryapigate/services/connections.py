@@ -17,6 +17,9 @@ from ..errors import ApiError
 
 # Fields the server owns or computes; never stored from a request.
 _SERVER_FIELDS = ('name', 'created_at', 'updated_at', 'usage', 'example')
+# A connection's own fields; every other one is a driver option, given under `options` (rc1, B8: a field the API
+# didn't know became one, so a typo - `hots` - was saved as an option and `bogus` answered 201).
+TOP_FIELDS = ('db', 'active', 'host', 'port', 'user', 'password', 'database', 'credentials')
 _NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$')
 # What may change on an H2 or JDBC connection without choosing what it opens: everything else - a URL, a jar, a
 # driver option - can name a file, or code, on this server.
@@ -95,7 +98,7 @@ def to_item(name, details):
 def to_detail(name, details):
     """One connection with every field, the password masked; driver options under `options`."""
     masked = _masked(name, details)
-    known = ('db', 'active', 'host', 'port', 'user', 'password', 'database', 'created_at', 'updated_at', 'example')
+    known = (*TOP_FIELDS, 'created_at', 'updated_at', 'example')
     return {**to_item(name, details), 'password': masked.get('password'),
             'options': {k: v for k, v in masked.items() if k not in known}}
 
@@ -123,6 +126,10 @@ def _fields(data):
     options = data.get('options') or {}
     if not isinstance(options, dict):
         raise ApiError('options must be a JSON object', code='invalid_body')
+    unknown = sorted(set(data) - {*_SERVER_FIELDS, *TOP_FIELDS, 'options'})
+    if unknown:
+        raise ApiError(f"Unknown field(s): {', '.join(unknown)} - a driver option goes under options, as "
+                       f'{{"options": {{"{unknown[0]}": ...}}}}', code='unknown_field')
     fields = {k: v for k, v in data.items() if k not in (*_SERVER_FIELDS, 'options')}
     clash = sorted(set(options) & set(fields))
     if clash:

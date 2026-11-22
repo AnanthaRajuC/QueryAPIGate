@@ -105,7 +105,8 @@ The image already runs as a non-root user, under gunicorn with one worker and ei
 ## Step 3: Add your database and a key
 
 Open `https://api.example.com/console`, enter the admin key, and add a connection under **Connections** - with the
-password as `${WAREHOUSE_PASSWORD}`, or typed in (it's encrypted, since `QUERYAPIGATE_SECRET_KEY` is set). Then
+password as `${WAREHOUSE_PASSWORD}` (with `WAREHOUSE_PASSWORD` and `QUERYAPIGATE_SECRET_ENV_VARS=WAREHOUSE_PASSWORD` in the
+container's environment), or typed in (it's encrypted, since `QUERYAPIGATE_SECRET_KEY` is set). Then
 create scoped keys for whatever will call the API ([guide 13](13-set-up-a-scoped-api-key.md)) - the admin key
 shouldn't leave your team.
 

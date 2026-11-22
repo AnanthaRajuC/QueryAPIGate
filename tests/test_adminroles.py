@@ -88,7 +88,8 @@ class RoleTests(unittest.TestCase):
                         self.assertEqual((status, code), (403, 'role_forbidden'))
 
     def test_a_refusal_names_the_capability(self):
-        res = self.client.post('/api/v1/roles', headers=self.as_role['developer'], json={'name': 'r'})
+        res = self.client.post('/api/v1/roles',
+                               headers=self.as_role['developer'], json={'connections': '*', 'name': 'r'})
         body = res.get_json()
         self.assertEqual((body['code'], body['capability'], body['role']), ('role_forbidden', 'access.write',
                                                                             'developer'))
@@ -168,12 +169,12 @@ class CollectionAccessTests(unittest.TestCase):
         self.assertEqual((res.status_code, body['code'], body['capability']), (403, 'role_forbidden', 'access.write'))
         self.assertEqual(body['gaining'], {'keys': ['partner-key'], 'roles': []})
         self.assertIn("key 'partner-key'", body['error'])
-        self.assertEqual(self.client.get('/q/salaries', headers=self.partner).status_code, 403)  # nothing changed
+        self.assertEqual(self.client.get('/q/salaries', headers=self.partner).status_code, 404)  # nothing changed
 
     def test_moves_that_give_no_one_new_access_are_the_developers(self):
         self.assertEqual(self.move(self.dev, 'draft_ideas', 'internal').status_code, 200)  # nobody holds internal
         self.assertEqual(self.move(self.dev, 'report', None).status_code, 200)  # taking access away
-        self.assertEqual(self.client.get('/q/report', headers=self.partner).status_code, 403)
+        self.assertEqual(self.client.get('/q/report', headers=self.partner).status_code, 404)
 
     def test_an_admin_may_widen_access(self):
         self.assertEqual(self.move(self.ops, 'salaries', 'partner').status_code, 200)
@@ -183,7 +184,7 @@ class CollectionAccessTests(unittest.TestCase):
         res = self.client.patch('/api/v1/collections/internal', headers=self.dev,
                                 json={'name': 'partner', 'merge': True})
         self.assertEqual((res.status_code, res.get_json()['code']), (403, 'role_forbidden'))
-        self.assertEqual(self.client.get('/q/salaries', headers=self.partner).status_code, 403)
+        self.assertEqual(self.client.get('/q/salaries', headers=self.partner).status_code, 404)
         # a plain rename gives no one anything new: the partner key follows its collection
         res = self.client.patch('/api/v1/collections/partner', headers=self.dev, json={'name': 'partners'})
         self.assertEqual(res.status_code, 200, res.get_data(as_text=True))

@@ -1,4 +1,5 @@
 """OpenAPI description of the API, served at /openapi.json and rendered at /docs."""
+import functools
 import re
 from urllib.parse import quote
 
@@ -47,9 +48,46 @@ _EXEC_PROPS = {
 }
 
 
-def _saved_query_paths(queries):
-    """One documented endpoint per saved query, with its declared parameters and rules."""
-    paths, seen = {}, set()
+@functools.cache
+def operation_ids():
+    """{(path, method): operationId} for every route the server answers - its Flask endpoint's function name
+    (`v1.create_connection` is `create_connection`), with the blueprint before it where two share a name
+    (`api_connection_schema`, `v1_connection_schema`), and `_post` after a second method of one function; a trailing
+    `_endpoint` dropped, the sign-in routes' as `auth_...`, and `publish_query`/`unpublish_query` (rc1, B18:
+    there were none, and adding them later would rename every generated client's methods). Read from the blueprints
+    registered on a bare app, so building the document needs no server; covered by the compatibility promise."""
+    from flask import Flask
+
+    from . import app, sso, v1
+    bare = Flask(__name__)
+    for blueprint in (app.bp, v1.bp, sso.bp):
+        bare.register_blueprint(blueprint)
+    routes = []
+    for rule in bare.url_map.iter_rules():
+        if rule.endpoint == 'static':
+            continue
+        path = re.sub(r'<[^>]+>', '{}', rule.rule)  # matched whatever the document names a path parameter
+        blueprint, function = rule.endpoint.split('.', 1)
+        function = _RENAMED.get(function, function.removesuffix('_endpoint'))
+        if blueprint == 'auth':
+            function = 'auth_' + function  # session, login, callback: the Console's sign-in, said so
+        for number, method in enumerate(sorted(rule.methods - {'HEAD', 'OPTIONS'}, key=_METHOD_ORDER.index)):
+            routes.append((path, method.lower(), blueprint, function + ('_post' if number else '')))
+    blueprints = {}
+    for _path, _method, blueprint, function in routes:
+        blueprints.setdefault(function, set()).add(blueprint)
+    return {(path, method): f'{blueprint}_{function}' if len(blueprints[function]) > 1 else function
+            for path, method, blueprint, function in routes}
+
+
+_METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+_RENAMED = {'publish': 'publish_query', 'unpublish': 'unpublish_query'}  # what they act on, in the name
+
+
+def _saved_query_paths(queries, taken=frozenset()):
+    """One documented endpoint per saved query, with its declared parameters and rules. Its operationId is `run_` and
+    its name, never one of ``taken`` - the fixed operations' (operation_ids()) - which keep theirs whatever is saved."""
+    paths, seen = {}, set(taken)
     for query in queries:
         name = query['name']
         has_default_connection = bool(query.get('connection_name'))
@@ -330,8 +368,13 @@ def build_spec(version, saved_queries=None, jwt=None):
         operation['description'] = ('**Experimental** - may change in any minor release, noted in the changelog. '
                                     + operation.get('description', '')).strip()
         spec['paths'][path] = {**spec['paths'][path], method: operation}
+    ids = operation_ids()
+    for path, item in list(spec['paths'].items()):  # copies, as above: v1_spec.PATHS' items are shared
+        route = re.sub(r'\{[^}]+\}', '{}', path)
+        spec['paths'][path] = {method: {**operation, 'operationId': ids[(route, method)]}
+                               if (route, method) in ids else operation for method, operation in item.items()}
     if saved_queries:
-        spec['paths'].update(_saved_query_paths(saved_queries))
+        spec['paths'].update(_saved_query_paths(saved_queries, frozenset(ids.values())))
         spec['tags'] = [{'name': 'Saved queries (live)',
                          'description': 'One endpoint per saved query, generated from its published version: its '
                                         'declared parameters and their rules, and its default connection.'}]

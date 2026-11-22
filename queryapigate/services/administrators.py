@@ -8,7 +8,7 @@ someone else takes `admins.read` / `admins.write` (owners). The route checks tha
 """
 from .. import adminroles, admins, store, workspaces
 from ..errors import ApiError
-from .access import _diff, _refuse_unknown, etag  # noqa: F401 - etag re-exported for the routes
+from .access import _diff, _refuse_unknown, etag, refuse_null  # noqa: F401 - etag re-exported for the routes
 
 
 def require_self_or(permission, name, capability):
@@ -48,6 +48,7 @@ def update(name, data, actor):
     """Change the role, email or `active` (false stops every token and session of theirs at once), or `sso`:
     "pending" binds them at their next SSO sign-in, null unlinks them."""
     _refuse_unknown(data, ('role', 'email', 'active', 'sso'))
+    refuse_null(data, ('active',))
     before = admins.get_admin(name)
     if 'sso' in data:
         if data['sso'] not in ('pending', None):

@@ -24,7 +24,8 @@ curl -X PATCH http://127.0.0.1:5000/api/v1/connections/warehouse -H 'X-API-Key: 
   -d '{"password": "${WAREHOUSE_PASSWORD}"}'
 ```
 
-and start the server with it set: `WAREHOUSE_PASSWORD=... queryapigate serve`. Verified: the store holds the
+and start the server with it set, and allowed: `WAREHOUSE_PASSWORD=... QUERYAPIGATE_SECRET_ENV_VARS=WAREHOUSE_PASSWORD queryapigate serve`
+(unset, `QUERYAPIGATE_SECRET_ENV_VARS` allows no variable - the PATCH is refused). Verified: the store holds the
 literal text `${WAREHOUSE_PASSWORD}`, the connection works, and the value is read from the environment each time a
 connection is opened. Your secret manager (Docker/Kubernetes secrets, systemd credentials, a `.env` file with
 `chmod 600`) keeps the real value.

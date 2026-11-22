@@ -30,7 +30,7 @@ class RekeyTestCase(unittest.TestCase):
         conn.commit()
         conn.close()
         self.env = mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': self.tmp.name, 'QUERYAPIGATE_API_KEY': 'admin-key',
-                                                'QUERYAPIGATE_SECRET_KEY': OLD})
+                                                'QUERYAPIGATE_SECRET_KEY': OLD, 'QUERYAPIGATE_SECRET_ENV_VARS': 'PW'})
         self.env.start()
         self.addCleanup(self.env.stop)
         db.init_schema()

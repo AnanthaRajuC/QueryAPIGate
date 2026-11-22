@@ -1,6 +1,7 @@
-// Timestamps from the server are its local wall-clock time, 'YYYY-MM-DD HH:MM:SS', with no zone in them. GET /health
-// says which zone that is (an IANA name where the server can tell, and its current UTC offset), so these turn such a
-// string into an instant and show it in the zone the viewer picked (Settings > Appearance > Time zone).
+// Timestamps from the Management API are RFC 3339 with the server's offset, '2026-11-22T12:03:10+05:30' (since rc1).
+// Elsewhere - and before - they are its local wall-clock time, 'YYYY-MM-DD HH:MM:SS', with no zone in them: GET /health
+// says which zone that is (an IANA name where the server can tell, and its current UTC offset), so these turn either
+// into an instant and show it in the zone the viewer picked (Settings > Appearance > Time zone).
 
 export interface ServerZone {
   name: string | null; // e.g. 'Asia/Kolkata'; correct across daylight-saving changes
@@ -10,6 +11,7 @@ export interface ServerZone {
 export type ShowIn = 'Local' | 'UTC' | 'Server';
 
 const WALL = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
+const WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** '+05:30' -> 330 minutes east of UTC. */
@@ -59,6 +61,7 @@ function wallIn(instant: number, format: Intl.DateTimeFormat): number {
 
 /** The instant a server timestamp names, or null when it isn't a date and time (e.g. a date-only expiry). */
 export function serverInstant(text: string, zone: ServerZone): number | null {
+  if (WITH_OFFSET.test(text.trim())) return Date.parse(text.trim()); // names its own instant
   const m = WALL.exec(text.trim());
   if (!m) return null;
   const wall = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +(m[6] ?? 0));

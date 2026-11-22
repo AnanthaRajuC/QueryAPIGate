@@ -21,6 +21,21 @@ Tool listing (`tools/list`) honors the exact same per-key scoping `GET /catalog`
 calls more than the identical REST key could. A tool's `inputSchema` is generated from the saved query's own
 declared parameters, the same JSON Schema translation `/openapi.json` already uses.
 
+**Tool names.** A saved query is listed as a tool named for it, in the characters common LLM APIs accept
+(`^[a-zA-Z0-9_-]{1,64}$`): every other character becomes `_`, and the name is cut to 64 - `monthly revenue` is
+`monthly_revenue`, `Umsätze.2026` is `Ums_tze_2026`. A call may name the query itself, as before 1.0. Two queries can't
+share a tool name: a new one that would is refused when it's saved (`400 invalid_name`), and so is one named for a
+built-in tool - `list_tables`, `execute_sql`, `describe_table` - or one kept for tools to come (`list_queries`,
+`describe_query`, `search_queries`, `run_query`, `list_connections`, `list_databases`, `list_collections`,
+`explain_sql`, `sample_table`, `list_resources`, `read_resource`). Of two stored before 1.0 that share one, the
+query named exactly as the tool is listed, else the first by name; one named for a built-in tool isn't listed.
+
+**Parameter names.** A tool's arguments are the query's parameters beside the ones that control a call -
+`page_size`, and a write tool's `approval` or `idempotency_key`. So a parameter can't be named `format`, `page`,
+`page_size`, `connection_name`, `version`, `timeout`, `stream`, `approval` or `idempotency_key`, nor start with `_`
+(kept for controls to come): a query that uses one is refused when it's saved (`400 invalid_body`). One saved before
+1.0 still runs; saving a new version of it needs the parameter renamed.
+
 Calling a tool (`tools/call`) runs the query through the exact same code path `GET /q/<name>` does: the same
 connection-grant check, parameter validation, `cache_ttl` caching, `execution_history` recording and audit
 trail. A run triggered over MCP shows up in the admin UI's History tab and the Home tab's live feed exactly
@@ -231,8 +246,9 @@ run history (and live events) with `"transport": "mcp"`.
 **Limits are shared through Redis.** With `QUERYAPIGATE_REDIS_URL` set (the same value for both processes), a key's
 `rate_limit` of 100/minute is 100 calls a minute over REST and MCP together. Without it, each process counts on its
 own: 100 over REST *and* 100 over MCP, as two instances would. Metrics are per process either way: `queryapigate mcp` serves its own
-`GET /metrics` (and `GET /health`) on its port, beside `/mcp` - open, or with `QUERYAPIGATE_METRICS_TOKEN` set, to a
-scraper sending it as a bearer token, as the REST server's. Scrape both.
+`GET /metrics` (and `GET /health`) on its port, beside `/mcp`, on the REST server's rule: with
+`QUERYAPIGATE_METRICS_TOKEN` set, to a scraper sending it as a bearer token; without, to a client on this machine. Scrape
+both.
 
 **The CLI is a local operator, not a caller.** `queryapigate export` reads the store directly with no key, so no
 grant or rate limit applies - whoever can run it can already read `QUERYAPIGATE_HOME`. Its runs are still recorded

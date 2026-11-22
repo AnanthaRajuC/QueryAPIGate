@@ -56,11 +56,14 @@ class ExportTests(BundleTestCase):
         self.save('loose')
         document = bundle.export_bundle('reporting')
         self.assertEqual((document['format'], document['format_version'], document['collection']),
-                         (bundle.FORMAT, 1, 'reporting'))
+                         (bundle.FORMAT, 2, 'reporting'))
         self.assertEqual([q['name'] for q in document['queries']], ['q1', 'q2'])
         q1 = document['queries'][0]
         self.assertEqual(q1['cache_ttl'], 30)
-        self.assertEqual(q1['query_parameters'], {'id': {'type': 'int'}})
+        # version 2 (rc1, B14): the Management API's names, as a configuration file writes them
+        self.assertEqual((q1['sql'], q1['parameters']), ('SELECT :id', {'id': 'integer'}))
+        self.assertNotIn('sql_query', q1)
+        self.assertNotIn('query_parameters', q1)
         for forbidden in ('execution_history', 'uuid', 'created_at', 'status', 'version', 'collection'):
             self.assertNotIn(forbidden, q1)
         self.assertNotIn('cache_ttl', document['queries'][1])  # unset fields are omitted, not null
@@ -68,7 +71,7 @@ class ExportTests(BundleTestCase):
     def test_exports_the_latest_version(self):
         self.save('q1', 'reporting', sql_query='SELECT 1')
         self.save('q1', sql_query='SELECT 2')
-        self.assertEqual(bundle.export_bundle('reporting')['queries'][0]['sql_query'], 'SELECT 2')
+        self.assertEqual(bundle.export_bundle('reporting')['queries'][0]['sql'], 'SELECT 2')
 
     def test_an_unknown_or_empty_collection_is_an_error(self):
         with self.assertRaises(ApiError) as caught:
@@ -128,6 +131,46 @@ class MaskAndMcpTests(BundleTestCase):
                 content = store.load_versions('q1')
                 stored = content[str(store.read_published(content))]
         self.assertEqual((stored['mask'], stored['mcp']), (mask, False))  # not unmasked, not back on MCP
+
+
+class FormatVersionTests(BundleTestCase):
+    """rc1 (B14): version 2 writes the Management API's names; version 1, the stored ones, still imports."""
+
+    def test_a_version_1_bundle_still_imports(self):
+        document = {'format': bundle.FORMAT, 'format_version': 1, 'collection': 'reporting', 'queries': [{
+            'name': 'old', 'author': 'a', 'description': 'd', 'sql_query': 'SELECT :id AS id',
+            'query_parameters': {'id': {'type': 'int', 'default': 3}}, 'column_descriptions': {'id': 'The id'},
+            'mcp': False}]}
+        self.assertEqual(bundle.import_bundle(document)['created'], ['old'])
+        stored = store.load_versions('old', with_history=False)['1']
+        self.assertEqual((stored['sql_query'], stored['column_descriptions'], stored['mcp']),
+                         ('SELECT :id AS id', {'id': 'The id'}, False))
+
+    def test_version_2_takes_the_api_names_only(self):
+        entry = {'name': 'new', 'description': 'd', 'sql_query': 'SELECT 1'}
+        with self.assertRaises(ApiError) as caught:
+            bundle.import_bundle({'format': bundle.FORMAT, 'format_version': 2, 'collection': 'reporting',
+                                  'queries': [entry]})
+        self.assertIn('unexpected field(s): sql_query', caught.exception.message)
+        for version in (3, True, '2'):
+            with self.subTest(version=version), self.assertRaises(ApiError) as caught:
+                bundle.import_bundle({'format': bundle.FORMAT, 'format_version': version, 'collection': 'reporting',
+                                      'queries': [entry]})
+            self.assertIn('this version reads 1 and 2', caught.exception.message)
+
+    def test_a_version_2_bundle_round_trips_every_field(self):
+        self.save('q', 'reporting', sql_query='SELECT :id AS id', tags=['a', 'b'], cache_ttl=30,
+                  query_parameters={'id': {'type': 'int', 'default': 3, 'example': 2, 'description': 'Which'}},
+                  column_descriptions={'id': 'The id'}, mask=[{'column': '*.id', 'action': 'hash'}], mcp=False)
+        before = store.load_versions('q', with_history=False)['1']
+        exported = bundle.export_bundle('reporting')
+        self.assertEqual(bundle.import_bundle(exported, on_conflict='new-version')['new_versions'], ['q'])
+        after = store.load_versions('q', with_history=False)['2']
+        for field in ('sql_query', 'tags', 'cache_ttl', 'column_descriptions', 'mask', 'mcp'):
+            self.assertEqual(after.get(field), before.get(field), field)
+        from queryapigate import params  # the same rules, written in their normal form ('integer', required: false)
+        self.assertEqual(params.read_definitions(after['query_parameters']),
+                         params.read_definitions(before['query_parameters']))
 
 
 class ImportTests(BundleTestCase):

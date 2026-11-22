@@ -12,6 +12,15 @@ describe('server timestamps', () => {
     );
   });
 
+  it('reads RFC 3339 with an offset as the instant it names, whatever the server zone', () => {
+    expect(new Date(serverInstant('2026-10-04T10:36:59+05:30', NEW_YORK)!).toISOString()).toBe(
+      '2026-10-04T05:06:59.000Z',
+    );
+    expect(new Date(serverInstant('2026-10-04T05:06:59.25Z', KOLKATA)!).toISOString()).toBe(
+      '2026-10-04T05:06:59.250Z',
+    );
+  });
+
   it("uses the zone's own rules across daylight saving, not today's offset", () => {
     // New York is UTC-4 in July and UTC-5 in January
     expect(new Date(serverInstant('2026-07-01 12:00:00', NEW_YORK)!).toISOString()).toBe(

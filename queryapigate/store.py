@@ -15,7 +15,7 @@ import threading
 import uuid
 from datetime import datetime
 
-from . import config, db, duckfiles, history, metacache, scope
+from . import config, db, duckfiles, history, metacache, scope, toolnames
 from .errors import ApiError
 
 # Serialises read-modify-write cycles on the JSON files this app manages.
@@ -162,9 +162,10 @@ def record_audit(actor, action, target, changes=None, via=None):
 
 
 def read_audit_entries():
-    """Every stored entry with its place in the hash chain (`seq`, `hash`), oldest first - for /api/v1/audit."""
-    rows = db.connection().execute('SELECT entry_json, seq, hash FROM audit_log ORDER BY id').fetchall()
-    return [{**json.loads(row['entry_json']), 'seq': row['seq'], 'hash': row['hash']} for row in rows]
+    """(row id, entry) for every stored entry, with its place in the hash chain (`seq`, `hash`), oldest first - for
+    /api/v1/audit, which pages by the row id."""
+    rows = db.connection().execute('SELECT id, entry_json, seq, hash FROM audit_log ORDER BY id').fetchall()
+    return [(row['id'], {**json.loads(row['entry_json']), 'seq': row['seq'], 'hash': row['hash']}) for row in rows]
 
 
 def read_audit_log():
@@ -681,6 +682,8 @@ def save_version(filename, fields, collection=_UNSET, example=False, publish=Tru
     with db.transaction() as conn:
         exists = conn.execute('SELECT 1 FROM saved_queries WHERE workspace = ? AND name = ?', (ws, name)).fetchone()
         if exists is None:
+            others = [r['name'] for r in conn.execute('SELECT name FROM saved_queries WHERE workspace = ?', (ws,))]
+            toolnames.check_new_query(name, others)
             conn.execute('INSERT INTO saved_queries (workspace, name, collection, example) VALUES (?, ?, NULL, 0)',
                          (ws, name))
         row = conn.execute('SELECT MAX(version) AS m FROM saved_query_versions WHERE workspace = ? AND query_name = ?',

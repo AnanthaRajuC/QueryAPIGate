@@ -15,6 +15,8 @@ each one replaces keep working, marked deprecated. Conventions, the same on ever
 Routes here translate HTTP to services/ calls and back; the meaning of each operation lives in the service.
 """
 import json
+import re
+from datetime import datetime
 
 from flask import Blueprint, Response, current_app, g, jsonify, request
 
@@ -61,6 +63,44 @@ def forget_what_was_deleted(response):
     if request.method == 'DELETE' and 200 <= response.status_code < 300:
         from . import configcode
         configcode.forget_deleted(request.endpoint, request.view_args)
+    return response
+
+
+# Timestamps, as RFC 3339 with the server's offset (rc1, B7): the store keeps its local wall-clock time,
+# 2026-11-22 12:03:10, which named no zone - a client had to ask /health for it. Converted on the way out, under the
+# keys that hold one; a date (a key's expires_at) stays a date. Not inside what callers wrote - a run's parameters, an
+# export's watermark, a write's arguments - nor a cached body or a Postman file, served as they are.
+_LOCAL_TIME = re.compile(r'^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?$')
+_TIME_KEYS = frozenset({'timestamp', 'last_seen', 'since', 'until'})
+_THEIRS = frozenset({'params', 'parameters', 'arguments', 'result', 'watermark', 'example', 'default', 'options',
+                     'mongo', 'columns', 'body', 'values'})
+_AS_SERVED = frozenset({'v1.get_cache_entry', 'v1.collection_postman'})
+
+
+def rfc3339(value):
+    """A stored local time as RFC 3339 with the offset it had then: '2026-11-22T12:03:10+05:30'."""
+    return datetime.fromisoformat(value.replace(' ', 'T')).astimezone().isoformat()
+
+
+def _with_offsets(value):
+    if isinstance(value, dict):
+        return {k: (rfc3339(v) if isinstance(v, str) and (k.endswith(('_at', '_until')) or k in _TIME_KEYS)
+                    and _LOCAL_TIME.match(v)
+                    else v if k in _THEIRS else _with_offsets(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_with_offsets(v) for v in value]
+    return value
+
+
+@bp.after_request
+def timestamps_with_offsets(response):
+    if response.mimetype != 'application/json' or response.direct_passthrough or request.endpoint in _AS_SERVED:
+        return response
+    data = response.get_data()
+    if not data:
+        return response
+    body = json.loads(data)
+    response.set_data(current_app.json.response(_with_offsets(body)).get_data())
     return response
 
 
@@ -816,8 +856,9 @@ def list_write_requests():
     """Writes AI agents asked to make over MCP (agentwrites.py), newest first; `?status=pending` for those
     waiting."""
     from . import agentwrites
-    found = agentwrites.list_requests(request.args.get('status'))
-    return jsonify({'items': [agentwrites.public(r) for r in found]}), 200
+    found, next_cursor = agentwrites.list_requests(request.args.get('status'), request.args.get('limit'),
+                                                   request.args.get('cursor'))
+    return jsonify({'items': [agentwrites.public(r) for r in found], 'next_cursor': next_cursor}), 200
 
 
 @bp.route('/write-requests/<request_id>', methods=['GET'])
@@ -889,7 +930,8 @@ def list_audit():
     else:
         workspace = g.permission.workspace
     return jsonify(audit.listing(action=args.get('action'), actor=args.get('actor'), target=args.get('target'),
-                                 text=args.get('q'), workspace=workspace)), 200
+                                 text=args.get('q'), workspace=workspace, limit=args.get('limit'),
+                                 cursor=args.get('cursor'))), 200
 
 
 @bp.route('/audit/delivery', methods=['GET'])

@@ -144,7 +144,7 @@ class ValidationTests(FilesTestCase):
                        {'use_ssl': 'no'}, {'auto_views': 'yes'}):
             with self.subTest(fields=fields):
                 res = self.client.post('/api/v1/connections', headers=ADMIN,
-                                       json={'name': 'x', 'db': 'duckdb', 'database': ':memory:', **fields})
+                                       json={'name': 'x', 'db': 'duckdb', 'database': ':memory:', 'options': fields})
                 self.assertEqual(res.status_code, 400, res.get_data(as_text=True))
                 self.assertEqual(res.get_json()['code'], 'invalid_body')
 
