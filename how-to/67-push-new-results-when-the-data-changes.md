@@ -220,7 +220,7 @@ watch('http://localhost:5002/live/product?id=3', appKey, (result) => {
 - **Route `/live/` to the events server** beside `/events`, from the reverse proxy in front of both - the Caddyfile
   in [DEPLOYMENT.md](../documentation/DEPLOYMENT.md#9-live-events-for-many-clients-optional) does. The main server
   answers `/live/...` with `404`.
-- **Set `QUERYAPIGATE_SECRET_KEY`**, so CDC sources' secrets are stored encrypted, as connection passwords are.
+- **Set `QUERYAPIGATE_ENCRYPTION_KEY`**, so CDC sources' secrets are stored encrypted, as connection passwords are.
 - **Rotate a secret** with **Rotate** on the CDC sources screen (or `POST /api/v1/cdc-sources/shop/rotate`): the new
   one is shown once, and the old one keeps working for the grace period you choose - an hour by default - so
   Debezium can be restarted with the new one at any point in it.

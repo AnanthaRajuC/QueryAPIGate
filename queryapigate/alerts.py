@@ -105,7 +105,7 @@ def _sso():
 
 
 def _encryption():
-    """QUERYAPIGATE_SECRET_KEY lists more than one key: a rotation was started (ADR 0009) and isn't finished -
+    """QUERYAPIGATE_ENCRYPTION_KEY lists more than one key: a rotation was started (ADR 0009) and isn't finished -
     passwords are still under an old key (run rekey), or none are (remove the old keys)."""
     if len(config.secret_keys()) < 2:
         return []
@@ -116,12 +116,12 @@ def _encryption():
     if old:
         return [_alert('warning', 'encryption_key_rotation_incomplete', 'secret_key',
                        f"{_plural(old, 'password')} {'is' if old == 1 else 'are'} still encrypted with an old key",
-                       'QUERYAPIGATE_SECRET_KEY lists several keys, so a rotation has started. Run `queryapigate '
+                       'QUERYAPIGATE_ENCRYPTION_KEY lists several keys, so a rotation has started. Run `queryapigate '
                        'rekey` to re-encrypt them with the first key, then remove the others.', target)]
     return [_alert('info', 'encryption_key_rotation_incomplete', 'secret_key',
                    'Every password is under the new encryption key - remove the old ones',
-                   f"QUERYAPIGATE_SECRET_KEY still lists {found['keys']} keys, but nothing is encrypted with any but "
-                   'the first. Remove the others from every instance to finish the rotation.', target)]
+                   f"QUERYAPIGATE_ENCRYPTION_KEY still lists {found['keys']} keys, but nothing is encrypted with any "
+                   'but the first. Remove the others from every instance to finish the rotation.', target)]
 
 
 def _secret_providers():

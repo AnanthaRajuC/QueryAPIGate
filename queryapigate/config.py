@@ -710,7 +710,8 @@ def _check_vault():
 
 # The settings that are secrets: each can also be read from a file, NAME_FILE (ADR 0015) - Docker's and most images'
 # convention - read at startup, as the environment variable would be.
-SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_SECRET_KEY', 'QUERYAPIGATE_DATABASE_URL',
+SECRET_SETTINGS = ('QUERYAPIGATE_API_KEY', 'QUERYAPIGATE_ENCRYPTION_KEY', 'QUERYAPIGATE_SECRET_KEY',
+                   'QUERYAPIGATE_DATABASE_URL',
                    'QUERYAPIGATE_REDIS_URL', 'QUERYAPIGATE_AUDIT_KEY', 'QUERYAPIGATE_MASK_KEY',
                    'QUERYAPIGATE_JWT_SECRET', 'QUERYAPIGATE_SSO_CLIENT_SECRET', 'QUERYAPIGATE_VAULT_SECRET_ID',
                    'QUERYAPIGATE_METRICS_TOKEN', 'QUERYAPIGATE_RUN_STORE_URL', 'QUERYAPIGATE_CDC_SOURCES')
@@ -767,12 +768,30 @@ def dataplane_secret():
     return os.environ.get('QUERYAPIGATE_DATAPLANE_SECRET', '').strip() or None
 
 
+ENCRYPTION_KEY = 'QUERYAPIGATE_ENCRYPTION_KEY'
+# Its name before rc1 (C1): still read, but a Flask user takes it for a session key, and every other SECRET_ setting
+# is about secret references. Both set, they must agree.
+ENCRYPTION_KEY_ALIAS = 'QUERYAPIGATE_SECRET_KEY'
+
+
+def _encryption_key_raw():
+    return (os.environ.get(ENCRYPTION_KEY, '').strip() or os.environ.get(ENCRYPTION_KEY_ALIAS, '').strip())
+
+
+def encryption_key_setting():
+    """The name the key is set under - its old one only when that alone is set - for what's said about it."""
+    if os.environ.get(ENCRYPTION_KEY_ALIAS, '').strip() and not os.environ.get(ENCRYPTION_KEY, '').strip():
+        return ENCRYPTION_KEY_ALIAS
+    return ENCRYPTION_KEY
+
+
 def secret_keys():
-    """The keys connection and destination passwords are encrypted with at rest (QUERYAPIGATE_SECRET_KEY), first
-    to last - empty when unset: encryption at rest is opt-in, and without it a password is stored exactly as given.
-    Several, comma-separated, while rotating (ADR 0009): the first encrypts, every one decrypts, and
-    `queryapigate rekey` moves what's stored under the others to the first. Validated by check_secret_keys()."""
-    return [k.strip() for k in os.environ.get('QUERYAPIGATE_SECRET_KEY', '').split(',') if k.strip()]
+    """The keys connection and destination passwords are encrypted with at rest (QUERYAPIGATE_ENCRYPTION_KEY, or its
+    old name QUERYAPIGATE_SECRET_KEY), first to last - empty when unset: encryption at rest is opt-in, and without it a
+    password is stored exactly as given. Several, comma-separated, while rotating (ADR 0009): the first encrypts, every
+    one decrypts, and `queryapigate rekey` moves what's stored under the others to the first. Validated by
+    check_secret_keys()."""
+    return [k.strip() for k in _encryption_key_raw().split(',') if k.strip()]
 
 
 def secret_key():
@@ -800,18 +819,23 @@ def _encryption_state():
 
 
 def check_secret_keys():
-    """Each key in QUERYAPIGATE_SECRET_KEY a real Fernet key, none twice - saying which one is wrong."""
+    """Each key in QUERYAPIGATE_ENCRYPTION_KEY a real Fernet key, none twice - saying which one is wrong; and its old
+    name, QUERYAPIGATE_SECRET_KEY, the same when both are set."""
+    new, old = os.environ.get(ENCRYPTION_KEY, '').strip(), os.environ.get(ENCRYPTION_KEY_ALIAS, '').strip()
+    if new and old and new != old:
+        raise ValueError(f'{ENCRYPTION_KEY} and {ENCRYPTION_KEY_ALIAS} (its old name) are both set, to different keys '
+                         f'- set {ENCRYPTION_KEY} only')
     keys = secret_keys()
     if not keys:
         return
     try:
         from cryptography.fernet import Fernet
     except ImportError:
-        raise ValueError('QUERYAPIGATE_SECRET_KEY is set but the "cryptography" package is not installed - '
+        raise ValueError(f'{encryption_key_setting()} is set but the "cryptography" package is not installed - '
                          'run `pip install "queryapigate[encryption]"`') from None
     for i, key in enumerate(keys):
-        which = ('QUERYAPIGATE_SECRET_KEY' if len(keys) == 1
-                 else f'Key {i + 1} of {len(keys)} in QUERYAPIGATE_SECRET_KEY')
+        which = (encryption_key_setting() if len(keys) == 1
+                 else f'Key {i + 1} of {len(keys)} in {encryption_key_setting()}')
         try:
             Fernet(key.encode('utf-8'))
         except (ValueError, TypeError):
@@ -1537,7 +1561,7 @@ def describe_settings():
                 'QUERYAPIGATE_ALLOW_WRITES', on_off(allow_writes())),
             row('Encryption at rest', 'Fernet key used to encrypt connection and destination passwords on disk; '
                 'several, comma-separated, while rotating it - the first encrypts.',
-                'QUERYAPIGATE_SECRET_KEY', _encryption_state(), secret=True),
+                encryption_key_setting(), _encryption_state(), secret=True),
             row('Metrics token', 'The bearer token /metrics needs. Unset: /metrics is open to whoever can reach it.',
                 'QUERYAPIGATE_METRICS_TOKEN', 'configured' if metrics_token() else 'not set - /metrics is open',
                 secret=True),

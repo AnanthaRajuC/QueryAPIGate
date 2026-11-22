@@ -68,7 +68,7 @@ documented way to Level 3; it isn't done yet.
   in string literals by default, PostgreSQL/SQLite/H2 do not) and is exercised by a fuzz test suite
   (`tests/test_sql_guard_fuzz.py`), but a regex-based guard can never be a full SQL parser for every server mode.
 - Keep database passwords out of the store: use `"password": "${ENV_VAR}"` references, or set
-  `QUERYAPIGATE_SECRET_KEY` to encrypt them at rest
+  `QUERYAPIGATE_ENCRYPTION_KEY` to encrypt them at rest
   ([guide 22](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/22-encrypt-passwords-at-rest.md)).
 - Set `QUERYAPIGATE_SECRET_ENV_VARS` to the variables your connections reference, and `QUERYAPIGATE_METRICS_TOKEN`
   wherever `/metrics` can be reached from outside

@@ -5,7 +5,7 @@ from any other server is refused), and the secret its posts are signed with (Sta
 
 **The secret is generated here and shown once** - in the response that creates the source, or the one that rotates
 its secret - never accepted from a caller, so no source has a weak one. It must be usable to check a signature, so it
-can't be hashed as an API key's is: it is stored like a connection password, encrypted with QUERYAPIGATE_SECRET_KEY
+can't be hashed as an API key's is: it is stored like a connection password, encrypted with QUERYAPIGATE_ENCRYPTION_KEY
 when that's set (store._encrypt_password(), rekey.py). Rotating keeps the old one working for a grace period (ADR
 0009), during which a post signed with either is accepted, so Debezium can be restarted with the new one at any point
 in it.

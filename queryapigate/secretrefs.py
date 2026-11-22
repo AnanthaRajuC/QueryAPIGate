@@ -61,10 +61,10 @@ def is_reference(value):
 
 
 def server_setting(name):
-    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL, and the OpenTelemetry
-    # exporter's (OTEL_EXPORTER_OTLP_HEADERS often carries a collector token)... - are never a connection's or
-    # destination's to read: an administrator could put one in a password sent to a host of theirs. Nor is
-    # QAG_API_KEY - the owner's key `config diff/apply --server` reads - though `QAG_*` is what config export names
+    # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_ENCRYPTION_KEY, the store's URL, and the
+    # OpenTelemetry exporter's (OTEL_EXPORTER_OTLP_HEADERS often carries a collector token)... - are never a
+    # connection's or destination's to read: an administrator could put one in a password sent to a host of theirs. Nor
+    # is QAG_API_KEY - the owner's key `config diff/apply --server` reads - though `QAG_*` is what config export names
     # passwords and the documentation suggests allowing.
     upper = name.upper()
     return upper.startswith(('QUERYAPIGATE_', 'OTEL_')) or upper == 'QAG_API_KEY'
@@ -119,9 +119,10 @@ _NEVER_READABLE = ('/proc', '/var/run/secrets/kubernetes.io', '/run/secrets/kube
 
 
 def _server_files():
-    """The files the server's own settings and the credentials it may run with name - QUERYAPIGATE_SECRET_KEY_FILE,
-    QUERYAPIGATE_VAULT_TOKEN_FILE, AWS_WEB_IDENTITY_TOKEN_FILE... - as real paths. As with `${VAR}` (env_refusal()),
-    none is a connection's to read: an administrator could have one sent to a host of theirs (ADR 0021)."""
+    """The files the server's own settings and the credentials it may run with name - QUERYAPIGATE_ENCRYPTION_KEY_FILE
+    (or QUERYAPIGATE_SECRET_KEY_FILE), QUERYAPIGATE_VAULT_TOKEN_FILE, AWS_WEB_IDENTITY_TOKEN_FILE... - as real paths.
+    As with `${VAR}` (env_refusal()), none is a connection's to read: an administrator could have one sent to a host
+    of theirs (ADR 0021)."""
     found = set()
     for name, value in os.environ.items():
         if name == 'QUERYAPIGATE_SECRET_FILE_DIRS' or not (server_setting(name)

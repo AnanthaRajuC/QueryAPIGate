@@ -25,7 +25,7 @@ Keep the secrets in a Secret you manage (by hand here; sealed-secrets, External 
 kubectl create namespace queryapigate
 kubectl -n queryapigate create secret generic queryapigate \
   --from-literal=QUERYAPIGATE_API_KEY=<a long random key> \
-  --from-literal=QUERYAPIGATE_SECRET_KEY=<a Fernet key>   # encrypts connection passwords in the store
+  --from-literal=QUERYAPIGATE_ENCRYPTION_KEY=<a Fernet key>   # encrypts connection passwords in the store
 helm install queryapigate oci://ghcr.io/anantharajuc/charts/queryapigate --version 0.26.0 \
   -n queryapigate --set existingSecret=queryapigate --wait
 ```
@@ -125,7 +125,7 @@ kubectl create namespace prod
 kubectl -n prod apply -f deploy/kubernetes/dev-dependencies.yaml
 kubectl -n prod create secret generic queryapigate \
   --from-literal=QUERYAPIGATE_API_KEY=<a long random key> \
-  --from-literal=QUERYAPIGATE_SECRET_KEY=<a Fernet key> \
+  --from-literal=QUERYAPIGATE_ENCRYPTION_KEY=<a Fernet key> \
   --from-literal=QUERYAPIGATE_DATABASE_URL=postgresql://queryapigate:<password>@postgres:5432/queryapigate \
   --from-literal=QUERYAPIGATE_REDIS_URL=redis://redis:6379/0
 ```

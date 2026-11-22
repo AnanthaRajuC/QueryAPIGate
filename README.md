@@ -169,7 +169,7 @@ SQLite needs no extra driver. H2 and generic JDBC connections (`queryapigate[h2]
 driver jar is bundled, a JDBC connection to another vendor brings its own. DuckDB (`queryapigate[duckdb]`) needs no
 external runtime either - it's a native Python extension, same as SQLite. `queryapigate[encryption]` adds
 [encryption at rest](documentation/API.md#encryption-at-rest-for-connection-passwords) for connection passwords -
-only needed if you set `QUERYAPIGATE_SECRET_KEY`.
+only needed if you set `QUERYAPIGATE_ENCRYPTION_KEY`.
 From a clone: `pip install -e ".[dev]"`. Or use Docker - see [below](#try-it-with-docker).
 
 ## Quick start

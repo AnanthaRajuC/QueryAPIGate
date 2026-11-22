@@ -265,7 +265,7 @@ def _is_encrypted(value):
 
 
 def _get_fernet():
-    """What encrypts and decrypts passwords at rest (QUERYAPIGATE_SECRET_KEY), or None when unset - encryption at
+    """What encrypts and decrypts passwords at rest (QUERYAPIGATE_ENCRYPTION_KEY), or None when unset - encryption at
     rest is opt-in. With several keys (rotating, ADR 0009) a MultiFernet: it encrypts with the first and decrypts
     with whichever works. The keys are already validated at startup (config.check_secret_keys())."""
     keys = config.secret_keys()
@@ -277,7 +277,7 @@ def _get_fernet():
 
 
 def _encrypt_password(value):
-    """Encrypt a literal connection password for storage, if QUERYAPIGATE_SECRET_KEY is set - a ${VAR} reference
+    """Encrypt a literal connection password for storage, if QUERYAPIGATE_ENCRYPTION_KEY is set - a ${VAR} reference
     or an already-encrypted value passes through unchanged (never double-encrypted, and a ${VAR} reference
     is not a secret stored in this file at all). Returns the value unchanged when no key is configured -
     today's behaviour, unaffected without opting in."""
@@ -292,21 +292,21 @@ def _encrypt_password(value):
 def _decrypt_password(value):
     """Decrypt a stored connection password for actual use, at the moment a connection is opened
     (get_connection()) - never held decrypted anywhere else. Fails clearly rather than silently: a missing
-    or rotated QUERYAPIGATE_SECRET_KEY must not pass ciphertext to the driver, or silently fall back to treating
+    or rotated QUERYAPIGATE_ENCRYPTION_KEY must not pass ciphertext to the driver, or silently fall back to treating
     it as a literal, the same "fail closed, say why" precedent is_expired() already sets for a malformed
     stored value that could otherwise fail dangerously quiet."""
     if not _is_encrypted(value):
         return value
     fernet = _get_fernet()
     if fernet is None:
-        raise ApiError("This connection's password is encrypted but QUERYAPIGATE_SECRET_KEY is not set - it "
+        raise ApiError("This connection's password is encrypted but QUERYAPIGATE_ENCRYPTION_KEY is not set - it "
                        'cannot be decrypted', 500, code='secret_key_required')
     from cryptography.fernet import InvalidToken
     try:
         return fernet.decrypt(value[len(_ENC_PREFIX):].encode('ascii')).decode('utf-8')
     except InvalidToken:
         keys = len(config.secret_keys())
-        which = 'QUERYAPIGATE_SECRET_KEY' if keys == 1 else f'any of the {keys} keys in QUERYAPIGATE_SECRET_KEY'
+        which = 'QUERYAPIGATE_ENCRYPTION_KEY' if keys == 1 else f'any of the {keys} keys in QUERYAPIGATE_ENCRYPTION_KEY'
         raise ApiError(f"This connection's password could not be decrypted with {which} - it was encrypted with a "
                        'key that is no longer listed. Add that key back (after the first), or enter the password '
                        'again', 500, code='password_undecryptable') from None
@@ -382,7 +382,7 @@ def plaintext_password_connections():
 
 
 def encrypt_plaintext_passwords_in_place():
-    """Called once at startup when QUERYAPIGATE_SECRET_KEY is set: encrypts any connection password that's still
+    """Called once at startup when QUERYAPIGATE_ENCRYPTION_KEY is set: encrypts any connection password that's still
     a literal, so a connection saved before the key existed benefits immediately rather than waiting for its
     next save of it - "don't require a one-time manual migration step" from the start."""
     with db.transaction() as conn:
@@ -403,7 +403,7 @@ def encrypt_plaintext_passwords_in_place():
 
 def encrypted_password_connections():
     """Names of connections whose password is encrypted at rest - used only for the startup warning that
-    fires when QUERYAPIGATE_SECRET_KEY is missing but encrypted passwords already exist on disk (a rotated-out
+    fires when QUERYAPIGATE_ENCRYPTION_KEY is missing but encrypted passwords already exist on disk (a rotated-out
     or removed key, most likely): those connections cannot be used until the key is restored."""
     return sorted(name for name, conn in read_connections().items() if _is_encrypted(conn.get('password')))
 
@@ -414,7 +414,7 @@ def update_connections(connections):
         refuse_store_access(details)
         if not isinstance(details, dict) or details.get('db') not in config.SUPPORTED_DB_TYPES:
             raise ApiError(f"Connection '{name}' must be an object whose 'db' is one of: "
-                           f"{', '.join(config.SUPPORTED_DB_TYPES)}")
+                           f"{', '.join(config.SUPPORTED_DB_TYPES)}", code='invalid_body')
         if details.get('db') == 'duckdb':
             duckfiles.validate(details)
     workspace = scope.current()
@@ -431,7 +431,7 @@ def update_connections(connections):
                 details = {**details, 'password': existing_details.get('password', '')}
             elif 'password' in details:
                 # A genuinely new literal password (or ${VAR} reference, which _encrypt_password() passes
-                # through unchanged) - encrypted here if QUERYAPIGATE_SECRET_KEY is set, stored as given otherwise.
+                # through unchanged) - encrypted here if QUERYAPIGATE_ENCRYPTION_KEY is set, stored as given otherwise.
                 details = {**details, 'password': _encrypt_password(details['password'])}
             # created_at/updated_at are server-controlled, never taken from the request (a client echoing back
             # what GET /api/v1/connections returned must not be able to fake either one). A connection that already
@@ -495,7 +495,7 @@ def resolve_saved_file(ref, check_exists=True):
     same 404), saving a round trip on every run.
     """
     if not isinstance(ref, str) or not ref.strip():
-        raise ApiError('Filename is missing')
+        raise ApiError('Filename is missing', code='invalid_name')
     candidate = ref
     if os.path.isabs(candidate):
         home = str(config.home())

@@ -276,6 +276,7 @@ class RefusalTests(unittest.TestCase):
                 ((*POSTGRES, '--set', 'config.QUERYAPIGATE_DATABASE_URL=postgresql://u:p@db/x'), 'not config'),
                 # config is plain text in the Deployment: every secret setting is refused there, whatever the store
                 ((*SECRET, '--set', 'config.QUERYAPIGATE_SECRET_KEY=x'), 'QUERYAPIGATE_SECRET_KEY is a secret'),
+                ((*SECRET, '--set', 'config.QUERYAPIGATE_ENCRYPTION_KEY=x'), 'QUERYAPIGATE_ENCRYPTION_KEY is a secret'),
                 ((*SECRET, '--set', 'config.QUERYAPIGATE_AUDIT_KEY=x'), 'QUERYAPIGATE_AUDIT_KEY is a secret'),
                 ((*POSTGRES, '--set', 'config.QUERYAPIGATE_REDIS_URL=redis://:pw@redis:6379/0'),
                  'QUERYAPIGATE_REDIS_URL is a secret'),

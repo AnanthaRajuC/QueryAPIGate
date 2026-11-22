@@ -18,7 +18,12 @@ log = logging.getLogger('queryapigate')
 ROUTES: dict[str, dict[str, str]] = {}  # none today: the 0.14 ones were removed in 0.15
 
 # Everything else that can be deprecated - a CLI command or flag, an environment variable, a behaviour - by key.
-OTHER: dict[str, dict[str, str]] = {}  # none today: the pre-SQLite JSON import was removed in 0.15
+OTHER: dict[str, dict[str, str]] = {
+    # rc1 (C6): two names for one thing - `params` is the one documented
+    'placeholders': {'name': '`placeholders` in the body of POST /q/{name}', 'since': '1.0.0', 'removal': '2.0.0',
+                     'successor': 'send them as `params`', 'why': 'the same values, under the name every other body '
+                                                                 'uses'},
+}
 
 
 _warned: set = set()

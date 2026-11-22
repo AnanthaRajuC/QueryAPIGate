@@ -192,14 +192,15 @@ class RekeyCommandTests(RekeyTestCase):
 
     def test_check_then_rekey(self):
         with self.keys(f'{NEW},{OLD}'):
-            code, out = self.run_cli('--check')
-            self.assertEqual(code, 0)
-            self.assertIn('3 encrypted password(s), 2 key(s) listed: 0 under the first key, 3 under key 2.', out)
+            for flag in ('--dry-run', '--check'):  # --check: its name before rc1 (C5)
+                code, out = self.run_cli(flag)
+                self.assertEqual(code, 0)
+                self.assertIn('3 encrypted password(s), 2 key(s) listed: 0 under the first key, 3 under key 2.', out)
             self.assertIn('Run `queryapigate rekey`', out)
             code, out = self.run_cli()
         self.assertEqual(code, 0)
         self.assertIn('Re-encrypted 3 password(s) under the first key.', out)
-        self.assertIn('remove them from QUERYAPIGATE_SECRET_KEY', out)
+        self.assertIn('remove them from QUERYAPIGATE_ENCRYPTION_KEY', out)
         self.assertEqual(store.read_audit_log()[-1]['actor'], 'cli')
 
     def test_a_bad_key_list_exits_2(self):

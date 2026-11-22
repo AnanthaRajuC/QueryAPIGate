@@ -36,6 +36,7 @@ FEATURES: dict[str, dict[str, Any]] = {
                'time limit on JDBC; Trino is fully governed and security-reviewed (ADR 0026) and awaits a release of '
                'stable shape and real use (the support matrix in DATABASE_CONNECTION_CONFIGURATION.md)',
         'db_types': ('h2', 'jdbc', 'trino'),
+        'settings': ('QUERYAPIGATE_H2_JAR',),
         'docs': ('documentation/DATABASE_CONNECTION_CONFIGURATION.md', 'Experimental: h2, jdbc and trino'),
     },
     'workspaces': {
@@ -47,6 +48,7 @@ FEATURES: dict[str, dict[str, Any]] = {
                        ('delete', '/api/v1/workspaces/{name}'), ('get', '/api/v1/workspaces/{name}/members'),
                        ('put', '/api/v1/workspaces/{name}/members/{admin}'),
                        ('delete', '/api/v1/workspaces/{name}/members/{admin}')),
+        'settings': ('QUERYAPIGATE_JWT_WORKSPACE_CLAIM', 'QUERYAPIGATE_MCP_WORKSPACE_CLAIM'),
         'docs': ('documentation/API.md', 'Workspaces'),
     },
     'embeddings': {

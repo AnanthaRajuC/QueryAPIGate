@@ -30,14 +30,14 @@ redis:
   # QUERYAPIGATE_REDIS_URL is in the existingSecret (the chart can't see inside one): set this to say so.
   inExistingSecret: false
 
-# The settings that are secrets - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, QUERYAPIGATE_DATABASE_URL,
+# The settings that are secrets - QUERYAPIGATE_API_KEY, QUERYAPIGATE_ENCRYPTION_KEY, QUERYAPIGATE_DATABASE_URL,
 # QUERYAPIGATE_REDIS_URL, QUERYAPIGATE_AUDIT_KEY, ... - as environment variables from a Secret.
 existingSecret: ""   # recommended: a Secret you manage (sealed-secrets, External Secrets, Vault, by hand)
 secret:
   create: false      # or let the chart make one from these values - they then sit in your values file
   values: {}
     # QUERYAPIGATE_API_KEY: change-me
-    # QUERYAPIGATE_SECRET_KEY: <a Fernet key>
+    # QUERYAPIGATE_ENCRYPTION_KEY: <a Fernet key>
     # QUERYAPIGATE_DATABASE_URL: postgresql://queryapigate:...@db:5432/queryapigate
     # QUERYAPIGATE_REDIS_URL: redis://redis:6379/0
 

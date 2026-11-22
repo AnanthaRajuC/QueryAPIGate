@@ -8,7 +8,7 @@ prefix by duckfiles.lock_down() - `allowed_paths = [prefix]`, external access ot
 locked - so no path template, parameter value or file name can reach anything else; DuckDB itself refuses.
 
 The secret (`password`) is stored like a connection password: masked in every response, a `${VAR}` reference kept
-as written, a literal one encrypted with QUERYAPIGATE_SECRET_KEY when set (store.py).
+as written, a literal one encrypted with QUERYAPIGATE_ENCRYPTION_KEY when set (store.py).
 """
 import json
 import os

@@ -56,7 +56,7 @@ guide covers one scenario end to end, and every command and response in it was r
 21. [**Verify who can reach what**](21-verify-who-can-reach-what.md) - the Access map, `GET /catalog`, and how grants
     add up.
 22. [**Keep connection passwords out of the store**](22-encrypt-passwords-at-rest.md) - `${VAR}` references, or
-    `QUERYAPIGATE_SECRET_KEY` encryption, and rotating the key.
+    `QUERYAPIGATE_ENCRYPTION_KEY` encryption, and rotating the key.
 23. [**Put QueryAPIGate behind a reverse proxy with real TLS**](23-put-it-behind-a-reverse-proxy.md) - Caddy or nginx,
     verified.
 43. [**Give your team their own admin access**](43-give-your-team-their-own-admin-access.md) - named administrators

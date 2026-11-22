@@ -20,7 +20,7 @@ where they are and published like any table, limited to the paths each connectio
 QueryAPIGate is built to expose specific query results, not database credentials:
 
 - API key authentication, with hashed key storage (SHA-256, never the raw secret) in `queryapigate.db`.
-- Database connection passwords encrypted at rest (`QUERYAPIGATE_SECRET_KEY`), decrypted only in memory at the
+- Database connection passwords encrypted at rest (`QUERYAPIGATE_ENCRYPTION_KEY`), decrypted only in memory at the
   moment a connection is opened; a literal password on disk is never returned to a client either way.
 - Scoped API keys: restrict a key to a set of connections, and/or to a specific allow-list of saved queries,
   independent of any connection grant - individual queries in that list can also be curated for write access,

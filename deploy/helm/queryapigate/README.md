@@ -15,7 +15,7 @@ helm install queryapigate oci://ghcr.io/anantharajuc/charts/queryapigate --versi
 **One pod on SQLite** - the default. The store on a PersistentVolumeClaim (kept on `helm uninstall`):
 
 ```yaml
-existingSecret: queryapigate   # a Secret with QUERYAPIGATE_API_KEY, and QUERYAPIGATE_SECRET_KEY to encrypt passwords
+existingSecret: queryapigate   # a Secret with QUERYAPIGATE_API_KEY, and QUERYAPIGATE_ENCRYPTION_KEY to encrypt passwords
 ```
 
 **Several pods on PostgreSQL and Redis:**

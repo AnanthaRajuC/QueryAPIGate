@@ -130,7 +130,7 @@ anything in `.env` above):
 
 The server reads only the variables `QUERYAPIGATE_SECRET_ENV_VARS` lists - add `QUERYAPIGATE_SECRET_ENV_VARS=PROD_DB_PASSWORD` to `.env` too.
 
-`QUERYAPIGATE_SECRET_KEY` (a Fernet key) additionally encrypts every literal connection password *at rest* in
+`QUERYAPIGATE_ENCRYPTION_KEY` (a Fernet key) additionally encrypts every literal connection password *at rest* in
 `queryapigate.db` itself, independent of the `${VAR}` convention above - worth setting if the volume or its
 backups might be read by someone who shouldn't see connection credentials. Generate one and add it to `.env`
 (keep a copy in your secrets manager - backups of the store are useless for these passwords without it):
@@ -223,7 +223,7 @@ The schema is recreated under its original name, so the URL's `search_path` (if 
 
 ### What a backup of the store does not contain
 
-- **`QUERYAPIGATE_SECRET_KEY`**, if you set it: connection passwords are stored encrypted with it. A store restored
+- **`QUERYAPIGATE_ENCRYPTION_KEY`**, if you set it: connection passwords are stored encrypted with it. A store restored
   without the same key has every encrypted password unreadable - each connection must be given its password again.
   Keep the key in your secrets manager, with the `.env` it lives in. After a key rotation (`queryapigate rekey`), a
   backup taken before it still needs the old key: list it after the new one to restore it, then run `rekey` again.

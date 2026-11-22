@@ -52,6 +52,7 @@ from . import (
     schema,
     scope,
     secheaders,
+    settingnames,
     sqltools,
     sso,
     store,
@@ -219,6 +220,11 @@ def create_app():
     from . import __version__
     config.check_settings()
     logging_setup.configure(log)  # before anything below logs - the legacy import's deprecation warning, for one
+    unknown = settingnames.unknown(os.environ, config.SECRET_SETTINGS)
+    if unknown:  # a typo is ignored otherwise, and what was meant runs with its default (rc1, D1)
+        log.warning('%s %s no setting of this server, and %s ignored - see documentation/CONFIGURATION.md for every '
+                    'one', ', '.join(unknown), 'is' if len(unknown) == 1 else 'are',
+                    'it is' if len(unknown) == 1 else 'they are')
     db.init_schema()
     runstore.check_marker()
     store.refuse_legacy_home()
@@ -265,29 +271,29 @@ def create_app():
                     'create an owner with `queryapigate admins create NAME --role owner`.')
     if config.secret_key():
         # Encrypt any literal password already on disk immediately, rather than waiting for its next
-        # PATCH /api/v1/connections - a connection saved before QUERYAPIGATE_SECRET_KEY existed benefits right away.
+        # PATCH /api/v1/connections - a connection saved before QUERYAPIGATE_ENCRYPTION_KEY existed benefits right away.
         store.encrypt_plaintext_passwords_in_place()
         from . import rekey
         found = rekey.report()
         if found['undecryptable']:
-            log.warning('No key in QUERYAPIGATE_SECRET_KEY decrypts the secret of %s - add the key it was '
+            log.warning('No key in QUERYAPIGATE_ENCRYPTION_KEY decrypts the secret of %s - add the key it was '
                         'encrypted with (after the first), or enter it again.',
                         ', '.join(rekey.describe(v) for v in found['undecryptable']))
         if found['under_old_keys']:
-            log.warning('%d password(s) are still encrypted with an old key in QUERYAPIGATE_SECRET_KEY - run '
+            log.warning('%d password(s) are still encrypted with an old key in QUERYAPIGATE_ENCRYPTION_KEY - run '
                         '`queryapigate rekey` to move them to the first key, then remove the others.',
                         found['under_old_keys'])
     else:
         encrypted = store.encrypted_password_connections()
         if encrypted:
-            log.warning('Connection(s) %s have an encrypted password but QUERYAPIGATE_SECRET_KEY is not set - '
+            log.warning('Connection(s) %s have an encrypted password but QUERYAPIGATE_ENCRYPTION_KEY is not set - '
                         'they cannot be used until the key that encrypted them is restored.',
                         ', '.join(encrypted))
     plaintext = store.plaintext_password_connections()
     if plaintext:
         log.warning("Connection(s) %s store a literal password in %s. Consider a \"${VAR}\" reference to an "
                     "environment variable instead - it reads the same way but keeps the secret out of the file, "
-                    "or set QUERYAPIGATE_SECRET_KEY to encrypt it at rest automatically.",
+                    "or set QUERYAPIGATE_ENCRYPTION_KEY to encrypt it at rest automatically.",
                     ', '.join(plaintext), config.db_file())
     _note_audit_key_rotation()
     from . import auditstream
@@ -595,19 +601,21 @@ def get_json_body(required=True):
 get_object = definitions.as_object  # one definition, shared with saved-query validation
 
 
-def get_int(value, label):
+def get_int(value, label, code):
+    """`value` as an int, None when not given - else a 400 with `code`, what the argument is to the endpoint (rc1, D6:
+    page=abc was invalid_request while page=0 was invalid_paging)."""
     if value is None or value == '':
         return None
     try:
         return int(value)
     except (TypeError, ValueError):
-        raise ApiError(f'{label} must be an integer') from None
+        raise ApiError(f'{label} must be an integer', code=code) from None
 
 
 def get_pagination():
     """Return (limit, offset, page) from the ?page and ?page_size query parameters."""
-    page = get_int(request.args.get('page'), 'page')
-    page_size = get_int(request.args.get('page_size'), 'page_size')
+    page = get_int(request.args.get('page'), 'page', 'invalid_paging')
+    page_size = get_int(request.args.get('page_size'), 'page_size', 'invalid_paging')
     page = 1 if page is None else page
     page_size = 10 if page_size is None else page_size
     if page < 1 or page_size < 1:
@@ -1057,7 +1065,7 @@ def _run_saved(ref, body, url_params):
     path = store.resolve_saved_file(ref, check_exists=False)  # load_versions() 404s the same, one read fewer
     content = store.load_versions(path, with_history=False)
     _refuse_unreachable(path, content)
-    requested = get_int(request.args.get('version') or body.get('version'), 'version')
+    requested = get_int(request.args.get('version') or body.get('version'), 'version', 'invalid_version')
     if requested is not None and store.is_draft(content, requested) and not g.permission.admin:
         raise ApiError(f'Version {requested} not found', 404, code='version_not_found')
     number, saved = store.select_version(content, requested)
@@ -1082,6 +1090,8 @@ def _run_saved(ref, body, url_params):
     if not (granted_by_name and connection_name == saved.get('connection_name')):
         require_connection(connection_name)
 
+    if 'placeholders' in body:
+        deprecations.warn('placeholders')
     raw = {**url_params, **get_object(body.get('params'), 'params'),
            **get_object(body.get('placeholders'), 'placeholders')}
     raw = bind_claims(saved, raw)

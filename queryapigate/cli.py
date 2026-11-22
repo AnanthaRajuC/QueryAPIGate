@@ -835,7 +835,7 @@ def _rekey(args):
     if found['undecryptable']:
         return 1
     if found['keys'] > 1 and not found['under_old_keys']:
-        print('Nothing is left under the other keys: remove them from QUERYAPIGATE_SECRET_KEY on every instance.')
+        print('Nothing is left under the other keys: remove them from QUERYAPIGATE_ENCRYPTION_KEY on every instance.')
     elif args.check and found['under_old_keys']:
         print('Run `queryapigate rekey` to move them to the first key.')
     return 0
@@ -847,28 +847,34 @@ def build_parser():
     commands = parser.add_subparsers(dest='command')
 
     serve = commands.add_parser('serve', help='start the HTTP server (default)')
-    serve.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    serve.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_PORT, or 5000 - read in _serve()
+    serve.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'),
+                       help='the address to listen on (QUERYAPIGATE_HOST)')
+    serve.add_argument('--port', type=int, default=None,  # QUERYAPIGATE_PORT, or 5000 - read in _serve()
+                       help='the port to listen on (default: QUERYAPIGATE_PORT, or 5000)')
     serve.add_argument('--debug', action='store_true', default=config.env_flag('QUERYAPIGATE_DEBUG'),
                        help='Flask debug mode, with an interactive debugger - only on a loopback --host')
     serve.set_defaults(func=_serve)
 
     mcp_parser = commands.add_parser('mcp', help='start an MCP server exposing read-only saved queries as '
                                                  'tools (needs `pip install "queryapigate[mcp]"`)')
-    mcp_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    mcp_parser.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_MCP_PORT, or 5001
+    mcp_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'),
+                            help='the address to listen on (QUERYAPIGATE_HOST)')
+    mcp_parser.add_argument('--port', type=int, default=None,
+                            help='the port to listen on (default: QUERYAPIGATE_MCP_PORT, or 5001)')
     mcp_parser.set_defaults(func=_mcp)
 
     events_parser = commands.add_parser('events', help='serve GET /events to many clients at once - apps, phones, '
                                                        'dashboards - with resume (Last-Event-ID) and every '
                                                        "instance's runs; run beside `queryapigate serve`")
-    events_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'))
-    events_parser.add_argument('--port', type=int, default=None)  # QUERYAPIGATE_EVENTS_PORT, or 5002
+    events_parser.add_argument('--host', default=os.environ.get('QUERYAPIGATE_HOST', '127.0.0.1'),
+                               help='the address to listen on (QUERYAPIGATE_HOST)')
+    events_parser.add_argument('--port', type=int, default=None,
+                               help='the port to listen on (default: QUERYAPIGATE_EVENTS_PORT, or 5002)')
     events_parser.set_defaults(func=_events)
 
     backup = commands.add_parser('backup', help='copy queryapigate.db to FILE, consistently, while the server '
                                                 'runs (a PostgreSQL store: prints the pg_dump command)')
-    backup.add_argument('file', metavar='FILE')
+    backup.add_argument('file', metavar='FILE', help='where to write the copy')
     backup.add_argument('--force', action='store_true', help='replace FILE if it exists')
     backup.set_defaults(func=_backup)
 
@@ -887,7 +893,8 @@ def build_parser():
     export = commands.add_parser('export', help='run a saved query and write the full result to a file '
                                                '(for cron/systemd/Kubernetes CronJob, not a scheduler itself)')
     export.add_argument('query', help='saved query name (as used in a GET /q/<name> request)')
-    export.add_argument('--format', choices=('csv', 'tsv', 'ndjson', 'parquet'), default='csv')
+    export.add_argument('--format', choices=('csv', 'tsv', 'ndjson', 'parquet'), default='csv',
+                        help='the file format, streamed as rows arrive')
     export.add_argument('--connection', help='overrides the saved query\'s own default connection')
     export.add_argument('--out', required=True,
                         help='output path; {date} (YYYY-MM-DD) and {name} are filled in, e.g. '
@@ -986,12 +993,13 @@ def build_parser():
     admins_parser.set_defaults(func=lambda a: admins_parser.print_help() or 2)
     admin_actions = admins_parser.add_subparsers(dest='action')
     admins_create = admin_actions.add_parser('create', help='create an administrator and print its first token')
-    admins_create.add_argument('name')
-    admins_create.add_argument('--role', required=True, choices=adminroles.ROLE_NAMES)
-    admins_create.add_argument('--email')
+    admins_create.add_argument('name', help='their name: letters, digits, spaces, ., _ or -')
+    admins_create.add_argument('--role', required=True, choices=adminroles.ROLE_NAMES,
+                               help='what they may do, server-wide')
+    admins_create.add_argument('--email', help='their email, for SSO to match them by')
     admins_token = admin_actions.add_parser('token', help="issue another token for an administrator (one who lost "
                                                           'theirs, or a new CI job)')
-    admins_token.add_argument('name')
+    admins_token.add_argument('name', help='the administrator')
     for sub in (admins_create, admins_token):
         sub.add_argument('--label', help="what the token is for, e.g. 'laptop' or 'ci'")
         sub.add_argument('--expires', help=f"YYYY-MM-DD, or 'never' (default: {DEFAULT_TOKEN_DAYS} days from today)")
@@ -1021,7 +1029,7 @@ def build_parser():
     history_forget.set_defaults(func=_history_forget)
 
     runs_parser = commands.add_parser('runs', help='where run history and the event log are kept: a ClickHouse run '
-                                                   'store (ADR 0029, experimental)')
+                                                   'store (ADR 0029)')
     runs_parser.set_defaults(func=lambda a: runs_parser.print_help() or 2)
     runs_actions = runs_parser.add_subparsers(dest='action')
     runs_actions.add_parser('copy-to-clickhouse', help="copy this store's run history into the run store, once"
@@ -1030,9 +1038,10 @@ def build_parser():
                             'above the run store\'s').set_defaults(func=_runs_leave)
 
     rekey_parser = commands.add_parser('rekey', help='re-encrypt every stored password under the first key in '
-                                                     'QUERYAPIGATE_SECRET_KEY, so the others can be removed (rotating '
-                                                     'the key)')
-    rekey_parser.add_argument('--check', action='store_true',
+                                                     'QUERYAPIGATE_ENCRYPTION_KEY, so the others can be removed '
+                                                     '(rotating the key)')
+    # --dry-run, as every other command that can change nothing says it (rc1, C5); --check, its name before, still works
+    rekey_parser.add_argument('--dry-run', '--check', dest='check', action='store_true',
                               help='only report how many passwords are under each key - change nothing')
     rekey_parser.set_defaults(func=_rekey)
 
@@ -1041,7 +1050,7 @@ def build_parser():
     exports_parser.set_defaults(func=lambda a: exports_parser.print_help() or 2)
     export_actions = exports_parser.add_subparsers(dest='action')
     exports_run = export_actions.add_parser('run', help='run a saved export once, now')
-    exports_run.add_argument('name')
+    exports_run.add_argument('name', help='the export')
     exports_run.set_defaults(func=_exports_run)
     exports_list = export_actions.add_parser('list', help='list saved exports')
     exports_list.set_defaults(func=_exports_list)
@@ -1055,8 +1064,8 @@ def build_parser():
     for sub in (export, collection_export, collection_import, config_export, examples_load, examples_unload,
                 examples_status, exports_run, exports_list):
         sub.add_argument('--workspace', metavar='NAME',
-                         help='the workspace whose queries, connections, keys and exports this acts on '
-                              '(default: default)')
+                         help='experimental, with workspaces: the workspace whose queries, connections, keys and '
+                              'exports this acts on (default: default)')
     return parser
 
 
