@@ -228,9 +228,8 @@ class ExitCodeTests(unittest.TestCase):
                 self.assertEqual(code, 2, err)
                 self.assertIn('QUERYAPIGATE_QUERY_TIMEOUT', err)
 
-    @mock.patch.dict(os.environ)
-    def test_a_missing_run_store_is_setup_and_a_failure_is_1(self):
-        os.environ.pop('QUERYAPIGATE_RUN_STORE_URL', None)  # the run store jobs set one
+    @mock.patch('queryapigate.config.run_store_url', return_value=None)  # the run store jobs set one (tests/__init__)
+    def test_a_missing_run_store_is_setup_and_a_failure_is_1(self, _run_store_url):
         for argv in (['runs', 'copy-to-clickhouse'], ['runs', 'leave-clickhouse']):
             with self.subTest(argv=argv):
                 self.assertEqual(self.run_cli(argv)[0], 2)
