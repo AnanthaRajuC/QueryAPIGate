@@ -71,9 +71,19 @@ def get(request_id):
 def list_requests(status=None, limit=200):
     if status not in (None, '') and status not in STATUSES:
         raise ApiError(f"status must be one of: {', '.join(STATUSES)}", code='invalid_filter')
-    rows = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ? '
+    # Filtered before the limit, not after: the newest `limit` of every status, filtered afterwards, could leave out
+    # an older request still pending approval. `expired` isn't stored - it is a pending or approved one past its time
+    # (_row) - so the filter says the same here.
+    where, args, now = '', [], time.time()
+    if status in ('pending', 'approved'):
+        where, args = ' AND status = ? AND expires_at >= ?', [status, now]
+    elif status == 'expired':
+        where, args = " AND (status = 'expired' OR (status IN ('pending', 'approved') AND expires_at < ?))", [now]
+    elif status:
+        where, args = ' AND status = ?', [status]
+    rows = db.connection().execute(f'SELECT {_COLUMNS} FROM write_requests WHERE workspace = ?{where} '
                                    'ORDER BY created_at DESC, id DESC LIMIT ?',
-                                   (scope.current(), max(1, min(int(limit), 1000)))).fetchall()
+                                   (scope.current(), *args, max(1, min(int(limit), 1000)))).fetchall()
     found = [_row(r) for r in rows]
     return [r for r in found if not status or r['status'] == status]
 

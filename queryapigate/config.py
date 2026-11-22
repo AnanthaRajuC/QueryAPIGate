@@ -889,6 +889,14 @@ def redact_url(url):
 redact_redis_url = redact_url
 
 
+def _url_has_password(value):
+    from urllib.parse import urlsplit
+    try:
+        return bool(urlsplit(value).password)
+    except ValueError:  # not a URL at all - an invalid port, say - so nothing in it to hide as one
+        return False
+
+
 def max_page_size():
     try:
         return max(1, int(os.environ.get('QUERYAPIGATE_MAX_PAGE_SIZE', 1000)))
@@ -1418,14 +1426,17 @@ def describe_settings():
     Each row is {label, description, env, value, source, env_value}. ``value`` is what to display (secrets are
     reduced to "configured" / "enabled" - never the secret itself), ``source`` is "env" when the variable is set
     and "default" when the built-in default applies, and ``env_value`` is the raw value for a "copy as .env"
-    export, or None for a secret so that export can never leak one. Read-only: settings are environment
-    variables, changed by restarting the server, not through the API."""
+    export, or None for a secret - a URL with a password among them - so that export can never leak one.
+    Read-only: settings are environment variables, changed by restarting the server, not through the API."""
     def row(label, description, env, value, secret=False):
         raw = os.environ.get(env, '').strip()
         if secret and secret_source(env):
             value = f'{value} (from {env}_FILE)'  # never the file's content: where it came from
         return {'label': label, 'description': description, 'env': env, 'value': value,
-                'source': 'env' if raw else 'default', 'env_value': None if secret or not raw else raw,
+                'source': 'env' if raw else 'default',
+                # a URL's password is a secret too, whatever row it's in (the syslog and OTLP endpoints): the
+                # value shown is redacted, and the raw one isn't given for the .env export either
+                'env_value': None if secret or not raw or _url_has_password(raw) else raw,
                 'experimental': env in experimental.SETTINGS}
 
     def on_off(flag):

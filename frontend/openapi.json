@@ -2824,6 +2824,10 @@
           "description": {
             "type": "string"
           },
+          "embed": {
+            "description": "Present, true, when the text is embedded before it is bound (semantic search, experimental).",
+            "type": "boolean"
+          },
           "enum": {
             "items": {},
             "type": "array"

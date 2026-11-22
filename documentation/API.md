@@ -344,7 +344,7 @@ tag.
 | `GET /api/v1/queries/{name}` | The query with every version, each with its `status` (`published`, `draft` or `previous`) and `run_count` (its runs stored in history). |
 | `PATCH /api/v1/queries/{name}` | Change its `collection` (`null` removes it). |
 | `DELETE /api/v1/queries/{name}` | Delete it and every version. |
-| `POST /api/v1/queries/{name}/versions` | Add a version: a draft unless `"publish": true`. The published version keeps serving. |
+| `POST /api/v1/queries/{name}/versions` | Add a version: a draft unless `"publish": true`. The published version keeps serving. A body without `mcp` keeps the query's own - its published version's, or else its newest one's - since it's switched in place, below; `mask` is the body's, like every other field. |
 | `GET /api/v1/queries/{name}/versions/{n}` | One version. |
 | `PATCH /api/v1/queries/{name}/versions/{n}` | Change its `cache_ttl` or `mcp` (MCP-tool exposure) in place - not a new version. |
 | `DELETE /api/v1/queries/{name}/versions/{n}` | Delete one version; see [Drafts and publishing](#drafts-and-publishing) for what happens to the published one. |
@@ -440,7 +440,7 @@ and those `workspaces`.
 
 | Method and path | What it does |
 |---|---|
-| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller, its events and its usage counts (`dry_run=true` counts them). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
+| `DELETE /api/v1/history?caller=` | Forget a person: delete every run by that caller, its events and its usage counts (`dry_run=true` counts them; anything but `true` or `false` is a 400, never an erasure). Audited as `forget_caller`, by the caller's SHA-256 - pseudonymous: confirmable by someone who knows the name. With several instances, runs another has queued may land a second later: check with `dry_run`. Owners only (`history.forget`); [Where data goes](DATA_PROTECTION.md#a-person-asks-for-their-data-to-be-erased). |
 | `GET /api/v1/history` | Every saved query's runs, newest first, as `{items, next_cursor}`. Filters: `query`, `version`, `status` (`success` or `error`), `key`, `since` (inclusive) and `until` (exclusive), each a date or a time; `limit` (default 100) and `cursor`. One query's runs alone: `GET /api/v1/queries/{name}/history`. |
 | `GET /api/v1/audit` | Administrative changes, newest first: each entry's `timestamp`, `actor`, `action`, `target`, `changes`, and its place in the [hash chain](#a-tamper-evident-chain) (`seq`, `hash`). Filters: `action`, `actor`, `target`, and `q` (matches the time, actor or target). The response also carries `total` (entries stored, before filtering), `actions` (every action in the log) and `retention` (how many entries the log keeps, `QUERYAPIGATE_AUDIT_LOG_LIMIT`). |
 | `GET /api/v1/audit/delivery` | Each [SIEM output](#streaming-the-audit-log-to-a-siem)'s progress: `delivered_seq`, `behind`, `last_error`, the delivering `instance`. |
@@ -701,6 +701,8 @@ Write `${VAR}` references in block style, as above: inside `{...}` on one line, 
   file changes its keys too (through the API, a role is a template copied once).
 - **A section left out is left alone**, and so is what the server has that the file doesn't - the diff lists it.
   A saved query whose definition changes gets a new version, published; one whose collection alone changes is moved.
+  A query's `mask` and `mcp` are compared only when the file gives them (as its `author` is): a file that leaves them
+  out keeps the query's own, so one written before a query was masked or taken off MCP never undoes either.
   The examples (`queryapigate examples load`) are exported only with `--examples`.
 - **Not in the file:** the server's settings (environment variables), administrators and their tokens, run history,
   usage counters, the audit log, and a query's earlier versions.

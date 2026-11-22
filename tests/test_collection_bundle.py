@@ -115,6 +115,21 @@ class RoundTripTests(BundleTestCase):
         self.assertEqual(again, document)  # what came out is what went in
 
 
+class MaskAndMcpTests(BundleTestCase):
+    def test_a_querys_mask_and_mcp_go_with_it(self):
+        mask = [{'column': 'customers.email', 'action': 'hash'}]
+        self.save('q1', 'reporting', mask=mask, mcp=False)
+        document = bundle.export_bundle('reporting')
+        self.assertEqual((document['queries'][0]['mask'], document['queries'][0]['mcp']), (mask, False))
+        with tempfile.TemporaryDirectory() as other:
+            with mock.patch.dict(os.environ, {'QUERYAPIGATE_HOME': other}):
+                write_connections({'a': {'db': 'sqlite', 'database': 'y.db', 'active': True}})
+                bundle.import_bundle(document)
+                content = store.load_versions('q1')
+                stored = content[str(store.read_published(content))]
+        self.assertEqual((stored['mask'], stored['mcp']), (mask, False))  # not unmasked, not back on MCP
+
+
 class ImportTests(BundleTestCase):
     def test_creates_queries_in_the_bundles_collection_and_audits(self):
         result = bundle.import_bundle(self.doc([self.entry('q1'), self.entry('q2')]))

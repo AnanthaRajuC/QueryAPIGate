@@ -73,6 +73,8 @@ SCHEMAS = {
             'description': {'type': 'string'},
             'example': {'description': 'A sample value, shown to callers and in the MCP tool input schema.'},
             'from_claim': {'type': 'string', 'description': "Bound from the signed-in caller's token claim."},
+            'embed': {'type': 'boolean', 'description': 'Present, true, when the text is embedded before it is '
+                                                        'bound (semantic search, experimental).'},
         },
     },
     'QueryVersion': {

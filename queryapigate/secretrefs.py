@@ -63,8 +63,11 @@ def is_reference(value):
 def server_setting(name):
     # The server's own settings - QUERYAPIGATE_API_KEY, QUERYAPIGATE_SECRET_KEY, the store's URL, and the OpenTelemetry
     # exporter's (OTEL_EXPORTER_OTLP_HEADERS often carries a collector token)... - are never a connection's or
-    # destination's to read: an administrator could put one in a password sent to a host of theirs.
-    return name.upper().startswith(('QUERYAPIGATE_', 'OTEL_'))
+    # destination's to read: an administrator could put one in a password sent to a host of theirs. Nor is
+    # QAG_API_KEY - the owner's key `config diff/apply --server` reads - though `QAG_*` is what config export names
+    # passwords and the documentation suggests allowing.
+    upper = name.upper()
+    return upper.startswith(('QUERYAPIGATE_', 'OTEL_')) or upper == 'QAG_API_KEY'
 
 
 # Credentials the server itself may run with - its cloud identity (boto3's AWS_*, Azure's, Google's), a Vault client's
