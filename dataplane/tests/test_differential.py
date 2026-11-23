@@ -16,6 +16,7 @@ them (ADR 0030, section 5).
     cargo build --release --manifest-path dataplane/Cargo.toml
     QUERYAPIGATE_DATAPLANE_TEST_POSTGRES=127.0.0.1:55435:postgres:pw:postgres \\
     QUERYAPIGATE_DATAPLANE_TEST_MYSQL=127.0.0.1:55436:root:pw:shop \\
+    QUERYAPIGATE_DATAPLANE_TEST_MARIADB=127.0.0.1:55437:root:pw:shop \\
     .venv/bin/python dataplane/tests/test_differential.py
 
 DIFFERENTIAL_CALLS (default 1500 per database) and DIFFERENTIAL_SEED (default 28) set the run; a failure prints the
@@ -446,6 +447,23 @@ class ProxiedPostgresDifferentialTests(DifferentialTests):
 class ProxiedMysqlDifferentialTests(DifferentialTests):
     dialect = 'mysql'
     env = 'QUERYAPIGATE_DATAPLANE_TEST_MYSQL'
+    proxied = True
+
+
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(details('QUERYAPIGATE_DATAPLANE_TEST_MARIADB') is None, 'set QUERYAPIGATE_DATAPLANE_TEST_MARIADB')
+class MariadbDifferentialTests(DifferentialTests):
+    """MariaDB through a `mysql` connection, as it is one: the data plane tells it apart by the server's version, for
+    its own time limit (SET STATEMENT max_statement_time ... FOR) and error numbers, as runners.py does."""
+    dialect = 'mysql'
+    env = 'QUERYAPIGATE_DATAPLANE_TEST_MARIADB'
+
+
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(details('QUERYAPIGATE_DATAPLANE_TEST_MARIADB') is None, 'set QUERYAPIGATE_DATAPLANE_TEST_MARIADB')
+class ProxiedMariadbDifferentialTests(DifferentialTests):
+    dialect = 'mysql'
+    env = 'QUERYAPIGATE_DATAPLANE_TEST_MARIADB'
     proxied = True
 
 

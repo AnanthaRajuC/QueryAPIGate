@@ -494,9 +494,14 @@ class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
         conn = self.admin()
         cursor = conn.cursor()
         cursor.execute('DROP FUNCTION IF EXISTS queryapigate_it_flip')
+        # MariaDB names them its own way: max_statement_time (seconds, not MySQL's max_execution_time in milliseconds),
+        # and tx_read_only (transaction_read_only only from 11.1)
+        mariadb = 'mariadb' in conn.get_server_info().lower()
+        limit, read_only = ('max_statement_time', 'tx_read_only') if mariadb else ('max_execution_time',
+                                                                                    'transaction_read_only')
         cursor.execute('CREATE FUNCTION queryapigate_it_flip() RETURNS INT DETERMINISTIC SQL SECURITY INVOKER '
-                       'BEGIN SET SESSION TRANSACTION READ WRITE; SET SESSION transaction_read_only = 0; '
-                       'SET SESSION max_execution_time = 0; RETURN 1; END')
+                       f'BEGIN SET SESSION TRANSACTION READ WRITE; SET SESSION {read_only} = 0; '
+                       f'SET SESSION {limit} = 0; RETURN 1; END')
         conn.close()
 
         def drop():
@@ -578,6 +583,12 @@ class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
         self.assertLess(time.monotonic() - started, 3)
         conn.close()
 
+
+
+class MariaDBTests(MySQLTests):
+    """Every MySQL test, against MariaDB - a `mysql` connection, as MariaDB is one: the same driver, its own time limit
+    (SET STATEMENT max_statement_time ... FOR, runners._mysql_limit()) and its own error numbers."""
+    env_var = 'QUERYAPIGATE_IT_MARIADB'
 
 class ClickHouseTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     db, env_var = 'clickhouse', 'QUERYAPIGATE_IT_CLICKHOUSE'

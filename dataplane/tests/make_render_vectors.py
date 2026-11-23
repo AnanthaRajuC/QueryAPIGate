@@ -6,6 +6,7 @@ for byte, or decline (and forward); where Python fails, it must decline.
     cargo build --release --manifest-path dataplane/Cargo.toml
     QUERYAPIGATE_DATAPLANE_TEST_POSTGRES=127.0.0.1:55435:postgres:pw:postgres \\
     QUERYAPIGATE_DATAPLANE_TEST_MYSQL=127.0.0.1:55436:root:pw:shop \\
+    QUERYAPIGATE_DATAPLANE_TEST_MARIADB=127.0.0.1:55437:root:pw:shop \\
     .venv/bin/python dataplane/tests/make_render_vectors.py
 """
 import json
@@ -53,6 +54,12 @@ MYSQL = [
     # strings a _bin collation flags BINARY: text to the Python driver, which reads only the binary charset as bytes
     "JSON_UNQUOTE(JSON_EXTRACT('{\"a\": \"é\"}', '$.a'))", "'abc' COLLATE utf8mb4_bin",
 ]
+MYSQL_ONLY = ("CAST('{\"a\": 1, \"b\": [1.5]}' AS JSON)", 'CAST(2024 AS YEAR)')  # MariaDB has neither cast
+# MariaDB, through the same `mysql` connection: MySQL's expressions, and the types only it has - UUID (10.7), INET6
+# (10.5), INET4 (11.3), JSON (a LONGTEXT with a check) - which the data plane renders as Python does, or declines.
+MARIADB = [*(e for e in MYSQL if e not in MYSQL_ONLY), "CAST('123e4567-e89b-12d3-a456-426614174000' AS UUID)",
+           "CAST('2001:db8::1' AS INET6)", "CAST('192.0.2.1' AS INET4)", "JSON_OBJECT('k', 'é', 'n', 1.5)",
+           "JSON_ARRAY(1, 'a', NULL)"]
 MASKED = {  # value -> each action applied to it
     'postgres': ["'jane@example.com'::text", "'@example.com'::text", "'x'::text", "''::text", "'abcd'::text",
                  "'é😀@x'::text", "5::int4", "true", "'\\x41'::bytea", "'\\xff00fe80'::bytea", "''::bytea",
@@ -97,7 +104,8 @@ APP.json = JSONProvider(APP)
 def main():
     vectors = []
     for dialect, env, expressions in (('postgres', 'QUERYAPIGATE_DATAPLANE_TEST_POSTGRES', POSTGRES),
-                                      ('mysql', 'QUERYAPIGATE_DATAPLANE_TEST_MYSQL', MYSQL)):
+                                      ('mysql', 'QUERYAPIGATE_DATAPLANE_TEST_MYSQL', MYSQL),
+                                      ('mysql', 'QUERYAPIGATE_DATAPLANE_TEST_MARIADB', MARIADB)):
         settings = details(env)
         cases = [(f'SELECT {e} AS v', None) for e in expressions]
         cases += [(f'SELECT {e} AS v', [action]) for e in MASKED[dialect] for action in masking.ACTIONS]

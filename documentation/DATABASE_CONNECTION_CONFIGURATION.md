@@ -32,7 +32,7 @@ driver option, so a typo was saved instead of reported.
 
 | `db` | Driver | Notes |
 |------|--------|-------|
-| `mysql` | `mysql-connector-python` | Sessions are opened `READ ONLY` unless writes are enabled |
+| `mysql` | `mysql-connector-python` | MySQL, and MariaDB - the same `mysql` connection, its own time limit applied (`max_statement_time`): MySQL 8.4 and MariaDB 10.11 and 11.4 are tested in CI. Sessions are opened `READ ONLY` unless writes are enabled |
 | `postgres` | `psycopg2` | Each query runs in a read-only transaction unless writes are enabled |
 | `clickhouse` | `clickhouse-driver` (native protocol, port 9000) | `readonly=1` unless writes are enabled |
 | `sqlite` | `sqlite3` | Opened with `mode=ro` unless writes are enabled |

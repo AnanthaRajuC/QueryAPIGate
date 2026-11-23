@@ -9,8 +9,9 @@ Every connection - regardless of database type - is one JSON object with the sam
 of the six built-in SQL dialects, and both ways to add one: the admin UI, or the API directly.
 
 What each type supports - read-only enforcement, time limits, `allowed_tables`, schema browsing, streaming - is
-in the [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix). PostgreSQL, MySQL,
-SQLite, DuckDB and ClickHouse are tier 1: every feature, tested against a real server in CI. H2 is experimental.
+in the [support matrix](../documentation/DATABASE_CONNECTION_CONFIGURATION.md#support-matrix). PostgreSQL, MySQL and
+MariaDB (a `mysql` connection), SQLite, DuckDB, ClickHouse and MongoDB are tier 1: every feature, tested against a real
+server in CI. H2, JDBC and Trino are experimental.
 
 For anything not listed here - Oracle, SQL Server, Snowflake, DB2, or any other JDBC-compliant database -
 see [Connect to anything else via generic JDBC](03-connect-via-generic-jdbc.md)
