@@ -48,7 +48,7 @@ RUN target="$(cat /target)" \
 # installation is carried over, without what the image never runs: its own pip (ensurepip's wheel stays, for the
 # install below), Tk and Tcl with tkinter, IDLE and turtledemo, and libpython3.13.so, which the statically linked
 # interpreter doesn't load.
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS python
 COPY --from=uv /uv /usr/local/bin/uv
 RUN UV_PYTHON_INSTALL_DIR=/tmp/python uv python install 3.13 \
