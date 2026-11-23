@@ -85,6 +85,15 @@ jobs:
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1})'" --health-interval 5s --health-timeout 5s
           --health-retries 20
+      mariadb:  # MariaDB through a `mysql` connection: every MySQL integration test (MariaDBTests)
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: pw
+          MARIADB_DATABASE: it
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s
+          --health-retries 20
       trino:  # Trino (experimental, ADR 0026); its built-in HEALTHCHECK gates readiness, plus a wait step below
         image: trinodb/trino:484
         ports: ["8085:8080"]
@@ -96,6 +105,7 @@ jobs:
     env:
       QUERYAPIGATE_IT_POSTGRES: '{"host": "localhost", "port": 5432, "user": "postgres", "password": "pw", "database": "postgres"}'
       QUERYAPIGATE_IT_MYSQL: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
+      QUERYAPIGATE_IT_MARIADB: '{"host": "127.0.0.1", "port": 3307, "user": "root", "password": "pw", "database": "it"}'
       QUERYAPIGATE_IT_CLICKHOUSE: '{"host": "localhost", "port": 9000, "user": "default", "password": "pw", "database": "default"}'
       QUERYAPIGATE_IT_H2: '{"host": "localhost", "user": "SA", "password": "", "database": "it"}'
       QUERYAPIGATE_IT_MONGO: '{"host": "localhost", "port": 27017, "database": "it"}'
@@ -360,8 +370,29 @@ jobs:
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      mariadb:  # the differential gate on MariaDB, through a `mysql` connection
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: pw
+          MARIADB_DATABASE: shop
+        ports: ["3307:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s
+          --health-retries 20
+      valkey:  # rate limits counted in Valkey, a Redis drop-in
+        image: valkey/valkey:8
+        ports: ["6380:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      dragonfly:  # and in Dragonfly, another
+        image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.1.0
+        ports: ["6381:6379"]
+        options: >-
+          --ulimit memlock=-1 --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s
+          --health-retries 10
     env:
       QUERYAPIGATE_DATAPLANE_TEST_POSTGRES: 127.0.0.1:5432:postgres:pw:postgres
+      QUERYAPIGATE_DATAPLANE_TEST_MARIADB: 127.0.0.1:3307:root:pw:shop
       QUERYAPIGATE_DATAPLANE_TEST_REDIS_URL: redis://127.0.0.1:6379/0
       QUERYAPIGATE_DATAPLANE_TEST_RUN_STORE_URL: http://default:pw@127.0.0.1:8123
       QUERYAPIGATE_DATAPLANE_TEST_MYSQL: 127.0.0.1:3306:root:pw:shop
@@ -396,6 +427,52 @@ jobs:
             python "$test" -v 2>&1 | tee -a /tmp/dataplane.log || exit 1
           done
           ! grep -E "skipped '" /tmp/dataplane.log
+      - name: Rate limits counted in Valkey and in Dragonfly, as in Redis
+        run: |
+          for url in redis://127.0.0.1:6380/0 redis://127.0.0.1:6381/0; do
+            QUERYAPIGATE_DATAPLANE_TEST_REDIS_URL=$url python dataplane/tests/test_rate_limits.py -v || exit 1
+          done
+
+  compatible-servers:
+    # The drop-ins, each where what it stands in for is used: MariaDB 10.11, the older long-term release, for every MySQL
+    # integration test (11.4 runs in the integration job); Valkey and Dragonfly for Redis - the whole suite, with the
+    # response cache, rate limits, quotas, concurrency slots and live events' signals in them.
+    name: Compatible servers (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: MariaDB 10.11, image: "mariadb:10.11", port: 3306, health: "healthcheck.sh --connect --innodb_initialized"}
+          - {name: Valkey 8, image: "valkey/valkey:8", port: 6379, health: "valkey-cli ping"}
+          - {name: Dragonfly 2.1, image: "docker.dragonflydb.io/dragonflydb/dragonfly:v2.1.0", port: 6379, health: "redis-cli ping"}
+    services:
+      server:
+        image: ${{ matrix.image }}
+        env:
+          MARIADB_ROOT_PASSWORD: pw
+          MARIADB_DATABASE: it
+        ports: ["${{ matrix.port }}:${{ matrix.port }}"]
+        options: >-
+          --ulimit memlock=-1 --health-cmd "${{ matrix.health }}" --health-interval 5s --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Every MySQL integration test, on MariaDB
+        if: startsWith(matrix.name, 'MariaDB')
+        run: python -m unittest tests.test_integration.MariaDBTests -v
+        env:
+          QUERYAPIGATE_IT_MARIADB: '{"host": "127.0.0.1", "port": 3306, "user": "root", "password": "pw", "database": "it"}'
+      - name: The whole suite, with this server as Redis
+        if: ${{ !startsWith(matrix.name, 'MariaDB') }}
+        run: python -m unittest discover -s tests -t . -v
+        env:
+          QUERYAPIGATE_TEST_REDIS_URL: redis://localhost:6379/0
 
   run-store:
     # The whole suite again, with run history, the event log and usage in a ClickHouse run store (ADR 0029) -

@@ -89,7 +89,8 @@ proxy, secrets, backups, monitoring - see [DEPLOYMENT.md](DEPLOYMENT.md).
 A saved query's `cache_ttl` (see the README) is served from an in-process cache by default - fast, zero
 setup, but wiped by every restart and never shared if you run more than one instance behind a load
 balancer. For an OLTP query that gets hit hundreds of times a second, set `QUERYAPIGATE_REDIS_URL` to point
-at a Redis instance instead: the cache then survives a restart and is shared across every instance that
+at a Redis instance instead - or Valkey or Dragonfly, which speak Redis's protocol and are tested as it is: the cache
+then survives a restart and is shared across every instance that
 points at the same Redis, so a cache warmed by one instance serves every instance's traffic instead of each
 duplicating the same database hits.
 

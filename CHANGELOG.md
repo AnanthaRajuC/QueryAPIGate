@@ -127,6 +127,11 @@ otherwise be kept until 2.0.
 
 ### Added
 
+- **MariaDB, Valkey and Dragonfly are supported, and tested in CI as what they stand in for.** MariaDB 10.11 and 11.4
+  as a `mysql` connection - every MySQL integration test, and the data plane's differential gate, which answers on
+  MariaDB exactly as Python does, its own types (`UUID`, `INET4`, `INET6`, JSON) among the rendering vectors. It
+  worked before - its time limit was already its own - but nothing tested it. Valkey 8 and Dragonfly 2.1 as
+  `QUERYAPIGATE_REDIS_URL`: the whole suite, and the data plane's rate limits, with each in Redis's place.
 - **`GET /api/v1/audit` and `GET /api/v1/write-requests` page:** `limit`, and `next_cursor` to send back as `cursor`.
   Without `limit`, a page is what the whole answer was (1000 entries, 200 requests), so nothing changes until a log
   outgrows it.
