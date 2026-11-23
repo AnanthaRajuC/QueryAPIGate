@@ -17,6 +17,7 @@ them (ADR 0030, section 5).
     QUERYAPIGATE_DATAPLANE_TEST_POSTGRES=127.0.0.1:55435:postgres:pw:postgres \\
     QUERYAPIGATE_DATAPLANE_TEST_MYSQL=127.0.0.1:55436:root:pw:shop \\
     QUERYAPIGATE_DATAPLANE_TEST_MARIADB=127.0.0.1:55437:root:pw:shop \\
+    QUERYAPIGATE_DATAPLANE_TEST_PGBOUNCER=127.0.0.1:56432:postgres:pw:postgres \\
     .venv/bin/python dataplane/tests/test_differential.py
 
 DIFFERENTIAL_CALLS (default 1500 per database) and DIFFERENTIAL_SEED (default 28) set the run; a failure prints the
@@ -465,6 +466,17 @@ class ProxiedMariadbDifferentialTests(DifferentialTests):
     dialect = 'mysql'
     env = 'QUERYAPIGATE_DATAPLANE_TEST_MARIADB'
     proxied = True
+
+
+
+@unittest.skipIf(binary() is None, 'build the data plane first')
+@unittest.skipIf(details('QUERYAPIGATE_DATAPLANE_TEST_PGBOUNCER') is None, 'set QUERYAPIGATE_DATAPLANE_TEST_PGBOUNCER')
+class PgbouncerDifferentialTests(DifferentialTests):
+    """PostgreSQL through PgBouncer in transaction pooling mode, as Neon and Supabase put one in front of it - in CI
+    with max_prepared_statements = 0, the strictest: each message's settings are SET LOCAL in its own transaction, so
+    none reaches another client given the same server connection."""
+    dialect = 'postgres'
+    env = 'QUERYAPIGATE_DATAPLANE_TEST_PGBOUNCER'
 
 
 del DifferentialTests  # the base runs only through its subclasses

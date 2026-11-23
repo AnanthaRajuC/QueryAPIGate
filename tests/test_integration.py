@@ -475,6 +475,41 @@ class PostgresTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
         self.assertEqual(decoy.get_json()['code'], 'table_not_allowed')
 
 
+
+class PgBouncerTests(PostgresTests):
+    """The PostgreSQL tests through PgBouncer in transaction pooling mode, as Neon and Supabase put one in front of
+    Postgres: a call's settings are SET LOCAL in its own transaction, so none reaches the next client given the same
+    server connection. QUERYAPIGATE_IT_PGBOUNCER is the bouncer, its user one of PgBouncer's admin_users."""
+    env_var = 'QUERYAPIGATE_IT_PGBOUNCER'
+
+    def bouncer(self, command):
+        """A command to PgBouncer's admin console."""
+        import psycopg2
+        conn = psycopg2.connect(host=self.details['host'], port=self.details['port'], user=self.details['user'],
+                                password=self.details.get('password'), dbname='pgbouncer')
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            cursor.execute(command)
+        conn.close()
+
+    def test_connections_are_reused_when_pooled(self):
+        self.skipTest("pg_backend_pid() is PgBouncer's server connection, not the one this server pools")
+
+    def test_every_request_gets_its_own_connection_when_pooling_is_disabled(self):
+        self.skipTest("pg_backend_pid() is PgBouncer's server connection, not the one this server opens")
+
+    def test_a_table_restricted_call_reads_the_schema_its_grant_was_checked_against(self):
+        # A role's settings apply to the sessions it opens next, and PgBouncer's are open already: RECONNECT closes
+        # them as they're released, so the next call is on a session with the role's search_path
+        admin = self.admin
+
+        def admin_then_reconnect(*statements):
+            admin(*statements)
+            self.bouncer('RECONNECT')
+
+        with mock.patch.object(self, 'admin', admin_then_reconnect):
+            super().test_a_table_restricted_call_reads_the_schema_its_grant_was_checked_against()
+
 class MySQLTests(DriverReadOnlyMixin, IntegrationBase, unittest.TestCase):
     db, env_var = 'mysql', 'QUERYAPIGATE_IT_MYSQL'
     finite_slow_sql = 'SELECT SLEEP(2) AS s'
@@ -756,6 +791,12 @@ class MongoTests(unittest.TestCase):
         self.mongo.queryapigate_it.insert_many([{'id': i, 'name': f'Item {i}', 'price': i + 0.5} for i in range(1, 8)])
         self.mongo.queryapigate_it_secret.insert_one({'token': 'tok_live_123'})
 
+    def slow(self):
+        """100,000 documents a regex has to scan - in batches of 10,000, as FerretDB takes at most 25,000 at once."""
+        for start in range(0, 100_000, 10_000):
+            batch = [{'s': 'x' * 40 + str(i)} for i in range(start, start + 10_000)]
+            self.mongo.queryapigate_it_slow.insert_many(batch)
+
     def find(self, headers=None, query='', **body):
         return self.client.post(f'/execute_mongo{query}', headers=headers or self.admin,
                                 json={'connection_name': 'it', 'collection': 'queryapigate_it', **body})
@@ -782,7 +823,7 @@ class MongoTests(unittest.TestCase):
         self.assertEqual((res.status_code, res.get_json()), (200, [{'name': 'Item 3'}]))
 
     def test_the_time_limit_cancels_a_find(self):
-        self.mongo.queryapigate_it_slow.insert_many([{'s': 'x' * 40 + str(i)} for i in range(100_000)])
+        self.slow()
         res = self.find(collection='queryapigate_it_slow', filter={'s': {'$regex': 'y$'}}, timeout=0.001)
         self.assertEqual((res.status_code, res.get_json()['code']), (504, 'query_timeout'))
         unlimited = self.find(collection='queryapigate_it_slow', filter={'s': {'$regex': 'y$'}})
@@ -840,7 +881,7 @@ class MongoTests(unittest.TestCase):
         self.assertEqual(found, [(2500, 1, 2499)])
 
     def test_a_streamed_find_keeps_to_the_time_limit(self):
-        self.mongo.queryapigate_it_slow.insert_many([{'s': 'x' * 40 + str(i)} for i in range(100_000)])
+        self.slow()
         res = self.find(query='?stream=true&format=ndjson', collection='queryapigate_it_slow',
                         filter={'s': {'$regex': 'y$'}}, timeout=0.001)
         self.assertEqual((res.status_code, res.get_json()['code']), (504, 'query_timeout'))
@@ -850,6 +891,9 @@ class MongoTests(unittest.TestCase):
 
         def open_cursors():
             return self.mongo.command('serverStatus')['metrics']['cursor']['open']['total']
+
+        if 'cursor' not in self.mongo.command('serverStatus').get('metrics', {}):
+            self.skipTest("this server's serverStatus doesn't count open cursors (FerretDB)")
 
         before = open_cursors()
         res = self.client.get('/q/many?stream=true&format=ndjson', headers=self.admin, buffered=False)
@@ -869,6 +913,11 @@ class MongoTests(unittest.TestCase):
         tested = self.client.post('/api/v1/connections/test', headers=self.admin, json=self.details)
         self.assertEqual(tested.status_code, 200, tested.get_data(as_text=True))
 
+
+
+class FerretDBTests(MongoTests):
+    """The same tests on FerretDB, MongoDB's wire protocol over PostgreSQL - a `mongo` connection."""
+    env_var = 'QUERYAPIGATE_IT_FERRETDB'
 
 if __name__ == '__main__':
     unittest.main()

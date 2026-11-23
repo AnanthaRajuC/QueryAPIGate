@@ -132,6 +132,15 @@ otherwise be kept until 2.0.
   MariaDB exactly as Python does, its own types (`UUID`, `INET4`, `INET6`, JSON) among the rendering vectors. It
   worked before - its time limit was already its own - but nothing tested it. Valkey 8 and Dragonfly 2.1 as
   `QUERYAPIGATE_REDIS_URL`: the whole suite, and the data plane's rate limits, with each in Redis's place.
+- **YugabyteDB, PgBouncer, FerretDB, Garnet and OpenBao are tested in CI too** - each with the tests of what it
+  stands in for, and nothing changed in the server for any of them. YugabyteDB 2026.1 (YSQL) as a `postgres`
+  connection; PgBouncer 1.26 in transaction pooling mode, with prepared statements off, in front of one - the data
+  plane's differential gate as well, as it's what Neon and Supabase put there; FerretDB 2.7 as a `mongo` connection;
+  Garnet 2.2 as `QUERYAPIGATE_REDIS_URL`, started with `--lua true` (without it the shared rate limits fall back to
+  counting per instance, logged); OpenBao 2.7, Vault's open-source fork, for `${vault:...}` and `vault-database`.
+  The metadata store (`QUERYAPIGATE_DATABASE_URL`) needs PostgreSQL directly or a session-mode pooler: it holds an
+  advisory lock and a `LISTEN`. [Compatible servers](documentation/DATABASE_CONNECTION_CONFIGURATION.md#compatible-servers)
+  lists these, the same-engine servers not tested separately, and those not supported yet.
 - **`GET /api/v1/audit` and `GET /api/v1/write-requests` page:** `limit`, and `next_cursor` to send back as `cursor`.
   Without `limit`, a page is what the whole answer was (1000 entries, 200 requests), so nothing changes until a log
   outgrows it.

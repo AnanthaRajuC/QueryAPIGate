@@ -8,12 +8,12 @@ stops it with a message naming the setting, rather than running with the default
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `QUERYAPIGATE_HOME` | current directory | Folder holding `queryapigate.db` (connections, saved queries, API keys, roles and the audit log). |
-| `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
+| `QUERYAPIGATE_DATABASE_URL` | unset | A `postgresql://` URL: keep connections, saved queries, run history, API keys, roles and the audit log in that PostgreSQL database instead of `queryapigate.db`, so several instances can share them. PostgreSQL directly, or a pooler in session mode - not transaction pooling, which loses the store's session state ([Compatible servers](DATABASE_CONNECTION_CONFIGURATION.md#compatible-servers)). Needs `queryapigate[postgres]`; copy an existing store across with `queryapigate migrate-to-postgres`. See [the setup guide](INSTALLATION_AND_SETUP.md#shared-metadata-store-postgresql). |
 | `QUERYAPIGATE_ALLOW_WRITES` | off | Allow `INSERT`/`UPDATE`/DDL. Otherwise only single read-only statements are accepted. |
 | `QUERYAPIGATE_API_KEY` | unset | The shared admin key, with the owner role. When set (or once a scoped key or a [named administrator](API.md#administrators-and-admin-roles) exists), every request except `/health`, `/docs`, `/console`, `/openapi.json` and `/metrics` needs an `X-API-Key` header. Once named owners exist it is the break-glass key: every use is logged and alerted, and it can be removed. |
 | `QUERYAPIGATE_EXPORT_DIRS` | unset | Comma-separated absolute folders a local-folder export destination may write under. Unset: only object-storage destinations (`s3://`, `gs://`, `r2://`) are allowed. Never the server's own home. |
 | `QUERYAPIGATE_MASK_KEY` | unset | The key column masking's `hash` action uses. Unset: one is made once in the store and shared by every instance. Changing it changes every hashed value. |
-| `QUERYAPIGATE_REDIS_URL` | unset | A `redis://` URL - Redis, or Valkey or Dragonfly, which speak its protocol (Redis 7, Valkey 8 and Dragonfly 2.1 are tested in CI): share rate limits and the response cache across every instance and process (`serve`, `mcp`, `events`). Needs `queryapigate[redis]`. Without it, each process counts and caches on its own. |
+| `QUERYAPIGATE_REDIS_URL` | unset | A `redis://` URL - Redis, or Valkey, Dragonfly or Garnet, which speak its protocol (Redis 7, Valkey 8, Dragonfly 2.1 and Garnet 2.2 are tested in CI; start Garnet with `--lua true`, or the shared rate limits fall back to counting per instance): share rate limits and the response cache across every instance and process (`serve`, `mcp`, `events`). Needs `queryapigate[redis]`. Without it, each process counts and caches on its own. |
 | `QUERYAPIGATE_MAX_PAGE_SIZE` | `1000` | Upper limit for `page_size`. |
 | `QUERYAPIGATE_STREAM_MAX_ROWS` | unset | Row cap for a `?stream=true` export. Off (unbounded) by default; a malformed value stops startup. |
 | `QUERYAPIGATE_CORS_ORIGINS` | unset | Websites allowed to call the API from a browser: comma-separated origins such as `https://app.example.com`, or `*`. Off by default. |
@@ -79,7 +79,7 @@ nothing that isn't listed here.
 | `QUERYAPIGATE_SECRET_ENV_VARS` | unset - none | The variables a `${VAR}` reference may read: names, or prefixes ending in `*`. |
 | `QUERYAPIGATE_SECRET_FILE_DIRS` | unset - none | Absolute folders a `${file:...}` reference may read. |
 | `QUERYAPIGATE_SECRET_CACHE_SECONDS` | `300` | Seconds a secret from a provider is kept at most (1-86400) - the one duration named with its unit. |
-| `QUERYAPIGATE_VAULT_ADDR`, `QUERYAPIGATE_VAULT_NAMESPACE`, `QUERYAPIGATE_VAULT_CACERT` | unset | Vault's address, an Enterprise namespace, a CA for its certificate. Unset address: `${vault:...}` and `vault-database` are refused. |
+| `QUERYAPIGATE_VAULT_ADDR`, `QUERYAPIGATE_VAULT_NAMESPACE`, `QUERYAPIGATE_VAULT_CACERT` | unset | Vault's address - or OpenBao's, its open-source fork, which speaks the same API (OpenBao 2.7 is tested in CI) - an Enterprise namespace, a CA for its certificate. Unset address: `${vault:...}` and `vault-database` are refused. |
 | `QUERYAPIGATE_VAULT_AUTH`, `QUERYAPIGATE_VAULT_AUTH_MOUNT` | `token`, the method's name | How the server signs in to Vault - `token`, `kubernetes` or `approle` - and where that method is mounted. |
 | `QUERYAPIGATE_VAULT_TOKEN`, `QUERYAPIGATE_VAULT_TOKEN_FILE` | unset | `token`: the token, or a file read again at each sign-in (what Vault Agent keeps current). |
 | `QUERYAPIGATE_VAULT_K8S_ROLE`, `QUERYAPIGATE_VAULT_K8S_TOKEN_FILE` | unset, the service account token | `kubernetes`: the Vault role, and the token signed in with. |
@@ -129,7 +129,7 @@ nothing that isn't listed here.
 | `QUERYAPIGATE_LIVE_QUERIES` | off | Live queries (experimental). |
 | `QUERYAPIGATE_LIVE_MIN_INTERVAL` | `1` | Seconds between two re-runs of one live query, however often its tables change. |
 | `QUERYAPIGATE_CDC_SOURCES` | unset | Debezium sources as JSON, for deployments configured only by environment; `/api/v1/cdc-sources` manages them otherwise. |
-| `QUERYAPIGATE_EMBEDDING_URL`, `QUERYAPIGATE_EMBEDDING_MODEL`, `QUERYAPIGATE_EMBEDDING_API_KEY` | unset | An OpenAI-compatible embeddings endpoint, its model and token, for `embed` parameters (experimental). |
+| `QUERYAPIGATE_EMBEDDING_URL`, `QUERYAPIGATE_EMBEDDING_MODEL`, `QUERYAPIGATE_EMBEDDING_API_KEY` | unset | An OpenAI-compatible embeddings endpoint (the full URL, such as Ollama's, vLLM's or LiteLLM's `/v1/embeddings` - not tested in CI), its model and token, for `embed` parameters (experimental). |
 
 **The Rust data plane** (experimental - [DEPLOYMENT.md](DEPLOYMENT.md#a-rust-data-plane-in-front-of-q))
 

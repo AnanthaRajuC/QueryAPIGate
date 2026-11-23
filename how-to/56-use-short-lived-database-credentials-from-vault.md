@@ -11,6 +11,10 @@ Every command and output below was run against **Vault 1.21** (dev mode) and **P
 signing in to Vault through **AppRole**. The leases last **60 seconds** so that a few rotations fit in the guide; an
 hour is usual.
 
+**OpenBao** - Vault's open-source fork, with the same API - works the same way: point `QUERYAPIGATE_VAULT_ADDR` at it.
+CI runs the Vault tests on OpenBao 2.7 too. Its CLI is `bao` rather than `vault`; the commands below are otherwise
+the same.
+
 ## Step 1: Vault makes the database's users
 
 What Vault's administrator sets up - the database secrets engine, managing a role that may only read `revenue`:
