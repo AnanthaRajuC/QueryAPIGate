@@ -5,7 +5,8 @@ What QueryAPIGate does, feature by feature, with links to the reference for each
 ## Multi-database support
 
 **Tier 1** - PostgreSQL, MySQL and MariaDB, SQLite, DuckDB, ClickHouse and MongoDB (`find()` queries): every
-feature, tested against a real server in CI, and covered by the compatibility promise. **Experimental** - H2, generic
+feature, tested against a real server in CI, and covered by the compatibility promise. YugabyteDB, PgBouncer and
+FerretDB are tested as what they stand in for ([compatible servers](DATABASE_CONNECTION_CONFIGURATION.md#compatible-servers)). **Experimental** - H2, generic
 JDBC (Oracle, SQL Server, DB2, Snowflake and anything else with a driver jar) and Trino: they work, with documented
 gaps. The same guard,
 pooling, parameter binding and output formats - JSON, NDJSON, XML, YAML, CSV, TSV, Excel and Parquet - apply to every one.
@@ -192,8 +193,8 @@ Configure Access
 ## Testing and quality
 
 Unit tests, integration tests against real PostgreSQL, MySQL, MariaDB, ClickHouse, H2, MongoDB and Trino servers (run
-in CI against service containers; the job fails if one skips), the whole suite with Valkey and Dragonfly standing in
-for Redis, DuckDB integration tests that run unconditionally since it's
+in CI against service containers; the job fails if one skips) and the servers compatible with them - YugabyteDB,
+PgBouncer, FerretDB, OpenBao - the whole suite with Valkey, Dragonfly and Garnet standing in for Redis, DuckDB integration tests that run unconditionally since it's
 embedded, property tests of the SQL guard with [Hypothesis](https://hypothesis.readthedocs.io/) and fuzzing of the
 guards with Atheris and ClusterFuzzLite ([fuzz/](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/fuzz/README.md)), CodeQL, static type checking with mypy, linting
 with ruff, and CI on every push - on Python 3.11 to 3.14, at the oldest dependency versions allowed, on a PostgreSQL

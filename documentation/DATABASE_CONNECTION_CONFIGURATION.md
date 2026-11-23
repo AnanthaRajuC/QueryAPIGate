@@ -33,16 +33,40 @@ driver option, so a typo was saved instead of reported.
 | `db` | Driver | Notes |
 |------|--------|-------|
 | `mysql` | `mysql-connector-python` | MySQL, and MariaDB - the same `mysql` connection, its own time limit applied (`max_statement_time`): MySQL 8.4 and MariaDB 10.11 and 11.4 are tested in CI. Sessions are opened `READ ONLY` unless writes are enabled |
-| `postgres` | `psycopg2` | Each query runs in a read-only transaction unless writes are enabled |
+| `postgres` | `psycopg2` | PostgreSQL, and YugabyteDB (YSQL) - tested in CI - through PgBouncer too: see [Compatible servers](#compatible-servers). Each query runs in a read-only transaction unless writes are enabled |
 | `clickhouse` | `clickhouse-driver` (native protocol, port 9000) | `readonly=1` unless writes are enabled |
 | `sqlite` | `sqlite3` | Opened with `mode=ro` unless writes are enabled |
 | `h2` | `JayDeBeApi` + bundled JDBC jar | Connects to a running H2 TCP server: `jdbc:h2:tcp://<host>[:port]/~/<database>` |
 | `jdbc` | `JayDeBeApi` + your own JDBC jar | Any other JDBC-compliant database (Oracle, SQL Server, DB2, Snowflake, ...) - see [Generic JDBC connections](#generic-jdbc-connections) |
 | `duckdb` | `duckdb` | An embedded analytical database that can also query CSV/JSON/Parquet files directly - see [DuckDB connections](#duckdb-connections) |
-| `mongo` | `pymongo` | `find()` queries only, never writes - see [MongoDB connections](#mongodb-connections) |
+| `mongo` | `pymongo` | MongoDB, and FerretDB 2 - tested in CI. `find()` queries only, never writes - see [MongoDB connections](#mongodb-connections) |
 | `trino` | `trino` (DB-API) | The Trino distributed SQL engine, federating many catalogs - see [Trino connections](#trino-connections) |
 
 `h2`, `jdbc` and `trino` are [experimental](#experimental-h2-jdbc-and-trino).
+
+## Compatible servers
+
+A server that speaks a supported database's protocol is reached through that database's connection type, with
+nothing to set. Those below are tested in CI, each with the integration tests of what it stands in for:
+
+| Server | Connection | Tested | Notes |
+|---|---|---|---|
+| MariaDB | `mysql` | 10.11, 11.4 | Its own time limit (`max_statement_time`) and error numbers are applied; the data plane answers on it as Python does |
+| YugabyteDB (YSQL) | `postgres` | 2026.1 | |
+| PgBouncer, transaction pooling | `postgres` | 1.26, `max_prepared_statements = 0` | What Neon and Supabase put in front of PostgreSQL. Each call's settings are `SET LOCAL` in its own transaction, so none reaches the next client given the same server connection; the data plane answers through it as Python does |
+| FerretDB | `mongo` | 2.7 | Its `serverStatus` doesn't count cursors, so that one test is skipped there |
+
+**Not separately tested, but the same engine:** PostgreSQL with extensions (TimescaleDB, Citus, pgvector, ParadeDB),
+Percona Server for MySQL and for MongoDB, and the managed services - Amazon RDS and Aurora, Google Cloud SQL and
+AlloyDB, Azure Database, Neon, Supabase.
+
+**Not the metadata store through a transaction pooler.** `QUERYAPIGATE_DATABASE_URL` holds session-level state - the
+history sweep's advisory lock and the event stream's `LISTEN` - so point it at PostgreSQL directly or at a pooler in
+session mode (Neon's unpooled host, Supabase's session pooler or direct connection).
+
+**Not yet:** servers that speak a protocol but not its semantics - CockroachDB and TiDB (partial catalogs and
+read-only transactions), Vitess/PlanetScale, SingleStore, StarRocks, Doris, Redshift, Materialize, RisingWave -
+and Amazon DocumentDB and Cosmos DB for MongoDB, which can't be run in CI.
 
 ## Support matrix
 
