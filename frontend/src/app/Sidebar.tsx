@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { getApiKey, setApiKey } from '@/auth/apiKey';
@@ -11,7 +11,16 @@ import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
 import { useAlertFeed } from './alerts';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-// ui.py <aside class="side">, element for element.
+// ui.py <aside class="side">, element for element - with the icons shown beside the labels, badges that stand out only
+// for what needs someone (open alerts, writes waiting for approval), and a fade at the bottom of the menu while more of
+// it is below.
+
+/** Counts that ask for action - shown as a coloured badge, and as a dot on the icon in the collapsed rail. The others
+ * are totals, shown quietly. */
+const ATTENTION: Partial<Record<NonNullable<NavItem['count']>, 'danger' | 'accent'>> = {
+  alerts: 'danger',
+  approvals: 'accent',
+};
 
 export function activeItem(pathname: string): NavItem | undefined {
   return [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS].find((i) =>
@@ -67,6 +76,24 @@ export function Sidebar() {
       return next;
     });
 
+  // The fade at the bottom of the menu: on while some of it is below the visible part.
+  const navRef = useRef<HTMLElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const update = () => setMoreBelow(nav.scrollTop + nav.clientHeight < nav.scrollHeight - 4);
+    update();
+    nav.addEventListener('scroll', update, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(nav);
+    for (const child of nav.children) observer?.observe(child);
+    return () => {
+      nav.removeEventListener('scroll', update);
+      observer?.disconnect();
+    };
+  }, [collapsed]);
+
   const go = (item: NavItem) => navigate(item.path);
   const button = (item: NavItem, extraClass?: string) => (
     <button
@@ -85,7 +112,15 @@ export function Sidebar() {
     >
       <span className="nav-abbr">{item.icon}</span>
       <span className="nav-text">{item.label}</span>
-      {item.count ? <span className="count">{counts[item.count]}</span> : null}
+      {item.count ? (
+        <span
+          className={
+            ATTENTION[item.count] && counts[item.count] ? `count attention ${ATTENTION[item.count]}` : 'count'
+          }
+        >
+          {counts[item.count]}
+        </span>
+      ) : null}
     </button>
   );
 
@@ -105,7 +140,13 @@ export function Sidebar() {
         </span>
       </div>
       <WorkspaceSwitcher />
-      <nav id="tabs" role="tablist" aria-label="Sections">
+      <nav
+        id="tabs"
+        role="tablist"
+        aria-label="Sections"
+        ref={navRef}
+        className={moreBelow ? 'more-below' : undefined}
+      >
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(shown);
           if (!items.length) return null;

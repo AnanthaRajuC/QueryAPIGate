@@ -8,10 +8,26 @@ import { PencilIcon, TrashIcon } from '@/components/icons';
 
 import { useDestinations, useReport } from './shared';
 import { ManagedTag } from '@/components/Managed';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 
 // Where exports may write (ADR 0004), on /api/v1/destinations: a bucket prefix or a folder, and its credentials.
 
 type Destination = Schemas['Destination'];
+
+const storageText = (d: Destination) =>
+  [d.storage ?? 'local folder', d.region, d.endpoint].filter(Boolean).join(' · ');
+
+const DESTINATION_COLUMNS: Column<Destination>[] = [
+  { key: 'name', label: 'Name', sort: (d) => d.name },
+  { key: 'url', label: 'Writes under', sort: (d) => d.url },
+  { key: 'storage', label: 'Storage', sort: storageText },
+  { key: 'credentials', label: 'Credentials', sort: (d) => d.user },
+  { key: 'actions', label: '' },
+];
+
+/** What the filter box finds a destination by: its name, URL, storage, region, endpoint and user. */
+const destinationText = (d: Destination) => [d.name, d.url, storageText(d), d.user];
 
 export function DestinationsPage() {
   const list = useDestinations();
@@ -21,6 +37,7 @@ export function DestinationsPage() {
   const client = useQueryClient();
   const write = can('destinations.write');
   const newDestination = () => openDrawer({ title: 'New destination', content: <DestinationForm /> });
+  const table = useTableControls(list.data ?? [], { columns: DESTINATION_COLUMNS, text: destinationText });
 
   const test = async (name: string) => {
     try {
@@ -70,62 +87,72 @@ export function DestinationsPage() {
     );
   } else {
     body = (
-      <div style={{ overflowX: 'auto' }}>
-        <table className="grid">
-          <thead>
-            <tr>
-              {['Name', 'Writes under', 'Storage', 'Credentials', ''].map((t, i) => (
-                <th key={i}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.map((d) => (
-              <tr key={d.name} data-name={d.name}>
-                <td>
-                  <span className="name">{d.name}</span> <ManagedTag kind="destinations" name={d.name} />
-                </td>
-                <td className="mono">{d.url}</td>
-                <td className="dim">
-                  {[d.storage ?? 'local folder', d.region, d.endpoint].filter(Boolean).join(' · ')}
-                </td>
-                <td className="dim">{d.user ? `${d.user} · ${d.password ?? 'no secret'}` : 'none'}</td>
-                <td>
-                  <div className="actions" hidden={!write}>
-                    <button type="button" className="btn ghost sm" onClick={() => void test(d.name)}>
-                      Test
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost sm icon"
-                      title={`Edit ${d.name}`}
-                      aria-label="Edit"
-                      onClick={() =>
-                        openDrawer({
-                          title: 'Edit destination',
-                          kicker: d.name,
-                          content: <DestinationForm name={d.name} />,
-                        })
-                      }
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost sm icon danger"
-                      title={`Delete ${d.name}`}
-                      aria-label="Delete"
-                      onClick={() => void remove(d.name)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </td>
+      <>
+        <div className="panel-bar">
+          <span className="spacer" />
+          <TableFilter
+            controls={table}
+            id="destinations-filter"
+            placeholder="Filter destinations…"
+            label="Filter destinations"
+          />
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                {table.columns.map((c) => (
+                  <SortHeader key={c.key} controls={table} column={c} />
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {table.rows.map((d) => (
+                <tr key={d.name} data-name={d.name}>
+                  <td>
+                    <span className="name">{d.name}</span> <ManagedTag kind="destinations" name={d.name} />
+                  </td>
+                  <td className="mono">{d.url}</td>
+                  <td className="dim">{storageText(d)}</td>
+                  <td className="dim">{d.user ? `${d.user} · ${d.password ?? 'no secret'}` : 'none'}</td>
+                  <td>
+                    <div className="actions" hidden={!write}>
+                      <button type="button" className="btn ghost sm" onClick={() => void test(d.name)}>
+                        Test
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm icon"
+                        title={`Edit ${d.name}`}
+                        aria-label="Edit"
+                        onClick={() =>
+                          openDrawer({
+                            title: 'Edit destination',
+                            kicker: d.name,
+                            content: <DestinationForm name={d.name} />,
+                          })
+                        }
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm icon danger"
+                        title={`Delete ${d.name}`}
+                        aria-label="Delete"
+                        onClick={() => void remove(d.name)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!table.rows.length && <NoMatches controls={table} span={DESTINATION_COLUMNS.length} />}
+            </tbody>
+          </table>
+        </div>
+      </>
     );
   }
 

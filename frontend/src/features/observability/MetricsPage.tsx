@@ -4,6 +4,8 @@ import { useConnections } from '@/app/data';
 import { Loading } from '@/app/feedback';
 import { useMetricsSeries, usePoolPoll } from '@/app/metrics';
 import { StatTile } from '@/components/StatTile';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { metricGauge, metricGroupSum, metricSum } from '@/lib/metrics';
 
 // The classic Metrics screen (ui.py #tab-metrics, loadMetrics, renderMetrics, pollPoolStats): live totals since
@@ -38,6 +40,65 @@ function BarCard({
           <span className="bv">{String(r.value)}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+type ConnectionMetrics = {
+  connection: string;
+  queries: number;
+  errors: number;
+  avgMs: number | null;
+  rows: number;
+};
+
+const METRIC_COLUMNS: Column<ConnectionMetrics>[] = [
+  { key: 'connection', label: 'Connection', sort: (r) => r.connection },
+  { key: 'queries', label: 'Queries', className: 'num', sort: (r) => r.queries },
+  { key: 'errors', label: 'Errors', className: 'num', sort: (r) => r.errors },
+  { key: 'latency', label: 'Avg latency', className: 'num', sort: (r) => r.avgMs },
+  { key: 'rows', label: 'Rows returned', className: 'num', sort: (r) => r.rows },
+];
+
+const metricText = (r: ConnectionMetrics) => [r.connection];
+
+/** Each connection's totals since this process started, sortable and filterable. */
+function ConnectionMetricsTable({ items }: { items: ConnectionMetrics[] }) {
+  const table = useTableControls(items, { columns: METRIC_COLUMNS, text: metricText });
+  return (
+    <div className="panel" id="metrics-connections" style={{ overflowX: 'auto' }}>
+      <div className="panel-bar">
+        <span className="spacer" />
+        <TableFilter
+          controls={table}
+          id="metrics-filter"
+          placeholder="Filter connections…"
+          label="Filter connections"
+        />
+      </div>
+      <table className="grid">
+        <thead>
+          <tr>
+            {table.columns.map((c) => (
+              <SortHeader key={c.key} controls={table} column={c} />
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((r) => (
+            <tr key={r.connection}>
+              <td>
+                <span className="name">{r.connection}</span>
+              </td>
+              <td className="mono num">{String(r.queries)}</td>
+              <td className="mono num">{String(r.errors)}</td>
+              <td className="mono num">{r.avgMs === null ? '—' : r.avgMs + ' ms'}</td>
+              <td className="mono num">{String(r.rows)}</td>
+            </tr>
+          ))}
+          {!table.rows.length && <NoMatches controls={table} span={METRIC_COLUMNS.length} />}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -109,7 +170,18 @@ export function MetricsPage() {
     const rowsByConnection = metricGroupSum(series, 'queryapigate_rows_returned_total', 'connection');
     const sumByConn = metricGroupSum(series, 'queryapigate_query_duration_seconds_sum', 'connection');
     const countByConn = metricGroupSum(series, 'queryapigate_query_duration_seconds_count', 'connection');
-    const connNames = Object.keys(byConnection).sort();
+    const connMetrics: ConnectionMetrics[] = Object.keys(byConnection)
+      .sort()
+      .map((c) => {
+        const count = countByConn[c] ?? 0;
+        return {
+          connection: c,
+          queries: byConnection[c] ?? 0,
+          errors: errorsByConnection[c] ?? 0,
+          avgMs: count ? Math.round((1000 * (sumByConn[c] ?? 0)) / count) : null,
+          rows: rowsByConnection[c] ?? 0,
+        };
+      });
     body = (
       <>
         <div className="stat-tiles">
@@ -142,38 +214,7 @@ export function MetricsPage() {
             <BarCard title="Queries by connection" rows={connRows} colorOf={() => 'var(--accent)'} />
           ) : null}
         </div>
-        {connNames.length ? (
-          <div className="panel" style={{ overflowX: 'auto' }}>
-            <table className="grid">
-              <thead>
-                <tr>
-                  {['Connection', 'Queries', 'Errors', 'Avg latency', 'Rows returned'].map((t, i) => (
-                    <th key={t} className={i ? 'num' : ''}>
-                      {t}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {connNames.map((c) => {
-                  const count = countByConn[c] ?? 0;
-                  const avgMs = count ? Math.round((1000 * (sumByConn[c] ?? 0)) / count) : null;
-                  return (
-                    <tr key={c}>
-                      <td>
-                        <span className="name">{c}</span>
-                      </td>
-                      <td className="mono num">{String(byConnection[c] ?? 0)}</td>
-                      <td className="mono num">{String(errorsByConnection[c] ?? 0)}</td>
-                      <td className="mono num">{avgMs === null ? '—' : avgMs + ' ms'}</td>
-                      <td className="mono num">{String(rowsByConnection[c] ?? 0)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+        {connMetrics.length ? <ConnectionMetricsTable items={connMetrics} /> : null}
       </>
     );
   }

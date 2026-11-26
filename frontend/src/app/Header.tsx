@@ -7,9 +7,10 @@ import { useAlertFeed } from './alerts';
 import { useAllQueries, useApiKeys, useConnections, useRoles } from './data';
 import { setPref, useIsDark, usePrefValues } from './prefs';
 import { activeItem } from './Sidebar';
+import { WorkspaceChip } from './WorkspaceSwitcher';
 
-// ui.py <header class="top">: sidebar toggle, breadcrumbs, global search (Ctrl K), the rate-limit chip, and the font
-// size and light/dark switches.
+// ui.py <header class="top">: sidebar toggle, the workspace (outside `default`), breadcrumbs, global search (Ctrl K), the
+// rate-limit chip, and the font size and light/dark switches.
 
 const COLLAPSE_KEY = 'queryapigate-ui-side-collapsed';
 
@@ -82,6 +83,7 @@ export function Header() {
             <i />
           </span>
         </button>
+        <WorkspaceChip />
         <div className="crumbs" id="crumbs">
           <span className="g" id="crumb-group">
             {active?.group ?? 'Overview'}

@@ -59,6 +59,7 @@ describe('workspaces in the Console', () => {
     await waitFor(() => expect(document.getElementById('side')).not.toBeNull());
     await waitFor(() => expect(screen.getByText('v9.9.9')).toBeInTheDocument());
     expect(document.getElementById('workspace')).toBeNull();
+    expect(document.getElementById('workspace-chip')).toBeNull(); // nor a chip in the top bar
   });
 
   it('switching sends every request to that workspace', async () => {
@@ -77,10 +78,21 @@ describe('workspaces in the Console', () => {
       return found;
     })) as HTMLSelectElement;
     expect(picker.value).toBe('default');
+    // in default the chip is only for the icon rail, which has no room for the switcher
+    expect(document.getElementById('workspace-chip')).toHaveClass('rail-only');
     calls.length = 0;
     await userEvent.selectOptions(picker, 'team-b');
     expect(getWorkspace()).toBe('team-b');
     await waitFor(() => expect(paths(calls)).toContain('/w/team-b/api/v1/me'));
+    // the top bar says so, wherever the tab goes - and switches back
+    const chip = await waitFor(() => {
+      const found = document.getElementById('workspace-chip');
+      if (!found) throw new Error('no chip yet');
+      return found;
+    });
+    await waitFor(() => expect(chip).not.toHaveClass('rail-only'));
+    const chipSelect = within(chip).getByLabelText('Workspace') as HTMLSelectElement;
+    expect(chipSelect.value).toBe('team-b');
     const api = paths(calls).filter((p) => p.includes('/api/v1/'));
     expect(api.every((p) => p.startsWith('/w/team-b/'))).toBe(true); // none left in default
   });

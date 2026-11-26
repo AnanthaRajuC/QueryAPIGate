@@ -4,6 +4,8 @@ import { Fragment, useState } from 'react';
 import { api, unwrap, type Schemas } from '@/api/client';
 import { Loading } from '@/app/feedback';
 import { CodeBox } from '@/components/CodeBox';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
 
 // What each AI agent did over MCP (GET /api/v1/usage/agents, BACKLOG #87): calls, rows read, refusals by code, how
@@ -19,6 +21,29 @@ const WINDOWS = [
 ];
 
 const n = (value: number) => value.toLocaleString();
+
+const AGENT_COLUMNS: Column<Agent>[] = [
+  { key: 'agent', label: 'Agent', sort: (a) => a.agent },
+  { key: 'calls', label: 'Calls', sort: (a) => a.calls },
+  { key: 'rows', label: 'Rows', sort: (a) => a.rows },
+  { key: 'errors', label: 'Failed', sort: (a) => a.errors },
+  { key: 'masked', label: 'Masked', sort: (a) => a.masked_calls },
+  {
+    key: 'refusals',
+    label: 'Refused or failed with',
+    sort: (a) => Object.values(a.refusals).reduce((sum, count) => sum + count, 0) || null,
+    title: 'Sorts by how many calls were refused or failed',
+  },
+  { key: 'last_seen', label: 'Last seen', sort: (a) => a.last_seen },
+];
+
+/** What the filter box finds an agent by: its name, connections, refusal codes and saved queries. */
+const agentText = (a: Agent) => [
+  a.agent,
+  ...a.connections,
+  ...Object.keys(a.refusals),
+  ...Object.keys(a.queries),
+];
 
 function Refusals({ refusals }: { refusals: Agent['refusals'] }) {
   const entries = Object.entries(refusals);
@@ -89,6 +114,7 @@ export function AgentsPage() {
     retry: false,
   });
   const items = usage.data?.items ?? [];
+  const table = useTableControls(items, { columns: AGENT_COLUMNS, text: agentText });
 
   let body: React.ReactNode;
   if (usage.isPending) body = <Loading text="Loading agents…" />;
@@ -114,15 +140,13 @@ export function AgentsPage() {
         <table className="grid">
           <thead>
             <tr>
-              {['Agent', 'Calls', 'Rows', 'Failed', 'Masked', 'Refused or failed with', 'Last seen'].map(
-                (t) => (
-                  <th key={t}>{t}</th>
-                ),
-              )}
+              {table.columns.map((c) => (
+                <SortHeader key={c.key} controls={table} column={c} />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {items.map((a) => (
+            {table.rows.map((a) => (
               <Fragment key={a.agent}>
                 <tr>
                   <td>
@@ -151,13 +175,14 @@ export function AgentsPage() {
                 </tr>
                 {open === a.agent && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={AGENT_COLUMNS.length}>
                       <Detail agent={a} />
                     </td>
                   </tr>
                 )}
               </Fragment>
             ))}
+            {!table.rows.length && <NoMatches controls={table} span={AGENT_COLUMNS.length} />}
           </tbody>
         </table>
       </div>
@@ -198,6 +223,14 @@ export function AgentsPage() {
           <span className="panel-count">
             {usage.data ? `${items.length} agent${items.length === 1 ? '' : 's'}` : ''}
           </span>
+          {items.length > 0 && (
+            <TableFilter
+              controls={table}
+              id="agents-filter"
+              placeholder="Filter agents…"
+              label="Filter agents"
+            />
+          )}
         </div>
         {notes.map((note) => (
           <div key={note} className="hint" style={{ padding: '6px 12px' }}>

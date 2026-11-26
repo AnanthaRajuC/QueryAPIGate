@@ -17,7 +17,7 @@ SQL editor, the demo video and the architecture.
 <tr>
 <td width="50%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in.png" alt="The Console's sign-in page: a centred card with the QueryAPIGate wordmark, the heading Sign in to the Console, a field for an admin token or API key, a Sign in button, and a note on where tokens come from">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/sign-in.png" alt="The Console's sign-in page: on the left a deep green panel with the QueryAPIGate mark and wordmark, the tagline Turn SQL into governed data access, three points (saved queries as REST endpoints, the same queries as MCP tools for AI agents, keys, roles, masking and a tamper-evident audit log) and this server's version and health; on the right the heading Sign in to the Console, a field for an admin token or API key with a show button, a Sign in button, a note that the token is kept for this tab only and where tokens come from, and links to the API reference and the documentation">
 </a>
 <br><sub>Signed out, a tab sees only the sign-in page - Sign in with SSO when it's set up, or an admin token</sub>
 </td>

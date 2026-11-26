@@ -8,6 +8,8 @@ import { useFeedback } from '@/app/feedback';
 import { useMetricsSeries } from '@/app/metrics';
 import { readResult, Results, type ResultData } from '@/components/Results';
 import { StatTile } from '@/components/StatTile';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { ActivitySpark } from '@/features/access/KeyActivity';
 import { useQueryActivityMap } from '@/features/access/activity';
 import { metricGauge } from '@/lib/metrics';
@@ -17,6 +19,30 @@ import { metricGauge } from '@/lib/metrics';
 // each entry's body viewable exactly as a caller receives it on a hit.
 
 type Entry = Schemas['CacheEntryList']['items'][number];
+type SavedQuery = NonNullable<ReturnType<typeof useAllQueries>['data']>[number];
+
+const CACHED_COLUMNS: Column<SavedQuery>[] = [
+  { key: 'name', label: 'Query', sort: (q) => q.name },
+  { key: 'collection', label: 'Collection', sort: (q) => q.collection || null },
+  { key: 'connection', label: 'Connection', sort: (q) => q.connection_name || null },
+  { key: 'ttl', label: 'cache_ttl', className: 'num', sort: (q) => q.cache_ttl ?? null },
+  { key: 'activity', label: 'Activity (30d)' },
+];
+
+const cachedText = (q: SavedQuery) => [q.name, q.collection, q.connection_name];
+
+const ENTRY_COLUMNS: Column<Entry>[] = [
+  { key: 'name', label: 'Query', sort: (e) => e.meta?.name || e.key },
+  { key: 'version', label: 'Version', sort: (e) => e.meta?.version ?? null },
+  { key: 'connection', label: 'Connection', sort: (e) => e.meta?.connection || null },
+  { key: 'format', label: 'Format', sort: (e) => e.meta?.format || null },
+  { key: 'content_type', label: 'Content type', className: 'num', sort: (e) => e.content_type },
+  { key: 'size', label: 'Size', className: 'num', sort: (e) => e.size_bytes },
+  { key: 'ttl', label: 'TTL left', className: 'num', sort: (e) => e.ttl_remaining_s },
+  { key: 'actions', label: '' },
+];
+
+const entryText = (e: Entry) => [e.meta?.name, e.key, e.meta?.connection, e.meta?.format, e.content_type];
 
 function useCacheEntries() {
   return useQuery({
@@ -39,6 +65,7 @@ export function CachingPage() {
   const misses = metricGauge(series, 'queryapigate_cache_misses_total');
   const total = hits + misses;
   const cached = (queries.data ?? []).filter((q) => (q.cache_ttl ?? 0) > 0);
+  const table = useTableControls(cached, { columns: CACHED_COLUMNS, text: cachedText });
 
   const refresh = () => {
     void metrics.refetch();
@@ -77,19 +104,26 @@ export function CachingPage() {
             responses.
           </div>
         ) : (
-          <div className="panel" style={{ overflowX: 'auto' }}>
+          <div className="panel" id="cached-queries" style={{ overflowX: 'auto' }}>
+            <div className="panel-bar">
+              <span className="spacer" />
+              <TableFilter
+                controls={table}
+                id="cached-queries-filter"
+                placeholder="Filter queries…"
+                label="Filter cached queries"
+              />
+            </div>
             <table className="grid">
               <thead>
                 <tr>
-                  {['Query', 'Collection', 'Connection', 'cache_ttl', 'Activity (30d)'].map((t, i) => (
-                    <th key={t} className={i === 3 ? 'num' : ''}>
-                      {t}
-                    </th>
+                  {table.columns.map((c) => (
+                    <SortHeader key={c.key} controls={table} column={c} />
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {cached.map((q) => (
+                {table.rows.map((q) => (
                   <tr key={q.name}>
                     <td>
                       <button
@@ -113,6 +147,7 @@ export function CachingPage() {
                     </td>
                   </tr>
                 ))}
+                {!table.rows.length && <NoMatches controls={table} span={CACHED_COLUMNS.length} />}
               </tbody>
             </table>
           </div>
@@ -134,6 +169,7 @@ function Entries() {
   const { openDrawer, showError, toast } = useFeedback();
   const entries = useCacheEntries();
   const list = entries.data ?? [];
+  const table = useTableControls(list, { columns: ENTRY_COLUMNS, text: entryText });
   const reload = () => void client.invalidateQueries({ queryKey: ['cache', 'entries'] });
   const fail = (error: unknown) => showError((error as Error).message);
 
@@ -180,20 +216,25 @@ function Entries() {
         </div>
       ) : (
         <div className="panel" style={{ overflowX: 'auto', marginTop: 8 }}>
+          <div className="panel-bar">
+            <span className="spacer" />
+            <TableFilter
+              controls={table}
+              id="cache-entries-filter"
+              placeholder="Filter entries…"
+              label="Filter cache entries"
+            />
+          </div>
           <table className="grid">
             <thead>
               <tr>
-                {['Query', 'Version', 'Connection', 'Format', 'Content type', 'Size', 'TTL left', ''].map(
-                  (t, i) => (
-                    <th key={i} className={i >= 4 && i <= 6 ? 'num' : ''}>
-                      {t}
-                    </th>
-                  ),
-                )}
+                {table.columns.map((c) => (
+                  <SortHeader key={c.key} controls={table} column={c} />
+                ))}
               </tr>
             </thead>
             <tbody>
-              {list.map((e) => {
+              {table.rows.map((e) => {
                 const m = e.meta ?? {};
                 return (
                   <tr key={e.key}>
@@ -226,6 +267,7 @@ function Entries() {
                   </tr>
                 );
               })}
+              {!table.rows.length && <NoMatches controls={table} span={ENTRY_COLUMNS.length} />}
             </tbody>
           </table>
         </div>

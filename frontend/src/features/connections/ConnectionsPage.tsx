@@ -8,6 +8,8 @@ import { Empty, Field, FormActions, Loading, useFeedback } from '@/app/feedback'
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { Time } from '@/components/Time';
 import { ManagedTag } from '@/components/Managed';
+import { SortHeader } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { ActivitySpark } from '@/features/access/KeyActivity';
 import { useConnectionActivity } from '@/features/access/activity';
 
@@ -35,6 +37,23 @@ function usageText(usage: Connection['usage']) {
     parts.push(usage.avg_duration_ms + 'ms avg');
   return parts.join(' · ');
 }
+
+const CONNECTION_COLUMNS: Column<Connection>[] = [
+  { key: 'name', label: 'Name', sort: (c) => c.name },
+  { key: 'type', label: 'Type', sort: (c) => c.db },
+  { key: 'host', label: 'Host', sort: (c) => endpoint(c) || null },
+  { key: 'database', label: 'Database', sort: (c) => c.database || null },
+  { key: 'user', label: 'User', sort: (c) => c.user || null },
+  { key: 'status', label: 'Status', sort: (c) => c.active },
+  { key: 'usage', label: 'Usage', sort: (c) => c.usage.queries || null },
+  { key: 'activity', label: 'Activity (30d)' },
+  { key: 'created', label: 'Created', sort: (c) => c.created_at },
+  { key: 'updated', label: 'Last modified', sort: (c) => c.updated_at },
+  { key: 'actions', label: '' },
+];
+
+/** The connections table keeps its own filter (the segments and #conn-filter); the controls here only sort. */
+const noText = () => [];
 
 function endpoint(c: { host?: string | null; port?: number | string | null }) {
   return c.host ? c.host + (c.port ? ':' + c.port : '') : '';
@@ -70,6 +89,12 @@ export function ConnectionsPage() {
   const activeCount = all.filter((c) => c.active).length;
   const deletedItems = deleted.data ?? [];
   const needle = q.trim().toLowerCase();
+  const live = all.filter((c) => {
+    if (filter === 'active' && !c.active) return false;
+    if (filter === 'inactive' && c.active) return false;
+    return !needle || [c.name, c.db, c.host, c.database, c.user].join(' ').toLowerCase().includes(needle);
+  });
+  const table = useTableControls(live, { columns: CONNECTION_COLUMNS, text: noText });
   const newConnection = () =>
     openDrawer({ title: 'New connection', kicker: 'POST /api/v1/connections', content: <ConnectionForm /> });
 
@@ -153,11 +178,7 @@ export function ConnectionsPage() {
       </div>
     );
   } else {
-    const shown = all.filter((c) => {
-      if (filter === 'active' && !c.active) return false;
-      if (filter === 'inactive' && c.active) return false;
-      return !needle || [c.name, c.db, c.host, c.database, c.user].join(' ').toLowerCase().includes(needle);
-    });
+    const shown = table.rows;
     foot = (
       <span>{`Showing ${shown.length} of ${all.length}${all.length === 1 ? ' connection' : ' connections'}`}</span>
     );
@@ -168,20 +189,8 @@ export function ConnectionsPage() {
         <table className="grid">
           <thead>
             <tr>
-              {[
-                'Name',
-                'Type',
-                'Host',
-                'Database',
-                'User',
-                'Status',
-                'Usage',
-                'Activity (30d)',
-                'Created',
-                'Last modified',
-                '',
-              ].map((t, i) => (
-                <th key={i}>{t}</th>
+              {table.columns.map((c) => (
+                <SortHeader key={c.key} controls={table} column={c} />
               ))}
             </tr>
           </thead>

@@ -5,6 +5,8 @@ import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from
 import { useCan, useGate, useMe } from '@/app/data';
 import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
 import { useSession } from '@/auth/session';
 import { SecretReveal } from '@/features/access/forms';
@@ -25,6 +27,31 @@ const ROLES = [
 // null: no server-wide role - only the roles their workspace memberships give them (ADR 0023)
 const roleLabel = (role: string | null) =>
   role === null ? 'Workspaces only' : (ROLES.find((r) => r.value === role)?.label ?? role);
+
+const ADMIN_COLUMNS: Column<Administrator>[] = [
+  { key: 'name', label: 'Name', sort: (a) => a.name },
+  {
+    key: 'role',
+    label: 'Role',
+    // by reach: owner, admin, developer, auditor; workspaces-only last
+    sort: (a) => (a.role === null ? null : ROLES.findIndex((r) => r.value === a.role)),
+    title: 'Sorts by reach: owner first',
+  },
+  { key: 'email', label: 'Email', sort: (a) => a.email },
+  { key: 'last_seen', label: 'Last seen', sort: (a) => a.last_seen_at },
+  { key: 'tokens', label: 'Tokens', sort: (a) => a.tokens },
+  { key: 'actions', label: '' },
+];
+
+/** What the filter box finds an administrator by: name, role, email and SSO state. */
+const adminText = (a: Administrator) => [
+  a.name,
+  roleLabel(a.role),
+  a.email,
+  a.active ? null : 'inactive',
+  a.sso?.status === 'linked' ? 'sso' : a.sso?.status === 'pending' ? 'sso pending' : null,
+];
+
 const TOKEN_DAYS = 90;
 const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const TOKEN_HINT =
@@ -140,6 +167,7 @@ function AdministratorTable({ items, self }: { items: Administrator[]; self: str
   const { openDrawer, toast } = useFeedback();
   const report = useReport();
   const client = useQueryClient();
+  const table = useTableControls(items, { columns: ADMIN_COLUMNS, text: adminText });
 
   const remove = async (name: string) => {
     if (!window.confirm(`Remove administrator '${name}'? Every token of theirs stops working immediately.`))
@@ -154,94 +182,106 @@ function AdministratorTable({ items, self }: { items: Administrator[]; self: str
   };
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table className="grid">
-        <thead>
-          <tr>
-            {['Name', 'Role', 'Email', 'Last seen', 'Tokens', ''].map((t, i) => (
-              <th key={i}>{t}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((a) => (
-            <tr key={a.name} data-name={a.name}>
-              <td>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span
-                    className={`dot ${a.active ? 'ok' : 'off'}`}
-                    title={a.active ? 'Active' : 'Inactive'}
-                  />
-                  <span className="name">{a.name}</span>
-                  {a.name === self && <span className="tag">you</span>}
-                  {a.sso?.status === 'linked' && (
-                    <span
-                      className="tag"
-                      title={`Signs in through ${a.sso.issuer ?? 'SSO'}; role from their groups`}
-                    >
-                      SSO
-                    </span>
-                  )}
-                  {a.sso?.status === 'pending' && (
-                    <span className="tag" title="Linked at their next SSO sign-in, by their verified email">
-                      SSO pending
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td>{roleLabel(a.role)}</td>
-              <td className={a.email ? undefined : 'dim'}>{a.email ?? '—'}</td>
-              <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
-                <Time value={a.last_seen_at} fallback="never" />
-              </td>
-              <td className="mono">{a.tokens}</td>
-              <td>
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    onClick={() =>
-                      openDrawer({
-                        title: 'Admin tokens',
-                        kicker: a.name,
-                        wide: true,
-                        content: <Tokens name={a.name} />,
-                      })
-                    }
-                  >
-                    Tokens
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost sm icon"
-                    title={`Edit ${a.name}`}
-                    aria-label="Edit"
-                    onClick={() =>
-                      openDrawer({
-                        title: 'Edit administrator',
-                        kicker: a.name,
-                        content: <AdministratorForm name={a.name} />,
-                      })
-                    }
-                  >
-                    <PencilIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost sm icon danger"
-                    title={`Remove ${a.name}`}
-                    aria-label="Remove"
-                    onClick={() => void remove(a.name)}
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              </td>
+    <>
+      <div className="panel-bar">
+        <span className="spacer" />
+        <TableFilter
+          controls={table}
+          id="administrators-filter"
+          placeholder="Filter administrators…"
+          label="Filter administrators"
+        />
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="grid">
+          <thead>
+            <tr>
+              {table.columns.map((c) => (
+                <SortHeader key={c.key} controls={table} column={c} />
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {table.rows.map((a) => (
+              <tr key={a.name} data-name={a.name}>
+                <td>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      className={`dot ${a.active ? 'ok' : 'off'}`}
+                      title={a.active ? 'Active' : 'Inactive'}
+                    />
+                    <span className="name">{a.name}</span>
+                    {a.name === self && <span className="tag">you</span>}
+                    {a.sso?.status === 'linked' && (
+                      <span
+                        className="tag"
+                        title={`Signs in through ${a.sso.issuer ?? 'SSO'}; role from their groups`}
+                      >
+                        SSO
+                      </span>
+                    )}
+                    {a.sso?.status === 'pending' && (
+                      <span className="tag" title="Linked at their next SSO sign-in, by their verified email">
+                        SSO pending
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td>{roleLabel(a.role)}</td>
+                <td className={a.email ? undefined : 'dim'}>{a.email ?? '—'}</td>
+                <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
+                  <Time value={a.last_seen_at} fallback="never" />
+                </td>
+                <td className="mono">{a.tokens}</td>
+                <td>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={() =>
+                        openDrawer({
+                          title: 'Admin tokens',
+                          kicker: a.name,
+                          wide: true,
+                          content: <Tokens name={a.name} />,
+                        })
+                      }
+                    >
+                      Tokens
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost sm icon"
+                      title={`Edit ${a.name}`}
+                      aria-label="Edit"
+                      onClick={() =>
+                        openDrawer({
+                          title: 'Edit administrator',
+                          kicker: a.name,
+                          content: <AdministratorForm name={a.name} />,
+                        })
+                      }
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost sm icon danger"
+                      title={`Remove ${a.name}`}
+                      aria-label="Remove"
+                      onClick={() => void remove(a.name)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {!table.rows.length && <NoMatches controls={table} span={ADMIN_COLUMNS.length} />}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

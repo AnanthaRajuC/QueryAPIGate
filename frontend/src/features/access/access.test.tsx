@@ -77,6 +77,28 @@ describe('API keys', () => {
     expect(row('old').querySelector('.dot.off')).toHaveAttribute('title', 'Revoked');
   });
 
+  it('sorts keys by a column and filters them by what they grant', async () => {
+    fakeBackend(routes());
+    renderAt('/api-keys');
+    await waitFor(() => expect(row('partner')).not.toBeNull());
+    const order = () =>
+      [...keysTable().querySelectorAll('tbody tr[data-name]')].map((r) => r.getAttribute('data-name'));
+    expect(order()).toEqual(['old', 'partner']);
+    // Usage: most queries first on the second click; a key with none stays last
+    const usage = within(screen.getByRole('columnheader', { name: 'Usage' })).getByRole('button');
+    await userEvent.click(usage);
+    await userEvent.click(usage);
+    expect(order()).toEqual(['partner', 'old']);
+    // the filter finds a key by a query it grants, and by its state
+    const filter = screen.getByRole('searchbox', { name: 'Filter API keys' });
+    await userEvent.type(filter, 'rentals');
+    expect(order()).toEqual(['partner']);
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+    await userEvent.clear(filter);
+    await userEvent.type(filter, 'revoked');
+    expect(order()).toEqual(['old']);
+  });
+
   it('sends column-masking rules - complete rows only', async () => {
     const { calls } = fakeBackend({
       ...routes(),
