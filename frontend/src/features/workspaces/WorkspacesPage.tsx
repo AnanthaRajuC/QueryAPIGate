@@ -8,6 +8,8 @@ import { useSwitchWorkspace } from '@/app/workspaceHooks';
 import { getWorkspace } from '@/auth/workspace';
 import { ExperimentalTag } from '@/components/Experimental';
 import { PencilIcon, TrashIcon } from '@/components/icons';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
 
 // Workspaces and their members (ADR 0023): delegated administration for teams on one server. Everyone sees the
@@ -15,6 +17,16 @@ import { Time } from '@/components/Time';
 // manages who belongs to it.
 
 type Member = Schemas['WorkspaceMember'];
+
+const WORKSPACE_COLUMNS: Column<Workspace>[] = [
+  { key: 'name', label: 'Name', sort: (w) => w.name },
+  { key: 'description', label: 'Description', sort: (w) => w.description },
+  { key: 'members', label: 'Members', sort: (w) => w.members },
+  { key: 'created', label: 'Created', sort: (w) => w.created_at },
+  { key: 'actions', label: '' },
+];
+
+const workspaceText = (w: Workspace) => [w.name, w.description];
 
 const ROLES = ['owner', 'admin', 'developer', 'auditor'] as const;
 
@@ -98,6 +110,7 @@ function WorkspaceTable({
   const client = useQueryClient();
   const switchTo = useSwitchWorkspace();
   const current = getWorkspace();
+  const table = useTableControls(items, { columns: WORKSPACE_COLUMNS, text: workspaceText });
   const remove = useMutation({
     mutationFn: async (name: string) =>
       unwrapEmpty(await api.DELETE('/api/v1/workspaces/{name}', { params: { path: { name } } })),
@@ -108,77 +121,93 @@ function WorkspaceTable({
     onError: report,
   });
   return (
-    <table className="grid">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Description</th>
-          <th>Members</th>
-          <th>Created</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        {items.map((w) => (
-          <tr
-            key={w.name}
-            data-name={w.name}
-            className={w.name === selected ? 'selected' : undefined}
-            onClick={() => onSelect(w.name)}
-          >
-            <td className="mono">
-              {w.name}
-              {w.name === current && <span className="tag">this tab</span>}
-            </td>
-            <td className={w.description ? undefined : 'dim'}>{w.description ?? '—'}</td>
-            <td className="mono">{w.members}</td>
-            <td className="mono dim">
-              <Time value={w.created_at} />
-            </td>
-            <td className="actions">
-              {w.name !== current && (
-                <button type="button" className="btn ghost sm" onClick={() => switchTo(w.name)}>
-                  Work here
-                </button>
-              )}
-              {owner && (
-                <button
-                  type="button"
-                  className="btn ghost sm icon"
-                  title={`Edit ${w.name}`}
-                  aria-label="Edit"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openDrawer({
-                      title: 'Edit workspace',
-                      kicker: w.name,
-                      content: <WorkspaceForm existing={w} />,
-                    });
-                  }}
-                >
-                  <PencilIcon />
-                </button>
-              )}
-              {owner && w.name !== 'default' && (
-                <button
-                  type="button"
-                  className="btn ghost sm icon danger"
-                  title="Remove - only once it owns nothing"
-                  aria-label={`Remove ${w.name}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Remove workspace '${w.name}'? Only an empty one can be removed.`))
-                      remove.mutate(w.name);
-                  }}
-                >
-                  <TrashIcon />
-                </button>
-              )}
-            </td>
+    <>
+      {items.length > 0 && (
+        <div className="panel-bar">
+          <span className="spacer" />
+          <TableFilter
+            controls={table}
+            id="workspaces-filter"
+            placeholder="Filter workspaces…"
+            label="Filter workspaces"
+          />
+        </div>
+      )}
+      <table className="grid">
+        <thead>
+          <tr>
+            {table.columns.map((c) => (
+              <SortHeader key={c.key} controls={table} column={c} />
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {table.rows.map((w) => (
+            <tr
+              key={w.name}
+              data-name={w.name}
+              className={w.name === selected ? 'selected' : undefined}
+              onClick={() => onSelect(w.name)}
+            >
+              <td className="mono">
+                {w.name}
+                {w.name === current && <span className="tag">this tab</span>}
+              </td>
+              <td className={w.description ? undefined : 'dim'}>{w.description ?? '—'}</td>
+              <td className="mono">{w.members}</td>
+              <td className="mono dim" style={{ whiteSpace: 'nowrap' }}>
+                <Time value={w.created_at} />
+              </td>
+              <td>
+                <div className="actions">
+                  {w.name !== current && (
+                    <button type="button" className="btn ghost sm" onClick={() => switchTo(w.name)}>
+                      Work here
+                    </button>
+                  )}
+                  {owner && (
+                    <button
+                      type="button"
+                      className="btn ghost sm icon"
+                      title={`Edit ${w.name}`}
+                      aria-label="Edit"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDrawer({
+                          title: 'Edit workspace',
+                          kicker: w.name,
+                          content: <WorkspaceForm existing={w} />,
+                        });
+                      }}
+                    >
+                      <PencilIcon />
+                    </button>
+                  )}
+                  {owner && w.name !== 'default' && (
+                    <button
+                      type="button"
+                      className="btn ghost sm icon danger"
+                      title="Remove - only once it owns nothing"
+                      aria-label={`Remove ${w.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Remove workspace '${w.name}'? Only an empty one can be removed.`))
+                          remove.mutate(w.name);
+                      }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+          {!table.rows.length && items.length > 0 && (
+            <NoMatches controls={table} span={WORKSPACE_COLUMNS.length} />
+          )}
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -334,18 +363,20 @@ function Members({ name }: { name: string }) {
                   )}
                 </td>
                 <td className={m.added_by ? 'mono' : 'dim'}>{m.added_by ?? '—'}</td>
-                <td className="actions">
-                  {manages && (
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      onClick={() => {
-                        if (window.confirm(`Take ${m.admin} out of ${name}?`)) remove.mutate(m.admin);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  )}
+                <td>
+                  <div className="actions">
+                    {manages && (
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        onClick={() => {
+                          if (window.confirm(`Take ${m.admin} out of ${name}?`)) remove.mutate(m.admin);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

@@ -11,12 +11,35 @@ import { useDestinations, useExports, useReport } from './shared';
 import { MaskRulesField } from '@/features/access/MaskRules';
 import { maskPayload, type MaskRule } from '@/features/access/maskRules';
 import { ManagedTag } from '@/components/Managed';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 
 // Saved exports (ADR 0004), on /api/v1/exports: a saved query delivered to a destination, run by a scheduler or here.
 
 type Export = Schemas['Export'];
 type Format = Export['format'];
 const FORMATS: Format[] = ['parquet', 'csv', 'ndjson'];
+
+const EXPORT_COLUMNS: Column<Export>[] = [
+  { key: 'name', label: 'Name', sort: (x) => x.name },
+  { key: 'query', label: 'Query', sort: (x) => x.query },
+  { key: 'target', label: 'Writes to', sort: (x) => `${x.destination}:${x.path}` },
+  { key: 'format', label: 'Format', sort: (x) => x.format },
+  { key: 'watermark', label: 'Watermark', sort: (x) => (x.incremental ? x.incremental.column : null) },
+  { key: 'actions', label: '' },
+];
+
+/** What the filter box finds an export by: its name, query, destination, path, format and watermark column. */
+const exportText = (x: Export) => [
+  x.name,
+  x.query,
+  x.destination,
+  x.path,
+  x.format,
+  x.incremental?.column,
+  x.incremental ? 'incremental' : null,
+  x.running ? 'running' : null,
+];
 
 export function ExportsPage() {
   const list = useExports();
@@ -26,6 +49,7 @@ export function ExportsPage() {
   const client = useQueryClient();
   const write = can('exports.write');
   const newExport = () => openDrawer({ title: 'New export', wide: true, content: <ExportForm /> });
+  const table = useTableControls(list.data ?? [], { columns: EXPORT_COLUMNS, text: exportText });
 
   const run = useMutation({
     mutationFn: async (name: string) =>
@@ -77,97 +101,109 @@ export function ExportsPage() {
     );
   } else {
     body = (
-      <div style={{ overflowX: 'auto' }}>
-        <table className="grid">
-          <thead>
-            <tr>
-              {['Name', 'Query', 'Writes to', 'Format', 'Watermark', ''].map((t, i) => (
-                <th key={i}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.map((x) => (
-              <tr key={x.name} data-name={x.name}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="name">{x.name}</span>
-                    <ManagedTag kind="exports" name={x.name} />
-                    {x.running && <span className="tag">running</span>}
-                  </div>
-                </td>
-                <td className="mono">{x.query}</td>
-                <td className="mono">
-                  {x.destination}:{x.path}
-                </td>
-                <td>{x.format}</td>
-                <td className={x.incremental ? 'mono' : 'dim'}>
-                  {x.incremental
-                    ? `${x.incremental.column} > ${x.watermark ?? x.incremental.start ?? '(start)'}`
-                    : 'everything, each run'}
-                </td>
-                <td>
-                  <div className="actions">
-                    {can('exports.run') && (
+      <>
+        <div className="panel-bar">
+          <span className="spacer" />
+          <TableFilter
+            controls={table}
+            id="exports-filter"
+            placeholder="Filter exports…"
+            label="Filter exports"
+          />
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                {table.columns.map((c) => (
+                  <SortHeader key={c.key} controls={table} column={c} />
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((x) => (
+                <tr key={x.name} data-name={x.name}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="name">{x.name}</span>
+                      <ManagedTag kind="exports" name={x.name} />
+                      {x.running && <span className="tag">running</span>}
+                    </div>
+                  </td>
+                  <td className="mono">{x.query}</td>
+                  <td className="mono">
+                    {x.destination}:{x.path}
+                  </td>
+                  <td>{x.format}</td>
+                  <td className={x.incremental ? 'mono' : 'dim'}>
+                    {x.incremental
+                      ? `${x.incremental.column} > ${x.watermark ?? x.incremental.start ?? '(start)'}`
+                      : 'everything, each run'}
+                  </td>
+                  <td>
+                    <div className="actions">
+                      {can('exports.run') && (
+                        <button
+                          type="button"
+                          className="btn sm outlined"
+                          disabled={run.isPending || x.running}
+                          onClick={() => run.mutate(x.name)}
+                        >
+                          {run.isPending && run.variables === x.name ? 'Running…' : 'Run now'}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className="btn sm outlined"
-                        disabled={run.isPending || x.running}
-                        onClick={() => run.mutate(x.name)}
+                        className="btn ghost sm"
+                        onClick={() =>
+                          openDrawer({
+                            title: 'Runs',
+                            kicker: x.name,
+                            wide: true,
+                            content: <Runs name={x.name} />,
+                          })
+                        }
                       >
-                        {run.isPending && run.variables === x.name ? 'Running…' : 'Run now'}
+                        Runs
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      onClick={() =>
-                        openDrawer({
-                          title: 'Runs',
-                          kicker: x.name,
-                          wide: true,
-                          content: <Runs name={x.name} />,
-                        })
-                      }
-                    >
-                      Runs
-                    </button>
-                    {write && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn ghost sm icon"
-                          title={`Edit ${x.name}`}
-                          aria-label="Edit"
-                          onClick={() =>
-                            openDrawer({
-                              title: 'Edit export',
-                              kicker: x.name,
-                              wide: true,
-                              content: <ExportForm name={x.name} />,
-                            })
-                          }
-                        >
-                          <PencilIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn ghost sm icon danger"
-                          title={`Delete ${x.name}`}
-                          aria-label="Delete"
-                          onClick={() => void remove(x.name)}
-                        >
-                          <TrashIcon />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                      {write && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn ghost sm icon"
+                            title={`Edit ${x.name}`}
+                            aria-label="Edit"
+                            onClick={() =>
+                              openDrawer({
+                                title: 'Edit export',
+                                kicker: x.name,
+                                wide: true,
+                                content: <ExportForm name={x.name} />,
+                              })
+                            }
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost sm icon danger"
+                            title={`Delete ${x.name}`}
+                            aria-label="Delete"
+                            onClick={() => void remove(x.name)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!table.rows.length && <NoMatches controls={table} span={EXPORT_COLUMNS.length} />}
+            </tbody>
+          </table>
+        </div>
+      </>
     );
   }
 

@@ -41,14 +41,27 @@ const recent = (daysAgo: number) =>
   new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 19).replace('T', ' ');
 
 describe('MCP page', () => {
-  it('lists this workspace’s tools and shows how to connect a client', async () => {
+  it('shows how to connect a client, then lists this workspace’s tools in their own tab', async () => {
     fakeBackend(routes());
     renderAt('/mcp');
     expect(await screen.findByRole('heading', { name: 'MCP server' })).toBeInTheDocument();
+    // three tabs; Connect a client first, with the Claude Desktop config snippet
+    expect(
+      within(screen.getByRole('tablist', { name: 'MCP server' }))
+        .getAllByRole('tab')
+        .map((t) => t.textContent?.replace(/\d+$/, '')),
+    ).toEqual(['Connect a client', 'Reachability', 'Tools']);
+    expect(screen.getByRole('tab', { name: 'Connect a client' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(/mcpServers/)).toBeInTheDocument();
+    expect(screen.queryByText('execute_sql')).toBeNull();
+    // the Tools tab counts them, and lists them
+    const toolsTab = screen.getByRole('tab', { name: /Tools/ });
+    expect(await within(toolsTab).findByText('2')).toBeInTheDocument();
+    await userEvent.click(toolsTab);
     expect(await screen.findByText('execute_sql')).toBeInTheDocument();
+    expect(screen.queryByText(/mcpServers/)).toBeNull();
     expect(screen.getByText('films')).toBeInTheDocument();
     expect(screen.getByText('connection, sql')).toBeInTheDocument();
-    expect(screen.getByText(/mcpServers/)).toBeInTheDocument(); // the Claude Desktop config snippet
     // The saved-query tool shows a sparkline of its MCP calls (2 mcp runs; the rest run is excluded).
     const filmsRow = screen.getByText('films').closest('tr') as HTMLElement;
     expect(
@@ -63,9 +76,32 @@ describe('MCP page', () => {
   it('checks reachability only when asked', async () => {
     const { calls } = fakeBackend(routes());
     renderAt('/mcp');
+    await userEvent.click(await screen.findByRole('tab', { name: 'Reachability' }));
     expect(await screen.findByText('Not checked yet')).toBeInTheDocument();
     expect(calls.some((c) => c.path === '/api/v1/mcp/status')).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Check now' }));
     expect(await screen.findByText('Not reachable on port 8765')).toBeInTheDocument();
+  });
+
+  it('opens the tab the URL names', async () => {
+    fakeBackend(routes());
+    renderAt('/mcp?tab=tools');
+    expect(await screen.findByText('execute_sql')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Tools/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('sorts and filters the tools', async () => {
+    fakeBackend(routes());
+    renderAt('/mcp?tab=tools');
+    await screen.findByText('execute_sql');
+    const names = () =>
+      [...document.querySelectorAll('#mcp-tools tbody tr')].map((r) => r.querySelector('td')?.textContent);
+    // Parameters: most first on the second click
+    const params = within(screen.getByRole('columnheader', { name: 'Parameters' })).getByRole('button');
+    await userEvent.click(params);
+    await userEvent.click(params);
+    expect(names()).toEqual(['execute_sql', 'films']);
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Filter tools' }), 'saved query');
+    expect(names()).toEqual(['films']);
   });
 });

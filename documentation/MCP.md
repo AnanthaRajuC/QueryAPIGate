@@ -277,9 +277,10 @@ The OAuth settings are under [Sign-in for AI clients](#sign-in-for-ai-clients-oa
 
 These show up as a read-only "MCP server" section on the Console's Settings screen (BACKLOG #54) - the effective
 value and whether it's the default, same as every other setting there. The Console also has a dedicated **MCP**
-screen (in the sidebar) for the operational view: **Check now** tries a TCP connection to that port on `127.0.0.1`
-(only when asked - `GET /api/v1/mcp/status`), **Tools** lists what `tools/list` returns in the current workspace
-(`GET /api/v1/mcp/tools`), and a connect snippet shows the URL and header a client needs. Both are worked out by the
+screen (in the sidebar) for the operational view, in three tabs: **Connect a client** shows the URL and header a
+client needs, **Reachability → Check now** tries a TCP connection to that port on `127.0.0.1` (only when asked -
+`GET /api/v1/mcp/status`), and **Tools** lists what `tools/list` returns in the current workspace
+(`GET /api/v1/mcp/tools`). Both are worked out by the
 REST server: the check only says whether *something* listens on that port on the same host, and the settings shown
 are the REST server's - an MCP process started with different variables isn't reflected. See
 [Check the MCP server from the Console](https://github.com/AnanthaRajuC/QueryAPIGate/blob/main/how-to/27-check-the-mcp-server-from-the-console.md).

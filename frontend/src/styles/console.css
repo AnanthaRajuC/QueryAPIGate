@@ -390,35 +390,164 @@ h1 .tag.experimental {
   font-weight: 400;
 }
 
-/* The sign-in page (SignIn.tsx), shown instead of the shell while signed out: one card, centred, across the whole
-   body grid. */
+/* The sign-in page (SignIn.tsx), shown instead of the shell while signed out, across the whole body grid. Wide: a brand
+   panel (mark, tagline, this server's health) beside the form. Narrow: the form alone, in a card. The brand panel is
+   the same deep green in both themes; everything else follows the theme's tokens. */
 .signin {
   grid-column: 1 / -1;
   min-height: 100vh;
   display: grid;
-  place-items: center;
-  padding: 24px 16px;
+  grid-template-columns: minmax(380px, 5fr) 7fr;
   box-sizing: border-box;
+  background: var(--bg);
 }
-.signin-card {
-  width: min(380px, 100%);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  padding: 28px;
+.signin .logo-mark {
+  flex: none;
+  border-radius: 9px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.14),
+    0 6px 18px rgb(0 0 0 / 0.18);
+}
+.signin-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.signin-lockup .wordmark {
+  display: block; /* classic.css hides .wordmark on narrow screens, with the sidebar */
+  font-size: 20px;
+}
+
+/* the brand panel */
+.signin-brand {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 44px 48px;
+  color: #e9f4f0;
+  background:
+    radial-gradient(900px 600px at 0% 0%, rgb(46 196 150 / 0.28), transparent 60%),
+    radial-gradient(700px 500px at 100% 100%, rgb(18 128 106 / 0.45), transparent 60%),
+    linear-gradient(160deg, #0c2a23, #0a1c18 70%);
 }
-.signin-card .signin-mark {
-  display: block; /* classic.css hides .wordmark on narrow screens, with the sidebar */
-  font-size: 15px;
+.signin-brand::before {
+  /* a faint grid, fading out towards the edges */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at 30% 40%, #000 20%, transparent 75%);
+  pointer-events: none;
 }
-.signin-card h1 {
+.signin-brand > * {
+  position: relative;
+}
+.signin-brand .wordmark {
+  color: #fff;
+}
+.signin-brand .wordmark b {
+  color: #6fd6b4;
+}
+.signin-tagline {
+  margin: 0 0 22px;
+  font-size: 30px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  max-width: 15em;
+  color: #fff;
+}
+.signin-points {
+  list-style: none;
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14.5px;
+  color: rgb(233 244 240 / 0.86);
+}
+.signin-points li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.signin-points svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 3px;
+  border-radius: 50%;
+  background: rgb(111 214 180 / 0.16);
+  fill: none;
+  stroke: #6fd6b4;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.signin-server {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px var(--mono);
+  color: rgb(233 244 240 / 0.7);
+}
+.signin-server .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.3);
+}
+.signin-server .dot.ok {
+  background: #6fd6b4;
+  box-shadow: 0 0 0 4px rgb(111 214 180 / 0.18);
+}
+.signin-server .dot.bad {
+  background: #ff8a8a;
+}
+
+/* the form */
+.signin-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 40px 24px 28px;
+  background: var(--surface);
+}
+.signin-card {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: signin-in 0.35s ease-out both;
+}
+@keyframes signin-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.signin-lockup-small {
+  display: none;
+}
+.signin-head h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.signin-head p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
 }
 .signin-card form {
   display: flex;
@@ -426,33 +555,453 @@ h1 .tag.experimental {
   gap: 8px;
 }
 .signin-card label {
-  font-weight: 500;
+  font-weight: 600;
   font-size: 12.5px;
+  color: var(--ink-2);
 }
-.signin-card input {
-  height: 34px;
-  font-family: var(--mono);
-  padding: 0 10px;
+.signin-field {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
-.signin-card .btn {
-  height: 34px;
+.signin-field > svg {
+  position: absolute;
+  left: 13px;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.signin-field input {
+  height: 44px;
+  padding: 0 44px 0 40px;
+  font: 14px var(--mono);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.signin-field input:focus {
+  background: var(--surface);
+}
+.signin-field input:focus ~ svg,
+.signin-field:focus-within > svg {
+  stroke: var(--accent);
+}
+.signin-reveal {
+  position: absolute;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.signin-reveal:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.signin-reveal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.signin-reveal svg,
+.signin-sso svg,
+.signin-error svg,
+.signin-note svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.signin-card .btn.signin-submit,
+.signin-card .btn.signin-sso {
+  height: 44px;
+  margin-top: 6px;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 8px;
+}
+.signin-card .btn.signin-sso {
+  margin-top: 0;
+  text-decoration: none;
+}
+.signin-card .btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .signin-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   color: var(--ink-3);
   font-size: 12px;
-  text-align: center;
+}
+.signin-or::before,
+.signin-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 .signin-error {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in oklch, var(--danger) 30%, transparent);
   color: var(--danger);
   background: var(--danger-soft);
+  font-size: 13.5px;
+  line-height: 1.45;
 }
-.signin-card .hint {
+.signin-error svg {
+  margin-top: 1px;
+}
+.signin-note {
+  display: flex;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+}
+.signin-note svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+}
+.signin-note p {
   margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.signin-note code {
+  font: 11.5px var(--mono);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.signin-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.signin-foot a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.signin-foot a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.signin-version {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* narrow: the form alone, in a card on the page's background, the mark above it */
+@media (max-width: 860px) {
+  .signin {
+    grid-template-columns: 1fr;
+  }
+  .signin-brand {
+    display: none;
+  }
+  .signin-main {
+    background: radial-gradient(600px 360px at 50% 0%, var(--accent-soft), transparent 70%), var(--bg);
+    padding: 32px 16px 24px;
+  }
+  .signin-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 28px 24px;
+  }
+  .signin-lockup-small {
+    display: flex;
+  }
+  .signin-lockup-small .wordmark {
+    font-size: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-card {
+    animation: none;
+  }
+}
+
+/* The MCP server screen (McpPage.tsx): one panel, three tabs - the query page's .subtabs, inside a panel with no
+   padding of its own. */
+.mcp-panel .subtabs {
+  margin: 0;
+  padding: 0 12px;
+}
+.mcp-panel .subtabs .dot.checking {
+  background: var(--warn);
+}
+.mcp-tab {
+  padding: 14px 0 0;
+}
+.mcp-intro {
+  margin: 0 18px 12px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.mcp-tab > .hint {
+  margin: 0 18px 12px;
+}
+.mcp-tab > .curlbox {
+  margin: 0 18px 18px;
+}
+.mcp-tab > .set-row {
+  border-top: 1px solid var(--line);
+}
+.mcp-tab > .set-row .set-what {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+.mcp-tab > .empty {
+  margin-bottom: 14px;
+}
+
+/* The sidebar (Sidebar.tsx): each item's icon beside its label - muted until hovered or active - and in the collapsed
+   rail on its own, as before. Totals are quiet numbers; a count that asks for action (ATTENTION) is a coloured
+   badge, and a dot on the icon in the rail. The menu fades out at the bottom while more of it is below. */
+.nav-abbr {
+  display: inline-flex;
+  color: var(--ink-3);
+}
+#tabs button:hover .nav-abbr,
+#tabs button.active .nav-abbr,
+.side-foot button.nav:hover .nav-abbr,
+.side-foot button.nav.active .nav-abbr {
+  color: var(--ink);
+}
+#tabs button.active .nav-abbr {
+  color: var(--accent);
+}
+#tabs .count {
+  background: none;
+  padding: 0 2px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+#tabs .count:empty {
+  display: none;
+}
+#tabs .count.attention {
+  min-width: 18px;
+  padding: 3px 6px;
+  border-radius: 9px;
+  font-weight: 700;
+  text-align: center;
+}
+#tabs .count.attention.danger {
+  background: var(--danger);
+  color: #fff;
+}
+#tabs .count.attention.accent {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+/* the icon rail - collapsed, or a narrow window (classic.css): no group labels (#tabs button would otherwise show them,
+   an id beating classic.css's .nav-label rule), and a count that asks for action is a dot on the icon */
+body.side-collapsed #tabs button.nav-label {
+  display: none;
+}
+body.side-collapsed #tabs .count.attention {
+  display: block;
+  position: absolute;
+  top: 5px;
+  right: 11px;
+  min-width: 0;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+@media (max-width: 980px) {
+  #tabs button.nav-label {
+    display: none;
+  }
+  #tabs .count.attention {
+    display: block;
+    position: absolute;
+    top: 5px;
+    right: 11px;
+    min-width: 0;
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    font-size: 0;
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+}
+#tabs.more-below {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+}
+
+/* The workspace chip in the top bar (WorkspaceChip), while the tab is outside `default`: the workspace's name as an
+   accent pill, a select over the whole of it. */
+.ws-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+.ws-chip svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+.ws-chip select {
+  width: auto;
+  height: 26px;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: 600 12.5px var(--mono);
+  cursor: pointer;
+}
+.ws-chip select:focus {
+  box-shadow: none;
+}
+.ws-chip:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* The Workspaces screen's members panel: its table runs edge to edge, so its head and its add-member form have the
+   padding the panel doesn't. */
+#workspace-members > .panel-head {
+  margin: 0;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+#workspaces-table td .tag {
+  margin-left: 8px;
+}
+#workspace-members > .form-inline {
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* Sortable, filterable list tables (TableControls.tsx). The header is a button that fills its cell, with a pair of
+   small triangles after the label: both faint until the column sorts, then the one for the direction in the accent.
+   A right-aligned (num) header puts the triangles before its label so the numbers stay lined up. */
+table.grid th.sortable {
+  padding: 0;
+}
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+table.grid th.num .th-sort {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+.th-sort:hover,
+table.grid th.sorted {
+  color: var(--ink);
+}
+.th-sort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.sort-icon {
+  flex: none;
+  width: 9px;
+  height: 12px;
+  fill: currentColor;
+}
+.sort-icon path {
+  opacity: 0.28;
+}
+.th-sort:hover .sort-icon path {
+  opacity: 0.5;
+}
+.sort-icon path.on,
+.th-sort:hover .sort-icon path.on {
+  opacity: 1;
+  fill: var(--accent);
+}
+.table-filter {
+  width: 220px;
+}
+.table-count {
   color: var(--ink-3);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+table.grid tr.no-matches td {
+  padding: 22px 12px;
+  text-align: center;
+  color: var(--ink-3);
+}
+table.grid tbody tr.no-matches:hover td {
+  background: none;
+}
+.mcp-intro-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 18px 12px;
+}
+.mcp-intro-row .mcp-intro {
+  flex: 1;
+  margin: 0;
+}
+@media (max-width: 640px) {
+  .table-filter {
+    width: 100%;
+  }
 }
 
 /* Workspaces (ADR 0023): the switcher under the wordmark, and the Workspaces screen's selected row and member form. */
@@ -471,6 +1020,31 @@ h1 .tag.experimental {
 }
 body.side-collapsed .ws-switch {
   display: none;
+}
+/* In the icon rail the top-bar chip does the switcher's job, in `default` too (WorkspaceChip's rail-only). */
+.ws-chip.rail-only {
+  display: none;
+}
+body.side-collapsed .ws-chip.rail-only {
+  display: inline-flex;
+}
+@media (max-width: 980px) {
+  .ws-switch {
+    display: none;
+  }
+  .ws-chip.rail-only {
+    display: inline-flex;
+  }
+}
+/* A phone has room for the chip or the breadcrumb, not both; the page's own heading is just below. */
+@media (max-width: 560px) {
+  header.top .ws-chip ~ .crumbs {
+    display: none;
+  }
+  .ws-chip select {
+    max-width: 120px;
+    text-overflow: ellipsis;
+  }
 }
 #workspaces-table tbody tr {
   cursor: pointer;

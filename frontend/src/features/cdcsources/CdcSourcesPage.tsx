@@ -6,6 +6,8 @@ import { useCan, useConnections, useSettings } from '@/app/data';
 import { Field, FormActions, Loading, copyText, useFeedback } from '@/app/feedback';
 import { ExperimentalTag } from '@/components/Experimental';
 import { PencilIcon, TrashIcon } from '@/components/icons';
+import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
+import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
 import { useReport } from '@/features/exports/shared';
 
@@ -16,6 +18,30 @@ import { sinkProperties, useCdcSources } from './shared';
 // paste into Debezium Server's application.properties.
 
 type CdcSource = Schemas['CdcSource'];
+
+const SOURCE_COLUMNS: Column<CdcSource>[] = [
+  { key: 'name', label: 'Name', sort: (s) => s.name },
+  { key: 'connection', label: 'Connection', sort: (s) => s.connection },
+  { key: 'server', label: 'Server', sort: (s) => s.server_name },
+  { key: 'ingest', label: 'Posts to', sort: (s) => s.ingest_path },
+  {
+    key: 'status',
+    label: 'Status',
+    sort: (s) => s.last_received_at,
+    title: 'Sorts by when a source last posted; one never reached sorts last',
+  },
+  { key: 'actions', label: '' },
+];
+
+/** What the filter box finds a source by: its name, connection, server name, path and where it's managed from. */
+const sourceText = (s: CdcSource) => [
+  s.name,
+  s.connection,
+  s.server_name,
+  s.ingest_path,
+  s.managed_by,
+  s.last_received_at ? null : 'never reached',
+];
 
 const GRACE_CHOICES: [string, string][] = [
   ['60', 'for 1 hour'],
@@ -52,6 +78,7 @@ export function CdcSourcesPage() {
   const client = useQueryClient();
   const write = can('connections.write');
   const newSource = () => openDrawer({ title: 'New CDC source', content: <SourceForm /> });
+  const table = useTableControls(list.data ?? [], { columns: SOURCE_COLUMNS, text: sourceText });
 
   const remove = async (name: string) => {
     if (
@@ -92,73 +119,85 @@ export function CdcSourcesPage() {
     );
   } else {
     body = (
-      <div style={{ overflowX: 'auto' }}>
-        <table className="grid">
-          <thead>
-            <tr>
-              {['Name', 'Connection', 'Server', 'Posts to', 'Status', ''].map((t, i) => (
-                <th key={i}>{t}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {list.data.map((s) => (
-              <tr key={s.name} data-name={s.name}>
-                <td>
-                  <span className="name">{s.name}</span>
-                </td>
-                <td>{s.connection}</td>
-                <td className="dim">{s.server_name ?? 'any'}</td>
-                <td className="mono">{s.ingest_path}</td>
-                <td>
-                  <Status source={s} />
-                </td>
-                <td>
-                  <div className="actions" hidden={!write || Boolean(s.managed_by)}>
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      onClick={() =>
-                        openDrawer({
-                          title: 'Rotate secret',
-                          kicker: s.name,
-                          content: <RotateForm source={s} />,
-                        })
-                      }
-                    >
-                      Rotate
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost sm icon"
-                      title={`Edit ${s.name}`}
-                      aria-label="Edit"
-                      onClick={() =>
-                        openDrawer({
-                          title: 'Edit CDC source',
-                          kicker: s.name,
-                          content: <SourceForm name={s.name} />,
-                        })
-                      }
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn ghost sm icon danger"
-                      title={`Delete ${s.name}`}
-                      aria-label="Delete"
-                      onClick={() => void remove(s.name)}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </td>
+      <>
+        <div className="panel-bar">
+          <span className="spacer" />
+          <TableFilter
+            controls={table}
+            id="cdc-sources-filter"
+            placeholder="Filter sources…"
+            label="Filter CDC sources"
+          />
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                {table.columns.map((c) => (
+                  <SortHeader key={c.key} controls={table} column={c} />
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {table.rows.map((s) => (
+                <tr key={s.name} data-name={s.name}>
+                  <td>
+                    <span className="name">{s.name}</span>
+                  </td>
+                  <td>{s.connection}</td>
+                  <td className="dim">{s.server_name ?? 'any'}</td>
+                  <td className="mono">{s.ingest_path}</td>
+                  <td>
+                    <Status source={s} />
+                  </td>
+                  <td>
+                    <div className="actions" hidden={!write || Boolean(s.managed_by)}>
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        onClick={() =>
+                          openDrawer({
+                            title: 'Rotate secret',
+                            kicker: s.name,
+                            content: <RotateForm source={s} />,
+                          })
+                        }
+                      >
+                        Rotate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm icon"
+                        title={`Edit ${s.name}`}
+                        aria-label="Edit"
+                        onClick={() =>
+                          openDrawer({
+                            title: 'Edit CDC source',
+                            kicker: s.name,
+                            content: <SourceForm name={s.name} />,
+                          })
+                        }
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost sm icon danger"
+                        title={`Delete ${s.name}`}
+                        aria-label="Delete"
+                        onClick={() => void remove(s.name)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!table.rows.length && <NoMatches controls={table} span={SOURCE_COLUMNS.length} />}
+            </tbody>
+          </table>
+        </div>
+      </>
     );
   }
 

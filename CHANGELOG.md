@@ -163,6 +163,29 @@ otherwise be kept until 2.0.
 - **`invalid_version`**, the error code for a run's `version` that isn't a whole number.
 ### Changed
 
+- **The Console's sign-in page is redesigned.** Wide screens get a brand panel beside the form, with the mark, what
+  QueryAPIGate does, and this server's version and health from `/health`; narrow ones get a card. The token field
+  has a show button, the Sign in button says "Signing in…" while the token is checked, an error has an icon, and
+  links go to the API reference and the documentation. Same fields, same behaviour.
+- **The Console's MCP server screen is in tabs:** Connect a client, Reachability and Tools, one at a time instead of
+  one under another. The Tools tab counts the tools, and Reachability shows the last check's dot. The tab is in the
+  URL (`/console/mcp?tab=tools`).
+- **The Console's sidebar shows each item's icon beside its label,** not only in the collapsed rail. Totals
+  (connections, saved queries, keys, roles) are quieter; open alerts are a red badge and writes waiting for approval
+  an accent one - a dot on the icon in the rail. The menu fades out at the bottom while more of it is below. The rail
+  no longer shows clipped group labels.
+- **A tab outside `default` shows its workspace in the top bar** (workspaces, experimental), a chip that switches
+  too, so whichever screen is open it's clear whose connections, queries and keys are on it. In `default` there's
+  none, as there's no switcher with only one workspace. In the icon rail (collapsed, or a narrow screen), which has no
+  room for the sidebar's switcher, the chip stands in for it in `default` too. The Workspaces screen's members panel
+  has its padding.
+- **The Console's list tables sort and filter.** Click a column header to sort by it - ascending, descending, then
+  back to the table's own order, with a ▲▼ beside each sortable header showing which - and type in the table's filter
+  box to narrow it to the rows that mention the text, with a count of how many are left. On API keys, Roles, the MCP
+  server's Tools tab, Workspaces, Administrators, both Caching tables, Metrics, Exports, Destinations, CDC sources and
+  Agents; Connections, which had a filter, gains the sorting. Numbers sort as numbers, rate limits by what they allow,
+  and empty values stay last either way. Tables fetched a page at a time (the audit log, run history, approvals, query
+  results) don't, since sorting one page would look right and be wrong.
 - **A bad whole number has the code of what it is:** `page=abc` is `invalid_paging`, as `page=0` was (it was
   `invalid_request`), a history or runs `limit` `invalid_filter`. A few more errors that had only their status's
   code have their own: `connection_required`, `invalid_body`, `invalid_name`, `query_exists`.
