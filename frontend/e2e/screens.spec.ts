@@ -14,7 +14,7 @@ const SCREENS: [string, string, string][] = [
   ['Exports', 'Exports', 'No exports yet'],
   ['Destinations', 'Destinations', 'No destinations yet'],
   ['Access map', 'Access map', 'API KEYS'],
-  ['Administrators', 'Administrators', 'No administrators yet'],
+  ['Administrators', 'Administrators', 'example-owner'], // the example workspace's members
   ['Alerts', 'Alerts', 'What needs attention now'],
   ['Metrics', 'Metrics', 'Requests by status'],
   ['Audit log', 'Audit log', 'load_examples'],
