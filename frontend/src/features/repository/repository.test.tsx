@@ -299,6 +299,15 @@ describe('API Repository - collections and the example APIs', () => {
       roles: ['example-partner'],
       keys: [],
       collections: ['catalog'],
+      workspace: {
+        name: 'example-stores',
+        workspace: true,
+        connection: true,
+        queries: ['example_store_revenue'],
+        roles: ['example-stores'],
+        keys: ['example-stores'],
+        members: ['example-auditor', 'example-developer', 'example-owner'],
+      },
     };
     const { calls } = fakeBackend({
       ...baseRoutes(),
@@ -306,7 +315,16 @@ describe('API Repository - collections and the example APIs', () => {
       'DELETE /api/v1/examples': () => ({
         removed: { connection: true, queries: ['films'], roles: ['example-partner'], keys: [] },
         keys_still_granted: ['partner'],
-        status: { ...status, loaded: false, connection: null, queries: [], roles: [], collections: [] },
+        workspace_kept: null,
+        status: {
+          ...status,
+          loaded: false,
+          connection: null,
+          queries: [],
+          roles: [],
+          collections: [],
+          workspace: null,
+        },
       }),
     });
     renderAt('/queries/films');
@@ -316,6 +334,7 @@ describe('API Repository - collections and the example APIs', () => {
       return el;
     });
     expect(strip).toHaveTextContent('Example APIs are loaded: 1 queries in 1 collections, 1 role');
+    expect(strip).toHaveTextContent('and the example-stores workspace with 3 members');
     await userEvent.click(within(strip).getByRole('button', { name: 'Remove examples' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
     expect(await screen.findByText('Example APIs removed')).toBeInTheDocument();

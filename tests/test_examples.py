@@ -9,7 +9,20 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from unittest import mock
 
-from queryapigate import apikeys, cli, config, create_app, db, definitions, examples, postman, store
+from queryapigate import (
+    admins,
+    apikeys,
+    cli,
+    config,
+    create_app,
+    db,
+    definitions,
+    examples,
+    postman,
+    scope,
+    store,
+    workspaces,
+)
 from queryapigate.errors import ApiError
 
 FIXED_NOW = datetime(2026, 9, 25, 12, 0, 0)
@@ -175,7 +188,8 @@ class LoadTests(ExamplesTestCase):
         added = examples.load(FIXED_NOW)
         self.assertEqual(sorted(added['queries']), sorted(examples.QUERY_NAMES))
         self.assertEqual(sorted(added['roles']), sorted(examples.ROLE_NAMES))
-        self.assertEqual(sorted(added['key_secrets']), sorted(examples.KEY_NAMES))
+        # a key per role, the example workspace's too - its own key, used without naming the workspace
+        self.assertEqual(sorted(added['key_secrets']), sorted(examples.KEY_NAMES + examples.WORKSPACE_KEY_NAMES))
         self.assertTrue(all(secret.startswith('sk_') for secret in added['key_secrets'].values()))
         self.assertTrue(added['connection'])
         state = examples.status()
@@ -207,7 +221,8 @@ class LoadTests(ExamplesTestCase):
     def test_it_is_idempotent_and_never_adds_versions(self):
         examples.load(FIXED_NOW)
         again = examples.load(FIXED_NOW)
-        self.assertEqual(again, {'connection': False, 'queries': [], 'roles': [], 'key_secrets': {}})
+        self.assertFalse(examples.added_anything(again))
+        self.assertEqual((again['key_secrets'], again['admin_tokens']), ({}, {}))  # no second token for a member
         for file in store.list_saved():
             self.assertEqual([v['version'] for v in file['versions']], [1], file['filename'])
 
@@ -300,7 +315,7 @@ class UnloadTests(ExamplesTestCase):
         self.assertFalse(os.path.exists(os.path.join(self.home, examples.DB_FILE)))
         self.assertEqual(store.collection_members(), {'my-group': ['mine']})
         self.assertEqual(examples.status(), {'loaded': False, 'partial': False, 'connection': None, 'queries': [],
-                                             'roles': [], 'keys': [], 'collections': []})
+                                             'roles': [], 'keys': [], 'collections': [], 'workspace': None})
 
     def test_unload_never_removes_a_user_query_that_shares_a_name(self):
         examples.load(FIXED_NOW)
@@ -311,8 +326,9 @@ class UnloadTests(ExamplesTestCase):
         self.assertEqual(self.saved_files(), ['example_top_films.json'])
 
     def test_unload_when_nothing_is_loaded_is_a_no_op(self):
-        self.assertEqual(examples.unload(), {'connection': False, 'queries': [], 'roles': [], 'keys': [],
-                                             'keys_still_granted': []})
+        removed = examples.unload()
+        self.assertFalse(examples.removed_anything(removed))
+        self.assertEqual((removed['workspace_kept'], removed['keys_still_granted']), (None, []))
 
     def test_unload_reports_keys_whose_grant_is_now_inert(self):
         examples.load(FIXED_NOW)
@@ -326,6 +342,162 @@ class UnloadTests(ExamplesTestCase):
         examples.unload()
         self.assertTrue(examples.load(FIXED_NOW)['queries'])
         self.assertTrue(examples.status()['loaded'])
+
+
+class WorkspaceTests(ExamplesTestCase):
+    """The example workspace (ADR 0023): a team with its own API and three members who sign in to it - loaded,
+    removed and loaded again with the rest, and never anyone else's workspace or administrators."""
+
+    def test_load_makes_the_workspace_its_members_and_its_own_api(self):
+        added = examples.load(FIXED_NOW)
+        self.assertTrue(added['workspace']['workspace'])
+        self.assertEqual(sorted(added['workspace']['members']), sorted(examples.MEMBER_NAMES))
+        self.assertEqual(workspaces.get_workspace(examples.WORKSPACE)['created_by'], examples.AUTHOR)
+        # each member: no server-wide role - only their membership - and one admin token, shown this once
+        people = {a['name']: a for a in admins.list_admins()}
+        for name, role in examples.MEMBERS:
+            self.assertIsNone(people[name]['role'], name)
+            self.assertEqual(people[name]['created_by'], examples.AUTHOR)
+            self.assertEqual(workspaces.memberships(name), {examples.WORKSPACE: role})
+            self.assertTrue(added['admin_tokens'][name].startswith(admins.TOKEN_PREFIX))
+            self.assertEqual(len(admins.list_tokens(name)), 1)
+        with scope.using(examples.WORKSPACE):
+            self.assertTrue(store.read_connections()[examples.CONNECTION]['example'])
+            self.assertEqual(sorted(store.example_query_names()), sorted(examples.WORKSPACE_QUERY_NAMES))
+            self.assertEqual(sorted(apikeys.list_roles()), examples.WORKSPACE_ROLE_NAMES)
+            self.assertEqual(sorted(apikeys.list_keys()), examples.WORKSPACE_KEY_NAMES)
+            for file in store.list_saved():
+                self.assertTrue(8 <= len(file['versions'][0]['execution_history']) <= 20, file['filename'])
+        # and none of it is default's
+        self.assertFalse(set(examples.WORKSPACE_QUERY_NAMES) & set(store.example_query_names()))
+        self.assertNotIn(examples.WORKSPACE_ROLE_NAMES[0], apikeys.list_roles())
+        state = examples.status()['workspace']
+        self.assertEqual(sorted(state['members']), sorted(examples.MEMBER_NAMES))
+        self.assertEqual(sorted(state['queries']), sorted(examples.WORKSPACE_QUERY_NAMES))
+
+    def test_the_audit_entry_names_the_tokens_never_their_secrets(self):
+        added = examples.load(FIXED_NOW)
+        redacted = examples.redact_for_audit(added)
+        self.assertEqual(redacted['admin_tokens'], sorted(examples.MEMBER_NAMES))
+        for secret in [*added['admin_tokens'].values(), *added['key_secrets'].values()]:
+            self.assertNotIn(secret, repr(redacted))
+
+    def test_unload_removes_the_workspace_and_its_administrators_and_a_reload_revives_it(self):
+        admins.create_admin('alice', 'owner')
+        examples.load(FIXED_NOW)
+        removed = examples.unload()
+        self.assertTrue(removed['workspace']['workspace'])
+        self.assertEqual(sorted(removed['workspace']['members']), sorted(examples.MEMBER_NAMES))
+        self.assertEqual(sorted(removed['workspace']['queries']), sorted(examples.WORKSPACE_QUERY_NAMES))
+        self.assertFalse(workspaces.exists(examples.WORKSPACE))
+        self.assertEqual([a['name'] for a in admins.list_admins()], ['alice'])  # never anyone else's
+        # its name is retired, as any deleted workspace's - but the examples' own comes back
+        with self.assertRaises(ApiError) as caught:
+            workspaces.create_workspace(examples.WORKSPACE, created_by='alice')
+        self.assertEqual(caught.exception.code, 'workspace_name_retired')
+        again = examples.load(FIXED_NOW)
+        self.assertTrue(again['workspace']['workspace'])
+        self.assertTrue(examples.status()['loaded'])
+
+    def test_a_workspace_holding_something_of_yours_stays(self):
+        examples.load(FIXED_NOW)
+        with scope.using(examples.WORKSPACE):
+            self.save_user_query('our_own')
+        removed = examples.unload()
+        self.assertEqual(removed['workspace_kept'], {'queries': 1})
+        self.assertFalse(removed['workspace']['workspace'])
+        self.assertTrue(workspaces.exists(examples.WORKSPACE))
+        with scope.using(examples.WORKSPACE):
+            self.assertEqual([f['filename'] for f in store.list_saved()], ['our_own'])
+        self.assertEqual(admins.list_admins(), [])  # its example members go all the same
+        self.assertTrue(examples.load(FIXED_NOW)['admin_tokens'])  # and loading again fills it back in
+        self.assertTrue(examples.status()['loaded'])
+
+    def test_someone_elses_workspace_or_administrator_with_an_examples_name_stops_the_load(self):
+        workspaces.create_workspace(examples.WORKSPACE, created_by='alice')
+        with self.assertRaises(ApiError) as caught:
+            examples.load(FIXED_NOW)
+        self.assertIn(f"workspace '{examples.WORKSPACE}'", caught.exception.message)
+        self.assertEqual(self.saved_files(), [])  # nothing loaded
+        workspaces.delete_workspace(examples.WORKSPACE)
+        with self.assertRaises(ApiError) as caught:  # nor is a retired name that isn't the examples' revived
+            examples.load(FIXED_NOW)
+        self.assertIn('retired', caught.exception.message)
+
+    def test_an_administrator_or_key_with_a_members_name_stops_the_load(self):
+        admins.create_admin('example-owner', 'developer')
+        with self.assertRaises(ApiError) as caught:
+            examples.load(FIXED_NOW)
+        self.assertIn("administrator 'example-owner'", caught.exception.message)
+        self.assertEqual(admins.list_admins()[0]['role'], 'developer')  # left as it was
+        admins.delete_admin('example-owner', check_owner=False)  # no owner here, and no shared key
+        apikeys.create_key('example-auditor', connections=[])
+        with self.assertRaises(ApiError) as caught:
+            examples.load(FIXED_NOW)
+        self.assertIn("API key 'example-auditor'", caught.exception.message)
+
+    def test_no_administrator_may_take_the_examples_name(self):
+        with self.assertRaises(ApiError) as caught:
+            admins.create_admin(examples.AUTHOR, 'owner')
+        self.assertEqual(caught.exception.code, 'invalid_name')
+
+
+class WorkspaceEndToEndTests(ExamplesTestCase):
+    """Signing in as a member is the point of the example workspace: each sees that workspace alone, as their role
+    allows - and none may load or remove the examples, which make administrators."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ['QUERYAPIGATE_API_KEY'] = 'admin-key'
+        self.added = examples.load()
+        self.client = create_app().test_client()
+        self.admin = {'X-API-Key': 'admin-key'}
+
+    def member(self, name):
+        return {'X-API-Key': self.added['admin_tokens'][name]}
+
+    def test_a_member_works_in_the_example_workspace_alone(self):
+        owner = self.member('example-owner')
+        me = self.client.get('/api/v1/me', headers=owner).get_json()
+        self.assertEqual(me['workspaces'], {examples.WORKSPACE: 'owner'})
+        res = self.client.get(f'/w/{examples.WORKSPACE}/api/v1/queries', headers=owner)
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(sorted(q['name'] for q in res.get_json()['items']), sorted(examples.WORKSPACE_QUERY_NAMES))
+        res = self.client.get('/api/v1/queries', headers=owner)  # default: no role there
+        self.assertEqual((res.status_code, res.get_json()['code']), (403, 'workspace_required'))
+
+    def test_the_auditor_reads_but_runs_no_sql_and_the_developer_runs_it(self):
+        path = f'/w/{examples.WORKSPACE}/q/example_store_revenue'
+        self.assertEqual(self.client.get(path, headers=self.member('example-auditor')).status_code, 403)
+        res = self.client.get(path, headers=self.member('example-developer'))
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertTrue(res.get_json())
+
+    def test_the_workspace_key_runs_its_queries_and_reaches_nothing_of_defaults(self):
+        key = {'X-API-Key': self.added['key_secrets']['example-stores']}
+        for city in (None, 'Berlin'):
+            res = self.client.get('/q/example_staff_activity', query_string={'city': city} if city else {},
+                                  headers=key)
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+            rows = res.get_json()
+            self.assertTrue(rows)
+            if city:
+                self.assertEqual({r['store'] for r in rows}, {'Berlin'})
+        self.assertEqual(self.client.get('/q/example_top_films', headers=key).status_code, 404)
+
+    def test_only_a_server_wide_owner_loads_or_removes_the_examples(self):
+        for method in ('post', 'delete'):
+            res = getattr(self.client, method)(f'/w/{examples.WORKSPACE}/api/v1/examples',
+                                               headers=self.member('example-owner'))
+            self.assertEqual((res.status_code, res.get_json()['code']), (403, 'role_forbidden'), method)
+        self.client.post('/api/v1/administrators', json={'name': 'ada', 'role': 'admin'}, headers=self.admin)
+        res = self.client.post('/api/v1/administrators/ada/tokens', json={}, headers=self.admin)
+        ada = {'X-API-Key': res.get_json()['secret']}
+        res = self.client.post('/api/v1/examples', headers=ada)
+        self.assertEqual((res.status_code, res.get_json()['capability']), (403, 'examples.write'))
+        res = self.client.post('/api/v1/examples', headers=self.admin)  # the shared key is an owner
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['admin_tokens'], {})  # already there: no new tokens
 
 
 class RunTests(ExamplesTestCase):
@@ -590,7 +762,8 @@ class CliTests(ExamplesTestCase):
         self.assertIn('Loaded: 11 queries', out)
         code, out, _ = self.run_cli('examples', 'unload')
         self.assertEqual(code, 0)
-        self.assertIn('Removed 11 example queries', out)
+        self.assertIn('Removed 13 example queries', out)  # 11, and the example workspace's 2
+        self.assertIn('3 administrators', out)
         code, out, _ = self.run_cli('examples', 'unload')
         self.assertIn('nothing changed', out)
 

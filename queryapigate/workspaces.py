@@ -66,6 +66,15 @@ def _get(conn, name):
     return _row(row, count)
 
 
+def origin(name):
+    """Who made the workspace named `name`, and whether it has been deleted (its name retired) - None when there has
+    never been one. For the examples, which revive their own retired workspace and no one else's."""
+    row = db.connection().execute('SELECT details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
+    if row is None:
+        return None
+    return {'created_by': json.loads(row['details_json']).get('created_by'), 'retired': retired(row)}
+
+
 def exists(name):
     return isinstance(name, str) and _get(db.connection(), name) is not None
 
@@ -86,13 +95,20 @@ def _validate_description(description):
     return description
 
 
-def create_workspace(name, description=None, created_by=None):
+def create_workspace(name, description=None, created_by=None, revive=False):
+    """`revive`: a retired name comes back when the same `created_by` made it - the examples' own workspace, removed
+    and loaded again (examples.py), whose history is the examples' own. Any other retired name is still refused."""
     if not isinstance(name, str) or not _NAME_RE.match(name):
         raise ApiError("A workspace's name is 1-100 letters, digits, '.', '_' or '-', starting with a letter or digit",
                        code='invalid_name')
     details = {'description': _validate_description(description), 'created_by': created_by}
     with db.transaction() as conn:
         row = conn.execute('SELECT details_json FROM workspaces WHERE name = ?', (name,)).fetchone()
+        if (row is not None and retired(row) and revive and created_by is not None
+                and json.loads(row['details_json']).get('created_by') == created_by):
+            conn.execute('UPDATE workspaces SET created_at = ?, details_json = ? WHERE name = ?',
+                         (store.now(), json.dumps(details), name))
+            return _get(conn, name)
         if row is not None and retired(row):
             raise ApiError(f"A workspace named '{name}' was deleted, and its name isn't given again: its run history "
                            "and audit log still name it, and a new one's members would see them. Choose another name",

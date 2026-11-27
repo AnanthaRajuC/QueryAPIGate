@@ -636,10 +636,19 @@ class CollectionAndExampleTests(V1TestCase):
         self.assertTrue(loaded['added']['queries'])
         self.assertEqual(sorted(loaded['key_secrets']), loaded['added']['keys'])
         self.assertNotIn(next(iter(loaded['key_secrets'].values()), 'none'), str(store.read_audit_log()))
+        # the example workspace's members: a token each, shown this once and never in the audit log
+        self.assertEqual(sorted(loaded['admin_tokens']), sorted(loaded['added']['workspace']['members']))
+        self.assertEqual(loaded['status']['workspace']['name'], 'example-stores')
+        for token in loaded['admin_tokens'].values():
+            self.assertNotIn(token, str(store.read_audit_log()))
         again = self.call('post', '/api/v1/examples', '/api/v1/examples', 200).get_json()
         self.assertEqual(again['added']['queries'], [])  # idempotent
+        self.assertEqual(again['admin_tokens'], {})
         removed = self.call('delete', '/api/v1/examples', '/api/v1/examples', 200).get_json()
         self.assertTrue(removed['removed']['connection'])
+        self.assertTrue(removed['removed']['workspace']['workspace'])
+        self.assertIsNone(removed['workspace_kept'])
+        self.assertIsNone(removed['status']['workspace'])
         self.assertFalse(removed['status']['loaded'] or removed['status']['partial'])
 
 

@@ -118,7 +118,7 @@ function ExamplesStrip() {
   const remove = async () => {
     if (
       !window.confirm(
-        'Remove the example APIs? This deletes exactly the queries, roles and connection marked “example” — nothing else.',
+        'Remove the example APIs? This deletes exactly the queries, roles, keys and connection marked “example”, the example workspace’s members, and the workspace itself if nothing else is in it — nothing else.',
       )
     )
       return;
@@ -146,7 +146,13 @@ function ExamplesStrip() {
           ? 'The example APIs are only partly loaded (an interrupted load).'
           : `Example APIs are loaded: ${st.queries.length} queries in ${st.collections.length} collections, ${st.roles.length}${
               st.roles.length === 1 ? ' role' : ' roles'
-            } and an “examples” connection. Removing them touches nothing else.`}
+            } and an “examples” connection${
+              st.workspace
+                ? `, and the ${st.workspace.name} workspace with ${st.workspace.members.length}${
+                    st.workspace.members.length === 1 ? ' member' : ' members'
+                  }`
+                : ''
+            }. Removing them touches nothing else.`}
       </span>
       {st.partial && (
         <button type="button" className="btn sm outlined" onClick={load}>

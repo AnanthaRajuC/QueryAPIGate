@@ -120,6 +120,7 @@ export function baseRoutes(): Record<string, (call: { search: URLSearchParams })
       roles: [],
       keys: [],
       collections: [],
+      workspace: null,
     }),
     'GET /api/v1/connections/lite/schema': () => ({
       truncated: false,

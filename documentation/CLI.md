@@ -169,7 +169,7 @@ load, remove or check the bundled example APIs (reporting, dashboard, export, pa
 
 #### `queryapigate examples load`
 
-install four worked example scenarios - queries in collections, roles, and a small generated SQLite database - all marked as examples; idempotent, never overwrites anything of yours
+install four worked example scenarios - queries in collections, roles, and a small generated SQLite database - and an example team's workspace with three members who sign in to it, all marked as examples; idempotent, never overwrites anything of yours
 
 | Argument | Meaning |
 |---|---|

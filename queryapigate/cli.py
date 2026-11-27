@@ -523,15 +523,25 @@ def _examples_command(action):
 @_examples_command
 def _examples_load(args):
     added = examples.load()
-    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+    if examples.added_anything(added):
         store.record_audit('cli', 'load_examples', 'examples', examples.redact_for_audit(added))
+        workspace = added['workspace']
         print(f"Loaded the example APIs: {len(added['queries'])} queries in "
               f"{len(examples.SCENARIOS)} collections, {len(added['roles'])} roles, "
               f"and the '{examples.CONNECTION}' connection.")
+        print(f"And the '{examples.WORKSPACE}' workspace (experimental): {len(workspace['queries'])} queries of its "
+              f"own and {len(workspace['members'])} members ({', '.join(workspace['members']) or 'none new'}).")
         if added['key_secrets']:
             print('Example API keys (store these now - they cannot be shown again):')
             for name, secret in sorted(added['key_secrets'].items()):
-                print(f'  {name}: {secret}')
+                where = f'  (workspace {examples.WORKSPACE})' if name in workspace['keys'] else ''
+                print(f'  {name}: {secret}{where}')
+        if added['admin_tokens']:
+            print(f"Admin tokens for the '{examples.WORKSPACE}' workspace's members - sign in to the Console with one "
+                  '(store these now - they cannot be shown again):')
+            roles = dict(examples.MEMBERS)
+            for name, secret in sorted(added['admin_tokens'].items()):
+                print(f'  {name} ({roles[name]}): {secret}')
         print('Try:  queryapigate serve   then open /console, or  curl http://127.0.0.1:5000/q/example_top_films '
              "-H 'X-API-Key: <one of the secrets above>'")
         print("Watch it live:  curl -N http://127.0.0.1:5000/events -H 'X-API-Key: <one of the secrets above>' "
@@ -545,11 +555,18 @@ def _examples_load(args):
 @_examples_command
 def _examples_unload(args):
     removed = examples.unload()
-    if removed['connection'] or removed['queries'] or removed['roles'] or removed['keys']:
+    if examples.removed_anything(removed):
         store.record_audit('cli', 'unload_examples', 'examples', removed)
-        print(f"Removed {len(removed['queries'])} example queries, {len(removed['roles'])} roles, "
-              f"{len(removed['keys'])} API keys"
-              f"{' and the connection' if removed['connection'] else ''}.")
+        workspace = removed['workspace']
+        print(f"Removed {len(removed['queries']) + len(workspace['queries'])} example queries, "
+              f"{len(removed['roles']) + len(workspace['roles'])} roles, "
+              f"{len(removed['keys']) + len(workspace['keys'])} API keys, "
+              f"{len(workspace['members'])} administrators"
+              f"{' and the connection' if removed['connection'] else ''}"
+              f"{f', and the {examples.WORKSPACE} workspace' if workspace['workspace'] else ''}.")
+        if removed['workspace_kept']:
+            kept = ', '.join(f'{count} {what}' for what, count in removed['workspace_kept'].items())
+            print(f"The '{examples.WORKSPACE}' workspace stays: it holds things that aren't examples ({kept}).")
         if removed['keys_still_granted']:
             print('These keys were granted an example collection, which no longer exists, so that grant now '
                   'reaches nothing: ' + ', '.join(removed['keys_still_granted']))
@@ -563,7 +580,8 @@ def _examples_status(args):
     state = examples.status()
     if state['loaded']:
         print(f"Loaded: {len(state['queries'])} queries in {', '.join(state['collections'])}; "
-              f"roles {', '.join(state['roles'])}; connection '{state['connection']}'.")
+              f"roles {', '.join(state['roles'])}; connection '{state['connection']}'; workspace "
+              f"'{examples.WORKSPACE}' with members {', '.join(state['workspace']['members'])}.")
     elif state['partial']:
         print('Partly loaded (an interrupted load) - run `queryapigate examples load` to finish it, or '
               '`queryapigate examples unload` to remove what is there.')
@@ -980,7 +998,8 @@ def build_parser():
     example_actions = example_parser.add_subparsers(dest='action')
     examples_load = example_actions.add_parser(
         'load', help='install four worked example scenarios - queries in collections, roles, and a small generated '
-                     'SQLite database - all marked as examples; idempotent, never overwrites anything of yours')
+                     'SQLite database - and an example team\'s workspace with three members who sign in to it, all '
+                     'marked as examples; idempotent, never overwrites anything of yours')
     examples_load.set_defaults(func=_examples_load)
     examples_unload = example_actions.add_parser(
         'unload', help='remove exactly what `examples load` installed (and nothing else)')

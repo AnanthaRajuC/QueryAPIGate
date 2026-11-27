@@ -21,7 +21,7 @@ CAPABILITIES = {
     'access.write': 'create, change and delete API keys and roles',
     'cache.read': 'read cached responses',
     'cache.write': 'clear cached responses',
-    'examples.write': 'load and remove the bundled example APIs',
+    'examples.write': 'load and remove the bundled example APIs, with their workspace and its administrators',
     'observe': 'read the audit log, run history, alerts, instances and MCP status',
     'settings.read': "read the server's settings",
     'secrets.rotate': 're-encrypt stored passwords under a new encryption key (ADR 0009)',
@@ -41,8 +41,10 @@ CAPABILITIES = {
 
 # What only a server-wide role gives (ADR 0023 §3): the server itself, and the people who run it. A role from a
 # workspace membership is that role without these - whatever it is called, it administers one workspace.
+# (config.apply isn't one: a workspace's owner applies its file.) examples.write is: the examples make a workspace and
+# administrators.
 SERVER_ONLY = frozenset({'admins.read', 'admins.write', 'settings.read', 'secrets.rotate', 'history.forget',
-                         'workspaces.read', 'workspaces.write'})  # config.apply: a workspace's owner applies its file
+                         'workspaces.read', 'workspaces.write', 'examples.write'})
 
 _EVERYONE = {'queries.read', 'connections.read', 'observe', 'self'}
 ROLES = {
@@ -52,6 +54,8 @@ ROLES = {
     'auditor': _EVERYONE | {'access.read', 'settings.read', 'exports.read', 'workspaces.read'},
 }
 ROLES['admin'] -= {'workspaces.write'}  # like administrators: who belongs where is an owner's to decide
+# The examples make a workspace and administrators with admin tokens (examples.py): an owner's, as those are.
+ROLES['admin'] -= {'examples.write'}
 
 # Which roles may run SQL - ad-hoc or saved - on every connection, as the shared key can. An auditor reads what
 # happened and needs no rows.

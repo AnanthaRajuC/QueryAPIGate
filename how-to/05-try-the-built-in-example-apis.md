@@ -2,8 +2,8 @@
 
 **Time:** 2 minutes to load, as long as you like to explore. **You'll end up with:** four realistic,
 fully-worked example APIs - reporting, a live dashboard, a bulk export, and a partner integration - each
-with its own scoped key, running against a small generated database. No external database, no config
-file to write by hand.
+with its own scoped key, running against a small generated database, and an example team's workspace with
+members who sign in to it. No external database, no config file to write by hand.
 
 This is the fastest way to see what a finished, production-shaped setup looks like before building your
 own - real collections, real roles, real per-scenario API keys, real run history, not a placeholder.
@@ -16,19 +16,25 @@ QUERYAPIGATE_API_KEY=demo-key queryapigate examples load
 
 ```
 Loaded the example APIs: 11 queries in 4 collections, 5 roles, and the 'examples' connection.
+And the 'example-stores' workspace (experimental): 2 queries of its own and 3 members (example-owner, example-developer, example-auditor).
 Example API keys (store these now - they cannot be shown again):
   example-dashboard: sk_...
   example-executive: sk_...
   example-export: sk_...
   example-partner: sk_...
   example-reporting: sk_...
+  example-stores: sk_...  (workspace example-stores)
+Admin tokens for the 'example-stores' workspace's members - sign in to the Console with one (store these now - they cannot be shown again):
+  example-auditor (auditor): qagadm_...
+  example-developer (developer): qagadm_...
+  example-owner (owner): qagadm_...
 Try:  queryapigate serve   then open /console, or  curl http://127.0.0.1:5000/q/example_top_films -H 'X-API-Key: <one of the secrets above>'
 Watch it live:  curl -N http://127.0.0.1:5000/events -H 'X-API-Key: <one of the secrets above>' (then call a query in another terminal to see the event arrive)
 Remove them again with:  queryapigate examples unload
 ```
 
-Copy those five secrets somewhere now - like any API key, they're generated fresh and shown exactly once;
-there's no way to retrieve them again later, only to remove the keys and start over. Setting
+Copy those six keys and three tokens somewhere now - like any API key or admin token, they're generated fresh
+and shown exactly once; there's no way to retrieve them again later, only to remove the examples and start over. Setting
 `QUERYAPIGATE_API_KEY=demo-key` first gives you an admin key too - the moment any key exists, the server
 requires one for every request, examples included.
 
@@ -63,6 +69,14 @@ traffic would realistically need - e.g. `example-export`'s key is capped at 20 r
 export isn't meant to be polled), plus a fifth, `example-executive`, granted *both* the reporting and
 dashboard collections at once - the one thing none of the other four shows on its own: a role reaching
 several collections together, not just one.
+
+**An example team's workspace, `example-stores`** - a [workspace](../documentation/adr/0023-workspaces.md)
+(experimental) is how one server serves several teams: each has its own connections, queries and keys, and members
+who administer it and nothing else. This one is the store operations team's - its own `examples` connection, the
+`examples-stores` collection (`example_store_revenue`, `example_staff_activity`) and an `example-stores` key - with
+three members: `example-owner`, `example-developer` and `example-auditor`. Sign in to the Console with one of their
+tokens and you see that workspace alone, as their role allows; sign in with `demo-key` and the workspace switcher
+under the wordmark moves between `default` and `example-stores`. [Give each team its own workspace](60-give-each-team-its-own-workspace.md) sets one up for real.
 
 **Seeded run history** - each query already has realistic-looking (synthetic, clearly not real traffic)
 execution history, so the admin UI's History tab, Home tab and requests-per-day charts show something
@@ -129,7 +143,7 @@ queryapigate examples unload
 ```
 
 ```
-Removed 11 example queries, 5 roles, 5 API keys and the connection.
+Removed 13 example queries, 6 roles, 6 API keys, 3 administrators and the connection, and the example-stores workspace.
 ```
 
 Removes exactly what was marked as an example - nothing you've added yourself, even if it happens to share

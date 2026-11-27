@@ -24,7 +24,9 @@ from .db import DEFAULT_WORKSPACE
 from .errors import ApiError
 
 TOKEN_PREFIX = 'qagadm_'
-RESERVED_NAMES = {'admin', 'cli', 'startup', '-'}  # the shared key's, the CLI's and start-up's names in the audit log
+# The shared key's, the CLI's and start-up's names in the audit log, and the examples' author: an administrator the
+# examples make is marked by `created_by` being that name (examples.py), so no administrator may act under it.
+RESERVED_NAMES = {'admin', 'cli', 'startup', '-', 'queryapigate-examples'}
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+$')
 _UNSET = object()
 _USE_RECORD_INTERVAL = 60.0  # seconds between last_used_at/last_seen_at writes per token, as for API keys
@@ -161,9 +163,10 @@ def update_admin(name, role=_UNSET, email=_UNSET, active=None):
     return admin
 
 
-def delete_admin(name):
+def delete_admin(name, check_owner=True):
     """Remove an administrator, every token it holds and its workspace memberships. Its name stays in the audit log
-    as written."""
+    as written. `check_owner=False` is for the examples' own administrators (examples.unload()): never owners
+    server-wide, so removing one can't be what leaves the server without one."""
     with db.transaction() as conn:
         if _get(conn, name) is None:
             raise ApiError(f"No administrator named '{name}'", 404, code='admin_not_found')
@@ -171,7 +174,8 @@ def delete_admin(name):
         conn.execute('DELETE FROM workspace_members WHERE admin_name = ?', (name,))  # their roles in workspaces too
         _end_sessions(conn, name)
         conn.execute('DELETE FROM administrators WHERE name = ?', (name,))
-        _refuse_ownerless(conn)
+        if check_owner:
+            _refuse_ownerless(conn)
 
 
 # --------------------------------------------------------------------------------------

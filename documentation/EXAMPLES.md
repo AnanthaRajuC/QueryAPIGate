@@ -2,13 +2,14 @@
 
 Four worked scenarios you can load, try and remove again - each a [collection](API.md#collections) of saved
 queries plus a [role](API.md#permission-roles-templates) shaped like the key that would front it - plus a fifth
-role that spans two of those collections at once. They show what QueryAPIGate is *for*: a named, small,
+role that spans two of those collections at once, and a [workspace](#6-a-teams-own-workspace---example-stores) of
+an example team's own, with members who sign in to it. They show what QueryAPIGate is *for*: a named, small,
 rate-limited surface over a database, instead of a hand-rolled controller.
 
 ~~~bash
 pip install queryapigate
-queryapigate examples load          # installs everything below, and prints a real API key per scenario -
-                                     # store them now, they cannot be shown again (see below)
+queryapigate examples load          # installs everything below, and prints a real API key per scenario and an
+                                     # admin token per example member - store them now, they cannot be shown again
 queryapigate serve                  # then open http://127.0.0.1:5000/console - a key from above is now required
 queryapigate examples unload        # removes exactly what `load` installed - nothing else
 ~~~
@@ -25,13 +26,15 @@ called `examples`.
 | | |
 |---|---|
 | `queryapigate examples load` | Install them. Idempotent: running it again changes nothing (no extra versions), and it finishes an interrupted load. |
-| `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, keys, connection and database file. |
+| `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, keys, connection and database file, and the example workspace's members, and the workspace itself unless something of yours is in it. |
 | `queryapigate examples status` | Say whether they are loaded (`Loaded`, `Partly loaded`, or `Not loaded`). |
 | `QUERYAPIGATE_LOAD_EXAMPLES=yes` | Load them at server start - for a container (`docker run -e QUERYAPIGATE_LOAD_EXAMPLES=yes -v qag:/data ...`). Idempotent across restarts. Unset, or `no`, leaves things as they are: it never removes anything - use `unload`. |
 | Admin UI | Once loaded, API Repository shows an "Example APIs are loaded" bar with **Remove examples** (and **Finish loading** after an interrupted load). Loading itself is the command above, the variable below or the API. |
-| `POST` / `DELETE` / `GET /api/v1/examples` | The same, over [HTTP](API.md#example-apis) (admin only). |
+| `POST` / `DELETE` / `GET /api/v1/examples` | The same, over [HTTP](API.md#example-apis). Loading and removing take a server-wide **owner** (the shared key is one): they make and remove administrators. |
 
-Everything installed is **marked `example`** (`"example": true` on each query, role, key and connection), and removal deletes exactly what is marked:
+Everything installed is **marked `example`** (`"example": true` on each query, role, key and connection; the example
+workspace and its administrators are marked by being made by `queryapigate-examples`, a name no administrator may
+take), and removal deletes exactly what is marked:
 
 - A query, role, key, connection or file of yours that merely shares a name is **never overwritten and never
   removed** - loading stops with a clear message and changes nothing until you rename it.
@@ -151,6 +154,37 @@ curl 'http://127.0.0.1:5000/q/example_all_rentals'           -H 'X-API-Key: <exe
 
 Granting a second collection to any role - yours or this one - works the same way: add its name to the role's
 `collections` list and every key created from that role gains it immediately.
+
+## 6. A team's own workspace - `example-stores`
+
+A server with several teams on it gives each a [workspace](adr/0023-workspaces.md) (experimental): its own
+connections, saved queries, keys and roles, and members who administer it and nothing else. The examples load one -
+the store operations team's - so you can see that without setting it up:
+
+| | |
+|---|---|
+| Its own API | An `examples` connection of its own (to the same example database - names are unique within a workspace, not across them), the `examples-stores` collection - `example_store_revenue` and `example_staff_activity` - and a role and key, both `example-stores`, `120/minute`. |
+| Its members | `example-owner` (owner: the workspace and who is in it), `example-developer` (its saved queries) and `example-auditor` (reads, runs no SQL). Each is an administrator with no server-wide role - only this membership - and gets a personal admin token (`qagadm_...`), shown once like the keys. |
+
+Sign in to the Console with a member's token and it is that workspace's alone: its two queries, its key, its
+connection - nothing of `default`'s. Sign in with the shared admin key instead and the workspace switcher under the
+wordmark moves between `default` and `example-stores`; the chip in the top bar says which one you are in.
+
+~~~bash
+curl 'http://127.0.0.1:5000/q/example_staff_activity?city=Berlin' -H 'X-API-Key: <example-stores secret>'  # 200
+curl 'http://127.0.0.1:5000/q/example_top_films'                   -H 'X-API-Key: <example-stores secret>'  # 404 - default's
+curl 'http://127.0.0.1:5000/w/example-stores/api/v1/queries'       -H 'X-API-Key: <example-owner token>'    # its queries
+curl 'http://127.0.0.1:5000/api/v1/queries'                        -H 'X-API-Key: <example-owner token>'    # 403 - no role in default
+~~~
+
+A key acts in its own workspace, so the `example-stores` key needs no `/w/...` in the path; an administrator names
+the workspace (`/w/example-stores/...`), as the Console does for them. Loading the examples is what turns
+workspaces on, so the server logs that this experimental feature is in use.
+
+`unload` removes the workspace's example queries, role, key and connection, its three members (their tokens and
+memberships with them), and then the workspace - unless something of yours is in it, which stays, with the
+workspace (`workspace_kept` in the API's answer). A deleted workspace's name is retired, not freed - its run
+history and audit entries still name it - but a later `load` brings the examples' own back.
 
 ## Things to try next
 

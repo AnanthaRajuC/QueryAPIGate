@@ -65,26 +65,27 @@ def examples_status():
 
 
 def load_examples(actor):
-    """Install the examples (idempotent; completes an interrupted load). The example keys' secrets are in the result,
-    shown this once."""
+    """Install the examples (idempotent; completes an interrupted load). The example keys' secrets and the example
+    workspace's members' admin tokens are in the result, shown this once."""
     try:
         added = examples.load()
     except ApiError as error:
         if error.status == 409:
             raise ApiError(error.message, 409, code='examples_conflict') from error
         raise
-    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+    if examples.added_anything(added):
         store.record_audit(actor, 'load_examples', 'examples', examples.redact_for_audit(added))
     return {'added': {'connection': added['connection'], 'queries': added['queries'], 'roles': added['roles'],
-                      'keys': sorted(added['key_secrets'])},
-            'key_secrets': added['key_secrets'], 'status': examples.status()}
+                      'keys': sorted(added['key_secrets']), 'workspace': added['workspace']},
+            'key_secrets': added['key_secrets'], 'admin_tokens': added['admin_tokens'], 'status': examples.status()}
 
 
 def unload_examples(actor):
     """Remove exactly what is marked as an example. `keys_still_granted`: other keys granted an example collection,
     whose grant is now inert."""
     removed = examples.unload()
-    if removed['connection'] or removed['queries'] or removed['roles'] or removed['keys']:
+    if examples.removed_anything(removed):
         store.record_audit(actor, 'unload_examples', 'examples', removed)
-    return {'removed': {k: removed[k] for k in ('connection', 'queries', 'roles', 'keys')},
-            'keys_still_granted': removed['keys_still_granted'], 'status': examples.status()}
+    return {'removed': {k: removed[k] for k in ('connection', 'queries', 'roles', 'keys', 'workspace')},
+            'workspace_kept': removed['workspace_kept'], 'keys_still_granted': removed['keys_still_granted'],
+            'status': examples.status()}
