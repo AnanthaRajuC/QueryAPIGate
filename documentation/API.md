@@ -501,8 +501,8 @@ and those `workspaces`.
 | `PATCH /api/v1/collections/{name}` | Rename it: `{"name": "new"}`. Grants follow, and nobody's access narrows part-way. Into an existing collection only with `"merge": true` (409 `collection_exists` otherwise), which also finishes a rename that was interrupted. |
 | `GET /api/v1/collections/{name}/postman` | The collection as a Postman Collection v2.1 file. It holds no key. |
 | `GET /api/v1/examples` | Whether the [example APIs](EXAMPLES.md) are installed: `loaded`, or `partial` after an interrupted load, and what they are. |
-| `POST /api/v1/examples` | Install them (idempotent; completes an interrupted load). The example keys' secrets are in the response, shown this once. 409 `examples_conflict`, changing nothing, if something that isn't an example holds one of their names. |
-| `DELETE /api/v1/examples` | Remove exactly what is marked as an example. `keys_still_granted` names other keys granted an example collection, whose grant now reaches nothing. |
+| `POST /api/v1/examples` | Install them, the example workspace and its members too (idempotent; completes an interrupted load). The example keys' secrets and the members' admin tokens are in the response, shown this once. 409 `examples_conflict`, changing nothing, if something that isn't an example holds one of their names. A server-wide owner's. |
+| `DELETE /api/v1/examples` | Remove exactly what is marked as an example, and the example workspace unless something of yours is in it (`workspace_kept`). `keys_still_granted` names other keys granted an example collection, whose grant now reaches nothing. A server-wide owner's. |
 
 ### The response cache
 
@@ -785,16 +785,22 @@ always. `GET /api/v1/config/managed` lists what's managed and whether it's locke
 
 ## Example APIs
 
-Four worked scenarios (reporting, dashboard, export, partner) ship with the package and can be loaded into a home
-folder and removed again - see [Example APIs](EXAMPLES.md) for the walkthrough. Over HTTP (admin only):
+Four worked scenarios (reporting, dashboard, export, partner) and an example team's workspace, `example-stores`,
+with three members, ship with the package and can be loaded into a home folder and removed again - see
+[Example APIs](EXAMPLES.md) for the walkthrough. Over HTTP (an administrator reads them; loading and removing take a
+server-wide owner, as they make and remove administrators):
 
 - `GET /api/v1/examples` - `{"loaded": true, "partial": false, "connection": "examples", "queries": [...],
-  "roles": [...], "keys": [...], "collections": [...]}`. `partial` means an interrupted load: some of it is installed.
-- `POST /api/v1/examples` - install them. Idempotent; the response lists what was `added`, with the example keys'
-  secrets (`key_secrets`), shown this once. `409 examples_conflict` and nothing changed if a query, role, connection
-  or file that is *not* an example already holds one of their names.
-- `DELETE /api/v1/examples` - remove exactly what is marked `example`, and report any keys still granted an example
-  collection (`keys_still_granted`), whose grant now reaches nothing.
+  "roles": [...], "keys": [...], "collections": [...], "workspace": {...}}`. `partial` means an interrupted load: some
+  of it is installed. `workspace` is the example workspace - `{"name", "workspace", "connection", "queries", "roles",
+  "keys", "members"}` - or `null` when it isn't there.
+- `POST /api/v1/examples` - install them. Idempotent; the response lists what was `added` (`added.workspace`: what
+  went into the example workspace), with the example keys' secrets (`key_secrets`) and the example members' admin
+  tokens (`admin_tokens`), shown this once. `409 examples_conflict` and nothing changed if a query, role, connection,
+  file, workspace or administrator that is *not* an example already holds one of their names.
+- `DELETE /api/v1/examples` - remove exactly what is marked `example`, the example workspace's members, and the
+  workspace once nothing else is in it (`workspace_kept`: what of yours keeps it, or `null`), and report any keys
+  still granted an example collection (`keys_still_granted`), whose grant now reaches nothing.
 
 The same as `queryapigate examples load|unload|status`, and `QUERYAPIGATE_LOAD_EXAMPLES=yes` loads them at startup
 (a problem there - a name conflict, a read-only home - is a logged warning, never a startup failure; a malformed value
@@ -1052,7 +1058,7 @@ alone; deactivating the administrator stops them all.
 | Role | May |
 |---|---|
 | `owner` | everything, including administrators, re-encrypting stored passwords under a new key, applying a configuration file and forgetting a person's history |
-| `admin` | everything but administrators, re-encrypting passwords, applying a configuration file and forgetting history: connections, API keys and roles, saved queries, cache, examples, settings |
+| `admin` | everything but administrators, re-encrypting passwords, applying a configuration file, forgetting history and loading the examples (they make administrators): connections, API keys and roles, saved queries, cache, settings |
 | `developer` | saved queries and collections; read connections, history, the audit log and alerts; run SQL - but no API keys, no connection changes, and no moves that give a key or role new reach |
 | `auditor` | read only: queries, connections, API keys and roles, the audit log, history, alerts, instances, settings. No SQL at all |
 

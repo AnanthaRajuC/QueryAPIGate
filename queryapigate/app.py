@@ -145,10 +145,12 @@ def load_examples_at_startup():
         log.warning('QUERYAPIGATE_LOAD_EXAMPLES is set but the examples could not be loaded (unexpected error: %s)',
                     error, exc_info=True)
         return
-    if added['connection'] or added['queries'] or added['roles'] or added['key_secrets']:
+    if examples.added_anything(added):
         store.record_audit('startup', 'load_examples', 'examples', examples.redact_for_audit(added))
-        log.info('Loaded the example APIs: %d queries, %d roles, %d API keys', len(added['queries']),
-                len(added['roles']), len(added['key_secrets']))
+        log.info('Loaded the example APIs: %d queries, %d roles, %d API keys, and the %s workspace with %d members',
+                 len(added['queries']) + len(added['workspace']['queries']),
+                 len(added['roles']) + len(added['workspace']['roles']), len(added['key_secrets']),
+                 examples.WORKSPACE, len(added['workspace']['members']))
         if added['key_secrets']:
             # There is no interactive terminal at startup to hand these to (unlike `queryapigate examples
             # load`'s own stdout) and a secret is never recoverable once created - the log is the only
@@ -158,6 +160,11 @@ def load_examples_at_startup():
             # rotates away.
             log.warning('Example API keys were just created - store these now, they cannot be shown again: %s',
                        ', '.join(f'{name}={secret}' for name, secret in sorted(added['key_secrets'].items())))
+        if added['admin_tokens']:
+            # The same reasoning: the example workspace's members sign in to the Console with these, and only these.
+            log.warning('Admin tokens for the %s workspace\'s example members were just created - store these now, '
+                        'they cannot be shown again: %s', examples.WORKSPACE,
+                        ', '.join(f'{name}={secret}' for name, secret in sorted(added['admin_tokens'].items())))
 
 
 def warn_env_references():

@@ -1918,21 +1918,32 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "workspace": {
+                "$ref": "#/components/schemas/ExamplesWorkspace"
               }
             },
             "required": [
               "connection",
               "queries",
               "roles",
-              "keys"
+              "keys",
+              "workspace"
             ],
+            "type": "object"
+          },
+          "admin_tokens": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The new example members' admin tokens (`qagadm_...`), to sign in to the Console as one - shown this once.",
             "type": "object"
           },
           "key_secrets": {
             "additionalProperties": {
               "type": "string"
             },
-            "description": "The new example keys' secrets - shown this once.",
+            "description": "The new example keys' secrets, the example workspace's too - shown this once.",
             "type": "object"
           },
           "status": {
@@ -1942,6 +1953,7 @@
         "required": [
           "added",
           "key_secrets",
+          "admin_tokens",
           "status"
         ],
         "type": "object"
@@ -1977,22 +1989,35 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "workspace": {
+                "$ref": "#/components/schemas/ExamplesWorkspace"
               }
             },
             "required": [
               "connection",
               "queries",
               "roles",
-              "keys"
+              "keys",
+              "workspace"
             ],
             "type": "object"
           },
           "status": {
             "$ref": "#/components/schemas/ExamplesStatus"
+          },
+          "workspace_kept": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "When the example workspace holds things that aren't examples, it stays: what it still holds, {what: how many}. Otherwise null.",
+            "nullable": true,
+            "type": "object"
           }
         },
         "required": [
           "removed",
+          "workspace_kept",
           "keys_still_granted",
           "status"
         ],
@@ -2017,7 +2042,7 @@
             "type": "array"
           },
           "loaded": {
-            "description": "All of them are installed.",
+            "description": "All of them are installed, the example workspace too.",
             "type": "boolean"
           },
           "partial": {
@@ -2035,6 +2060,15 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "workspace": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExamplesWorkspace"
+              }
+            ],
+            "description": "The example workspace, or null when it is not there.",
+            "nullable": true
           }
         },
         "required": [
@@ -2044,7 +2078,57 @@
           "queries",
           "roles",
           "keys",
-          "collections"
+          "collections",
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "ExamplesWorkspace": {
+        "description": "The example workspace (experimental), `example-stores`: in a status, what it holds; in a load's `added` or an unload's `removed`, what was added to it or removed from it. `members` are the examples' administrators, each with only a role in it.",
+        "properties": {
+          "connection": {
+            "type": "boolean"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workspace": {
+            "description": "The workspace itself: there, created or removed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "workspace",
+          "connection",
+          "queries",
+          "roles",
+          "keys",
+          "members"
         ],
         "type": "object"
       },

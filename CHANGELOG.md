@@ -124,9 +124,22 @@ otherwise be kept until 2.0.
   Written down under Versioning and compatibility, above.
 - **A collection bundle is `format_version` 2:** each query in the Management API's fields (`sql`, `parameters`,
   `columns`), not the store's (`sql_query`, `query_parameters`, `column_descriptions`). An import reads 1 and 2.
+- **Loading or removing the examples over the API takes a server-wide owner** (`examples.write` is an owner's alone,
+  and not a workspace role's): they now make and remove administrators, with admin tokens, and a workspace - an
+  owner's to do. The `admin` role gets `403 role_forbidden` from `POST` and `DELETE /api/v1/examples`, as a
+  workspace's owner does; reading their status is unchanged. The CLI and `QUERYAPIGATE_LOAD_EXAMPLES` load as before.
 
 ### Added
 
+- **The examples include an example team's workspace, `example-stores`, with members who sign in to it**
+  (workspaces, experimental). It has an `examples` connection, collection (`example_store_revenue`,
+  `example_staff_activity`), role and key of its own, and three members - `example-owner`, `example-developer` and
+  `example-auditor` - administrators with no server-wide role, only their membership, each with an admin token shown
+  once, like the example keys' secrets: by `examples load`, in `POST /api/v1/examples`'s `admin_tokens`, or logged
+  once at startup. Signing in with one shows that workspace alone. `unload` removes the members and the workspace
+  (unless something of yours is in it: `workspace_kept`), and a later `load` revives the examples' own retired
+  name. The examples' status, load and unload answers gain `workspace`. Loading the examples now turns on the
+  experimental-workspaces warning at startup.
 - **MariaDB, Valkey and Dragonfly are supported, and tested in CI as what they stand in for.** MariaDB 10.11 and 11.4
   as a `mysql` connection - every MySQL integration test, and the data plane's differential gate, which answers on
   MariaDB exactly as Python does, its own types (`UUID`, `INET4`, `INET6`, JSON) among the rendering vectors. It

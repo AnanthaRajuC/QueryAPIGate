@@ -827,39 +827,66 @@ SCHEMAS = {
                                      'roles': {'type': 'array', 'items': {'type': 'string'}}}},
         },
     },
-    'ExamplesStatus': {
-        'type': 'object', 'required': ['loaded', 'partial', 'connection', 'queries', 'roles', 'keys', 'collections'],
+    'ExamplesWorkspace': {
+        'type': 'object', 'required': ['name', 'workspace', 'connection', 'queries', 'roles', 'keys', 'members'],
+        'description': "The example workspace (experimental), `example-stores`: in a status, what it holds; in a "
+                       "load's `added` or an unload's `removed`, what was added to it or removed from it. `members` "
+                       "are the examples' administrators, each with only a role in it.",
         'properties': {
-            'loaded': {'type': 'boolean', 'description': 'All of them are installed.'},
+            'name': {'type': 'string'},
+            'workspace': {'type': 'boolean', 'description': 'The workspace itself: there, created or removed.'},
+            'connection': {'type': 'boolean'},
+            'queries': {'type': 'array', 'items': {'type': 'string'}},
+            'roles': {'type': 'array', 'items': {'type': 'string'}},
+            'keys': {'type': 'array', 'items': {'type': 'string'}},
+            'members': {'type': 'array', 'items': {'type': 'string'}},
+        },
+    },
+    'ExamplesStatus': {
+        'type': 'object',
+        'required': ['loaded', 'partial', 'connection', 'queries', 'roles', 'keys', 'collections', 'workspace'],
+        'properties': {
+            'loaded': {'type': 'boolean', 'description': 'All of them are installed, the example workspace too.'},
             'partial': {'type': 'boolean', 'description': 'Some are: an interrupted load (POST again completes it).'},
             'connection': _NULLABLE_STRING,
             'queries': {'type': 'array', 'items': {'type': 'string'}},
             'roles': {'type': 'array', 'items': {'type': 'string'}},
             'keys': {'type': 'array', 'items': {'type': 'string'}},
             'collections': {'type': 'array', 'items': {'type': 'string'}},
+            'workspace': {'allOf': [_ref('ExamplesWorkspace')], 'nullable': True,
+                          'description': 'The example workspace, or null when it is not there.'},
         },
     },
     'ExamplesLoaded': {
-        'type': 'object', 'required': ['added', 'key_secrets', 'status'],
+        'type': 'object', 'required': ['added', 'key_secrets', 'admin_tokens', 'status'],
         'properties': {
-            'added': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys'],
+            'added': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys', 'workspace'],
                       'properties': {'connection': {'type': 'boolean'},
                                      'queries': {'type': 'array', 'items': {'type': 'string'}},
                                      'roles': {'type': 'array', 'items': {'type': 'string'}},
-                                     'keys': {'type': 'array', 'items': {'type': 'string'}}}},
+                                     'keys': {'type': 'array', 'items': {'type': 'string'}},
+                                     'workspace': _ref('ExamplesWorkspace')}},
             'key_secrets': {'type': 'object', 'additionalProperties': {'type': 'string'},
-                            'description': "The new example keys' secrets - shown this once."},
+                            'description': "The new example keys' secrets, the example workspace's too - shown this "
+                                           'once.'},
+            'admin_tokens': {'type': 'object', 'additionalProperties': {'type': 'string'},
+                             'description': "The new example members' admin tokens (`qagadm_...`), to sign in to the "
+                                            'Console as one - shown this once.'},
             'status': _ref('ExamplesStatus'),
         },
     },
     'ExamplesRemoved': {
-        'type': 'object', 'required': ['removed', 'keys_still_granted', 'status'],
+        'type': 'object', 'required': ['removed', 'workspace_kept', 'keys_still_granted', 'status'],
         'properties': {
-            'removed': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys'],
+            'removed': {'type': 'object', 'required': ['connection', 'queries', 'roles', 'keys', 'workspace'],
                         'properties': {'connection': {'type': 'boolean'},
                                        'queries': {'type': 'array', 'items': {'type': 'string'}},
                                        'roles': {'type': 'array', 'items': {'type': 'string'}},
-                                       'keys': {'type': 'array', 'items': {'type': 'string'}}}},
+                                       'keys': {'type': 'array', 'items': {'type': 'string'}},
+                                       'workspace': _ref('ExamplesWorkspace')}},
+            'workspace_kept': {'type': 'object', 'additionalProperties': {'type': 'integer'}, 'nullable': True,
+                               'description': "When the example workspace holds things that aren't examples, it "
+                                              'stays: what it still holds, {what: how many}. Otherwise null.'},
             'keys_still_granted': {'type': 'array', 'items': {'type': 'string'},
                                    'description': 'Other keys granted an example collection; that grant is now inert.'},
             'status': _ref('ExamplesStatus'),
