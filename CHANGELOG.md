@@ -227,6 +227,14 @@ otherwise be kept until 2.0.
 
 ### Fixed
 
+- **The Console asks nothing of a workspace it's about to leave, and nothing at all before sign-in.** An
+  administrator whose roles are all in workspaces (the example workspace's members, say) signed in to `default` first:
+  the sidebar's counts, the alerts bell and Home asked it for connections, queries and alerts, drew 403s, and only
+  then moved to their workspace - and Home's error rate counted every one. A tab left in a deleted workspace asked it
+  for a dozen things before going back to `default`, and the sign-in page's own shell asked for three before saying
+  "sign in". Now every request waits until `/api/v1/me` has said where the tab belongs, and goes there; signed out,
+  none is sent - the server's 401 is given without asking it.
+
 Found in a review of what 1.0.0-rc1 would freeze.
 
 - **A saved query read through the Management API lost its parameters' `example` and `embed`.** The v1 parameter

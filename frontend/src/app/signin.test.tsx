@@ -32,11 +32,13 @@ const shell = () => document.getElementById('side');
 
 describe('the sign-in page', () => {
   it('stands in for the whole Console until a token is accepted', async () => {
-    fakeBackend({ ...baseRoutes(), 'GET /api/v1/me': meFor('tok_alice') });
+    const { calls } = fakeBackend({ ...baseRoutes(), 'GET /api/v1/me': meFor('tok_alice') });
     renderAt('/queries');
     expect(await screen.findByRole('heading', { name: 'Sign in to the Console' })).toBeInTheDocument();
     expect(shell()).toBeNull(); // no sidebar, no pages
     expect(screen.queryByRole('link', { name: 'Sign in with SSO' })).toBeNull(); // the server has no SSO
+    // and nothing asked of the server but who this tab is: everything else would be refused, and counted as errors
+    expect(new Set(calls.map((c) => c.path))).toEqual(new Set(['/api/v1/me', '/health', '/auth/session']));
 
     await userEvent.type(screen.getByLabelText('Admin token or API key'), 'tok_alice');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));

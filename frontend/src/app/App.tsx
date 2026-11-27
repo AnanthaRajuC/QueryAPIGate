@@ -1,7 +1,11 @@
-import { lazy, Suspense } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
+import { answerMeWith } from '@/auth/workspace';
+
 import { AppShell } from './AppShell';
+import { meAnswerFrom } from './data';
 import { Loading } from './feedback';
 
 // The API Repository carries the SQL editor - loaded on first visit, so the shell stays small.
@@ -84,6 +88,10 @@ const McpPage = lazy(() => import('@/features/mcp/McpPage').then((m) => ({ defau
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
+  // Before any screen asks for anything (a render-time initializer, so it runs ahead of their effects): where the API
+  // client reads who this tab is, to hold requests until the tab is in its workspace (auth/workspace.ts).
+  const client = useQueryClient();
+  useState(() => answerMeWith(meAnswerFrom(client)));
   return (
     <Routes>
       <Route element={<AppShell />}>

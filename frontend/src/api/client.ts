@@ -2,7 +2,7 @@ import createClient, { type Middleware } from 'openapi-fetch';
 
 import { getApiKey } from '@/auth/apiKey';
 import { getCsrf, loadSession } from '@/auth/session';
-import { workspacePath } from '@/auth/workspace';
+import { settleWorkspace, workspacePath } from '@/auth/workspace';
 
 import type { components, paths } from './schema';
 
@@ -43,10 +43,28 @@ const withRate: Middleware = {
   },
 };
 
-// Every request in this tab's workspace (auth/workspace.ts): /w/<workspace>/... unless it's `default`.
+/** A request that has to wait until this tab is in its workspace (auth/workspace.ts): everything asked of a workspace
+ * - the Management API, saved queries, /metrics, /events - but /api/v1/me, which is how the tab finds out, and what
+ * workspacePath() leaves alone: the server's /health, sign-in (/auth/...) and a path that names its workspace. */
+function waitsForWorkspace(pathname: string) {
+  if (pathname === '/api/v1/me' || pathname === '/health') return false;
+  return !pathname.startsWith('/auth/') && !pathname.startsWith('/w/');
+}
+
+/** The server's own answer to a tab that has to sign in, given without asking it again (settleWorkspace()). */
+function signedOut() {
+  return new Response(JSON.stringify({ error: 'Unauthorized', code: 'unauthorized' }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+// Every request in this tab's workspace (auth/workspace.ts): /w/<workspace>/... unless it's `default` - and, while the
+// tab is about to move to another, in that one, once it has. Signed out, none goes at all.
 const withWorkspace: Middleware = {
   async onRequest({ request }) {
     const url = new URL(request.url);
+    if (waitsForWorkspace(url.pathname) && (await settleWorkspace()) === 'signed-out') return signedOut();
     const path = workspacePath(url.pathname);
     if (path === url.pathname) return request;
     url.pathname = path;
@@ -124,6 +142,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const key = getApiKey();
   if (key) headers.set('X-API-Key', key);
   else if ((await loadSession()).signed_in) headers.set('X-QAG-CSRF', getCsrf());
+  if (waitsForWorkspace(path) && (await settleWorkspace()) === 'signed-out') return signedOut();
   return globalThis
     .fetch(
       new Request(new URL(workspacePath(path), globalThis.location?.origin ?? 'http://localhost'), {

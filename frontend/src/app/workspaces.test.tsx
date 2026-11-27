@@ -99,7 +99,7 @@ describe('workspaces in the Console', () => {
 
   it('an administrator whose roles are all in workspaces starts in theirs', async () => {
     setApiKey('qagadm_bea');
-    fakeBackend({
+    const { calls } = fakeBackend({
       ...baseRoutes(),
       ...under('team-b'),
       'GET /api/v1/me': () =>
@@ -125,11 +125,14 @@ describe('workspaces in the Console', () => {
     renderAt('/');
     await waitFor(() => expect(getWorkspace()).toBe('team-b'));
     expect(await screen.findByText('Signed in as bea · Admin')).toBeInTheDocument();
+    // nothing but "who am I" was asked of default, where bea has no role: no screen, count or bell drew a 403 there
+    const inDefault = paths(calls).filter((p) => p.startsWith('/api/v1/'));
+    expect(inDefault.every((p) => p === '/api/v1/me')).toBe(true);
   });
 
   it('a tab left in a workspace that is gone goes back to default', async () => {
     setWorkspace('gone');
-    fakeBackend({
+    const { calls } = fakeBackend({
       ...baseRoutes(),
       'GET /w/gone/api/v1/me': () =>
         jsonResponse({ error: "No workspace named 'gone'", code: 'workspace_not_found' }, 404),
@@ -137,6 +140,11 @@ describe('workspaces in the Console', () => {
     });
     renderAt('/');
     await waitFor(() => expect(getWorkspace()).toBe('default'));
+    expect(await screen.findByText('v9.9.9')).toBeInTheDocument();
+    // and asked nothing more of the workspace that's gone than the question that found out (/health is the server's,
+    // the same in every workspace)
+    const inGone = paths(calls).filter((p) => p.startsWith('/w/gone/') && p !== '/w/gone/health');
+    expect(inGone).toEqual(['/w/gone/api/v1/me']);
   });
 });
 

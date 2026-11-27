@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 
 import { api, ApiError, unwrap, type Schemas } from '@/api/client';
+import { type MeAnswer } from '@/auth/workspace';
 
 // Data the shell and several screens share. /api/v1 where it exists; the legacy routes (typed loosely here) for
 // what hasn't got a v1 resource yet - collections.
@@ -128,6 +129,21 @@ export function useWorkspaces(enabled = true) {
 
 export function useMe() {
   return useQuery(ME_QUERY);
+}
+
+/** /api/v1/me's answer from `client`'s cache - asked once, shared with useMe() - for the API client's wait for this
+ * tab's workspace (auth/workspace.ts). An answer that was an error stays one - asking again would start it over -
+ * until it is being asked again (a sign-in): then it's that answer that counts. */
+export function meAnswerFrom(client: QueryClient): () => Promise<MeAnswer> {
+  return async () => {
+    const state = client.getQueryState(ME_QUERY.queryKey);
+    if (state?.status === 'error' && state.fetchStatus === 'idle') return { error: state.error };
+    try {
+      return { data: await client.ensureQueryData(ME_QUERY) };
+    } catch (error) {
+      return { error };
+    }
+  };
 }
 
 /** Whether this tab has to sign in first: the server answered /api/v1/me with 401 - no key, a wrong or expired one,
