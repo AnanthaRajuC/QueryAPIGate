@@ -1,10 +1,10 @@
-import { api, ADMIN_KEY, expect, open, test } from './fixtures';
+import { api, ADMIN_KEY, expect, open, openInSection, test } from './fixtures';
 
 // The main things a person does in the Console, end to end against a real server.
 
 test('a connection: create, test, edit, delete with a reason', async ({ page, allowStatus }) => {
   allowStatus(502); // the failing test below
-  await open(page, '/connections', 'Connections');
+  await openInSection(page, '/connections', 'Data', /Connections/);
   await page.getByRole('button', { name: 'New connection' }).click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('Name').fill('e2e-lite');
@@ -40,7 +40,7 @@ test('an API key: create from explicit grants, use its secret once, revoke it', 
   allowStatus,
 }) => {
   allowStatus(401);
-  await open(page, '/api-keys', 'API keys');
+  await openInSection(page, '/api-keys', 'Access', /API keys/);
   await page.getByRole('button', { name: 'New API key' }).click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('Name').fill('e2e-key');
@@ -76,7 +76,7 @@ test("an API key's secret: rotate it, both work, end the old one", async ({ page
       headers: { 'X-API-Key': secret },
       data: { sql: 'SELECT 1 AS one', connection_name: 'examples' },
     });
-  await open(page, '/api-keys', 'API keys');
+  await openInSection(page, '/api-keys', 'Access', /API keys/);
   const row = page.locator('#apikeys-table tr[data-name="e2e-rotate"]');
   await row.getByRole('button', { name: 'Edit' }).click();
   const drawer = page.locator('#drawer');
@@ -101,7 +101,7 @@ test("an API key's secret: rotate it, both work, end the old one", async ({ page
 });
 
 test('a role, and a key created from it', async ({ page }) => {
-  await open(page, '/roles', 'Roles');
+  await openInSection(page, '/roles', 'Access', /Roles/);
   await page.getByRole('button', { name: 'New role' }).click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('Name').fill('e2e-role');
@@ -125,7 +125,7 @@ test('API Designer to a published API: run, save as draft, publish, call it', as
   allowStatus,
 }) => {
   allowStatus(404); // the draft isn't served yet
-  await open(page, '/designer', 'API Designer');
+  await openInSection(page, '/designer', 'API', /API Designer/);
   await expect(page.getByLabel('Connection', { exact: true })).toHaveValue('examples');
   const editor = page.locator('#run-sql');
   await editor.click();
@@ -184,7 +184,7 @@ test('Caching: a cached response is listed, viewable and evictable', async ({ pa
   expect(
     (await page.request.get('/q/example_top_films', { headers: { 'X-API-Key': ADMIN_KEY } })).status(),
   ).toBe(200);
-  await open(page, '/caching', 'Caching');
+  await openInSection(page, '/caching', 'Data', /Caching/);
   const entries = page.locator('#cache-entries-panel');
   await expect(entries).toContainText('1 live entry right now.');
   await entries.getByRole('button', { name: 'example_top_films' }).click();
@@ -195,7 +195,7 @@ test('Caching: a cached response is listed, viewable and evictable', async ({ pa
 });
 
 test('Access map: the table drill-down and View in Access map', async ({ page }) => {
-  await open(page, '/access-map', 'Access map');
+  await openInSection(page, '/access-map', 'Access', /Access map/);
   await page.getByLabel('Connection', { exact: true }).selectOption('examples');
   await page.getByLabel('Table').selectOption('rental');
   await expect(page.locator('#accessmap-body tbody tr').first()).toBeVisible();
@@ -210,7 +210,7 @@ test('Access map: the table drill-down and View in Access map', async ({ page })
 });
 
 test('a collection: rename it and its grants follow', async ({ page }) => {
-  await open(page, '/queries/example_kpi_overdue', 'API Repository');
+  await openInSection(page, '/queries/example_kpi_overdue', 'API', /API Repository/);
   await page.locator('.qg-foot').getByRole('link', { name: 'Rename' }).click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('New name').fill('e2e-dashboard');

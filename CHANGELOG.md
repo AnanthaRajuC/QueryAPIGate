@@ -183,10 +183,6 @@ otherwise be kept until 2.0.
 - **The Console's MCP server screen is in tabs:** Connect a client, Reachability and Tools, one at a time instead of
   one under another. The Tools tab counts the tools, and Reachability shows the last check's dot. The tab is in the
   URL (`/console/mcp?tab=tools`).
-- **The Console's sidebar shows each item's icon beside its label,** not only in the collapsed rail. Totals
-  (connections, saved queries, keys, roles) are quieter; open alerts are a red badge and writes waiting for approval
-  an accent one - a dot on the icon in the rail. The menu fades out at the bottom while more of it is below. The rail
-  no longer shows clipped group labels.
 - **A tab outside `default` shows its workspace in the top bar** (workspaces, experimental), a chip that switches
   too, so whichever screen is open it's clear whose connections, queries and keys are on it. In `default` there's
   none, as there's no switcher with only one workspace. In the icon rail (collapsed, or a narrow screen), which has no
@@ -199,6 +195,14 @@ otherwise be kept until 2.0.
   Agents; Connections, which had a filter, gains the sorting. Numbers sort as numbers, rate limits by what they allow,
   and empty values stay last either way. Tables fetched a page at a time (the audit log, run history, approvals, query
   results) don't, since sorting one page would look right and be wrong.
+- **The Console's sidebar has one entry per area, its screens tabs on the area's page** - Home, Data, API, MCP server,
+  Delivery, Access and Observability, where it listed twenty screens under seven group headings. Data, for one, opens
+  a page with Connections, CDC sources and Caching as tabs, each with its icon and a count where there is one, and
+  only the tabs your role may open. Open alerts are a red badge on Observability - writes waiting for approval an
+  accent one, while no alert is (a dot on the icon in the collapsed rail) - and both are counted on their tabs. Each
+  entry shows its icon beside its label, not only in the rail. Each screen keeps its own address
+  (`/console/connections`, `/console/api-keys`, ...), so links and bookmarks still work; an area's own
+  (`/console/data`, `/console/access`, ...) opens the first tab you may see.
 - **A bad whole number has the code of what it is:** `page=abc` is `invalid_paging`, as `page=0` was (it was
   `invalid_request`), a history or runs `limit` `invalid_filter`. A few more errors that had only their status's
   code have their own: `connection_required`, `invalid_body`, `invalid_name`, `query_exists`.

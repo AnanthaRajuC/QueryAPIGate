@@ -166,7 +166,9 @@ version management, API key management, an audit log of administrative changes, 
 response inspection with a collapsible JSON tree for non-tabular results, a quick bar chart of any numeric
 result, and one-click "copy as curl" / "copy as TSV" for any result.
 
-The UI has a collapsible sidebar (Data, Access, Observability; `Ctrl`+`B` toggles it) and a read-only **Settings**
+The UI has a collapsible sidebar (`Ctrl`+`B` toggles it) of one entry per area - Home, Data, API, MCP server,
+Delivery, Access and Observability - each area's page with its screens as tabs (Data: Connections, CDC sources and
+Caching; Access: API keys, Roles, Access map, Workspaces and Administrators; ...), and a read-only **Settings**
 screen that shows every environment variable, its effective value and whether it was set or is the default (secrets are
 reported as configured or not, never shown), with a "Copy as .env" button. Theme, table density and the default
 result format are per-browser preferences.

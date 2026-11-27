@@ -29,6 +29,7 @@ import {
   type DesignerState,
   type HistoryEntry,
 } from './state';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic "API Designer" screen (ui.py #tab-run): ad-hoc SQL (or a Mongo find()) against any connection, with
 // the Type → Host → Connection → Database picker, the runner's sidebar (Recent Queries, Settings, Schema) behind a
@@ -334,7 +335,7 @@ export function DesignerPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>API Designer</h1>
+          <PageTitle tab>API Designer</PageTitle>
           <span className="sub">Ad-hoc statements against any active connection. Nothing here is saved.</span>
         </div>
       </div>

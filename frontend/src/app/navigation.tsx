@@ -11,10 +11,27 @@ export interface NavItem {
   icon: ReactNode;
   /** Console route. */
   path: string;
-  count?: 'connections' | 'queries' | 'apikeys' | 'roles' | 'alerts' | 'approvals';
+  count?:
+    | 'connections'
+    | 'queries'
+    | 'apikeys'
+    | 'roles'
+    | 'workspaces'
+    | 'administrators'
+    | 'alerts'
+    | 'approvals';
   /** The capability (adminroles.py) a role needs for this screen; hidden without it. 'data': may run SQL. */
   needs?: string;
 }
+
+export type CountKind = NonNullable<NavItem['count']>;
+
+/** Counts that ask for someone's action: a coloured badge (and a dot on the icon in the collapsed rail) - on the tab,
+ * and on its section in the sidebar (navCounts.tsx). The others are totals, shown quietly on the tab. */
+export const ATTENTION: Partial<Record<CountKind, 'danger' | 'accent'>> = {
+  alerts: 'danger',
+  approvals: 'accent',
+};
 
 const svg = (children: ReactNode) => (
   <svg
@@ -29,7 +46,24 @@ const svg = (children: ReactNode) => (
   </svg>
 );
 
-export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+/** A sidebar group shown as one item: it opens a page of its own whose tabs are the group's screens (SectionLayout).
+ * Each screen keeps its own route, so links and bookmarks to it still work; the section's `path` opens the first one
+ * the caller may see. */
+export interface NavSection {
+  id: string;
+  label: string;
+  path: string;
+  description: string;
+  icon: ReactNode;
+}
+
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
+  section?: NavSection;
+}
+
+export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Overview',
     items: [
@@ -49,6 +83,20 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'Data',
+    section: {
+      id: 'data',
+      label: 'Data',
+      path: '/data',
+      description:
+        'The databases this gateway reaches, the change streams it listens to, and the response cache.',
+      icon: svg(
+        <>
+          <ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+          <path d="M4.5 5.5v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-6" />
+          <path d="M4.5 11.5v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-6" />
+        </>,
+      ),
+    },
     items: [
       {
         tab: 'connections',
@@ -89,6 +137,19 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'API',
+    section: {
+      id: 'api',
+      label: 'API',
+      path: '/api',
+      description: 'Saved queries published as REST endpoints, and the designer to write and try them first.',
+      icon: svg(
+        <>
+          <path d="M8 6l-5 6 5 6" />
+          <path d="M16 6l5 6-5 6" />
+          <path d="M13.5 4l-3 16" />
+        </>,
+      ),
+    },
     items: [
       {
         tab: 'queries',
@@ -140,6 +201,20 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'Delivery',
+    section: {
+      id: 'delivery',
+      label: 'Delivery',
+      path: '/delivery',
+      description:
+        'Saved queries written out as files - the exports, and the buckets and folders they go to.',
+      icon: svg(
+        <>
+          <path d="M12 3v12" />
+          <path d="M7 10l5 5 5-5" />
+          <path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17" />
+        </>,
+      ),
+    },
     items: [
       {
         tab: 'exports',
@@ -173,6 +248,20 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'Access',
+    section: {
+      id: 'access',
+      label: 'Access',
+      path: '/access',
+      description:
+        'Who can reach what: API keys and the roles they come from, workspaces, and the administrators.',
+      icon: svg(
+        <>
+          <rect x="4" y="10.5" width="16" height="10" rx="2" />
+          <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+          <path d="M12 14.5v2.5" />
+        </>,
+      ),
+    },
     items: [
       {
         tab: 'apikeys',
@@ -219,6 +308,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         path: '/workspaces',
         group: 'Access',
         label: 'Workspaces',
+        count: 'workspaces',
         needs: 'self',
         icon: svg(
           <>
@@ -233,6 +323,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
         path: '/administrators',
         group: 'Access',
         label: 'Administrators',
+        count: 'administrators',
         needs: 'self',
         icon: svg(
           <>
@@ -247,6 +338,18 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
   {
     label: 'Observability',
+    section: {
+      id: 'observability',
+      label: 'Observability',
+      path: '/observability',
+      description:
+        'What is happening: alerts, live metrics, what AI agents did, writes waiting for approval, and the audit log.',
+      icon: svg(
+        <>
+          <path d="M3 12h4l2.5-6 4 12 2.5-6H21" />
+        </>,
+      ),
+    },
     items: [
       {
         tab: 'alerts',
@@ -353,3 +456,11 @@ export const FOOT_ITEMS: NavItem[] = [
 ];
 
 export const ALL_NAV = [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS];
+
+/** The sidebar groups shown as one item each, by id. */
+export const SECTIONS: Record<string, NavGroup & { section: NavSection }> = Object.fromEntries(
+  NAV_GROUPS.filter((g): g is NavGroup & { section: NavSection } => Boolean(g.section)).map((g) => [
+    g.section.id,
+    g,
+  ]),
+);

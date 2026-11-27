@@ -7,6 +7,7 @@ import { StatTile } from '@/components/StatTile';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
 import { metricGauge, metricGroupSum, metricSum } from '@/lib/metrics';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Metrics screen (ui.py #tab-metrics, loadMetrics, renderMetrics, pollPoolStats): live totals since
 // this process started, from /metrics. The two pool tiles refresh every 2s; the rest on Refresh.
@@ -223,7 +224,7 @@ export function MetricsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Metrics</h1>
+          <PageTitle tab>Metrics</PageTitle>
           <span className="sub">
             Live totals since this process started - with several instances, this one only. For trends and
             every instance together, scrape each one's <code>/metrics</code> with Prometheus and import the

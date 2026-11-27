@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { api, expect, open, test } from './fixtures';
+import { api, expect, openInSection, test } from './fixtures';
 
 // Exports end to end (ADR 0004): a folder destination made and tested in the Console, an export of an example query
 // defined and run there, and the Parquet file it wrote, on disk.
@@ -10,7 +10,7 @@ import { api, expect, open, test } from './fixtures';
 test('a destination, an export, a run - and the file it wrote', async ({ page }) => {
   const folder = mkdtempSync(join(tmpdir(), 'qag-e2e-drop-'));
   try {
-    await open(page, '/destinations', 'Destinations');
+    await openInSection(page, '/destinations', 'Delivery', /Destinations/);
     await page.locator('#new-destination').click();
     const drawer = page.locator('#drawer');
     await drawer.getByLabel('Name').fill('e2e-drop');
@@ -20,7 +20,7 @@ test('a destination, an export, a run - and the file it wrote', async ({ page })
     await drawer.getByRole('button', { name: 'Create' }).click();
     await expect(page.locator('#destinations-table tr[data-name="e2e-drop"]')).toContainText(folder);
 
-    await open(page, '/exports', 'Exports');
+    await openInSection(page, '/exports', 'Delivery', /Exports/);
     await page.locator('#new-export').click();
     await drawer.getByLabel('Name').fill('e2e-rentals');
     await drawer.getByLabel('Saved query').selectOption('example_rentals_since');

@@ -10,6 +10,7 @@ import { reachVia, type Via } from '@/features/repository/reach';
 
 import { ActivitySpark } from './KeyActivity';
 import { useKeyQueryActivity } from './activity';
+import { PageTitle } from '@/components/PageTitle';
 
 // A single API key in full (reached from the Details button on the API keys table, /api-keys/:name): the APIs
 // (saved queries) and connections it can reach, the tables and write surface it is allowed, its limits, and its
@@ -70,7 +71,7 @@ export function ApiKeyDetailPage() {
             <Link to="/api-keys" className="sub">
               ← API keys
             </Link>
-            <h1>{name || 'API key'}</h1>
+            <PageTitle>{name || 'API key'}</PageTitle>
           </div>
         </div>
         <div className="panel">
@@ -124,11 +125,11 @@ export function ApiKeyDetailPage() {
           <Link to="/api-keys" className="sub">
             ← API keys
           </Link>
-          <h1 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <PageTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className={`dot ${k.active && !expired ? 'ok' : 'off'}`} title={status} />
             {name}
             {k.example ? <span className="tag">example</span> : null}
-          </h1>
+          </PageTitle>
           <span className="sub">
             {status}
             {k.created_from_role ? ` · created from role ${k.created_from_role}` : ''}

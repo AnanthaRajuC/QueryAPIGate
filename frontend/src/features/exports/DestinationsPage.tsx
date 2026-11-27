@@ -10,6 +10,7 @@ import { useDestinations, useReport } from './shared';
 import { ManagedTag } from '@/components/Managed';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
+import { PageTitle } from '@/components/PageTitle';
 
 // Where exports may write (ADR 0004), on /api/v1/destinations: a bucket prefix or a folder, and its credentials.
 
@@ -160,7 +161,7 @@ export function DestinationsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Destinations</h1>
+          <PageTitle tab>Destinations</PageTitle>
           <span className="sub">
             Buckets and folders exports may write to, and the credentials to write there.
           </span>

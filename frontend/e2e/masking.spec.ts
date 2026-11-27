@@ -1,10 +1,10 @@
-import { api, expect, open, test } from './fixtures';
+import { api, expect, openInSection, test } from './fixtures';
 
 // Column masking end to end (ADR 0005): a key given a rule in the Console, then used - the example customers' emails
 // come back hashed, whatever the SQL calls the column.
 
 test('a key with a masking rule never sees the real emails', async ({ page }) => {
-  await open(page, '/api-keys', 'API keys');
+  await openInSection(page, '/api-keys', 'Access', /API keys/);
   await page.locator('#new-apikey').click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('Name').fill('e2e-masked');

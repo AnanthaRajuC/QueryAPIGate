@@ -114,6 +114,20 @@ const ME_QUERY = {
   staleTime: 60_000,
 };
 
+/** The administrators (/api/v1/administrators) - an owner's to see (`admins.read`). */
+export function useAdministrators(enabled: boolean) {
+  const gate = useGate('admins.read', 'other administrators');
+  return useQuery({
+    queryKey: ['administrators'],
+    queryFn: async () => {
+      await gate.check();
+      return unwrap(await api.GET('/api/v1/administrators')).items;
+    },
+    enabled,
+    retry: false,
+  });
+}
+
 export type Workspace = Schemas['Workspace'];
 
 /** The workspaces this caller sees (ADR 0023): every one for a server-wide owner, admin or auditor; their own

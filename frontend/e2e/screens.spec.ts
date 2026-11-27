@@ -1,23 +1,23 @@
-import { expect, open, test } from './fixtures';
+import { expect, open, openInSection, test } from './fixtures';
 
 // Every screen, reached through the sidebar as a person would: it renders, its data loads, and nothing fails.
 
-const SCREENS: [string, string, string][] = [
-  // sidebar label, heading, something only that screen's data shows
+const SCREENS: [string, string, string, string?][] = [
+  // sidebar label, heading, something only that screen's data shows - and, for a section's screen, its tab
   ['Home', 'Home', 'System health'],
-  ['Connections', 'Connections', 'examples'],
-  ['Caching', 'Caching', 'Saved queries with cache_ttl set'],
-  ['API Repository', 'API Repository', 'examples-dashboard'],
-  ['API Designer', 'API Designer', 'Recent Queries'],
-  ['API keys', 'API keys', 'example-partner'],
-  ['Roles', 'Roles', 'example-partner'],
-  ['Exports', 'Exports', 'No exports yet'],
-  ['Destinations', 'Destinations', 'No destinations yet'],
-  ['Access map', 'Access map', 'API KEYS'],
-  ['Administrators', 'Administrators', 'example-owner'], // the example workspace's members
-  ['Alerts', 'Alerts', 'What needs attention now'],
-  ['Metrics', 'Metrics', 'Requests by status'],
-  ['Audit log', 'Audit log', 'load_examples'],
+  ['Data', 'Data', 'examples', 'Connections'],
+  ['Data', 'Data', 'Saved queries with cache_ttl set', 'Caching'],
+  ['API', 'API', 'examples-dashboard', 'API Repository'],
+  ['API', 'API', 'Recent Queries', 'API Designer'],
+  ['Access', 'Access', 'example-partner', 'API keys'],
+  ['Access', 'Access', 'example-partner', 'Roles'],
+  ['Delivery', 'Delivery', 'No exports yet', 'Exports'],
+  ['Delivery', 'Delivery', 'No destinations yet', 'Destinations'],
+  ['Access', 'Access', 'API KEYS', 'Access map'],
+  ['Access', 'Access', 'example-owner', 'Administrators'], // the example workspace's members
+  ['Observability', 'Observability', 'What needs attention now', 'Alerts'],
+  ['Observability', 'Observability', 'Requests by status', 'Metrics'],
+  ['Observability', 'Observability', 'load_examples', 'Audit log'],
   ['Settings', 'Settings', 'QUERYAPIGATE_HOME'],
   ['Help', 'Help', 'Quick reference'],
 ];
@@ -25,9 +25,14 @@ const SCREENS: [string, string, string][] = [
 test('every sidebar screen renders its data', async ({ page, allowStatus }) => {
   allowStatus(404); // Help reads docs from GitHub at this version's tag, falling back to main
   await open(page, '/', 'Home');
-  for (const [label, heading, marker] of SCREENS) {
+  for (const [label, heading, marker, tab] of SCREENS) {
     await page.locator('#tabs, .side-foot').getByRole('tab', { name: label, exact: false }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    if (tab) {
+      const link = page.getByRole('navigation', { name: heading }).getByRole('link', { name: tab });
+      await link.click();
+      await expect(link).toHaveAttribute('aria-current', 'page');
+    }
     await expect(
       page.locator('main section').getByText(marker, { exact: false }).locator('visible=true').first(),
     ).toBeVisible();
@@ -35,10 +40,12 @@ test('every sidebar screen renders its data', async ({ page, allowStatus }) => {
 });
 
 test('the breadcrumb, Ctrl+K search and sidebar collapse work', async ({ page }) => {
-  await open(page, '/api-keys', 'API keys');
+  await openInSection(page, '/api-keys', 'Access', /API keys/);
   await expect(page.locator('#crumb-page')).toHaveText('API keys');
   await page.keyboard.press('Control+k');
   await page.keyboard.type('example_top');
+  // the first result is the query, once the list has loaded - Enter before then picks whatever was first
+  await expect(page.locator('#pal-list .pal-item.on .nm')).toHaveText('example_top_films');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/console\/queries\/example_top_films$/);
   await page.keyboard.press('Control+b');

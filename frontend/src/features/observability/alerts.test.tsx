@@ -114,9 +114,16 @@ describe('Alerts', () => {
     const bell = await screen.findByRole('button', { name: 'Alerts: 3 need attention' });
     expect(bell.querySelector('.badge')).toHaveTextContent('3');
     expect(bell.querySelector('.badge')).toHaveClass('critical');
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Alerts/ })).toHaveTextContent('Alerts3'));
+    // in the sidebar, on Observability - whose page has Alerts as a tab
+    const observability = screen.getByRole('tab', { name: /^Observability/ });
+    await waitFor(() => expect(observability).toHaveTextContent('Observability3'));
+    expect(observability.querySelector('.count')).toHaveClass('attention', 'danger');
     await userEvent.click(bell);
     expect(await screen.findByRole('heading', { name: /^Alerts/ })).toBeInTheDocument();
+    const tab = within(screen.getByRole('navigation', { name: 'Observability' })).getByRole('link', {
+      name: /Alerts/,
+    });
+    await waitFor(() => expect(tab).toHaveTextContent('Alerts3'));
   });
 
   it('dismisses one in this browser, and can bring it back', async () => {

@@ -9,6 +9,7 @@ import { useFeedback } from '@/app/feedback';
 import { NewCollectionForm, QueryForm } from './forms';
 import { QueryDetail } from './QueryDetail';
 import { QueryList } from './QueryList';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic "API Repository" screen (ui.py #tab-queries): examples strip, page head, and the split list | detail.
 
@@ -37,7 +38,7 @@ export function RepositoryPage() {
       <ExamplesStrip />
       <div className="page-head">
         <div className="titles">
-          <h1>API Repository</h1>
+          <PageTitle tab>API Repository</PageTitle>
           <span className="sub" id="queries-sub">
             {list.length
               ? `${versions}${versions === 1 ? ' version' : ' versions'}${

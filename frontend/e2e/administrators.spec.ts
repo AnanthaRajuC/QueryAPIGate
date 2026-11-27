@@ -1,10 +1,10 @@
-import { ADMIN_KEY, api, expect, open, test } from './fixtures';
+import { ADMIN_KEY, api, expect, openInSection, test } from './fixtures';
 
 // Named administrators (ADR 0003), end to end: an owner's shared key creates a developer in the Console, the developer
 // signs in with the token shown once, and the Console then shows only what a developer may do.
 
 test('a developer, created in the Console, signs in with their own token', async ({ page }) => {
-  await open(page, '/administrators', 'Administrators');
+  await openInSection(page, '/administrators', 'Access', /Administrators/);
   await page.locator('#new-administrator').click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('Name').fill('e2e-dev');
@@ -22,8 +22,11 @@ test('a developer, created in the Console, signs in with their own token', async
     await page.locator('#save-key').click();
     await expect(page.locator('#key-state')).toHaveText('Signed in as e2e-dev · Developer');
     const nav = page.locator('#tabs');
-    await expect(nav.getByRole('tab', { name: 'API Repository' })).toBeVisible();
-    await expect(nav.getByRole('tab', { name: 'API keys' })).toHaveCount(0);
+    await expect(nav.getByRole('tab', { name: 'API', exact: true })).toBeVisible(); // the section holding API Repository
+    // Access holds only the tabs a developer may open: not API keys
+    await expect(
+      page.getByRole('navigation', { name: 'Access' }).getByRole('link', { name: /API keys/ }),
+    ).toHaveCount(0);
     await expect(page.locator('.side-foot').getByRole('tab', { name: 'Settings' })).toHaveCount(0);
     // their own account and tokens, not everyone's
     await expect(page.getByText('Your account and your admin tokens.')).toBeVisible();

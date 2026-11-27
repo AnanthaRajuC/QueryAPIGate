@@ -7,6 +7,7 @@ import { useGate } from '@/app/data';
 import { Field, Loading, useFeedback } from '@/app/feedback';
 import { CodeBox } from '@/components/CodeBox';
 import { Time } from '@/components/Time';
+import { PageTitle } from '@/components/PageTitle';
 
 // Writes AI agents asked to make over MCP (ADR 0008): a person approves or rejects each one before it runs. The link an
 // agent is given - /console/approvals/wr_... - opens that request here.
@@ -251,7 +252,7 @@ export function ApprovalsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Approvals</h1>
+          <PageTitle tab>Approvals</PageTitle>
           <span className="sub">
             Writes AI agents asked to make over MCP. Each runs only once a person approves it - with exactly
             the arguments shown.

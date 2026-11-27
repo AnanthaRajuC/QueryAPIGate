@@ -128,7 +128,7 @@ Open **<http://127.0.0.1:5000/console>**. Two things worth noticing right away:
 From there, the same tabs work as they would for a query you wrote yourself: **SQL** (the query text),
 **History** (every run, seeded or real), **Curl**/**CLI** (copy-pasteable commands), **API Keys**/**Roles**
 (which of the five keys can reach this specific query), **Access**, **Cache** (for the dashboard scenario's
-`cache_ttl=30` queries), **Metrics**. Visit **Access map** (under **Access** in the sidebar) to see all
+`cache_ttl=30` queries), **Metrics**. Visit **Access map** (a tab of **Access**, in the sidebar) to see all
 five keys and every query they reach laid out at once - the fastest way to build intuition for how
 `connections`/`queries`/`collections` grants actually compose, before designing your own.
 

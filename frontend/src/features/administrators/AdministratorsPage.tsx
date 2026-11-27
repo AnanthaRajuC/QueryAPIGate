@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 
 import { ApiError, api, unwrap, unwrapEmpty, unwrapWithEtag, type Schemas } from '@/api/client';
-import { useCan, useGate, useMe } from '@/app/data';
+import { useAdministrators, useCan, useMe } from '@/app/data';
 import { Field, FormActions, Loading, useFeedback } from '@/app/feedback';
 import { PencilIcon, TrashIcon } from '@/components/icons';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
@@ -10,6 +10,7 @@ import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
 import { useSession } from '@/auth/session';
 import { SecretReveal } from '@/features/access/forms';
+import { PageTitle } from '@/components/PageTitle';
 
 // Named administrators and their admin tokens (ADR 0003), on /api/v1/administrators. Owners see everyone; every other
 // administrator sees their own account and manages their own tokens.
@@ -64,19 +65,6 @@ function useReport() {
     error instanceof ApiError
       ? showError(error.message, { status: error.status })
       : showError((error as Error).message);
-}
-
-function useAdministrators(enabled: boolean) {
-  const gate = useGate('admins.read', 'other administrators');
-  return useQuery({
-    queryKey: ['administrators'],
-    queryFn: async () => {
-      await gate.check();
-      return unwrap(await api.GET('/api/v1/administrators')).items;
-    },
-    enabled,
-    retry: false,
-  });
 }
 
 function useTokens(name: string) {
@@ -142,7 +130,7 @@ export function AdministratorsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Administrators</h1>
+          <PageTitle tab>Administrators</PageTitle>
           <span className="sub" id="administrators-sub">
             {owner
               ? 'The people and pipelines that manage this server, each with a role and their own tokens.'

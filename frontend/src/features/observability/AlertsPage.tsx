@@ -5,6 +5,7 @@ import { ALERT_TABS, dismissAlert, restoreAlert, useAlertFeed, type Alert } from
 import { Loading } from '@/app/feedback';
 import { Time } from '@/components/Time';
 import { rememberSection } from '@/features/settings/state';
+import { PageTitle } from '@/components/PageTitle';
 
 // What needs attention now (GET /api/v1/alerts): expiring keys, failing connections, failing or slow queries, rate
 // limits being hit, an open server. Live conditions, checked every minute - each clears by itself once its cause
@@ -196,7 +197,7 @@ export function AlertsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Alerts</h1>
+          <PageTitle tab>Alerts</PageTitle>
           <span className="sub">
             What needs attention now, checked every minute. Each clears by itself once its cause does.
             {query.data ? (

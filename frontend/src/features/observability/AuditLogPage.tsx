@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { api, unwrap, type Schemas } from '@/api/client';
 import { Loading, useFeedback } from '@/app/feedback';
 import { Time } from '@/components/Time';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Audit log screen (ui.py #tab-auditlog, loadAuditLog, renderAuditLog, renderAuditChanges), on
 // /api/v1/audit: newest first, filtered by action and by actor / target / time, exported as JSON.
@@ -146,7 +147,7 @@ export function AuditLogPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Audit log</h1>
+          <PageTitle tab>Audit log</PageTitle>
           <span className="sub" id="auditlog-sub">
             {'Administrative actions, newest first.' +
               (log.data ? ` Keeps the last ${log.data.retention} entries.` : '')}
