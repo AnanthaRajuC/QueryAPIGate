@@ -1,26 +1,27 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { getApiKey, setApiKey } from '@/auth/apiKey';
 import { signInUrl, signOut, useSession } from '@/auth/session';
 
-import { usePendingWrites } from './approvals';
-import { useAllQueries, useApiKeys, useCan, useConnections, useHealth, useMe, useRoles } from './data';
-import { FOOT_ITEMS, NAV_GROUPS, type NavItem } from './navigation';
-import { useAlertFeed } from './alerts';
+import { useCan, useHealth, useMe } from './data';
+import { AttentionBadge } from './navCounts';
+import {
+  ATTENTION,
+  FOOT_ITEMS,
+  NAV_GROUPS,
+  type CountKind,
+  type NavGroup,
+  type NavItem,
+  type NavSection,
+} from './navigation';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-// ui.py <aside class="side">, element for element - with the icons shown beside the labels, badges that stand out only
-// for what needs someone (open alerts, writes waiting for approval), and a fade at the bottom of the menu while more of
-// it is below.
-
-/** Counts that ask for action - shown as a coloured badge, and as a dot on the icon in the collapsed rail. The others
- * are totals, shown quietly. */
-const ATTENTION: Partial<Record<NonNullable<NavItem['count']>, 'danger' | 'accent'>> = {
-  alerts: 'danger',
-  approvals: 'accent',
-};
+// ui.py <aside class="side">, element for element - but one entry per group: a group of several screens is a section
+// (navigation.tsx), whose page has them as tabs (SectionLayout); a group of one is that screen. A section holding what
+// asks for someone's action (open alerts, writes waiting for approval) carries its badge. The menu fades out at the
+// bottom while more of it is below.
 
 export function activeItem(pathname: string): NavItem | undefined {
   return [...NAV_GROUPS.flatMap((g) => g.items), ...FOOT_ITEMS].find((i) =>
@@ -28,53 +29,13 @@ export function activeItem(pathname: string): NavItem | undefined {
   );
 }
 
-function useCounts() {
-  const connections = useConnections();
-  const queries = useAllQueries();
-  const keys = useApiKeys();
-  const roles = useRoles();
-  const alerts = useAlertFeed();
-  const pending = usePendingWrites();
-  const n = (value: number | undefined) => (value ? String(value) : '');
-  return {
-    connections: n(connections.data?.length),
-    queries: n(queries.data?.length),
-    apikeys: n(keys.data ? Object.keys(keys.data).length : undefined),
-    roles: n(roles.data ? Object.keys(roles.data).length : undefined),
-    alerts: n(alerts.urgent),
-    approvals: n(pending.data?.length),
-  };
-}
-
 export function Sidebar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const active = activeItem(pathname);
-  const counts = useCounts();
   const health = useHealth();
   const can = useCan();
   const shown = (item: NavItem) => !item.needs || can(item.needs);
-
-  // Collapsible nav groups - which are collapsed is kept in this browser (per viewer convenience).
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem('queryapigate-nav-collapsed') ?? '[]') as string[]);
-    } catch {
-      return new Set();
-    }
-  });
-  const toggleGroup = (label: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      try {
-        localStorage.setItem('queryapigate-nav-collapsed', JSON.stringify([...next]));
-      } catch {
-        /* storage unavailable */
-      }
-      return next;
-    });
 
   // The fade at the bottom of the menu: on while some of it is below the visible part.
   const navRef = useRef<HTMLElement>(null);
@@ -92,37 +53,55 @@ export function Sidebar() {
       nav.removeEventListener('scroll', update);
       observer?.disconnect();
     };
-  }, [collapsed]);
+  }, []);
 
-  const go = (item: NavItem) => navigate(item.path);
-  const button = (item: NavItem, extraClass?: string) => (
+  const entry = (
+    key: string,
+    label: string,
+    icon: ReactNode,
+    isActive: boolean,
+    onClick: () => void,
+    badge?: ReactNode,
+    extraClass?: string,
+  ) => (
     <button
-      key={item.tab}
+      key={key}
       type="button"
       role="tab"
-      data-tab={item.tab}
-      data-group={item.group}
-      data-label={item.label}
-      title={item.label}
-      className={
-        [extraClass, active?.tab === item.tab ? 'active' : ''].filter(Boolean).join(' ') || undefined
-      }
-      aria-selected={active?.tab === item.tab}
-      onClick={() => go(item)}
+      data-tab={key}
+      data-label={label}
+      title={label}
+      className={[extraClass, isActive ? 'active' : ''].filter(Boolean).join(' ') || undefined}
+      aria-selected={isActive}
+      onClick={onClick}
     >
-      <span className="nav-abbr">{item.icon}</span>
-      <span className="nav-text">{item.label}</span>
-      {item.count ? (
-        <span
-          className={
-            ATTENTION[item.count] && counts[item.count] ? `count attention ${ATTENTION[item.count]}` : 'count'
-          }
-        >
-          {counts[item.count]}
-        </span>
-      ) : null}
+      <span className="nav-abbr">{icon}</span>
+      <span className="nav-text">{label}</span>
+      {badge}
     </button>
   );
+  const button = (item: NavItem, extraClass?: string) =>
+    entry(
+      item.tab,
+      item.label,
+      item.icon,
+      active?.tab === item.tab,
+      () => navigate(item.path),
+      null,
+      extraClass,
+    );
+  // A section: it opens the section's page, and is the active entry while any of its screens is open.
+  const sectionButton = (group: NavGroup, section: NavSection, items: NavItem[]) => {
+    const asking = items.map((i) => i.count).filter((k): k is CountKind => Boolean(k && ATTENTION[k]));
+    return entry(
+      section.id,
+      section.label,
+      section.icon,
+      active?.group === group.label,
+      () => navigate(section.path),
+      asking.length ? <AttentionBadge kinds={asking} /> : null,
+    );
+  };
 
   return (
     <aside className="side" id="side">
@@ -150,33 +129,9 @@ export function Sidebar() {
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(shown);
           if (!items.length) return null;
-          const isCollapsed = collapsed.has(group.label);
-          return (
-            <div className={`nav-group${isCollapsed ? ' collapsed' : ''}`} key={group.label}>
-              <button
-                type="button"
-                className="nav-label"
-                aria-expanded={!isCollapsed}
-                aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
-                onClick={() => toggleGroup(group.label)}
-              >
-                <span>{group.label}</span>
-                <svg
-                  className="nav-chevron"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-              <div className="nav-rule" />
-              {!isCollapsed && items.map((item) => button(item))}
-            </div>
-          );
+          return group.section
+            ? sectionButton(group, group.section, items)
+            : items.map((item) => button(item));
         })}
       </nav>
       <StarCard />

@@ -11,6 +11,7 @@ import { grantBreadth, grantWords, ratePerSecond, writeLevel } from './grantSort
 import { ManagedTag } from '@/components/Managed';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Roles screen (ui.py #tab-roles, renderRoles), on /api/v1/roles.
 
@@ -215,7 +216,7 @@ export function RolesPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Roles</h1>
+          <PageTitle tab>Roles</PageTitle>
           <span className="sub" id="roles-sub">
             Reusable permission sets that API keys can inherit.
           </span>

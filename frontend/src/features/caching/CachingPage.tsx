@@ -13,6 +13,7 @@ import { useTableControls, type Column } from '@/components/useTableControls';
 import { ActivitySpark } from '@/features/access/KeyActivity';
 import { useQueryActivityMap } from '@/features/access/activity';
 import { metricGauge } from '@/lib/metrics';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Caching screen (ui.py #tab-caching, renderCaching, renderCacheEntriesPanel, showCacheEntry): how the
 // cache_ttl response cache performs, which saved queries declare a cache_ttl, and what is cached right now -
@@ -76,7 +77,7 @@ export function CachingPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Caching</h1>
+          <PageTitle tab>Caching</PageTitle>
           <span className="sub">
             The response cache backing saved queries&apos; <code>cache_ttl</code> - see the Response cache row
             in Settings for the backend itself.

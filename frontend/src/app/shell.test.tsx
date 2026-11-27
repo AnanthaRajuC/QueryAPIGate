@@ -19,34 +19,17 @@ describe('Console shell - the classic frame', () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
     const nav = screen.getByRole('tablist', { name: 'Sections' });
-    const groups = [...nav.querySelectorAll('.nav-label')].map((n) => n.textContent);
-    expect(groups).toEqual(['Overview', 'Data', 'API', 'MCP', 'Delivery', 'Access', 'Observability']);
+    // one entry per group: a group of several screens is a section, whose page has them as tabs; a group of one is it
+    expect(nav.querySelectorAll('.nav-label')).toHaveLength(0);
     const labels = [...nav.querySelectorAll('.nav-text')].map((n) => n.textContent);
-    expect(labels).toEqual([
-      'Home',
-      'Connections',
-      'CDC sources',
-      'Caching',
-      'API Repository',
-      'API Designer',
-      'MCP server',
-      'Exports',
-      'Destinations',
-      'API keys',
-      'Roles',
-      'Access map',
-      'Workspaces',
-      'Administrators',
-      'Alerts',
-      'Metrics',
-      'Agents',
-      'Approvals',
-      'Audit log',
-    ]);
+    expect(labels).toEqual(['Home', 'Data', 'API', 'MCP server', 'Delivery', 'Access', 'Observability']);
+    expect(within(nav).getByRole('tab', { name: 'API' })).toHaveClass('active');
+    // the screen's count is on its tab
+    const tabs = within(screen.getByRole('navigation', { name: 'API' }));
     await waitFor(() =>
-      expect(within(nav).getByRole('tab', { name: /API Repository/ })).toHaveTextContent('API Repository2'),
+      expect(tabs.getByRole('link', { name: /API Repository/ })).toHaveTextContent('API Repository2'),
     );
-    expect(within(nav).getByRole('tab', { name: /API Repository/ })).toHaveClass('active');
+    expect(tabs.getByRole('link', { name: /API Repository/ })).toHaveAttribute('aria-current', 'page');
     expect(await screen.findByText('v9.9.9')).toBeInTheDocument();
   });
 
@@ -66,20 +49,8 @@ describe('Console shell - the classic frame', () => {
     expect(await screen.findByText('Signed in as alice · Developer')).toBeInTheDocument();
     const nav = screen.getByRole('tablist', { name: 'Sections' });
     const labels = [...nav.querySelectorAll('.nav-text')].map((n) => n.textContent);
-    expect(labels).toEqual([
-      'Home',
-      'Connections',
-      'CDC sources',
-      'API Repository',
-      'API Designer',
-      'MCP server',
-      'Workspaces',
-      'Administrators',
-      'Alerts',
-      'Metrics',
-      'Agents',
-      'Audit log',
-    ]);
+    // no Delivery: a developer may open neither of its screens (each section holds only the tabs a role may open)
+    expect(labels).toEqual(['Home', 'Data', 'API', 'MCP server', 'Access', 'Observability']);
     expect(screen.queryByRole('tab', { name: /Settings/ })).toBeNull();
   });
 
@@ -143,10 +114,10 @@ describe('Console shell - the classic frame', () => {
     await waitFor(() => expect(document.body).toHaveClass('side-collapsed'));
     await userEvent.click(screen.getByRole('button', { name: 'Expand sidebar' })); // still yours to open on Help
     expect(document.body).not.toHaveClass('side-collapsed');
-    await open(/API keys/, 'API keys');
+    await open(/Access/, 'Access');
     await open(/Help/, 'Help');
     await waitFor(() => expect(document.body).toHaveClass('side-collapsed')); // collapsed again on the next visit
-    await open(/API keys/, 'API keys');
+    await open(/Access/, 'Access');
     await waitFor(() => expect(document.body).not.toHaveClass('side-collapsed'));
     expect(localStorage.getItem('queryapigate-ui-side-collapsed')).toBe('0');
   });

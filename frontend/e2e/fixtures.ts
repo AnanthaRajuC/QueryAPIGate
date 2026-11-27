@@ -46,6 +46,14 @@ export async function open(page: Page, path: string, heading: string) {
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
 }
 
+/** A screen that is a tab of a section (the sidebar's Access): the section's heading, with that screen's tab open. */
+export async function openInSection(page: Page, path: string, section: string, tab: string | RegExp) {
+  await open(page, path, section);
+  await expect(
+    page.getByRole('navigation', { name: section }).getByRole('link', { name: tab }),
+  ).toHaveAttribute('aria-current', 'page');
+}
+
 /** A call to the API as the admin, outside the page. */
 export async function api(
   page: Page,

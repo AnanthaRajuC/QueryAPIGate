@@ -85,7 +85,7 @@ close_ticket {"id": 2}
 ```
 
 Nothing has changed yet. The agent shows its user the link; it opens on the Console's **Approvals** screen
-(Observability → Approvals, with a count in the sidebar): who asked, the query, the SQL, **the exact arguments**, at
+(Observability → Approvals, with a count on the tab and on Observability in the sidebar): who asked, the query, the SQL, **the exact arguments**, at
 most how many rows, when it expires - **Approve**, or **Reject** with a reason the agent is told. Owners and admins
 can decide (`writes.approve`); here, maria:
 

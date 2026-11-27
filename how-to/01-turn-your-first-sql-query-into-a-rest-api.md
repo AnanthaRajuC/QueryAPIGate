@@ -44,7 +44,7 @@ an endpoint" screen - distinct from **API Repository**, which lists endpoints yo
 ## Step 3: Pick a connection and look at what's there
 
 A **connection** is a database this server can query. Every connection is listed on the **Connections** screen
-(in the sidebar, under **Data**). Right after `examples load` there's one, `examples`: the SQLite file that
+(**Data** in the sidebar, then its **Connections** tab). Right after `examples load` there's one, `examples`: the SQLite file that
 step 1 created, marked with an `example` badge. Your own databases join it there once you
 [connect them](02-connect-a-database.md).
 
@@ -106,7 +106,7 @@ parameter - a request with a rating outside that list gets rejected with a clear
 runs. See [How to use bound parameters safely](06-use-bound-parameters-safely.md) for every available rule
 (`min`/`max`, `pattern`, `default`, `required`, and more).
 
-Click **Save**. A toast confirms it, and **API Repository**'s query count in the sidebar increments - your
+Click **Save**. A toast confirms it, and the query count on the **API Repository** tab increments - your
 query is now a real, versioned, saved endpoint.
 
 ## Step 6: Call your new endpoint

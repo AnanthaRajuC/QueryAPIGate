@@ -87,8 +87,19 @@ describe('Approvals', () => {
     });
     renderAt('/');
     const nav = await screen.findByRole('tablist', { name: 'Sections' });
-    await waitFor(() =>
-      expect(within(nav).getByRole('tab', { name: /Approvals/ })).toHaveTextContent('Approvals2'),
+    // on Observability in the sidebar (no alerts are open, so writes waiting are its badge), and on its tab
+    const observability = within(nav).getByRole('tab', { name: /^Observability/ });
+    await waitFor(() => expect(observability).toHaveTextContent('Observability2'));
+    expect(observability.querySelector('.count')).toHaveClass('attention', 'accent');
+    await userEvent.click(observability);
+    await userEvent.click(
+      within(await screen.findByRole('navigation', { name: 'Observability' })).getByRole('link', {
+        name: /Approvals/,
+      }),
     );
+    const tab = within(screen.getByRole('navigation', { name: 'Observability' })).getByRole('link', {
+      name: /Approvals/,
+    });
+    await waitFor(() => expect(tab).toHaveTextContent('Approvals2'));
   });
 });

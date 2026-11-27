@@ -12,6 +12,7 @@ import { SortHeader } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
 import { ActivitySpark } from '@/features/access/KeyActivity';
 import { useConnectionActivity } from '@/features/access/activity';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Connections screen (ui.py #tab-connections, renderConnections, openConnectionForm,
 // openDeleteConnectionForm): All / Active / Inactive / Deleted, a filter, the table with each connection's live
@@ -318,7 +319,7 @@ export function ConnectionsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Connections</h1>
+          <PageTitle tab>Connections</PageTitle>
           <span className="sub">Databases this gateway can run saved queries against.</span>
         </div>
         <span className="spacer" />

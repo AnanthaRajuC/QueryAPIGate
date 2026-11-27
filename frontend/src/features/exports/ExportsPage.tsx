@@ -13,6 +13,7 @@ import { maskPayload, type MaskRule } from '@/features/access/maskRules';
 import { ManagedTag } from '@/components/Managed';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
+import { PageTitle } from '@/components/PageTitle';
 
 // Saved exports (ADR 0004), on /api/v1/exports: a saved query delivered to a destination, run by a scheduler or here.
 
@@ -211,7 +212,7 @@ export function ExportsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Exports</h1>
+          <PageTitle tab>Exports</PageTitle>
           <span className="sub">Saved queries delivered as files to a bucket or a folder.</span>
         </div>
         <span className="spacer" />

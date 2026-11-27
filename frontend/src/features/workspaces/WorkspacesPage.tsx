@@ -11,6 +11,7 @@ import { PencilIcon, TrashIcon } from '@/components/icons';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
+import { PageTitle } from '@/components/PageTitle';
 
 // Workspaces and their members (ADR 0023): delegated administration for teams on one server. Everyone sees the
 // workspaces they belong to - server-wide roles see them all; owners create and remove them; a workspace's own owner
@@ -66,12 +67,10 @@ export function WorkspacesPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>
-            Workspaces <ExperimentalTag />
-          </h1>
+          <PageTitle tab>Workspaces</PageTitle>
           <span className="sub">
-            Teams on one server: each manages its own connections, queries, keys and exports, without reaching
-            another&apos;s.
+            <ExperimentalTag /> Teams on one server: each manages its own connections, queries, keys and
+            exports, without reaching another&apos;s.
           </span>
         </div>
         <span className="spacer" />

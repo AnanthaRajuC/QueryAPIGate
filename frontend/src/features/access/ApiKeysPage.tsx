@@ -15,6 +15,7 @@ import { PencilIcon } from '@/components/icons';
 import { ManagedTag } from '@/components/Managed';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic API keys screen (ui.py #tab-apikeys, renderApiKeys), on /api/v1/api-keys.
 
@@ -302,7 +303,7 @@ export function ApiKeysPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>API keys</h1>
+          <PageTitle tab>API keys</PageTitle>
           <span className="sub" id="apikeys-sub">
             {(names.length ? names.length + (names.length === 1 ? ' key. ' : ' keys. ') : '') +
               'Scope each one to connections, collections or roles.'}

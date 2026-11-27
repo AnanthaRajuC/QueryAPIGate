@@ -7,6 +7,7 @@ import { CodeBox } from '@/components/CodeBox';
 import { NoMatches, SortHeader, TableFilter } from '@/components/TableControls';
 import { useTableControls, type Column } from '@/components/useTableControls';
 import { Time } from '@/components/Time';
+import { PageTitle } from '@/components/PageTitle';
 
 // What each AI agent did over MCP (GET /api/v1/usage/agents, BACKLOG #87): calls, rows read, refusals by code, how
 // often masking applied, and - opened - its saved queries and most frequent ad-hoc statements. From run history.
@@ -200,7 +201,7 @@ export function AgentsPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Agents</h1>
+          <PageTitle tab>Agents</PageTitle>
           <span className="sub">
             What each AI agent did over MCP - per API key or signed-in user, from run history.
           </span>

@@ -17,6 +17,7 @@ import { reachVia } from '@/features/repository/reach';
 import { QueryInfo } from './QueryInfo';
 import { amapState, setAmapState, type AmapState } from './state';
 import { Time } from '@/components/Time';
+import { PageTitle } from '@/components/PageTitle';
 
 // The classic Access map (ui.py #tab-accessmap, renderAccessMap and its helpers): every saved query against every
 // API key and role - how each reaches it (Q a named query, C a collection, W a whole connection) - with the
@@ -244,7 +245,7 @@ export function AccessMapPage() {
     <>
       <div className="page-head">
         <div className="titles">
-          <h1>Access map</h1>
+          <PageTitle tab>Access map</PageTitle>
           <span className="sub">
             Which API keys can reach which saved queries - the whole point of collections and connection
             grants, in one place.{' '}

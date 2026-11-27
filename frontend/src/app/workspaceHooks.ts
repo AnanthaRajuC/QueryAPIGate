@@ -2,8 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ApiError } from '@/api/client';
-import { DEFAULT_WORKSPACE, getWorkspace, setWorkspace } from '@/auth/workspace';
+import { setWorkspace, workspaceToSettle } from '@/auth/workspace';
 
 import { useMe } from './data';
 
@@ -26,22 +25,12 @@ export function useSwitchWorkspace() {
 
 /** Where a tab starts: an administrator whose roles are all in workspaces starts in their first one - in `default`
  * they'd be refused everything - and a tab left in a workspace that's gone (or was never theirs) goes back to
- * `default`. */
+ * `default` (workspaceToSettle()). Until it has moved, the API client holds every request but /api/v1/me. */
 export function useSettleWorkspace() {
   const me = useMe();
   const switchTo = useSwitchWorkspace();
+  const target = workspaceToSettle(me);
   useEffect(() => {
-    const current = getWorkspace();
-    const gone =
-      me.error instanceof ApiError && me.error.status === 404 && me.error.code === 'workspace_not_found';
-    if (gone && current !== DEFAULT_WORKSPACE) {
-      switchTo(DEFAULT_WORKSPACE);
-      return;
-    }
-    const memberships = Object.keys(me.data?.workspaces ?? {});
-    const first = memberships[0];
-    if (me.data && me.data.role === null && first !== undefined && !memberships.includes(current)) {
-      switchTo(first);
-    }
-  }, [me.data, me.error, switchTo]);
+    if (target !== null) switchTo(target);
+  }, [target, switchTo]);
 }

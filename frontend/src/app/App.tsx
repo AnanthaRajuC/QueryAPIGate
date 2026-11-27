@@ -1,7 +1,12 @@
-import { lazy, Suspense } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 
+import { answerMeWith } from '@/auth/workspace';
+
 import { AppShell } from './AppShell';
+import { SectionIndex, SectionLayout } from './SectionLayout';
+import { meAnswerFrom } from './data';
 import { Loading } from './feedback';
 
 // The API Repository carries the SQL editor - loaded on first visit, so the shell stays small.
@@ -84,6 +89,10 @@ const McpPage = lazy(() => import('@/features/mcp/McpPage').then((m) => ({ defau
 const HelpPage = lazy(() => import('@/features/help/HelpPage').then((m) => ({ default: m.HelpPage })));
 
 export function App() {
+  // Before any screen asks for anything (a render-time initializer, so it runs ahead of their effects): where the API
+  // client reads who this tab is, to hold requests until the tab is in its workspace (auth/workspace.ts).
+  const client = useQueryClient();
+  useState(() => answerMeWith(meAnswerFrom(client)));
   return (
     <Routes>
       <Route element={<AppShell />}>
@@ -96,138 +105,10 @@ export function App() {
           }
         />
         <Route
-          path="queries/:name?"
-          element={
-            <Suspense fallback={<Loading />}>
-              <RepositoryPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="designer"
-          element={
-            <Suspense fallback={<Loading />}>
-              <DesignerPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="connections"
-          element={
-            <Suspense fallback={<Loading />}>
-              <ConnectionsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="api-keys"
-          element={
-            <Suspense fallback={<Loading />}>
-              <ApiKeysPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="api-keys/:name"
-          element={
-            <Suspense fallback={<Loading />}>
-              <ApiKeyDetailPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="roles"
-          element={
-            <Suspense fallback={<Loading />}>
-              <RolesPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="exports"
-          element={
-            <Suspense fallback={<Loading />}>
-              <ExportsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="cdc-sources"
-          element={
-            <Suspense fallback={<Loading />}>
-              <CdcSourcesPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="destinations"
-          element={
-            <Suspense fallback={<Loading />}>
-              <DestinationsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="workspaces"
-          element={
-            <Suspense fallback={<Loading />}>
-              <WorkspacesPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="administrators"
-          element={
-            <Suspense fallback={<Loading />}>
-              <AdministratorsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="alerts/:tab?"
-          element={
-            <Suspense fallback={<Loading />}>
-              <AlertsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="metrics"
-          element={
-            <Suspense fallback={<Loading />}>
-              <MetricsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="approvals/:id?"
-          element={
-            <Suspense fallback={<Loading />}>
-              <ApprovalsPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="agents"
-          element={
-            <Suspense fallback={<Loading />}>
-              <AgentsPage />
-            </Suspense>
-          }
-        />
-        <Route
           path="mcp"
           element={
             <Suspense fallback={<Loading />}>
               <McpPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="audit-log"
-          element={
-            <Suspense fallback={<Loading />}>
-              <AuditLogPage />
             </Suspense>
           }
         />
@@ -240,22 +121,6 @@ export function App() {
           }
         />
         <Route
-          path="caching"
-          element={
-            <Suspense fallback={<Loading />}>
-              <CachingPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="access-map"
-          element={
-            <Suspense fallback={<Loading />}>
-              <AccessMapPage />
-            </Suspense>
-          }
-        />
-        <Route
           path="help"
           element={
             <Suspense fallback={<Loading />}>
@@ -263,6 +128,166 @@ export function App() {
             </Suspense>
           }
         />
+        {/* A section per sidebar group: one item, its screens as tabs (SectionLayout) - each at its own route. */}
+        <Route path="data" element={<SectionIndex id="data" />} />
+        <Route element={<SectionLayout id="data" />}>
+          <Route
+            path="connections"
+            element={
+              <Suspense fallback={<Loading />}>
+                <ConnectionsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="cdc-sources"
+            element={
+              <Suspense fallback={<Loading />}>
+                <CdcSourcesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="caching"
+            element={
+              <Suspense fallback={<Loading />}>
+                <CachingPage />
+              </Suspense>
+            }
+          />
+        </Route>
+        <Route path="api" element={<SectionIndex id="api" />} />
+        <Route element={<SectionLayout id="api" />}>
+          <Route
+            path="queries/:name?"
+            element={
+              <Suspense fallback={<Loading />}>
+                <RepositoryPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="designer"
+            element={
+              <Suspense fallback={<Loading />}>
+                <DesignerPage />
+              </Suspense>
+            }
+          />
+        </Route>
+        <Route path="delivery" element={<SectionIndex id="delivery" />} />
+        <Route element={<SectionLayout id="delivery" />}>
+          <Route
+            path="exports"
+            element={
+              <Suspense fallback={<Loading />}>
+                <ExportsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="destinations"
+            element={
+              <Suspense fallback={<Loading />}>
+                <DestinationsPage />
+              </Suspense>
+            }
+          />
+        </Route>
+        <Route path="observability" element={<SectionIndex id="observability" />} />
+        <Route element={<SectionLayout id="observability" />}>
+          <Route
+            path="alerts/:tab?"
+            element={
+              <Suspense fallback={<Loading />}>
+                <AlertsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="metrics"
+            element={
+              <Suspense fallback={<Loading />}>
+                <MetricsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="agents"
+            element={
+              <Suspense fallback={<Loading />}>
+                <AgentsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="approvals/:id?"
+            element={
+              <Suspense fallback={<Loading />}>
+                <ApprovalsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="audit-log"
+            element={
+              <Suspense fallback={<Loading />}>
+                <AuditLogPage />
+              </Suspense>
+            }
+          />
+        </Route>
+        <Route path="access" element={<SectionIndex id="access" />} />
+        <Route element={<SectionLayout id="access" />}>
+          <Route
+            path="api-keys"
+            element={
+              <Suspense fallback={<Loading />}>
+                <ApiKeysPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="api-keys/:name"
+            element={
+              <Suspense fallback={<Loading />}>
+                <ApiKeyDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="roles"
+            element={
+              <Suspense fallback={<Loading />}>
+                <RolesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="workspaces"
+            element={
+              <Suspense fallback={<Loading />}>
+                <WorkspacesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="administrators"
+            element={
+              <Suspense fallback={<Loading />}>
+                <AdministratorsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="access-map"
+            element={
+              <Suspense fallback={<Loading />}>
+                <AccessMapPage />
+              </Suspense>
+            }
+          />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
