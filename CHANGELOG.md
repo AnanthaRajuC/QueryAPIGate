@@ -286,6 +286,11 @@ Found in a review of what 1.0.0-rc1 would freeze.
   --server` read, and `QAG_*` is what config export names passwords and the documentation suggests allowing in
   `QUERYAPIGATE_SECRET_ENV_VARS` - so where both are in one environment, an administrator could send that key to a
   host of theirs as a password. It is refused like the server's own settings now. Since 0.27.0.
+- **The data plane's SQLite is 3.54.1 (libsqlite3-sys 0.40, with sqlx 0.9.1), fixing RUSTSEC-2026-0459
+  (CVE-2026-119375).** SQLite before 3.54 could return uninitialized page-cache memory when opening a database whose
+  `-wal` file has a different page size. The data plane opens only SQLite files an administrator configured, so it
+  wasn't reachable by a caller; `cargo audit` ignored the advisory since 0.51.0 until sqlx allowed the fix, and
+  ignores nothing now.
 
 ## [0.52.0] - 2026-11-21
 
