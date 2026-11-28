@@ -4,11 +4,12 @@ import { MemoryRouter } from 'react-router';
 
 import { App } from '@/app/App';
 
-export function renderAt(path: string) {
+/** The app at `path`; `state` is the location state a link would carry (Home's request rows open a query's tab). */
+export function renderAt(path: string, state?: unknown) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={[state === undefined ? path : { pathname: path, state }]}>
         <App />
       </MemoryRouter>
     </QueryClientProvider>,

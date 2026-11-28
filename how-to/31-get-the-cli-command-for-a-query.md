@@ -3,9 +3,9 @@
 **Time:** 2 minutes. **You'll end up with:** a ready-to-run `queryapigate export` command for one saved query - its
 name, parameters and a dated output path filled in - copied from the Console instead of written by hand.
 
-## Step 1: Open the query's CLI tab
+## Step 1: Open the query's CLI command
 
-**API Repository → (the query) → CLI**. For `example_rentals_since` from the
+**API Repository → (the query) → Connect → CLI**. For `example_rentals_since` from the
 [example APIs](05-try-the-built-in-example-apis.md):
 
 ```bash
@@ -17,9 +17,9 @@ queryapigate export 'example_rentals_since' \
 
 **Copy command** puts it on the clipboard.
 
-[![example_rentals_since in API Repository with its CLI tab open: queryapigate export 'example_rentals_since' --param 'since=2000-01-01' --format csv --out '/exports/example_rentals_since_{date}.csv'](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)
+[![example_rentals_since in API Repository with Connect open on CLI: queryapigate export 'example_rentals_since' --param 'since=2000-01-01' --format csv --out '/exports/example_rentals_since_{date}.csv'](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/guide-31-cli-tab.png)
 
-*The CLI tab of `example_rentals_since`.*
+*Connect → CLI for `example_rentals_since`.*
 
 How each line is built:
 
@@ -48,7 +48,7 @@ so the file outlives the container).
 
 ## The same, for curl
 
-The **Curl** tab next to it gives the equivalent HTTP request - the same parameters, against `/q/<name>` with an API
+**curl**, beside it under **Connect**, gives the equivalent HTTP request - the same parameters, against `/q/<name>` with an API
 key. For an export, add `stream=true` so the whole result comes back in one response instead of a page:
 
 ```bash

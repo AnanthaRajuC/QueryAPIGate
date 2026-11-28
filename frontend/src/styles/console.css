@@ -1007,29 +1007,60 @@ table.grid tbody tr.no-matches:hover td {
 /* A section (SectionLayout): a sidebar group shown as one item, its screens as tabs - the section's name, what it is
    for, then a tab bar (icon, name, a count where known; the open one underlined in the accent), then the screen. The
    screen's own title is the tab's (PageTitle, visually hidden), so its head keeps only its description and actions. */
-.section-head {
+/* the tab row: the section's screens on the left, the open screen's main actions (SectionActions) on the right */
+.section-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  column-gap: 24px;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  padding-bottom: 8px;
+}
+.section-actions:empty {
+  display: none;
+}
+/* a screen's main actions when it isn't inside a section (SectionActions) */
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
   margin-bottom: 14px;
 }
-.section-head .titles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* an action that reads as a link: quiet, underlined, red for a destructive one */
+.btn-text {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
-.section-head h1 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
+.btn-text:hover {
+  color: var(--ink);
 }
-.section-head .sub {
-  color: var(--ink-3);
-  font-size: 12.5px;
+.btn-text.danger {
+  color: var(--danger);
+}
+.btn-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .section-tabs {
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   gap: 4px;
-  margin: 0 0 18px;
-  border-bottom: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1211,4 +1242,70 @@ body.side-collapsed .ws-chip.rail-only {
 .editor.cm-host .cm-cursor,
 .editor.cm-host .cm-dropCursor {
   border-left-color: var(--ink);
+}
+
+/* A ⋯ menu (MenuButton) and a small panel of controls (PopoverButton): opened under their button, right-aligned. */
+.menu-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.menu-pop,
+.popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.menu-pop {
+  display: flex;
+  flex-direction: column;
+  min-width: 210px;
+  padding: 4px;
+}
+.menu-pop button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font: 500 12.5px var(--sans);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.menu-pop button:hover,
+.menu-pop button:focus {
+  background: var(--surface-2);
+  outline: none;
+}
+.menu-pop button.danger {
+  color: var(--danger);
+}
+.menu-pop button.danger:hover,
+.menu-pop button.danger:focus {
+  background: var(--danger-soft);
+}
+.menu-pop .menu-note {
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: var(--ink-3);
+  font-size: 12px;
+  cursor: default;
+}
+.menu-pop .menu-note:focus {
+  background: var(--surface-2);
+  outline: none;
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+.popover {
+  width: 240px;
+  padding: 12px;
 }

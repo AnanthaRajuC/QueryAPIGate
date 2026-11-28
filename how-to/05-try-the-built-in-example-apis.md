@@ -121,14 +121,14 @@ Open **<http://127.0.0.1:5000/console>**. Two things worth noticing right away:
   numbers - total runs, success rate, average duration, a requests-per-day bar chart - from the seeded
   history above, with no need to call it yourself first.
 
-[![API Repository with the example APIs loaded: the banner saying 11 queries in 4 collections, 5 roles and an examples connection are loaded, with a Remove examples button; the examples-reporting collection open on the left, and example_top_films on the right with its total runs, success rate, durations and a requests-per-day chart](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)
+[![API Repository with the example APIs loaded: a line saying example data is loaded, 11 queries in 4 collections, with What's included and Remove examples; the examples-reporting collection open on the left, and example_top_films on the right with its total runs, success rate, average duration, last run and a seven-day requests sparkline](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)
 
-*API Repository with the examples loaded - the banner with Remove examples, and a query already showing its seeded runs.*
+*API Repository with the examples loaded - the line with Remove examples, and a query already showing its seeded runs.*
 
-From there, the same tabs work as they would for a query you wrote yourself: **SQL** (the query text),
-**History** (every run, seeded or real), **Curl**/**CLI** (copy-pasteable commands), **API Keys**/**Roles**
-(which of the five keys can reach this specific query), **Access**, **Cache** (for the dashboard scenario's
-`cache_ttl=30` queries), **Metrics**. Visit **Access map** (a tab of **Access**, in the sidebar) to see all
+From there, the same tabs work as they would for a query you wrote yourself: **Run**, **SQL** (the query text),
+**History** (every run, seeded or real), **Metrics**, **Access** (which of the five keys and roles can reach this
+specific query, and its query flow), **Cache** (for the dashboard scenario's `cache_ttl=30` queries) and **Connect**
+(copy-pasteable curl and CLI commands, and the query as an MCP tool). Visit **Access map** (a tab of **Access**, in the sidebar) to see all
 five keys and every query they reach laid out at once - the fastest way to build intuition for how
 `connections`/`queries`/`collections` grants actually compose, before designing your own.
 

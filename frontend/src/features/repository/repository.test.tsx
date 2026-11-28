@@ -18,6 +18,11 @@ afterEach(() => {
 });
 
 const detail = () => document.getElementById('query-detail')!;
+/** The loaded query's panel (until then #query-detail is a placeholder, replaced once it loads). */
+const loadedDetail = async () => {
+  await waitFor(() => expect(detail().querySelector('.subtabs')).not.toBeNull());
+  return detail();
+};
 
 describe('API Repository - list', () => {
   it('groups queries into collections, as the classic list does', async () => {
@@ -29,10 +34,48 @@ describe('API Repository - list', () => {
       return el!;
     });
     expect(item).toHaveClass('sel');
-    expect(screen.getByRole('button', { name: 'Queries · catalog' })).toHaveClass('active');
-    await userEvent.click(screen.getByRole('button', { name: 'Collections' }));
-    expect(screen.getByRole('button', { name: /catalog1/ })).toHaveClass('qcoll-row');
-    expect(screen.getByRole('button', { name: /No collection1/ })).toBeInTheDocument();
+    expect(item).toHaveAttribute('aria-current', 'true');
+    // the selected query's collection, headed by its name and count, with the way back
+    expect(document.querySelector('.qg-head')).toHaveTextContent('catalog1 query');
+    await userEvent.click(screen.getByRole('button', { name: 'Back to collections' }));
+    expect(screen.getByRole('button', { name: /^catalog/ })).toHaveClass('qcoll-row');
+    expect(screen.getByRole('button', { name: /^No collection/ })).toBeInTheDocument();
+    expect(document.querySelector('.qg-head')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /^catalog/ }));
+    expect(document.querySelector('.qitem[data-name="films"]')).not.toBeNull();
+  });
+
+  it('shows a version chip only on a query with more than one version', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const films = await waitFor(() => {
+      const el = document.querySelector('.qitem[data-name="films"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(films.querySelector('.tag.v')).toHaveTextContent('v2');
+    await userEvent.click(screen.getByRole('button', { name: 'Back to collections' }));
+    await userEvent.click(screen.getByRole('button', { name: /^No collection/ }));
+    expect(document.querySelector('.qitem[data-name="rentals"] .tag.v')).toBeNull();
+  });
+
+  it('keeps the connection filters in a popover, counting the ones set', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    await waitFor(() => expect(document.querySelector('.qitem[data-name="films"]')).not.toBeNull());
+    const filters = screen.getByRole('button', { name: 'Filters: type, host, database' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById('qf-type')).toBeNull();
+    await userEvent.click(filters);
+    const panel = screen.getByRole('dialog', { name: 'Filters: type, host, database' });
+    const type = within(panel).getByLabelText('Type');
+    expect(type).toHaveFocus();
+    await userEvent.selectOptions(type, within(type).getAllByRole('option')[1]!);
+    expect(filters).toHaveTextContent('1');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(filters).toHaveFocus();
+    expect(filters).toHaveClass('on');
   });
 
   it('a text filter searches every collection at once', async () => {
@@ -44,11 +87,15 @@ describe('API Repository - list', () => {
     expect(document.querySelector('.qitem[data-name="films"]')).toBeNull();
   });
 
-  it('heads the page like the classic one', async () => {
+  it('puts its actions on the section’s tab row, with no header band of its own', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    expect(await screen.findByText(/3 versions across 1 collection\./)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New API' })).toHaveClass('btn', 'primary');
+    const newApi = await screen.findByRole('button', { name: 'New API' });
+    expect(newApi).toHaveClass('btn', 'primary');
+    const row = document.querySelector('.section-tabbar .section-actions')!;
+    expect(row).toContainElement(newApi);
+    expect(row).toContainElement(screen.getByRole('button', { name: 'New collection' }));
+    expect(screen.queryByText(/versions? across/)).not.toBeInTheDocument();
   });
 });
 
@@ -59,9 +106,78 @@ describe('API Repository - detail and publishing', () => {
     await waitFor(() => expect(detail()).toHaveTextContent('Draft'));
     expect(within(detail()).getByRole('group', { name: 'Version' })).toHaveTextContent('v1v2');
     expect(within(detail()).getByRole('button', { name: 'Publish v2' })).toBeInTheDocument();
+    expect(detail()).not.toHaveTextContent('older version'); // the latest is the usual case: no label
     await userEvent.click(within(detail()).getByRole('button', { name: 'v1' }));
     expect(detail()).toHaveTextContent('Published');
-    expect(within(detail()).getByRole('button', { name: 'Unpublish' })).toBeInTheDocument();
+    expect(detail()).toHaveTextContent('older version');
+    // a published version has no Publish button; Unpublish is in the ⋯ menu
+    expect(within(detail()).queryByRole('button', { name: /Publish/ })).toBeNull();
+    await userEvent.click(within(detail()).getByRole('button', { name: /^More actions/ }));
+    expect(screen.getByRole('menuitem', { name: 'Unpublish' })).toBeInTheDocument();
+  });
+
+  it('keeps New version in view and the rest in the ⋯ menu, Delete red and confirmed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { calls } = fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    await waitFor(() => expect(detail()).toHaveTextContent('Draft'));
+    expect(within(detail()).getByRole('button', { name: 'New version' })).toBeInTheDocument();
+    const more = within(detail()).getByRole('button', { name: /^More actions/ });
+    expect(more).toHaveAttribute('aria-haspopup', 'menu');
+    await userEvent.click(more);
+    const items = screen.getAllByRole('menuitem');
+    // a draft isn't served, so there is nothing to unpublish
+    expect(items.map((i) => i.textContent)).toEqual([
+      'Move…',
+      'Delete v2…',
+      'Delete query (all 2 versions)…',
+    ]);
+    expect(items[1]).toHaveClass('danger');
+    expect(items[2]).toHaveClass('danger');
+    await userEvent.click(items[2]!);
+    expect(confirm).toHaveBeenCalledWith('Delete films and all 2 versions?');
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false); // declined: nothing sent
+    expect(more).toHaveFocus();
+    confirm.mockRestore();
+  });
+
+  it('says what the query runs on as one line: connection, author, modified to the minute, tags as chips', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const meta = await waitFor(() => {
+      const el = detail().querySelector('.d-meta');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(meta).toHaveTextContent('Connectionlite');
+    expect(meta).toHaveTextContent('Authoralice');
+    expect(meta).not.toHaveTextContent(/collection/i); // the list's head already names it
+    await waitFor(() => expect(meta.querySelector('time')).not.toBeNull());
+    const modified = meta.querySelector('time')!;
+    expect(modified.textContent).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+    expect(modified.getAttribute('title')).toMatch(/\d\d:\d\d:\d\d/); // the tooltip keeps the seconds
+    expect([...meta.querySelectorAll('.tag-chip')].map((t) => t.textContent)).toEqual(['films']);
+  });
+
+  it('shows status and cache as quiet text, not pills', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse({ ...FILMS, versions: [version(1, 'published', { cache_ttl: 30 })] }, 200, {
+          ETag: ETAG,
+        }),
+    });
+    renderAt('/queries/films');
+    const status = await waitFor(() => {
+      const el = detail().querySelector('.d-status');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(status).toHaveTextContent('Published');
+    expect(status).toHaveClass('ok');
+    expect(detail().querySelector('.d-cache')).toHaveTextContent('Cached 30s');
+    expect(detail().querySelector('.pill')).toBeNull();
+    expect(detail().querySelector('.vbadge')).toHaveTextContent('v1');
   });
 
   it('publishes conditionally on the version it loaded', async () => {
@@ -105,20 +221,62 @@ describe('API Repository - detail and publishing', () => {
         }),
     });
     renderAt('/queries/films');
-    await userEvent.type(await screen.findByLabelText('film_id'), '7');
+    const filmId = await screen.findByLabelText('film_id');
+    // the request row comes first, then the parameters; the rows' place waits for a run
+    const getRow = detail().querySelector('.get-row')!;
+    expect(getRow.compareDocumentPosition(filmId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(detail()).getByText('Run the query to see its rows here.')).toBeInTheDocument();
+    await userEvent.type(filmId, '7');
     await userEvent.click(within(detail()).getByRole('button', { name: 'Run' }));
     expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(within(detail()).queryByText('Run the query to see its rows here.')).toBeNull();
     const run = calls.find((c) => c.path === '/q/films')!;
     expect(run.search.get('film_id')).toBe('7');
     expect(run.search.get('version')).toBe('2'); // the draft, not the published version
     expect(document.querySelector('table.rs')).not.toBeNull();
   });
 
-  it('builds its stat tiles and history from the version runs', async () => {
+  it('says in one line that a query without parameters runs as-is', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse(
+          {
+            ...FILMS,
+            versions: [version(1, 'published', { parameters: {}, placeholders: [], sql: 'SELECT 1' })],
+          },
+          200,
+          { ETag: ETAG },
+        ),
+    });
+    renderAt('/queries/films');
+    expect(
+      await within(await loadedDetail()).findByText('No parameters. This query runs as-is.'),
+    ).toHaveClass('hint');
+    expect(detail().querySelector('.d-body table')).toBeNull();
+  });
+
+  it('builds its stat strip and history from the version runs, and Metrics has the rest', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    await waitFor(() => expect(detail().querySelector('.stat-tiles')).not.toBeNull());
-    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Total runs1');
+    const strip = await waitFor(() => {
+      const el = detail().querySelector('.stat-strip');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(strip).toHaveTextContent('Total runs1');
+    expect(strip).toHaveTextContent('Success100%');
+    expect(strip).toHaveTextContent('Avg duration4 ms');
+    expect(strip).not.toHaveTextContent('Slowest run');
+    expect(
+      within(detail()).getByRole('img', { name: /^Requests per day over the last 7 days: / }),
+    ).toBeInTheDocument();
+    expect(detail().querySelector('.stat-tiles')).toBeNull();
+    expect(detail().querySelector('.req-day-chart')).toBeNull();
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'Metrics' }));
+    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Slowest run4 ms');
+    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Avg rows1');
+    expect(detail().querySelector('.req-day-chart')).toHaveTextContent('Requests per day');
     await userEvent.click(within(detail()).getByRole('tab', { name: /History/ }));
     expect(within(detail()).getByText('partner')).toBeInTheDocument();
   });
@@ -126,12 +284,65 @@ describe('API Repository - detail and publishing', () => {
   it('lists the keys that reach the query, from their grants', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    await waitFor(() =>
-      expect(within(detail()).getByRole('tab', { name: /API Keys/ })).toHaveTextContent('API Keys1'),
+    await userEvent.click(within(await loadedDetail()).getByRole('tab', { name: 'Access' }));
+    // API keys, Roles and who can call it are sections of Access, each count on its heading
+    expect(within(detail()).getByRole('heading', { name: 'API keys 1' })).toBeInTheDocument();
+    expect(within(detail()).getByRole('heading', { name: /^Roles/ })).toBeInTheDocument();
+    expect(within(detail()).getByRole('heading', { name: 'Who can call it' })).toBeInTheDocument();
+    const keys = within(detail()).getByRole('region', { name: 'API keys 1' });
+    expect(within(keys).getByText('partner')).toBeInTheDocument();
+    expect(within(keys).getByText('60/minute')).toBeInTheDocument();
+  });
+
+  it('has seven tabs, in order', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const tabs = within(await loadedDetail()).getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Run',
+      'SQL',
+      'History',
+      'Metrics',
+      'Access',
+      'Cache',
+      'Connect',
+    ]);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the old API Keys tab name on Access', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films', { tab: 'keys' });
+    expect(within(await loadedDetail()).getByRole('tab', { name: 'Access' })).toHaveAttribute(
+      'aria-selected',
+      'true',
     );
-    await userEvent.click(within(detail()).getByRole('tab', { name: /API Keys/ }));
-    expect(within(detail()).getByText('partner')).toBeInTheDocument();
-    expect(within(detail()).getByText('60/minute')).toBeInTheDocument();
+    expect(await within(detail()).findByRole('heading', { name: 'API keys 1' })).toBeInTheDocument();
+  });
+
+  it('opens Connect on the CLI view for the old CLI tab, and switches views', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse({ ...FILMS, versions: [version(1, 'published')] }, 200, { ETag: ETAG }),
+    });
+    renderAt('/queries/films', { tab: 'cli' });
+    expect(within(await loadedDetail()).getByRole('tab', { name: 'Connect' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const views = within(detail()).getByRole('tablist', { name: 'Connect with' });
+    expect(within(views).getByRole('tab', { name: 'CLI' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(detail()).getByRole('tabpanel')).toHaveTextContent('queryapigate export');
+    await userEvent.click(within(views).getByRole('tab', { name: 'curl' }));
+    expect(within(detail()).getByRole('tabpanel')).toHaveTextContent('X-API-Key');
+    // a tab chosen by hand opens on its default view
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'SQL' }));
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'Connect' }));
+    expect(within(views.ownerDocument.body).getByRole('tab', { name: 'curl' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('toggles MCP exposure in place from the MCP tab, conditionally on the loaded version', async () => {
@@ -140,7 +351,8 @@ describe('API Repository - detail and publishing', () => {
       'PATCH /api/v1/queries/films/versions/2': () => ({ ...FILMS }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('tab', { name: 'MCP' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
     const toggle = within(detail()).getByRole('checkbox', { name: /Expose this query as an MCP tool/ });
     expect(toggle).toBeChecked();
     await userEvent.click(toggle);
@@ -266,7 +478,8 @@ describe('API Repository - collections and the example APIs', () => {
       }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('link', { name: 'Rename' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Collection actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
     const drawer = document.getElementById('drawer')!;
     await userEvent.clear(within(drawer).getByLabelText('New name')); // it starts as the current name
     await userEvent.type(within(drawer).getByLabelText('New name'), 'films-v2');
@@ -283,7 +496,8 @@ describe('API Repository - collections and the example APIs', () => {
       'GET /api/v1/collections/catalog/postman': () => ({ info: { name: 'catalog' }, item: [] }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('link', { name: 'Postman' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Collection actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Download Postman collection' }));
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(calls.some((c) => c.path === '/api/v1/collections/catalog/postman')).toBe(true);
     click.mockRestore();
@@ -333,7 +547,16 @@ describe('API Repository - collections and the example APIs', () => {
       if (!el || el.hidden) throw new Error('not shown yet');
       return el;
     });
-    expect(strip).toHaveTextContent('Example APIs are loaded: 1 queries in 1 collections, 1 role');
+    expect(strip).toHaveTextContent('Example data is loaded: 1 query in 1 collection.');
+    // the full account is one click away, behind a disclosure
+    const included = within(strip).getByRole('button', { name: 'What’s included' });
+    expect(included).toHaveAttribute('aria-expanded', 'false');
+    const account = strip.querySelector('.examples-included')!;
+    expect(account).not.toBeVisible();
+    await userEvent.click(included);
+    expect(included).toHaveAttribute('aria-expanded', 'true');
+    expect(account).toBeVisible();
+    expect(strip).toHaveTextContent('Example APIs are loaded: 1 query in 1 collection, 1 role');
     expect(strip).toHaveTextContent('and the example-stores workspace with 3 members');
     await userEvent.click(within(strip).getByRole('button', { name: 'Remove examples' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));

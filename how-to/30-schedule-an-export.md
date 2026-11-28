@@ -25,7 +25,7 @@ QUERYAPIGATE_HOME=/srv/queryapigate queryapigate export example_rentals_since \
 - **`--param name=value`** (repeatable) supplies parameters, validated by the query's rules as over REST;
   `--connection` overrides the query's connection; `--timeout` overrides `QUERYAPIGATE_QUERY_TIMEOUT`.
 
-The exact command for any query, with its parameters filled in, is on its **CLI** tab - see
+The exact command for any query, with its parameters filled in, is under its **Connect → CLI** - see
 [Get the exact CLI command for a saved query](31-get-the-cli-command-for-a-query.md).
 
 ## Step 2: Know how it fails

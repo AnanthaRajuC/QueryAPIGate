@@ -1,43 +1,52 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
 import { useApiKeys, useCan, useRoles } from '@/app/data';
 import { Empty, Loading, useFeedback } from '@/app/feedback';
 
-import {
-  useQueryActions,
-  useQueryDetail,
-  useVersionHistory,
-  type HistoryEntry,
-  type Query,
-  type QueryVersion,
-} from './api';
+import { useQueryActions, useQueryDetail, useVersionHistory, type Query, type QueryVersion } from './api';
 import { MoveForm, QueryForm } from './forms';
 import { queryReach } from './reach';
 import {
   AccessTab,
   CacheTab,
-  CliTab,
-  McpTab,
-  CurlTab,
+  ConnectTab,
   HistoryTab,
-  KeysTab,
   MetricsTab,
-  RolesTab,
   RunTab,
   SqlTab,
-  StatTiles,
+  type AccessPart,
+  type ConnectView,
 } from './tabs';
+import { StatStrip } from './stats';
 import { Time } from '@/components/Time';
 import { ManagedTag } from '@/components/Managed';
+import { MoreIcon } from '@/components/icons';
+import { MenuButton, type MenuEntry } from '@/components/Menu';
 
 // The classic saved-query detail panel (ui.py renderDetail): title row with the version switcher and actions,
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
 // with the classic pill and buttons: Published / Draft / Previous, and Publish, Roll back or Unpublish.
 
-type TabId =
-  'run' | 'sql' | 'history' | 'curl' | 'keys' | 'roles' | 'access' | 'cache' | 'metrics' | 'cli' | 'mcp';
+type TabId = 'run' | 'sql' | 'history' | 'metrics' | 'access' | 'cache' | 'connect';
+
+/** Where a tab name opens - the seven tabs, and the eleven there used to be (a link from Home, or one saved before):
+ * API Keys and Roles are sections of Access now, Curl, CLI and MCP the views of Connect. */
+const OPENS: Record<string, { tab: TabId; part?: AccessPart | ConnectView }> = {
+  run: { tab: 'run' },
+  sql: { tab: 'sql' },
+  history: { tab: 'history' },
+  metrics: { tab: 'metrics' },
+  access: { tab: 'access' },
+  cache: { tab: 'cache' },
+  connect: { tab: 'connect' },
+  keys: { tab: 'access', part: 'keys' },
+  roles: { tab: 'access', part: 'roles' },
+  curl: { tab: 'connect', part: 'curl' },
+  cli: { tab: 'connect', part: 'cli' },
+  mcp: { tab: 'connect', part: 'mcp' },
+};
 
 const STATUS_LABEL: Record<QueryVersion['status'], string> = {
   published: 'Published',
@@ -79,9 +88,12 @@ export function QueryDetail({ name }: { name: string | undefined }) {
 function Detail({ query, etag }: { query: Query; etag: string | null }) {
   const latest = query.versions[query.versions.length - 1]!;
   // Home's request rows open a query on its History tab, at the version that ran
-  const opened = useLocation().state as { tab?: TabId; version?: number } | null;
+  const opened = useLocation().state as { tab?: string; version?: number } | null;
+  const opens = OPENS[opened?.tab ?? ''] ?? OPENS.run!;
   const [versionNumber, setVersionNumber] = useState(opened?.version ?? latest.version);
-  const [tab, setTab] = useState<TabId>(opened?.tab ?? 'run');
+  const [tab, setTab] = useState<TabId>(opens.tab);
+  // the section or view a tab name from before opens (a Home link to 'keys'): once, then the tab's own default
+  const [part, setPart] = useState(opens.part);
   // A new version saved from the drawer becomes the latest: follow it, as the classic view does.
   const [seenLatest, setSeenLatest] = useState(latest.version);
   if (seenLatest !== latest.version) {
@@ -106,9 +118,13 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
     <button
       type="button"
       role="tab"
+      aria-selected={tab === id}
       data-subtab={id}
       className={tab === id ? 'on' : ''}
-      onClick={() => setTab(id)}
+      onClick={() => {
+        setTab(id);
+        setPart(undefined);
+      }}
     >
       {label}
       {count !== undefined ? <span className="count">{count ? String(count) : ''}</span> : null}
@@ -139,61 +155,77 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           ) : (
             <span className="vbadge">v{v.version}</span>
           )}
-          <span className="hint">{isLatest ? 'latest' : 'older version'}</span>
-          <span className={`pill ${v.status === 'published' ? 'ok' : 'off'}`} title={statusTitle(v, query)}>
-            <i />
+          {isLatest ? null : (
+            <span className="hint" title={`The latest is v${latest.version}`}>
+              older version
+            </span>
+          )}
+          <span
+            className={`d-status ${v.status === 'published' ? 'ok' : 'off'}`}
+            title={statusTitle(v, query)}
+          >
+            <i aria-hidden="true" />
             {STATUS_LABEL[v.status]}
           </span>
           {v.cache_ttl ? (
             <span
-              className="tag"
-              title={`Served from cache for ${v.cache_ttl}s after each run - see the Caching tab`}
+              className="d-cache"
+              title={`Served from cache for ${v.cache_ttl}s after each run - see the Cache tab`}
             >
-              Cached · {v.cache_ttl}s
+              Cached {v.cache_ttl}s
             </span>
           ) : null}
           <span className="spacer" />
-          {/* One group, so the buttons wrap onto the next line together, as the classic three always did. */}
-          <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <span className="d-actions">
             <HeadActions query={query} v={v} etag={etag} />
           </span>
         </div>
         {v.description ? <p className="d-desc">{v.description}</p> : null}
-        <dl className="meta">
-          <MetaItem k="connection" v={v.connection_name || '—'} />
-          <MetaItem k="collection" v={query.collection || '—'} />
-          <MetaItem k="author" v={v.author || '—'} />
-          <MetaItem k="modified" v={<Time value={v.last_modified_at || v.created_at} />} />
-          {v.tags.length ? <MetaItem k="tags" v={v.tags.join(', ')} /> : null}
+        <dl className="d-meta">
+          <MetaItem k="Connection" v={v.connection_name || '—'} />
+          <MetaItem k="Author" v={v.author || '—'} />
+          <MetaItem k="Modified" v={<Time value={v.last_modified_at || v.created_at} seconds={false} />} />
+          {v.tags.length ? (
+            <div className="d-tags">
+              <dt className="visually-hidden">Tags</dt>
+              {v.tags.map((t) => (
+                <dd key={t} className="tag-chip">
+                  {t}
+                </dd>
+              ))}
+            </div>
+          ) : null}
         </dl>
-        <StatTiles runs={runs} />
-        <RequestsPerDay runs={runs} />
-        <div className="subtabs" role="tablist">
+        <StatStrip runs={runs} />
+        <div className="subtabs" role="tablist" aria-label={query.name}>
           {tabButton('run', 'Run')}
           {tabButton('sql', 'SQL')}
           {tabButton('history', 'History', runs.length)}
-          {tabButton('curl', 'Curl')}
-          {tabButton('keys', 'API Keys', reach.keys.length)}
-          {tabButton('roles', 'Roles', reach.roles.length)}
+          {tabButton('metrics', 'Metrics')}
           {tabButton('access', 'Access')}
           {tabButton('cache', 'Cache')}
-          {tabButton('metrics', 'Metrics')}
-          {tabButton('cli', 'CLI')}
-          {tabButton('mcp', 'MCP')}
+          {tabButton('connect', 'Connect')}
         </div>
       </div>
       <div className="d-body">
         {tab === 'run' && <RunTab query={query} v={v} />}
         {tab === 'sql' && <SqlTab query={query} v={v} />}
         {tab === 'history' && <HistoryTab v={v} runs={runs} />}
-        {tab === 'curl' && <CurlTab query={query} v={v} />}
-        {tab === 'keys' && <KeysTab reach={reach} keys={keys.data ?? {}} />}
-        {tab === 'roles' && <RolesTab reach={reach} keys={keys.data ?? {}} roles={roles.data ?? {}} />}
-        {tab === 'access' && <AccessTab query={query} v={v} reach={reach} />}
-        {tab === 'cache' && <CacheTab query={query} v={v} etag={etag} />}
         {tab === 'metrics' && <MetricsTab v={v} runs={runs} />}
-        {tab === 'cli' && <CliTab query={query} v={v} />}
-        {tab === 'mcp' && <McpTab query={query} v={v} etag={etag} />}
+        {tab === 'access' && (
+          <AccessTab
+            query={query}
+            v={v}
+            reach={reach}
+            keys={keys.data ?? {}}
+            roles={roles.data ?? {}}
+            focus={part as AccessPart | undefined}
+          />
+        )}
+        {tab === 'cache' && <CacheTab query={query} v={v} etag={etag} />}
+        {tab === 'connect' && (
+          <ConnectTab query={query} v={v} etag={etag} view={part as ConnectView | undefined} />
+        )}
       </div>
     </div>
   );
@@ -214,14 +246,14 @@ function MetaItem({ k, v }: { k: string; v: string | ReactElement }) {
   );
 }
 
-/** Publish / Roll back / Unpublish, New version, Move… and Delete… (a menu, as in the classic view). */
+/** Publish or Roll back (for a version that isn't the one served), New version, and a ⋯ menu: Move…, Unpublish
+ * and the Delete items, each with its confirmation. */
 function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: string | null }) {
   const can = useCan();
   const navigate = useNavigate();
   const { openDrawer, showError, toast } = useFeedback();
   const actions = useQueryActions(query.name);
-  const [menu, setMenu] = useState<DOMRect | null>(null);
-  const deleteBtn = useRef<HTMLButtonElement>(null);
+  const writer = can('queries.write');
 
   const report = (error: unknown) => {
     if (error instanceof ApiError && error.code === 'precondition_failed') {
@@ -260,49 +292,84 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       { onSuccess: () => toast(`${query.name} unpublished`), onError: report },
     );
   };
-
-  const items: { label: string; title?: string; run: () => void }[] = [];
-  if (query.versions.length > 1) {
-    items.push({
-      label: `Delete v${v.version}`,
-      title: `DELETE /api/v1/queries/${query.name}/versions/${v.version}`,
-      run: () => {
-        if (!window.confirm(`Delete version ${v.version} of ${query.name}?`)) return;
-        actions.deleteVersion.mutate(
-          { version: v.version, etag },
-          { onSuccess: () => toast(`Deleted v${v.version} of ${query.name}`), onError: report },
-        );
-      },
-    });
-  }
-  items.push({
-    label:
-      query.versions.length > 1 ? `Delete query (all ${query.versions.length} versions)` : 'Delete query',
-    run: () => {
-      if (
-        !window.confirm(
-          `Delete ${query.name}${query.versions.length > 1 ? ` and all ${query.versions.length} versions` : ''}?`,
-        )
+  const deleteVersion = () => {
+    if (!window.confirm(`Delete version ${v.version} of ${query.name}?`)) return;
+    actions.deleteVersion.mutate(
+      { version: v.version, etag },
+      { onSuccess: () => toast(`Deleted v${v.version} of ${query.name}`), onError: report },
+    );
+  };
+  const deleteQuery = () => {
+    if (
+      !window.confirm(
+        `Delete ${query.name}${query.versions.length > 1 ? ` and all ${query.versions.length} versions` : ''}?`,
       )
-        return;
-      actions.deleteQuery.mutate(
-        { etag },
-        {
-          onSuccess: () => {
-            toast(`Deleted ${query.name}`);
-            navigate('/queries');
-          },
-          onError: report,
+    )
+      return;
+    actions.deleteQuery.mutate(
+      { etag },
+      {
+        onSuccess: () => {
+          toast(`Deleted ${query.name}`);
+          navigate('/queries');
         },
-      );
-    },
-  });
+        onError: report,
+      },
+    );
+  };
 
   const busy = actions.publish.isPending || actions.unpublish.isPending;
+  const several = query.versions.length > 1;
+  const entries: MenuEntry[] = [
+    {
+      label: 'Move…',
+      title: `File this query under a collection (PATCH /api/v1/queries/${query.name})`,
+      hidden: !writer,
+      onSelect: () =>
+        openDrawer({
+          title: 'Move to a collection',
+          kicker: query.name,
+          content: <MoveForm query={query} etag={etag} />,
+        }),
+    },
+    {
+      label: 'Unpublish',
+      title: `Stop serving ${query.endpoint} (POST /api/v1/queries/${query.name}/unpublish)`,
+      hidden: !writer || v.status !== 'published',
+      onSelect: unpublish,
+    },
+    'separator',
+    {
+      label: `Delete v${v.version}…`,
+      title: `DELETE /api/v1/queries/${query.name}/versions/${v.version}`,
+      danger: true,
+      hidden: !writer || !several,
+      onSelect: deleteVersion,
+    },
+    {
+      label: several ? `Delete query (all ${query.versions.length} versions)…` : 'Delete query…',
+      title: `DELETE /api/v1/queries/${query.name}`,
+      danger: true,
+      hidden: !writer,
+      onSelect: deleteQuery,
+    },
+  ];
   return (
     <>
+      {v.status !== 'published' && (
+        <button
+          hidden={!writer}
+          type="button"
+          className={v.status === 'draft' ? 'btn md primary' : 'btn md'}
+          disabled={busy}
+          title={`POST /api/v1/queries/${query.name}/publish`}
+          onClick={publish}
+        >
+          {v.status === 'draft' ? `Publish v${v.version}` : `Roll back to v${v.version}`}
+        </button>
+      )}
       <button
-        hidden={!can('queries.write')}
+        hidden={!writer}
         type="button"
         className="btn md"
         onClick={() =>
@@ -315,163 +382,9 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       >
         New version
       </button>
-      <button
-        hidden={!can('queries.write')}
-        type="button"
-        className="btn md"
-        title={`File this query under a collection (PATCH /api/v1/queries/${query.name})`}
-        onClick={() =>
-          openDrawer({
-            title: 'Move to a collection',
-            kicker: query.name,
-            content: <MoveForm query={query} etag={etag} />,
-          })
-        }
-      >
-        Move…
-      </button>
-      <button
-        hidden={!can('queries.write')}
-        ref={deleteBtn}
-        type="button"
-        className="btn md danger"
-        title="Delete this version or the whole query"
-        onClick={() => setMenu(deleteBtn.current?.getBoundingClientRect() ?? null)}
-      >
-        Delete…
-      </button>
-      {v.status !== 'published' && (
-        <button
-          hidden={!can('queries.write')}
-          type="button"
-          className={v.status === 'draft' ? 'btn md primary' : 'btn md'}
-          disabled={busy}
-          title={`POST /api/v1/queries/${query.name}/publish`}
-          onClick={publish}
-        >
-          {v.status === 'draft' ? `Publish v${v.version}` : `Roll back to v${v.version}`}
-        </button>
-      )}
-      {v.status === 'published' && (
-        <button
-          hidden={!can('queries.write')}
-          type="button"
-          className="btn md"
-          disabled={busy}
-          title={`POST /api/v1/queries/${query.name}/unpublish`}
-          onClick={unpublish}
-        >
-          Unpublish
-        </button>
-      )}
-      {menu && <Menu anchor={menu} items={items} onClose={() => setMenu(null)} />}
+      <MenuButton label="More actions: move, unpublish, delete" className="btn md icon" entries={entries}>
+        <MoreIcon />
+      </MenuButton>
     </>
-  );
-}
-
-/** A small popover menu under its anchor; closes on an outside click or Escape (ui.py openMenu). */
-function Menu({
-  anchor,
-  items,
-  onClose,
-}: {
-  anchor: DOMRect;
-  items: { label: string; title?: string; run: () => void }[];
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const outside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const t = setTimeout(() => {
-      document.addEventListener('mousedown', outside, true);
-      document.addEventListener('keydown', esc, true);
-    }, 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener('mousedown', outside, true);
-      document.removeEventListener('keydown', esc, true);
-    };
-  }, [onClose]);
-  return (
-    <div
-      ref={ref}
-      id="popmenu"
-      className="menu"
-      role="menu"
-      style={{ top: anchor.bottom + 4, right: Math.max(8, window.innerWidth - anchor.right) }}
-    >
-      {items.map((it) => (
-        <button
-          key={it.label}
-          type="button"
-          role="menuitem"
-          title={it.title}
-          onClick={() => {
-            onClose();
-            it.run();
-          }}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Daily request counts, zero-filled from the first to the last day recorded (ui.py dailyRequestCounts). */
-function dailyCounts(runs: HistoryEntry[]) {
-  const counts: Record<string, number> = {};
-  runs.forEach((e) => {
-    const day = String(e.executed_at || '').slice(0, 10);
-    if (day) counts[day] = (counts[day] ?? 0) + 1;
-  });
-  const days = Object.keys(counts).sort();
-  if (!days.length) return [];
-  const out: { date: string; count: number }[] = [];
-  const cursor = new Date(days[0] + 'T00:00:00Z');
-  const end = new Date(days[days.length - 1] + 'T00:00:00Z');
-  while (cursor <= end) {
-    const iso = cursor.toISOString().slice(0, 10);
-    out.push({ date: iso, count: counts[iso] ?? 0 });
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return out;
-}
-
-function RequestsPerDay({ runs }: { runs: HistoryEntry[] }): ReactNode {
-  const days = dailyCounts(runs);
-  if (!days.length) return null;
-  const max = days.reduce((m, d) => Math.max(m, d.count), 0);
-  return (
-    <div className="req-day-chart">
-      <div className="req-day-head">
-        <h3>Requests per day</h3>
-        <span className="hint">{days.length === 1 ? '1 day' : `${days.length} days`}</span>
-      </div>
-      <div className="req-day-cols">
-        {days.map((d) => (
-          <div
-            key={d.date}
-            className="req-day-col"
-            title={`${d.date} — ${d.count}${d.count === 1 ? ' request' : ' requests'}`}
-          >
-            {d.count === max && max > 0 ? <div className="req-day-label">{d.count}</div> : null}
-            <div
-              className={d.count ? 'req-day-bar' : 'req-day-bar zero'}
-              style={{ height: `${max ? (100 * d.count) / max : 0}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="req-day-axis">
-        <span>{days[0]!.date}</span>
-        {days.length > 1 ? <span>{days[days.length - 1]!.date}</span> : null}
-      </div>
-    </div>
   );
 }
