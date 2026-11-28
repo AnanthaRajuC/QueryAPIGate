@@ -22,6 +22,7 @@ import { useAccessDrawers } from '@/features/access/forms';
 import { presetQuery } from '@/features/accessmap/state';
 
 import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
+import { RequestsPerDay } from './stats';
 import { Time } from '@/components/Time';
 
 // The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
@@ -1020,6 +1021,7 @@ export function MetricsTab({ v, runs }: { v: QueryVersion; runs: HistoryEntry[] 
   return (
     <>
       <StatTiles runs={runs} />
+      <RequestsPerDay runs={runs} />
       {callers.length > 1 && (
         <div className="metrics-charts">
           <div className="chart-card">

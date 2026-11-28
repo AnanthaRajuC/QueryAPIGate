@@ -225,11 +225,27 @@ describe('API Repository - detail and publishing', () => {
     expect(document.querySelector('table.rs')).not.toBeNull();
   });
 
-  it('builds its stat tiles and history from the version runs', async () => {
+  it('builds its stat strip and history from the version runs, and Metrics has the rest', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    await waitFor(() => expect(detail().querySelector('.stat-tiles')).not.toBeNull());
-    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Total runs1');
+    const strip = await waitFor(() => {
+      const el = detail().querySelector('.stat-strip');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(strip).toHaveTextContent('Total runs1');
+    expect(strip).toHaveTextContent('Success100%');
+    expect(strip).toHaveTextContent('Avg duration4 ms');
+    expect(strip).not.toHaveTextContent('Slowest run');
+    expect(
+      within(detail()).getByRole('img', { name: /^Requests per day over the last 7 days: / }),
+    ).toBeInTheDocument();
+    expect(detail().querySelector('.stat-tiles')).toBeNull();
+    expect(detail().querySelector('.req-day-chart')).toBeNull();
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'Metrics' }));
+    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Slowest run4 ms');
+    expect(detail().querySelector('.stat-tiles')).toHaveTextContent('Avg rows1');
+    expect(detail().querySelector('.req-day-chart')).toHaveTextContent('Requests per day');
     await userEvent.click(within(detail()).getByRole('tab', { name: /History/ }));
     expect(within(detail()).getByText('partner')).toBeInTheDocument();
   });

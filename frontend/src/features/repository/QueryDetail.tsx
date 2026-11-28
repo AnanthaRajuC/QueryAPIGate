@@ -1,18 +1,11 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { useState, type ReactElement } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
 import { useApiKeys, useCan, useRoles } from '@/app/data';
 import { Empty, Loading, useFeedback } from '@/app/feedback';
 
-import {
-  useQueryActions,
-  useQueryDetail,
-  useVersionHistory,
-  type HistoryEntry,
-  type Query,
-  type QueryVersion,
-} from './api';
+import { useQueryActions, useQueryDetail, useVersionHistory, type Query, type QueryVersion } from './api';
 import { MoveForm, QueryForm } from './forms';
 import { queryReach } from './reach';
 import {
@@ -27,8 +20,8 @@ import {
   RolesTab,
   RunTab,
   SqlTab,
-  StatTiles,
 } from './tabs';
+import { StatStrip } from './stats';
 import { Time } from '@/components/Time';
 import { ManagedTag } from '@/components/Managed';
 import { MoreIcon } from '@/components/icons';
@@ -182,8 +175,7 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
             </div>
           ) : null}
         </dl>
-        <StatTiles runs={runs} />
-        <RequestsPerDay runs={runs} />
+        <StatStrip runs={runs} />
         <div className="subtabs" role="tablist">
           {tabButton('run', 'Run')}
           {tabButton('sql', 'SQL')}
@@ -370,58 +362,5 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
         <MoreIcon />
       </MenuButton>
     </>
-  );
-}
-
-/** Daily request counts, zero-filled from the first to the last day recorded (ui.py dailyRequestCounts). */
-function dailyCounts(runs: HistoryEntry[]) {
-  const counts: Record<string, number> = {};
-  runs.forEach((e) => {
-    const day = String(e.executed_at || '').slice(0, 10);
-    if (day) counts[day] = (counts[day] ?? 0) + 1;
-  });
-  const days = Object.keys(counts).sort();
-  if (!days.length) return [];
-  const out: { date: string; count: number }[] = [];
-  const cursor = new Date(days[0] + 'T00:00:00Z');
-  const end = new Date(days[days.length - 1] + 'T00:00:00Z');
-  while (cursor <= end) {
-    const iso = cursor.toISOString().slice(0, 10);
-    out.push({ date: iso, count: counts[iso] ?? 0 });
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return out;
-}
-
-function RequestsPerDay({ runs }: { runs: HistoryEntry[] }): ReactNode {
-  const days = dailyCounts(runs);
-  if (!days.length) return null;
-  const max = days.reduce((m, d) => Math.max(m, d.count), 0);
-  return (
-    <div className="req-day-chart">
-      <div className="req-day-head">
-        <h3>Requests per day</h3>
-        <span className="hint">{days.length === 1 ? '1 day' : `${days.length} days`}</span>
-      </div>
-      <div className="req-day-cols">
-        {days.map((d) => (
-          <div
-            key={d.date}
-            className="req-day-col"
-            title={`${d.date} — ${d.count}${d.count === 1 ? ' request' : ' requests'}`}
-          >
-            {d.count === max && max > 0 ? <div className="req-day-label">{d.count}</div> : null}
-            <div
-              className={d.count ? 'req-day-bar' : 'req-day-bar zero'}
-              style={{ height: `${max ? (100 * d.count) / max : 0}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="req-day-axis">
-        <span>{days[0]!.date}</span>
-        {days.length > 1 ? <span>{days[days.length - 1]!.date}</span> : null}
-      </div>
-    </div>
   );
 }

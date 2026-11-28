@@ -575,6 +575,18 @@
   .meta div { background: var(--bg); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .meta dt { font-size: 11px; color: var(--ink-3); }
   .meta dd { margin: 0; font: 12px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the runs at a glance, under a query's header: figures on the left, a seven-day sparkline on the right */
+  .stat-strip { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 40px; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .stat-strip-figures { margin: 0; display: flex; flex-wrap: wrap; gap: 12px 36px; }
+  .stat-strip-figures > div { display: flex; flex-direction: column-reverse; gap: 2px; }
+  .stat-strip-figures dd { margin: 0; font: 600 16px var(--mono); color: var(--ink); }
+  .stat-strip-figures dd.warn { color: var(--danger); }
+  .stat-strip-figures dt { font-size: 12px; color: var(--ink-3); }
+  .sparkline-wrap { display: flex; align-items: flex-end; gap: 12px; }
+  .sparkline { display: flex; align-items: flex-end; gap: 3px; height: 30px; }
+  .spark-bar { width: 8px; min-height: 2px; border-radius: 1px; background: var(--accent); }
+  .spark-bar.zero { background: var(--line-strong); }
+  .sparkline-label { font-size: 12px; color: var(--ink-3); }
   .req-day-chart { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
   .req-day-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
   .req-day-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
