@@ -11,10 +11,15 @@ import {
 import { Empty, Loading, useFeedback } from '@/app/feedback';
 import { apiFetch } from '@/api/client';
 
+import { ChevronLeftIcon, FilterIcon, MoreIcon } from '@/components/icons';
+import { MenuButton } from '@/components/Menu';
+import { PopoverButton } from '@/components/Popover';
+
 import { QueryForm, RenameCollectionForm } from './forms';
 
-// The classic API Repository list panel (ui.py #queries-panel): text filter, Type/Host/Database filters,
-// Collections | Queries · <collection> mini-tabs, and the query items.
+// The API Repository list: a text filter with a filters button (type, host, database, in a popover), then either the
+// collections or one collection's queries - headed by a row to go back, the collection's name and count, and a ⋯ menu
+// of what can be done with the collection (its keys, Postman export, Rename).
 
 function hostLabel(c: Connection) {
   return c.host ? c.host + (c.port ? ':' + c.port : '') : '(local file)';
@@ -49,6 +54,12 @@ export function QueryList({ selected }: { selected: string | undefined }) {
     ),
   ].sort();
 
+  // What each filter shows - a host or database the type filter has since ruled out shows as "All" - and how many
+  // are set, for the filters button.
+  const hostShown = hosts.includes(host) ? host : '';
+  const databaseShown = dbs.includes(database) ? database : '';
+  const active = [type, hostShown, databaseShown].filter(Boolean).length;
+
   // Land on the selected query's own collection the first time it is known (ui.py loadQueries' first load).
   const selectedSummary = list.find((s) => s.name === selected);
   const [initialised, setInitialised] = useState(false);
@@ -79,19 +90,21 @@ export function QueryList({ selected }: { selected: string | undefined }) {
       type="button"
       data-name={s.name}
       className={s.name === selected ? 'qitem sel' : 'qitem'}
+      aria-current={s.name === selected ? 'true' : undefined}
       onClick={() => select(s)}
     >
       <div className="qi-top">
         <span className="name">{s.name}</span>
         {showCollection && s.collection ? <span className="tag">{s.collection}</span> : null}
-        <span className="tag v">v{s.latest_version}</span>
+        {s.version_count > 1 ? <span className="tag v">v{s.latest_version}</span> : null}
       </div>
       {s.description ? <div className="qi-desc">{s.description}</div> : null}
     </button>
   );
 
   let body: React.ReactNode;
-  let subtabs: React.ReactNode = null;
+  // above the scrolling rows, so its ⋯ menu isn't clipped by them
+  let head: React.ReactNode = null;
   if (queries.isPending) body = <Loading />;
   else if (queries.isError) {
     body = (
@@ -143,115 +156,120 @@ export function QueryList({ selected }: { selected: string | undefined }) {
       if (groups['']) names.push('');
       const current = activeCollection !== null && groups[activeCollection] ? activeCollection : null;
       const showQueries = view === 'queries' && current !== null;
-      subtabs = (
-        <div className="minitabs">
-          <button
-            type="button"
-            className={!showQueries ? 'minitab active' : 'minitab'}
-            onClick={() => setView('collections')}
-          >
-            Collections
-          </button>
-          <button
-            type="button"
-            className={showQueries ? 'minitab active' : 'minitab'}
-            disabled={current === null}
-            onClick={() => current !== null && setView('queries')}
-          >
-            {'Queries' + (current !== null ? ' · ' + (current || 'No collection') : '')}
-          </button>
-        </div>
-      );
-      body = showQueries ? (
-        <>
-          <CollectionHeader name={current!} />
-          {groups[current!]!.map((s) => item(s))}
-        </>
-      ) : (
-        names.map((c) => (
-          <button
-            key={c || '(none)'}
-            type="button"
-            className="qcoll-row"
-            onClick={() => {
-              setView('queries');
-              setActiveCollection(c);
-            }}
-          >
-            <span className="qg-name">{c || 'No collection'}</span>
-            <span className="qg-n">{groups[c]!.length}</span>
-          </button>
-        ))
-      );
+      if (showQueries)
+        head = (
+          <CollectionHeader
+            name={current!}
+            count={groups[current!]!.length}
+            onBack={() => setView('collections')}
+          />
+        );
+      body = showQueries
+        ? groups[current!]!.map((s) => item(s))
+        : names.map((c) => (
+            <button
+              key={c || '(none)'}
+              type="button"
+              className="qcoll-row"
+              onClick={() => {
+                setView('queries');
+                setActiveCollection(c);
+              }}
+            >
+              <span className="qg-name">{c || 'No collection'}</span>
+              <span className="qg-n">{plural(groups[c]!.length)}</span>
+            </button>
+          ));
     }
   }
 
   return (
-    <div id="queries-panel" className="panel">
+    <div id="queries-panel">
       <div className="qsearch">
         <input
           id="query-filter"
           className="search"
           type="search"
+          aria-label="Filter by name, description or tag"
           placeholder="Filter by name, description, tag…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
+        <PopoverButton
+          label="Filters: type, host, database"
+          className={active ? 'btn icon qf-button on' : 'btn icon qf-button'}
+          button={
+            <>
+              <FilterIcon />
+              {active ? <span className="qf-count">{active}</span> : null}
+            </>
+          }
+        >
+          <div className="qfilters">
+            <label>
+              Type
+              <select id="qf-type" value={type} onChange={(e) => setType(e.target.value)}>
+                <option value="">All types</option>
+                {types.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Host
+              <select id="qf-host" value={hostShown} onChange={(e) => setHost(e.target.value)}>
+                <option value="">All hosts</option>
+                {hosts.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Database
+              <select id="qf-database" value={databaseShown} onChange={(e) => setDatabase(e.target.value)}>
+                <option value="">All databases</option>
+                {dbs.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {active ? (
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => {
+                  setType('');
+                  setHost('');
+                  setDatabase('');
+                }}
+              >
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+        </PopoverButton>
       </div>
-      <div className="qfilters">
-        <select
-          id="qf-type"
-          aria-label="Filter by database type"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          <option value="">All types</option>
-          {types.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <select
-          id="qf-host"
-          aria-label="Filter by host"
-          value={hosts.includes(host) ? host : ''}
-          onChange={(e) => setHost(e.target.value)}
-        >
-          <option value="">All hosts</option>
-          {hosts.map((h) => (
-            <option key={h} value={h}>
-              {h}
-            </option>
-          ))}
-        </select>
-        <select
-          id="qf-database"
-          aria-label="Filter by database"
-          value={dbs.includes(database) ? database : ''}
-          onChange={(e) => setDatabase(e.target.value)}
-        >
-          <option value="">All databases</option>
-          {dbs.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div id="queries-subtabs">{subtabs}</div>
+      {head}
       <div id="queries-table">{body}</div>
     </div>
   );
 }
 
-/** Keys granted the collection, its Postman export and Rename (ui.py collectionHeader). */
-function CollectionHeader({ name }: { name: string }) {
+const plural = (n: number) => `${n} ${n === 1 ? 'query' : 'queries'}`;
+
+/** One collection's head: back to the collections, its name and how many queries it holds, and a ⋯ menu - the keys
+ * granted it, its Postman export and Rename. */
+function CollectionHeader({ name, count, onBack }: { name: string; count: number; onBack: () => void }) {
   const { openDrawer, showError, toast } = useFeedback();
   const info = useCollections();
-  if (!name) return null;
-  const known = info.data?.collections[name];
-  const reach = known ? known.keys.length : 0;
+  const known = name ? info.data?.collections[name] : undefined;
+  const keys = known ? known.keys : [];
   const postman = async () => {
     const res = await apiFetch(`/api/v1/collections/${encodeURIComponent(name)}/postman`);
     if (!res.ok) {
@@ -269,40 +287,53 @@ function CollectionHeader({ name }: { name: string }) {
     toast(`Downloaded ${name}.postman_collection.json — set its apiKey variable after importing`);
   };
   return (
-    <div className="qg-foot">
-      <span
-        title={
-          reach
-            ? 'Keys granted this collection: ' + known!.keys.join(', ')
-            : 'No key is granted this collection'
-        }
+    <div className="qg-head">
+      <button
+        type="button"
+        className="btn icon ghost"
+        aria-label="Back to collections"
+        title="Back to collections"
+        onClick={onBack}
       >
-        {reach + (reach === 1 ? ' key' : ' keys')}
+        <ChevronLeftIcon />
+      </button>
+      <span className="qg-name" title={name || 'No collection'}>
+        {name || 'No collection'}
       </span>
-      <a
-        href="#"
-        title="Download this collection as a Postman Collection file (one request per query; holds no API key)"
-        onClick={(e) => {
-          e.preventDefault();
-          void postman();
-        }}
-      >
-        Postman
-      </a>
-      <a
-        href="#"
-        title="Rename this collection, carrying every key and role grant with it"
-        onClick={(e) => {
-          e.preventDefault();
-          openDrawer({
-            title: 'Rename collection',
-            kicker: name,
-            content: <RenameCollectionForm name={name} />,
-          });
-        }}
-      >
-        Rename
-      </a>
+      <span className="qg-n">{plural(count)}</span>
+      {name ? (
+        <MenuButton
+          label="Collection actions"
+          className="btn icon ghost"
+          entries={[
+            {
+              note: keys.length
+                ? `Granted to ${keys.length === 1 ? '1 key' : `${keys.length} keys`}`
+                : 'No key is granted this collection',
+              title: keys.length ? 'Keys granted this collection: ' + keys.join(', ') : undefined,
+            },
+            'separator',
+            {
+              label: 'Download Postman collection',
+              title:
+                'Download this collection as a Postman Collection file (one request per query; holds no API key)',
+              onSelect: () => void postman(),
+            },
+            {
+              label: 'Rename…',
+              title: 'Rename this collection, carrying every key and role grant with it',
+              onSelect: () =>
+                openDrawer({
+                  title: 'Rename collection',
+                  kicker: name,
+                  content: <RenameCollectionForm name={name} />,
+                }),
+            },
+          ]}
+        >
+          <MoreIcon />
+        </MenuButton>
+      ) : null}
     </div>
   );
 }

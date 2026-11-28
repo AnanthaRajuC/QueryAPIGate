@@ -211,7 +211,8 @@ test('Access map: the table drill-down and View in Access map', async ({ page })
 
 test('a collection: rename it and its grants follow', async ({ page }) => {
   await openInSection(page, '/queries/example_kpi_overdue', 'API', /API Repository/);
-  await page.locator('.qg-foot').getByRole('link', { name: 'Rename' }).click();
+  await page.getByRole('button', { name: 'Collection actions' }).click();
+  await page.getByRole('menuitem', { name: 'Rename…' }).click();
   const drawer = page.locator('#drawer');
   await drawer.getByLabel('New name').fill('e2e-dashboard');
   await drawer.getByRole('button', { name: 'Rename' }).click();

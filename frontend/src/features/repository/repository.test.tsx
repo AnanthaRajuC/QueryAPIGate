@@ -29,10 +29,48 @@ describe('API Repository - list', () => {
       return el!;
     });
     expect(item).toHaveClass('sel');
-    expect(screen.getByRole('button', { name: 'Queries · catalog' })).toHaveClass('active');
-    await userEvent.click(screen.getByRole('button', { name: 'Collections' }));
-    expect(screen.getByRole('button', { name: /catalog1/ })).toHaveClass('qcoll-row');
-    expect(screen.getByRole('button', { name: /No collection1/ })).toBeInTheDocument();
+    expect(item).toHaveAttribute('aria-current', 'true');
+    // the selected query's collection, headed by its name and count, with the way back
+    expect(document.querySelector('.qg-head')).toHaveTextContent('catalog1 query');
+    await userEvent.click(screen.getByRole('button', { name: 'Back to collections' }));
+    expect(screen.getByRole('button', { name: /^catalog/ })).toHaveClass('qcoll-row');
+    expect(screen.getByRole('button', { name: /^No collection/ })).toBeInTheDocument();
+    expect(document.querySelector('.qg-head')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /^catalog/ }));
+    expect(document.querySelector('.qitem[data-name="films"]')).not.toBeNull();
+  });
+
+  it('shows a version chip only on a query with more than one version', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const films = await waitFor(() => {
+      const el = document.querySelector('.qitem[data-name="films"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(films.querySelector('.tag.v')).toHaveTextContent('v2');
+    await userEvent.click(screen.getByRole('button', { name: 'Back to collections' }));
+    await userEvent.click(screen.getByRole('button', { name: /^No collection/ }));
+    expect(document.querySelector('.qitem[data-name="rentals"] .tag.v')).toBeNull();
+  });
+
+  it('keeps the connection filters in a popover, counting the ones set', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    await waitFor(() => expect(document.querySelector('.qitem[data-name="films"]')).not.toBeNull());
+    const filters = screen.getByRole('button', { name: 'Filters: type, host, database' });
+    expect(filters).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById('qf-type')).toBeNull();
+    await userEvent.click(filters);
+    const panel = screen.getByRole('dialog', { name: 'Filters: type, host, database' });
+    const type = within(panel).getByLabelText('Type');
+    expect(type).toHaveFocus();
+    await userEvent.selectOptions(type, within(type).getAllByRole('option')[1]!);
+    expect(filters).toHaveTextContent('1');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(filters).toHaveFocus();
+    expect(filters).toHaveClass('on');
   });
 
   it('a text filter searches every collection at once', async () => {
@@ -270,7 +308,8 @@ describe('API Repository - collections and the example APIs', () => {
       }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('link', { name: 'Rename' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Collection actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
     const drawer = document.getElementById('drawer')!;
     await userEvent.clear(within(drawer).getByLabelText('New name')); // it starts as the current name
     await userEvent.type(within(drawer).getByLabelText('New name'), 'films-v2');
@@ -287,7 +326,8 @@ describe('API Repository - collections and the example APIs', () => {
       'GET /api/v1/collections/catalog/postman': () => ({ info: { name: 'catalog' }, item: [] }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('link', { name: 'Postman' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Collection actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Download Postman collection' }));
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(calls.some((c) => c.path === '/api/v1/collections/catalog/postman')).toBe(true);
     click.mockRestore();
