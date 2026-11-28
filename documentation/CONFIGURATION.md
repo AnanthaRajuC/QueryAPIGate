@@ -145,7 +145,7 @@ nothing that isn't listed here.
 Every setting that holds a secret can also be read from a file named by `NAME_FILE` -
 `QUERYAPIGATE_ENCRYPTION_KEY_FILE`, `QUERYAPIGATE_API_KEY_FILE` and so on.
 
-The Console's **Settings** screen shows every one of these with its effective value and whether it was set or is the default (secrets are reported as configured or not, never shown). Settings that hold secrets can also be read from a file - `QUERYAPIGATE_ENCRYPTION_KEY_FILE` and the like: see [the server's own secrets, from files](API.md#secrets-from-files-and-secrets-managers).
+The Console's **Settings** screen shows every one of these with its effective value, a tab per area, and tags the ones something set - *Set by env*, or *Set by file* for a secret read from its `_FILE`; **Changed** shows only those, and a filter finds a setting by its name, description or variable in every tab (secrets are reported as configured or not, never shown). Settings that hold secrets can also be read from a file - `QUERYAPIGATE_ENCRYPTION_KEY_FILE` and the like: see [the server's own secrets, from files](API.md#secrets-from-files-and-secrets-managers).
 
 ## Calling the API from a browser
 

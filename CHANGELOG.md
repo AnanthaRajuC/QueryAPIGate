@@ -179,6 +179,12 @@ otherwise be kept until 2.0.
 - **`invalid_version`**, the error code for a run's `version` that isn't a whole number.
 ### Changed
 
+- **The Console's Settings screen is easier to scan, and shows what was changed.** Tabs under the title - General,
+  Security, Sign-in, Performance, Observability, MCP server and This browser - each with a link of its own
+  (`/settings/<tab>`), replace the menu of 15 sections. General and Security are grouped (Storage, Startup, ...;
+  Access, Encryption, ...). Only an overridden value is tagged, *Set by env* or *Set by file*, and **Changed** shows
+  only those; a filter finds a setting by its name, description or variable in every tab, never by its value. Values
+  read as On or Off, Not set; a long one wraps, with a copy button - never a secret's. Copy as .env is unchanged.
 - **The Console's sign-in page is redesigned.** Wide screens get a brand panel beside the form, with the mark, what
   QueryAPIGate does, and this server's version and health from `/health`; narrow ones get a card. The token field
   has a show button, the Sign in button says "Signing in…" while the token is checked, an error has an icon, and

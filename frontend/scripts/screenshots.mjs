@@ -416,8 +416,7 @@ if (approvalId) {
   console.log('no approval request: guide-49-approval not taken');
 }
 
-await go('/settings', '#settings-nav');
-await page.getByRole('button', { name: 'Appearance' }).click();
+await go('/settings/general', '#settings-tabs');
 await wait(400);
 await shot('settings', 820);
 

@@ -106,10 +106,10 @@ queries, nothing ad hoc, and can't reach anything outside that collection even i
 
 ## Check it from the admin UI
 
-**Settings > MCP server** shows the configured port, an on-demand **Check now** reachability probe (a
-real TCP connect to that port - never run automatically), and a live **Tools** panel listing exactly what
-`tools/list` currently returns for an unrestricted caller - useful for confirming what's actually exposed
-without needing an MCP client at all.
+The **MCP server** screen has an on-demand **Check now** reachability probe (a real TCP connect to the
+configured port - never run automatically), and a live **Tools** tab listing exactly what `tools/list`
+currently returns for an unrestricted caller - useful for confirming what's actually exposed without needing
+an MCP client at all. **Settings → MCP server** shows the port and the rest of its settings, read-only.
 
 ## Next steps
 

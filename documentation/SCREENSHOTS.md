@@ -133,9 +133,9 @@ SQL editor, the demo video and the architecture.
 </td>
 <td width="33%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png" alt="Settings: the server's effective configuration by section, and this browser's Appearance preferences - theme, font size, time zone, time format, table density and reduced motion">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/settings.png" alt="Settings, General tab: a tab per area with counts, a filter and an All / Changed switch, then Storage, Startup, Configuration file and Drivers - each setting's name, variable and description beside its value, the home folder tagged Set by env">
 </a>
-<br><sub>Settings: the server's effective configuration, read-only, plus per-browser appearance and editor preferences</sub>
+<br><sub>Settings: the server's effective configuration, read-only, a tab per area - what was changed is tagged and can be shown alone</sub>
 </td>
 </tr>
 </table>

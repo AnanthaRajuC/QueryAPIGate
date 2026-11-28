@@ -71,8 +71,8 @@ Experimental: Console sign-in through SSO (QUERYAPIGATE_SSO_CLIENT_ID, QUERYAPIG
   than once (`admin=qag-admins,admin=platform`). Someone in several gets the most capable.
 - Everything must be `https://` (only `localhost` may be plain HTTP), and the Console must be reached over HTTPS: the
   session cookie is `Secure`. Put the server behind [a reverse proxy with real TLS](23-put-it-behind-a-reverse-proxy.md).
-- Anything half-set stops startup, saying what's missing. **Settings → Console sign-in (SSO)** shows what's in use -
-  the secret only as "configured".
+- Anything half-set stops startup, saying what's missing. **Settings → Sign-in**, under *Console sign-in (SSO)*, shows
+  what's in use - the secret only as "configured".
 
 ## Step 3: Sign in
 
