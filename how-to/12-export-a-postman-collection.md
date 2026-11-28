@@ -6,11 +6,11 @@ you can hand to a teammate without them writing a single request by hand.
 
 ## From the admin UI
 
-Open **API Repository**, click **Collections**, pick a collection, then click **Postman** (next to the key
-count and **Rename**, in the collection's own query list) - downloads a `.json` file ready to import into
-Postman (File → Import).
+Open **API Repository**, open a collection (the back arrow above the query list shows them all), then choose
+**Download Postman collection** from the collection's **⋯** menu (beside its name, with the keys granted it and
+**Rename…**) - downloads a `.json` file ready to import into Postman (File → Import).
 
-[![API Repository with a collection open: above its query list, the key count, a Postman link and Rename](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)
+[![API Repository with a collection open: above its query list, the collection's name, its query count and its ⋯ menu](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)](https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png)
 
 *A collection open in API Repository - Postman sits beside the key count and Rename.*
 

@@ -90,7 +90,7 @@ allows the write - and then a person approves each write before it runs. See
 
 **Hiding a query from agents while it keeps serving REST.** A saved query carries an `mcp` flag (default on). Turn it
 off and the query is no longer listed or callable as an MCP tool - a call by name is refused with `mcp_disabled` -
-but it still answers over REST exactly as before. Toggle it in the Console on the API Repository's **MCP** tab (it
+but it still answers over REST exactly as before. Toggle it in the Console under the API Repository's **Connect → MCP** (it
 takes effect at once, no new version), set `"mcp": false` in the query definition when you save it, or
 `PATCH /api/v1/queries/{name}/versions/{version}` with `{"mcp": false}`. Use it for queries that are fine for your
 apps but you don't want an agent reaching for.

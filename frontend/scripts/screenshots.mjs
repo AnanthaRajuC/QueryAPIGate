@@ -288,7 +288,8 @@ await page.locator('[data-subtab="history"]').click();
 await wait(700);
 await shot('saved-query-history');
 
-await page.getByRole('button', { name: 'Move…' }).click();
+await page.getByRole('button', { name: /^More actions/ }).click();
+await page.getByRole('menuitem', { name: 'Move…' }).click();
 await page.waitForSelector('#mv-select');
 await page.selectOption('#mv-select', 'examples-partner');
 await wait(700);
@@ -384,11 +385,12 @@ await page.locator('#k-grace').evaluate((el) => el.scrollIntoView({ block: 'cent
 await wait(300);
 await shot('guide-50-rotate-key', 900);
 
-await go('/api-keys/acme-corp', 'h1');
+await go('/api-keys/acme-corp', 'h2:has-text("acme-corp")');
 await shot('guide-21-key-details', 1100);
 
 await go('/queries/example_rentals_since', '.subtabs');
-await page.locator('[data-subtab="cli"]').click();
+await page.locator('[data-subtab="connect"]').click();
+await page.getByRole('tablist', { name: 'Connect with' }).getByRole('tab', { name: 'CLI' }).click();
 await page.locator('.subtabs').evaluate((el) => el.scrollIntoView({ block: 'start' }));
 await wait(700);
 await shot('guide-31-cli-tab', 900);

@@ -58,7 +58,7 @@ SQL editor, the demo video and the architecture.
 </td>
 <td width="25%">
 <a href="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png">
-<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png" alt="The API Repository: saved queries grouped into collapsible collections, each with its key count and Postman/Rename actions, beside the selected query's connection, collection, Run/SQL/History/Curl tabs and generated GET /q/ endpoint">
+<img src="https://raw.githubusercontent.com/AnanthaRajuC/QueryAPIGate/main/documentation/screenshots/saved-queries.png" alt="The API Repository: one collection's saved queries, headed by its name, query count and a menu with its keys, Postman export and Rename, beside the selected query's one-line header, its connection, author and tags, a strip of run figures with a seven-day sparkline, the Run, SQL, History, Metrics, Access, Cache and Connect tabs, and the GET /q/ request row">
 </a>
 <br><sub>Every saved query becomes a documented REST endpoint - grouped into collections</sub>
 </td>
