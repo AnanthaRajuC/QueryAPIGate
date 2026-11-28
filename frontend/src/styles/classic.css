@@ -596,6 +596,15 @@
   .req-day-bar:not(.zero) { min-height: 2px; }
   .req-day-label { font: 11px var(--mono); color: var(--ink-2); margin-bottom: 2px; white-space: nowrap; }
   .req-day-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; color: var(--ink-3); }
+  /* the Access tab: API keys, Roles and who can call it, one section each */
+  .access-sections { display: flex; flex-direction: column; gap: 22px; }
+  .access-sections > section { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 80px; }
+  .access-h { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+  .access-h .count { padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font: 600 11px/18px var(--mono); }
+  /* the Connect tab: curl, CLI or MCP, by a small switcher */
+  .connect-tab { display: flex; flex-direction: column; gap: 14px; }
+  .connect-tab > .seg { align-self: flex-start; }
+  .connect-panel { display: flex; flex-direction: column; gap: 12px; }
   .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 -20px; padding: 0 14px; }
   .subtabs button { border: 0; background: none; font: 500 12.5px var(--sans); color: var(--ink-2); padding: 10px 8px; cursor: pointer; position: relative; display: flex; gap: 6px; align-items: center; }
   .subtabs button:hover { color: var(--ink); }

@@ -18,6 +18,11 @@ afterEach(() => {
 });
 
 const detail = () => document.getElementById('query-detail')!;
+/** The loaded query's panel (until then #query-detail is a placeholder, replaced once it loads). */
+const loadedDetail = async () => {
+  await waitFor(() => expect(detail().querySelector('.subtabs')).not.toBeNull());
+  return detail();
+};
 
 describe('API Repository - list', () => {
   it('groups queries into collections, as the classic list does', async () => {
@@ -253,12 +258,65 @@ describe('API Repository - detail and publishing', () => {
   it('lists the keys that reach the query, from their grants', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    await waitFor(() =>
-      expect(within(detail()).getByRole('tab', { name: /API Keys/ })).toHaveTextContent('API Keys1'),
+    await userEvent.click(within(await loadedDetail()).getByRole('tab', { name: 'Access' }));
+    // API keys, Roles and who can call it are sections of Access, each count on its heading
+    expect(within(detail()).getByRole('heading', { name: 'API keys 1' })).toBeInTheDocument();
+    expect(within(detail()).getByRole('heading', { name: /^Roles/ })).toBeInTheDocument();
+    expect(within(detail()).getByRole('heading', { name: 'Who can call it' })).toBeInTheDocument();
+    const keys = within(detail()).getByRole('region', { name: 'API keys 1' });
+    expect(within(keys).getByText('partner')).toBeInTheDocument();
+    expect(within(keys).getByText('60/minute')).toBeInTheDocument();
+  });
+
+  it('has seven tabs, in order', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const tabs = within(await loadedDetail()).getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Run',
+      'SQL',
+      'History',
+      'Metrics',
+      'Access',
+      'Cache',
+      'Connect',
+    ]);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the old API Keys tab name on Access', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films', { tab: 'keys' });
+    expect(within(await loadedDetail()).getByRole('tab', { name: 'Access' })).toHaveAttribute(
+      'aria-selected',
+      'true',
     );
-    await userEvent.click(within(detail()).getByRole('tab', { name: /API Keys/ }));
-    expect(within(detail()).getByText('partner')).toBeInTheDocument();
-    expect(within(detail()).getByText('60/minute')).toBeInTheDocument();
+    expect(await within(detail()).findByRole('heading', { name: 'API keys 1' })).toBeInTheDocument();
+  });
+
+  it('opens Connect on the CLI view for the old CLI tab, and switches views', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse({ ...FILMS, versions: [version(1, 'published')] }, 200, { ETag: ETAG }),
+    });
+    renderAt('/queries/films', { tab: 'cli' });
+    expect(within(await loadedDetail()).getByRole('tab', { name: 'Connect' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const views = within(detail()).getByRole('tablist', { name: 'Connect with' });
+    expect(within(views).getByRole('tab', { name: 'CLI' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(detail()).getByRole('tabpanel')).toHaveTextContent('queryapigate export');
+    await userEvent.click(within(views).getByRole('tab', { name: 'curl' }));
+    expect(within(detail()).getByRole('tabpanel')).toHaveTextContent('X-API-Key');
+    // a tab chosen by hand opens on its default view
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'SQL' }));
+    await userEvent.click(within(detail()).getByRole('tab', { name: 'Connect' }));
+    expect(within(views.ownerDocument.body).getByRole('tab', { name: 'curl' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 
   it('toggles MCP exposure in place from the MCP tab, conditionally on the loaded version', async () => {
@@ -267,7 +325,8 @@ describe('API Repository - detail and publishing', () => {
       'PATCH /api/v1/queries/films/versions/2': () => ({ ...FILMS }),
     });
     renderAt('/queries/films');
-    await userEvent.click(await screen.findByRole('tab', { name: 'MCP' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'MCP' }));
     const toggle = within(detail()).getByRole('checkbox', { name: /Expose this query as an MCP tool/ });
     expect(toggle).toBeChecked();
     await userEvent.click(toggle);

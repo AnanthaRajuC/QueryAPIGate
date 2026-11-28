@@ -499,7 +499,7 @@ export function useDeleteRole() {
   };
 }
 
-/** Drawer openers, shared with the API Repository's API Keys and Roles tabs. */
+/** Drawer openers, shared with the API Repository's Access tab (its API keys and Roles sections). */
 export function useAccessDrawers() {
   const { openDrawer } = useFeedback();
   return {

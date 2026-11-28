@@ -1,4 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactElement,
+} from 'react';
 import { useNavigate } from 'react-router';
 
 import { timedFetch } from '@/api/client';
@@ -25,9 +33,10 @@ import { AccessCell, AccessPill, ReachDot, type Reach } from './reach';
 import { RequestsPerDay } from './stats';
 import { Time } from '@/components/Time';
 
-// The saved-query detail subtabs, each ported from its classic renderer (ui.py renderRunTab, renderSqlTab,
-// renderHistoryTab, renderCurlTab, renderQueryKeysTab, renderQueryRolesTab, the Access box + flow diagram,
-// renderCacheTab, renderQueryMetricsTab, renderCliTab), reading the Management API instead of the legacy routes.
+// The saved-query detail tabs - Run, SQL, History, Metrics, Access (the keys and roles that reach the query, and who
+// can call it), Cache and Connect (curl, CLI, MCP) - each part ported from its classic renderer (ui.py renderRunTab,
+// renderSqlTab, renderHistoryTab, renderCurlTab, renderQueryKeysTab, renderQueryRolesTab, the Access box + flow
+// diagram, renderCacheTab, renderQueryMetricsTab, renderCliTab), reading the Management API, not the legacy routes.
 
 const preferredFormat = () => readPrefs().format;
 
@@ -634,9 +643,58 @@ export function RolesTab({
   );
 }
 
-// ---- Access ----
+// ---- Access: the keys and roles that reach the query, and who can call it ----
 
-export function AccessTab({ query, v, reach }: { query: Query; v: QueryVersion; reach: Reach }) {
+export type AccessPart = 'keys' | 'roles';
+
+/** The Access tab: API keys, Roles, then who can call it and the query's flow - each a section with its own heading
+ * (and count). `focus` scrolls to a section when the tab is opened for it (a link to the old API Keys tab). */
+export function AccessTab({
+  query,
+  v,
+  reach,
+  keys,
+  roles,
+  focus,
+}: {
+  query: Query;
+  v: QueryVersion;
+  reach: Reach;
+  keys: Record<string, ApiKeyEntry>;
+  roles: Record<string, RoleEntry>;
+  focus?: AccessPart;
+}) {
+  const keysRef = useRef<HTMLElement>(null);
+  const rolesRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = focus === 'keys' ? keysRef.current : focus === 'roles' ? rolesRef.current : null;
+    el?.scrollIntoView?.({ block: 'start' });
+  }, [focus]);
+  return (
+    <div className="access-sections">
+      <section ref={keysRef} aria-labelledby="access-h-keys">
+        <h4 className="access-h" id="access-h-keys">
+          API keys <span className="count">{reach.keys.length}</span>
+        </h4>
+        <KeysTab reach={reach} keys={keys} />
+      </section>
+      <section ref={rolesRef} aria-labelledby="access-h-roles">
+        <h4 className="access-h" id="access-h-roles">
+          Roles <span className="count">{reach.roles.length}</span>
+        </h4>
+        <RolesTab reach={reach} keys={keys} roles={roles} />
+      </section>
+      <section aria-labelledby="access-h-who">
+        <h4 className="access-h" id="access-h-who">
+          Who can call it
+        </h4>
+        <ReachSummary query={query} v={v} reach={reach} />
+      </section>
+    </div>
+  );
+}
+
+function ReachSummary({ query, v, reach }: { query: Query; v: QueryVersion; reach: Reach }) {
   const navigate = useNavigate();
   return (
     <>
@@ -902,8 +960,9 @@ export function CacheTab({ query, v, etag }: { query: Query; v: QueryVersion; et
   );
 }
 
-/** The MCP tab: whether this query is exposed as a tool (toggled in place, like cache_ttl), and a read-only summary
- * of the tool it becomes - its name, kind (read-only / write with approval / insert) and any agent-write row ceiling.
+/** Connect's MCP view: whether this query is exposed as a tool (toggled in place, like cache_ttl), and a read-only
+ * summary of the tool it becomes - its name, kind (read-only / write with approval / insert) and any agent-write row
+ * ceiling.
  * Agent-write settings themselves are part of the version definition, so they change by adding a version. */
 export function McpTab({ query, v, etag }: { query: Query; v: QueryVersion; etag: string | null }) {
   const { showError, toast } = useFeedback();
@@ -958,6 +1017,57 @@ export function McpTab({ query, v, etag }: { query: Query; v: QueryVersion; etag
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Connect: calling the query from outside the Console ----
+
+export type ConnectView = 'curl' | 'cli' | 'mcp';
+
+const CONNECT_VIEWS: { id: ConnectView; label: string }[] = [
+  { id: 'curl', label: 'curl' },
+  { id: 'cli', label: 'CLI' },
+  { id: 'mcp', label: 'MCP' },
+];
+
+/** The Connect tab: a curl command, the CLI export command, and the query as an MCP tool - one at a time, by a small
+ * switcher. `view` is the one to open with (a link to the old Curl, CLI or MCP tab). */
+export function ConnectTab({
+  query,
+  v,
+  etag,
+  view,
+}: {
+  query: Query;
+  v: QueryVersion;
+  etag: string | null;
+  view?: ConnectView;
+}) {
+  const [shown, setShown] = useState<ConnectView>(view ?? 'curl');
+  return (
+    <div className="connect-tab">
+      <div className="seg" role="tablist" aria-label="Connect with">
+        {CONNECT_VIEWS.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            id={`connect-${x.id}`}
+            aria-selected={shown === x.id}
+            aria-controls="connect-panel"
+            className={shown === x.id ? 'on' : undefined}
+            onClick={() => setShown(x.id)}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+      <div id="connect-panel" role="tabpanel" aria-labelledby={`connect-${shown}`} className="connect-panel">
+        {shown === 'curl' && <CurlTab query={query} v={v} />}
+        {shown === 'cli' && <CliTab query={query} v={v} />}
+        {shown === 'mcp' && <McpTab query={query} v={v} etag={etag} />}
+      </div>
     </div>
   );
 }

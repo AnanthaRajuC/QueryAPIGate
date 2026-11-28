@@ -11,15 +11,13 @@ import { queryReach } from './reach';
 import {
   AccessTab,
   CacheTab,
-  CliTab,
-  McpTab,
-  CurlTab,
+  ConnectTab,
   HistoryTab,
-  KeysTab,
   MetricsTab,
-  RolesTab,
   RunTab,
   SqlTab,
+  type AccessPart,
+  type ConnectView,
 } from './tabs';
 import { StatStrip } from './stats';
 import { Time } from '@/components/Time';
@@ -31,8 +29,24 @@ import { MenuButton, type MenuEntry } from '@/components/Menu';
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
 // with the classic pill and buttons: Published / Draft / Previous, and Publish, Roll back or Unpublish.
 
-type TabId =
-  'run' | 'sql' | 'history' | 'curl' | 'keys' | 'roles' | 'access' | 'cache' | 'metrics' | 'cli' | 'mcp';
+type TabId = 'run' | 'sql' | 'history' | 'metrics' | 'access' | 'cache' | 'connect';
+
+/** Where a tab name opens - the seven tabs, and the eleven there used to be (a link from Home, or one saved before):
+ * API Keys and Roles are sections of Access now, Curl, CLI and MCP the views of Connect. */
+const OPENS: Record<string, { tab: TabId; part?: AccessPart | ConnectView }> = {
+  run: { tab: 'run' },
+  sql: { tab: 'sql' },
+  history: { tab: 'history' },
+  metrics: { tab: 'metrics' },
+  access: { tab: 'access' },
+  cache: { tab: 'cache' },
+  connect: { tab: 'connect' },
+  keys: { tab: 'access', part: 'keys' },
+  roles: { tab: 'access', part: 'roles' },
+  curl: { tab: 'connect', part: 'curl' },
+  cli: { tab: 'connect', part: 'cli' },
+  mcp: { tab: 'connect', part: 'mcp' },
+};
 
 const STATUS_LABEL: Record<QueryVersion['status'], string> = {
   published: 'Published',
@@ -74,9 +88,12 @@ export function QueryDetail({ name }: { name: string | undefined }) {
 function Detail({ query, etag }: { query: Query; etag: string | null }) {
   const latest = query.versions[query.versions.length - 1]!;
   // Home's request rows open a query on its History tab, at the version that ran
-  const opened = useLocation().state as { tab?: TabId; version?: number } | null;
+  const opened = useLocation().state as { tab?: string; version?: number } | null;
+  const opens = OPENS[opened?.tab ?? ''] ?? OPENS.run!;
   const [versionNumber, setVersionNumber] = useState(opened?.version ?? latest.version);
-  const [tab, setTab] = useState<TabId>(opened?.tab ?? 'run');
+  const [tab, setTab] = useState<TabId>(opens.tab);
+  // the section or view a tab name from before opens (a Home link to 'keys'): once, then the tab's own default
+  const [part, setPart] = useState(opens.part);
   // A new version saved from the drawer becomes the latest: follow it, as the classic view does.
   const [seenLatest, setSeenLatest] = useState(latest.version);
   if (seenLatest !== latest.version) {
@@ -101,9 +118,13 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
     <button
       type="button"
       role="tab"
+      aria-selected={tab === id}
       data-subtab={id}
       className={tab === id ? 'on' : ''}
-      onClick={() => setTab(id)}
+      onClick={() => {
+        setTab(id);
+        setPart(undefined);
+      }}
     >
       {label}
       {count !== undefined ? <span className="count">{count ? String(count) : ''}</span> : null}
@@ -176,32 +197,35 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           ) : null}
         </dl>
         <StatStrip runs={runs} />
-        <div className="subtabs" role="tablist">
+        <div className="subtabs" role="tablist" aria-label={query.name}>
           {tabButton('run', 'Run')}
           {tabButton('sql', 'SQL')}
           {tabButton('history', 'History', runs.length)}
-          {tabButton('curl', 'Curl')}
-          {tabButton('keys', 'API Keys', reach.keys.length)}
-          {tabButton('roles', 'Roles', reach.roles.length)}
+          {tabButton('metrics', 'Metrics')}
           {tabButton('access', 'Access')}
           {tabButton('cache', 'Cache')}
-          {tabButton('metrics', 'Metrics')}
-          {tabButton('cli', 'CLI')}
-          {tabButton('mcp', 'MCP')}
+          {tabButton('connect', 'Connect')}
         </div>
       </div>
       <div className="d-body">
         {tab === 'run' && <RunTab query={query} v={v} />}
         {tab === 'sql' && <SqlTab query={query} v={v} />}
         {tab === 'history' && <HistoryTab v={v} runs={runs} />}
-        {tab === 'curl' && <CurlTab query={query} v={v} />}
-        {tab === 'keys' && <KeysTab reach={reach} keys={keys.data ?? {}} />}
-        {tab === 'roles' && <RolesTab reach={reach} keys={keys.data ?? {}} roles={roles.data ?? {}} />}
-        {tab === 'access' && <AccessTab query={query} v={v} reach={reach} />}
-        {tab === 'cache' && <CacheTab query={query} v={v} etag={etag} />}
         {tab === 'metrics' && <MetricsTab v={v} runs={runs} />}
-        {tab === 'cli' && <CliTab query={query} v={v} />}
-        {tab === 'mcp' && <McpTab query={query} v={v} etag={etag} />}
+        {tab === 'access' && (
+          <AccessTab
+            query={query}
+            v={v}
+            reach={reach}
+            keys={keys.data ?? {}}
+            roles={roles.data ?? {}}
+            focus={part as AccessPart | undefined}
+          />
+        )}
+        {tab === 'cache' && <CacheTab query={query} v={v} etag={etag} />}
+        {tab === 'connect' && (
+          <ConnectTab query={query} v={v} etag={etag} view={part as ConnectView | undefined} />
+        )}
       </div>
     </div>
   );
