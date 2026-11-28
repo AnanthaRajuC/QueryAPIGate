@@ -210,6 +210,96 @@ describe('Settings', () => {
     expect(await screen.findByText('QUERYAPIGATE_SSO_ISSUER')).toBeInTheDocument();
   });
 
+  it('filters every tab at once by name, description or variable, each match under its tab', async () => {
+    fakeBackend(routes());
+    renderAt('/settings/general');
+    await screen.findByText(LONG_PATH);
+    const filter = screen.getByRole('searchbox', { name: 'Filter settings by name or variable' });
+    await userEvent.type(filter, 'allow');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Security · Access',
+    ]);
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Allow writes']);
+    // no tab is the open one while the filter spans them all
+    expect(within(tabs()).queryByRole('tab', { selected: true })).toBeNull();
+    await userEvent.clear(filter);
+    await userEvent.type(filter, 'mcp_port'); // a variable, in any case
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['MCP server']);
+    await userEvent.clear(filter);
+    await userEvent.type(filter, 'identity provider'); // a section's description is not a setting's
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+    await userEvent.clear(filter);
+    await userEvent.type(filter, 'issuer description'); // a setting's description is
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Sign-in · Console sign-in (SSO)',
+    ]);
+    await userEvent.clear(filter);
+    await userEvent.type(filter, 'theme'); // this browser's preferences too
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'This browser · Appearance',
+    ]);
+    await userEvent.keyboard('{Escape}'); // clears it: back to the open tab
+    expect(filter).toHaveValue('');
+    expect(within(tabs()).getByRole('tab', { name: /General/ })).toHaveAttribute('aria-selected', 'true');
+    await userEvent.type(filter, 'allow');
+    await userEvent.click(within(tabs()).getByRole('tab', { name: /MCP server/ })); // a tab clears it too
+    expect(filter).toHaveValue('');
+    expect(screen.getByText('QUERYAPIGATE_MCP_PORT')).toBeInTheDocument();
+  });
+
+  it('never matches a value - nothing masked can be found by its text', async () => {
+    fakeBackend(routes());
+    renderAt('/settings/security');
+    await screen.findByText('QUERYAPIGATE_ALLOW_WRITES');
+    const filter = screen.getByRole('searchbox', { name: 'Filter settings by name or variable' });
+    for (const text of ['db.internal', 'configured', 'qag:***']) {
+      await userEvent.clear(filter);
+      await userEvent.type(filter, text);
+      expect(screen.getByText(`No setting matches “${text}”.`)).toBeInTheDocument();
+      expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Clear the filter' }));
+    expect(filter).toHaveValue('');
+    expect(screen.getByText('QUERYAPIGATE_ALLOW_WRITES')).toBeInTheDocument();
+  });
+
+  it('shows only what was changed, counted for the open tab - or wherever the filter matches', async () => {
+    fakeBackend(routes());
+    renderAt('/settings/general');
+    await screen.findByText(LONG_PATH);
+    const show = screen.getByRole('group', { name: 'Show' });
+    const changed = within(show).getByRole('button', { name: /Changed/ });
+    expect(changed).toHaveTextContent('Changed 2');
+    expect(within(show).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(changed);
+    expect(changed).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'Home directory',
+      'Load examples',
+    ]);
+    // a group with nothing left has no heading
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Storage',
+      'Startup',
+    ]);
+    // it stays on from tab to tab, counting each
+    await userEvent.click(within(tabs()).getByRole('tab', { name: /Security/ }));
+    expect(changed).toHaveTextContent('Changed 2');
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'Admin API key',
+      'Metadata database',
+    ]);
+    await userEvent.click(within(tabs()).getByRole('tab', { name: /Sign-in/ }));
+    expect(changed).toHaveTextContent('Changed 0');
+    expect(screen.getByText(/Nothing in this tab was changed/)).toBeInTheDocument();
+    // with the filter, counted in every tab it matches
+    await userEvent.type(screen.getByRole('searchbox', { name: /Filter settings/ }), 'queryapigate_');
+    expect(changed).toHaveTextContent('Changed 4');
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(4);
+    await userEvent.click(within(show).getByRole('button', { name: 'All' }));
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(11); // every server setting: all have a variable
+  });
+
   it('copies only what is set, never a secret, as .env', async () => {
     const user = userEvent.setup(); // with a clipboard stub
     fakeBackend(routes());

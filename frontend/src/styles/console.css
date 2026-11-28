@@ -1514,6 +1514,27 @@ body.side-collapsed .side-foot .popover.above {
 .settings-tabbar .subtabs button.on::after {
   background: var(--accent);
 }
+.settings-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 7px;
+}
+.settings-tools .search {
+  width: 230px;
+}
+.settings-tools .seg .n {
+  margin-left: 2px;
+}
+.set-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 12px 0 28px;
+  color: var(--ink-2);
+}
 #settings-body {
   display: flex;
   flex-direction: column;

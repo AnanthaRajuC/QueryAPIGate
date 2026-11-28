@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { type Schemas } from '@/api/client';
@@ -15,6 +15,10 @@ import { lastTab, rememberTab } from './state';
 // `group` where its section has them (General, Security), else the section itself. A row is its name, variable and
 // description, beside its value - "Set by env" only when something set it. The MCP server's tools and reachability
 // live on their own screen (features/mcp/McpPage); the MCP *settings* stay here.
+//
+// The filter matches a setting's name, description and variable - never its value, so nothing masked can match - in
+// every tab at once, each match under its tab's name. "Changed" keeps what something set (a source other than the
+// default).
 
 type Section = Schemas['SettingsSection'];
 type Row = Section['rows'][number];
@@ -80,6 +84,11 @@ const EDITOR_ROWS: PrefRow[] = [
   ['lineNumbers', 'Line numbers', 'In the SQL editor.', ['Off', 'On']],
 ];
 
+const PREF_GROUPS: [string, PrefRow[]][] = [
+  ['Appearance', APPEARANCE_ROWS],
+  ['Editor & results', EDITOR_ROWS],
+];
+
 export function SettingsPage() {
   const { toast } = useFeedback();
   const settings = useSettings();
@@ -92,6 +101,26 @@ export function SettingsPage() {
       ? asked!
       : (sections.find((sec) => sec.id === asked)?.area ?? lastTab());
   useEffect(() => rememberTab(tab), [tab]);
+  const [query, setQuery] = useState('');
+  const [changedOnly, setChangedOnly] = useState(false);
+  const words = query.trim().toLowerCase();
+  const filtering = words !== '';
+  const matches = (text: { label: string; description: string; env?: string }) =>
+    !filtering || [text.label, text.description, text.env ?? ''].some((t) => t.toLowerCase().includes(words));
+  const changed = (row: Row) => row.source !== 'default';
+  /** What the filter and the switch leave of a set of sections: the rows kept, and no section left empty. */
+  const kept = (of: Section[]) =>
+    of
+      .map((sec) => ({
+        ...sec,
+        rows: sec.rows.filter((row) => matches(row) && (!changedOnly || changed(row))),
+      }))
+      .filter((sec) => sec.rows.length);
+  // Changed N: in the open tab - or, while filtering, wherever the filter matches
+  const changedCount = sections
+    .filter((sec) => filtering || sec.area === tab)
+    .flatMap((sec) => sec.rows)
+    .filter((row) => matches(row) && changed(row)).length;
 
   const copyEnv = () => {
     const lines = sections.flatMap((sec) =>
@@ -114,15 +143,84 @@ export function SettingsPage() {
     { id: BROWSER, label: 'This browser', n: null },
   ];
 
+  const noConfigFile = sections.some((sec) =>
+    sec.rows.some((row) => row.env === 'QUERYAPIGATE_CONFIG_FILE' && row.source === 'default'),
+  );
+  const readOnly = (
+    <div className="set-note">
+      <LockIcon />
+      <span>
+        <strong>Read-only.</strong> These values come from <code>QUERYAPIGATE_*</code> environment variables
+        and are validated at startup. Change them in your deployment and restart the server.
+      </span>
+    </div>
+  );
+  const browserNote = (
+    <div className="set-note">
+      <span>Stored in this browser only. Nothing is sent to the server.</span>
+    </div>
+  );
+  /** An area's groups, as kept - titled with the tab's name too while the filter spans every tab. */
+  const serverGroups = (area: { id: string; label: string }) =>
+    groupsOf(kept(sections.filter((sec) => sec.area === area.id)), area.id).map((group) => (
+      <SettingsGroup
+        key={group.key}
+        title={filtering && group.title !== area.label ? `${area.label} · ${group.title}` : group.title}
+        description={group.description}
+      >
+        {group.rows.map((row) => (
+          <SettingRow
+            key={row.env + row.label}
+            row={row}
+            // it applies only with a configuration file (the server refuses it without one)
+            dim={noConfigFile && row.env === 'QUERYAPIGATE_CONFIG_PRUNE'}
+          />
+        ))}
+      </SettingsGroup>
+    ));
+  const prefGroups = () =>
+    changedOnly && filtering
+      ? []
+      : PREF_GROUPS.map(
+          ([title, rows]) =>
+            [title, rows.filter(([, label, description]) => matches({ label, description }))] as const,
+        )
+          .filter(([, rows]) => rows.length)
+          .map(([title, rows]) => (
+            <PrefsGroup key={title} title={filtering ? `This browser · ${title}` : title} rows={rows} />
+          ));
+  const nothing = (what: string, action: string, onClick: () => void) => (
+    <div className="set-empty">
+      <span>{what}</span>
+      <button type="button" className="btn-text" onClick={onClick}>
+        {action}
+      </button>
+    </div>
+  );
+
   let body: ReactNode;
-  if (tab === BROWSER) {
+  if (filtering) {
+    // every tab at once, in the tabs' order
+    const found = [...AREAS.map((area) => serverGroups(area)).flat(), ...prefGroups()];
+    body = found.length ? (
+      <>
+        {settings.data && readOnly}
+        {found}
+      </>
+    ) : (
+      nothing(
+        changedOnly
+          ? `No changed setting matches “${query.trim()}”.`
+          : `No setting matches “${query.trim()}”.`,
+        'Clear the filter',
+        () => setQuery(''),
+      )
+    );
+  } else if (tab === BROWSER) {
     body = (
       <>
-        <div className="set-note">
-          <span>Stored in this browser only. Nothing is sent to the server.</span>
-        </div>
-        <PrefsGroup title="Appearance" rows={APPEARANCE_ROWS} />
-        <PrefsGroup title="Editor & results" rows={EDITOR_ROWS} />
+        {browserNote}
+        {prefGroups()}
       </>
     );
   } else if (settings.isPending) {
@@ -140,31 +238,16 @@ export function SettingsPage() {
       </div>
     );
   } else {
-    const noConfigFile = sections.some((sec) =>
-      sec.rows.some((row) => row.env === 'QUERYAPIGATE_CONFIG_FILE' && row.source === 'default'),
-    );
-    body = (
+    const groups = serverGroups(AREAS.find((a) => a.id === tab) ?? { id: tab, label: tab });
+    body = groups.length ? (
       <>
-        <div className="set-note">
-          <LockIcon />
-          <span>
-            <strong>Read-only.</strong> These values come from <code>QUERYAPIGATE_*</code> environment
-            variables and are validated at startup. Change them in your deployment and restart the server.
-          </span>
-        </div>
-        {groupsOf(sections, tab).map((group) => (
-          <SettingsGroup key={group.key} title={group.title} description={group.description}>
-            {group.rows.map((row) => (
-              <SettingRow
-                key={row.env + row.label}
-                row={row}
-                // it applies only with a configuration file (the server refuses it without one)
-                dim={noConfigFile && row.env === 'QUERYAPIGATE_CONFIG_PRUNE'}
-              />
-            ))}
-          </SettingsGroup>
-        ))}
+        {readOnly}
+        {groups}
       </>
+    ) : (
+      nothing('Nothing in this tab was changed: every setting here is at its default.', 'Show all', () =>
+        setChangedOnly(false),
+      )
     );
   }
 
@@ -189,17 +272,58 @@ export function SettingsPage() {
               key={t.id}
               type="button"
               role="tab"
-              aria-selected={tab === t.id}
-              className={tab === t.id ? 'on' : undefined}
-              onClick={() => navigate(`/settings/${t.id}`)}
+              aria-selected={!filtering && tab === t.id}
+              className={!filtering && tab === t.id ? 'on' : undefined}
+              onClick={() => {
+                setQuery('');
+                navigate(`/settings/${t.id}`);
+              }}
             >
               {t.label}
               {t.n === null ? null : <span className="count">{t.n}</span>}
             </button>
           ))}
         </div>
+        <div className="settings-tools">
+          <input
+            id="settings-filter"
+            className="search"
+            type="search"
+            aria-label="Filter settings by name or variable"
+            placeholder="Filter by name or variable…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('');
+            }}
+          />
+          {(filtering || tab !== BROWSER) && (
+            <div className="seg" role="group" aria-label="Show">
+              <button
+                type="button"
+                aria-pressed={!changedOnly}
+                className={changedOnly ? undefined : 'on'}
+                onClick={() => setChangedOnly(false)}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                aria-pressed={changedOnly}
+                className={changedOnly ? 'on' : undefined}
+                onClick={() => setChangedOnly(true)}
+              >
+                Changed <span className="n">{changedCount}</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      <div id="settings-body" role="tabpanel" aria-label={tabs.find((t) => t.id === tab)?.label}>
+      <div
+        id="settings-body"
+        role="tabpanel"
+        aria-label={filtering ? 'Settings matching the filter' : tabs.find((t) => t.id === tab)?.label}
+      >
         {body}
       </div>
     </>
