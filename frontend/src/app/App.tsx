@@ -112,14 +112,17 @@ export function App() {
             </Suspense>
           }
         />
-        <Route
-          path="settings"
-          element={
-            <Suspense fallback={<Loading />}>
-              <SettingsPage />
-            </Suspense>
-          }
-        />
+        {['settings', 'settings/:tab'].map((path) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <Suspense fallback={<Loading />}>
+                <SettingsPage />
+              </Suspense>
+            }
+          />
+        ))}
         <Route
           path="help"
           element={

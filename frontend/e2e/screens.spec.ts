@@ -71,7 +71,7 @@ test('a larger font size scales the page and still fits the window', async ({ pa
 
 test('dark theme and compact density apply at once and survive a reload', async ({ page }) => {
   await open(page, '/settings', 'Settings');
-  await page.getByRole('button', { name: 'Appearance' }).click();
+  await page.getByRole('tab', { name: 'This browser' }).click();
   await page.getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Dark' }).click();
   await page.getByRole('group', { name: 'Table density' }).getByRole('button', { name: 'Compact' }).click();
   await page.reload();

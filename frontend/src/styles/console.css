@@ -1486,3 +1486,212 @@ body.side-collapsed .side-foot .popover.above {
     width: 260px;
   }
 }
+
+/* Settings (SettingsPage.tsx): a tab per area under the title, a tinted read-only line, and per group a small
+   heading over hairline-separated rows - the name, its variable (a button that copies it) and description on the
+   left, the value in a fixed column on the right, so values line up; under it a "Set by" tag only when something set
+   it. Narrower than a comfortable two columns, the value goes under the description. */
+.settings-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-tabbar .subtabs {
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.settings-tabbar .subtabs button {
+  font-size: 13.5px;
+}
+.settings-tabbar .subtabs button.on {
+  font-weight: 600;
+}
+.settings-tabbar .subtabs button.on::after {
+  background: var(--accent);
+}
+#settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  container-type: inline-size;
+}
+.set-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.set-note svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.set-note strong {
+  color: var(--ink);
+}
+.set-note code {
+  font: 12px var(--mono);
+  color: var(--ink);
+}
+.set-group h2 {
+  margin: 0;
+  padding: 0 0 10px;
+  font: 600 12px var(--sans);
+  color: var(--ink-3);
+}
+.set-group-desc {
+  margin: -4px 0 10px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  max-width: 760px;
+}
+.set-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
+  gap: 10px 48px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+@container (max-width: 760px) {
+  .set-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.set-item.dim {
+  opacity: 0.55;
+}
+.set-item-what {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.set-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+}
+.set-item-title h3 {
+  margin: 0;
+  font: 600 13.5px var(--sans);
+  color: var(--ink);
+}
+.set-env {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 11.5px var(--mono);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.set-env:hover,
+.set-env:focus-visible {
+  color: var(--ink);
+}
+.set-env svg,
+.set-item-meta svg,
+#copy-env svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#copy-env {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+#copy-env svg {
+  width: 13px;
+  height: 13px;
+}
+.set-item-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.set-item-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.set-text {
+  font: 12.5px var(--mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.set-long {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font: 12px/1.6 var(--mono);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.set-bool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.set-dot {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 50%;
+}
+.set-dot.on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.set-unset {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.set-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.set-item-meta .btn-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  text-decoration: none;
+}
+.tag.set-by {
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
