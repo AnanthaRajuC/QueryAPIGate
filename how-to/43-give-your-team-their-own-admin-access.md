@@ -29,8 +29,8 @@ In Docker: `docker compose exec queryapigate queryapigate admins create alice --
 days unless you pass `--expires YYYY-MM-DD` (or `never`, for automation that rotates its own).
 
 Alice signs in by pasting the token into the Console's sign-in page, the first thing a tab without one sees - the
-sidebar then says **Signed in as alice · Owner**, and **Sign out** beside it ends that - or by sending it as
-`X-API-Key`:
+account button at the foot of the sidebar then says **alice**, *Owner · this tab*, and **Sign out** in its menu ends
+that - or by sending it as `X-API-Key`:
 
 ```bash
 curl http://127.0.0.1:5000/api/v1/me -H 'X-API-Key: qagadm_9-2f...'

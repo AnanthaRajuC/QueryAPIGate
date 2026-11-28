@@ -16,11 +16,13 @@ test('a developer, created in the Console, signs in with their own token', async
   await expect(page.locator('#administrators-table tr[data-name="e2e-dev"]')).toContainText('Developer');
 
   try {
-    // sign in as them, in the sidebar's key box
+    // sign in as them, from the sidebar's account menu
+    await page.getByRole('button', { name: /^Account:/ }).click();
     await page.locator('#key-change').click();
     await page.locator('#key').fill(secret);
     await page.locator('#save-key').click();
-    await expect(page.locator('#key-state')).toHaveText('Signed in as e2e-dev · Developer');
+    await expect(page.locator('#key-state')).toHaveText('e2e-dev');
+    await expect(page.getByRole('button', { name: 'Account: e2e-dev, Developer · this tab' })).toBeVisible();
     const nav = page.locator('#tabs');
     await expect(nav.getByRole('tab', { name: 'API', exact: true })).toBeVisible(); // the section holding API Repository
     // Access holds only the tabs a developer may open: not API keys

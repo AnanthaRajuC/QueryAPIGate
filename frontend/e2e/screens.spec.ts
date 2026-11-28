@@ -26,7 +26,12 @@ test('every sidebar screen renders its data', async ({ page, allowStatus }) => {
   allowStatus(404); // Help reads docs from GitHub at this version's tag, falling back to main
   await open(page, '/', 'Home');
   for (const [label, heading, marker, tab] of SCREENS) {
-    await page.locator('#tabs, .side-foot').getByRole('tab', { name: label, exact: false }).first().click();
+    if (label === 'Help') {
+      // Help is in the Help and docs menu, with the API docs and OpenAPI links
+      await page.getByRole('button', { name: 'Help and docs' }).click();
+      await page.getByRole('menuitem', { name: 'Help' }).click();
+    } else
+      await page.locator('#tabs, .side-foot').getByRole('tab', { name: label, exact: false }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
     if (tab) {
       const link = page.getByRole('navigation', { name: heading }).getByRole('link', { name: tab });

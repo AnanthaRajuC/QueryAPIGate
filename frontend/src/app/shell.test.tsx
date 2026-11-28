@@ -46,7 +46,9 @@ describe('Console shell - the classic frame', () => {
       }),
     });
     renderAt('/queries');
-    expect(await screen.findByText('Signed in as alice · Developer')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Account: alice, Developer · this tab' }),
+    ).toBeInTheDocument();
     const nav = screen.getByRole('tablist', { name: 'Sections' });
     const labels = [...nav.querySelectorAll('.nav-text')].map((n) => n.textContent);
     // no Delivery: a developer may open neither of its screens (each section holds only the tabs a role may open)
@@ -90,13 +92,24 @@ describe('Console shell - the classic frame', () => {
     expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
   });
 
-  it("opens API docs and OpenAPI in a new tab that keeps this tab's API key", () => {
+  it("has Help, API docs and OpenAPI in one menu - the docs in a new tab that keeps this tab's API key", async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');
-    for (const name of ['API docs', 'OpenAPI']) {
-      const link = screen.getByRole('link', { name: new RegExp(name) });
-      expect(link).toHaveAttribute('target', '_blank');
-      expect(link).toHaveAttribute('rel', 'opener'); // noopener would start /docs with empty sessionStorage
+    const foot = document.querySelector<HTMLElement>('.side-foot')!;
+    expect(within(foot).queryByRole('link')).toBeNull(); // nothing of it until it's opened
+    const button = within(foot).getByRole('button', { name: 'Help and docs' });
+    expect(button).toHaveAttribute('aria-haspopup', 'menu');
+    await userEvent.click(button);
+    const menu = screen.getByRole('menu', { name: 'Help and docs' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Help', 'API docs/docs', 'OpenAPI.json']);
+    for (const [item, href] of [
+      [items[1]!, '/docs'],
+      [items[2]!, '/openapi.json'],
+    ] as const) {
+      expect(item).toHaveAttribute('href', href);
+      expect(item).toHaveAttribute('target', '_blank');
+      expect(item).toHaveAttribute('rel', 'opener'); // noopener would start /docs with empty sessionStorage
     }
   });
 
@@ -107,7 +120,10 @@ describe('Console shell - the classic frame', () => {
     // Await each page settling before leaving it: some tabs (API keys) load data-heavy pages whose async
     // queries, if still resolving as we navigate on, re-render mid-transition and can race the collapse toggle.
     const open = async (tab: RegExp, heading: string) => {
-      await userEvent.click(screen.getByRole('tab', { name: tab }));
+      if (heading === 'Help') {
+        await userEvent.click(screen.getByRole('button', { name: 'Help and docs' }));
+        await userEvent.click(screen.getByRole('menuitem', { name: 'Help' }));
+      } else await userEvent.click(screen.getByRole('tab', { name: tab }));
       await screen.findByRole('heading', { name: heading });
     };
     await open(/Help/, 'Help');
@@ -129,25 +145,58 @@ describe('Console shell - the classic frame', () => {
     expect(document.getElementById('crumb-page')).toHaveTextContent('API Repository');
   });
 
-  it('every sidebar item is a Console screen', async () => {
+  it('Help is a Console screen, and its entry is active there', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries');
-    await userEvent.click(screen.getByRole('tab', { name: /Help/ }));
+    const button = screen.getByRole('button', { name: 'Help and docs' });
+    expect(button).not.toHaveClass('active');
+    await userEvent.click(button);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Help' }));
     expect(await screen.findByRole('heading', { name: 'Help' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(button).toHaveClass('active');
   });
 
   it('applies an API key to this tab, in the same storage /docs uses', async () => {
     const { calls } = fakeBackend(baseRoutes());
     renderAt('/queries');
-    expect(screen.getByText('No API key')).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText('API key'), 'secret-key-1234567890');
-    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    // the account, at the foot: who this tab is, as a button opening a menu over it
+    const account = screen.getByRole('button', { name: 'Account: No API key, this tab' });
+    expect(account).toHaveAttribute('aria-haspopup', 'menu');
+    await userEvent.click(account);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Use an API key' }));
+    const form = screen.getByRole('dialog', { name: 'API key for this tab' });
+    const input = within(form).getByLabelText('Admin token or API key');
+    expect(input).toHaveFocus();
+    await userEvent.type(input, 'secret-key-1234567890');
+    await userEvent.click(within(form).getByRole('button', { name: 'Apply' }));
     expect(sessionStorage.getItem('queryapigate-key')).toBe('secret-key-1234567890');
-    expect(screen.getByText('API key applied')).toBeInTheDocument();
-    expect(document.getElementById('key-mask')).toHaveTextContent('••••••••7890');
+    expect(screen.queryByRole('dialog', { name: 'API key for this tab' })).toBeNull();
+    const applied = screen.getByRole('button', { name: 'Account: API key applied, this tab' });
+    expect(applied).toHaveFocus();
+    await userEvent.click(applied);
+    expect(document.getElementById('key-mask')).toHaveTextContent('••••7890');
+    expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Change key', 'Sign out']);
     await waitFor(() =>
       expect(calls.some((c) => c.headers.get('X-API-Key') === 'secret-key-1234567890')).toBe(true),
     );
+  });
+
+  it('closes the key form on Cancel and on Escape, changing nothing', async () => {
+    sessionStorage.setItem('queryapigate-key', 'kept-key-1234567890');
+    fakeBackend(baseRoutes());
+    renderAt('/queries');
+    const account = screen.getByRole('button', { name: /^Account:/ });
+    for (const close of ['Cancel', 'Escape']) {
+      await userEvent.click(account);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Change key' }));
+      await userEvent.type(screen.getByLabelText('Admin token or API key'), 'other');
+      if (close === 'Cancel') await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      else await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(account).toHaveFocus();
+      expect(sessionStorage.getItem('queryapigate-key')).toBe('kept-key-1234567890');
+    }
   });
 
   it('collapses the sidebar with its toggle, remembered like the classic UI', async () => {

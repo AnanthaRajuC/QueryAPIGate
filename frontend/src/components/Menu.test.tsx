@@ -71,6 +71,34 @@ describe('MenuButton', () => {
     expect(button).toHaveFocus();
   });
 
+  it('has links among its items, and opens over its button when asked', async () => {
+    render(
+      <MenuButton
+        label="Help and docs"
+        placement="above"
+        entries={[
+          { label: 'Help', onSelect: vi.fn() },
+          { label: 'API docs', hint: '/docs', href: '/docs', newTab: true },
+          { label: 'Same tab', href: '/elsewhere' },
+        ]}
+      >
+        ?icon
+      </MenuButton>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: '?icon' }));
+    const menu = screen.getByRole('menu', { name: 'Help and docs' });
+    expect(menu).toHaveClass('above');
+    await userEvent.keyboard('{ArrowDown}');
+    const docs = screen.getByRole('menuitem', { name: /^API docs/ });
+    expect(docs).toHaveFocus();
+    expect(docs.tagName).toBe('A');
+    expect(docs).toHaveAttribute('target', '_blank');
+    expect(docs.querySelector('.menu-hint')).toHaveTextContent('/docs');
+    const same = screen.getByRole('menuitem', { name: 'Same tab' });
+    expect(same).not.toHaveAttribute('target');
+    expect(same).not.toHaveAttribute('rel');
+  });
+
   it('closes on a press outside it', async () => {
     const { button } = setup();
     await userEvent.click(button);

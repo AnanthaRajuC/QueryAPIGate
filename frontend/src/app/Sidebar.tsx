@@ -1,9 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { getApiKey, setApiKey } from '@/auth/apiKey';
 import { signInUrl, signOut, useSession } from '@/auth/session';
+import { ChevronRightIcon, ChevronsUpDownIcon, KeyIcon, SignInIcon, SignOutIcon } from '@/components/icons';
+import { MenuButton, type MenuEntry } from '@/components/Menu';
+import { useDismiss } from '@/components/useDismiss';
 
 import { useCan, useHealth, useMe } from './data';
 import { AttentionBadge } from './navCounts';
@@ -139,31 +142,40 @@ export function Sidebar() {
       </nav>
       <StarCard />
       <div className="side-foot">
-        {FOOT_ITEMS.filter(shown).map((item) => button(item, 'nav'))}
-        <KeyDotNarrow />
-        {/* A new tab, so the Console stays open. rel="opener" because target="_blank" is noopener by default, and a
-            noopener tab starts with empty sessionStorage: /docs would lose this tab's API key. Same origin, so safe. */}
-        <a className="side-link" href="/docs" target="_blank" rel="opener">
-          API docs<span>/docs</span>
-        </a>
-        <a className="side-link" href="/openapi.json" target="_blank" rel="opener">
-          OpenAPI<span>.json</span>
-        </a>
-        <KeyPanel />
+        {FOOT_ITEMS.filter((item) => item.tab !== 'help' && shown(item)).map((item) => button(item, 'nav'))}
+        <HelpMenu active={active?.tab === 'help'} />
+        <AccountMenu />
       </div>
     </aside>
   );
 }
 
-function KeyDotNarrow() {
+/** Help and docs: one entry that opens a menu over it - the Help screen, and the API's docs and OpenAPI description in
+ * a new tab, so the Console stays open (with this tab's API key: MenuEntry's newTab). In the icon rail the menu opens
+ * beside the icon. */
+function HelpMenu({ active }: { active: boolean }) {
+  const navigate = useNavigate();
+  const help = FOOT_ITEMS.find((item) => item.tab === 'help')!;
   return (
-    <div className="key-dot-only" title="API key applied to this tab">
-      <span className={`dot ${getApiKey() ? 'ok' : 'off'}`} id="key-dot-narrow" />
-    </div>
+    <MenuButton
+      label="Help and docs"
+      placement="above"
+      className={active ? 'nav help-menu active' : 'nav help-menu'}
+      entries={[
+        { label: 'Help', onSelect: () => navigate(help.path) },
+        { label: 'API docs', hint: '/docs', href: '/docs', newTab: true },
+        { label: 'OpenAPI', hint: '.json', href: '/openapi.json', newTab: true },
+      ]}
+    >
+      <span className="nav-abbr">{help.icon}</span>
+      <span className="nav-text">Help and docs</span>
+      <span className="nav-chevron">
+        <ChevronRightIcon />
+      </span>
+    </MenuButton>
   );
 }
 
-/** The API key for this tab - the same sessionStorage entry /ui and /docs use (ui.py #key-panel). */
 const ROLE_LABEL: Record<string, string> = {
   owner: 'Owner',
   admin: 'Admin',
@@ -171,33 +183,45 @@ const ROLE_LABEL: Record<string, string> = {
   auditor: 'Auditor',
 };
 
-/** Who the key in this tab signs in as: an administrator by name, the shared break-glass key, or an open server. */
-function identity(me: ReturnType<typeof useMe>['data'], key: string) {
-  if (!me) return key ? 'API key applied' : 'No API key';
+/** Who this tab is, as the account button says it: a name, and a line under it. */
+function who(me: ReturnType<typeof useMe>['data'], key: string): { name: string; detail: string } {
+  if (!me) return { name: key ? 'API key applied' : 'No API key', detail: 'this tab' };
   // no role here: only in workspaces (ADR 0023)
   const role = me.role === null ? 'Workspaces only' : (ROLE_LABEL[me.role] ?? me.role);
-  if (me.via === 'token') return `Signed in as ${me.name} · ${role}`;
-  if (me.via === 'sso') return `Signed in as ${me.name} · ${role} via SSO`;
-  if (me.via === 'break-glass') return 'Shared admin key (owner)';
-  return 'No API key needed';
+  if (me.via === 'token') return { name: me.name ?? 'Admin token', detail: `${role} · this tab` };
+  if (me.via === 'sso') return { name: me.name ?? 'Signed in', detail: `${role} via SSO` };
+  if (me.via === 'break-glass') return { name: 'Shared admin key', detail: 'Owner · this tab' };
+  return { name: 'No API key needed', detail: 'an open server' };
 }
 
-function KeyPanel() {
+/** The account, at the foot of the sidebar: who this tab is, as a button that opens a menu over it - Change key and
+ * Sign out, or Sign in with SSO. The key is this tab's: the same sessionStorage entry /docs uses. Change key opens a
+ * small form where the menu was; in the icon rail the button is the dot alone, and both open beside it. */
+function AccountMenu() {
   const queryClient = useQueryClient();
   const me = useMe();
   const session = useSession();
   const [key, setKey] = useState(getApiKey);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const showView = Boolean(key) && !editing;
+  const wrap = useRef<HTMLDivElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const closeForm = useCallback((refocus: boolean) => {
+    setEditing(false);
+    setDraft('');
+    if (refocus) wrap.current?.querySelector<HTMLElement>('.account')?.focus();
+  }, []);
+  useDismiss(editing, [form], closeForm);
+  useEffect(() => {
+    if (editing) form.current?.querySelector('input')?.focus();
+  }, [editing]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const value = draft.trim();
     setApiKey(value);
     setKey(value);
-    setDraft('');
-    setEditing(false);
+    closeForm(true);
     // Who this key is, asked afresh - its readers see it emptied at once and refetched - and only then everything
     // else, so nothing is fetched (or shown) on the previous key's role.
     void queryClient.resetQueries({ queryKey: ['me'] }).finally(() => queryClient.invalidateQueries());
@@ -221,59 +245,95 @@ function KeyPanel() {
     else globalThis.location.reload();
   }
 
+  const { name, detail } = who(me.data, key);
+  const email = viaSso ? (session.data?.email ?? session.data?.admin) : undefined;
+  const entries: MenuEntry[] = viaSso
+    ? [{ label: 'Sign out', icon: <SignOutIcon />, id: 'sso-sign-out', onSelect: () => void leave() }]
+    : key
+      ? [
+          { label: 'Change key', icon: <KeyIcon />, id: 'key-change', onSelect: () => setEditing(true) },
+          { label: 'Sign out', icon: <SignOutIcon />, id: 'key-sign-out', onSelect: forget },
+        ]
+      : [
+          {
+            label: 'Sign in with SSO',
+            icon: <SignInIcon />,
+            id: 'sso-sign-in',
+            href: signInUrl(),
+            hidden: !sso,
+            onSelect: () => setApiKey(''), // the session, not a key, from here on
+          },
+          { label: 'Use an API key', icon: <KeyIcon />, id: 'key-change', onSelect: () => setEditing(true) },
+        ];
+
   return (
-    <div id="key-panel">
-      <div className="kp-state">
+    <div id="key-panel" className="account-wrap" ref={wrap}>
+      <MenuButton
+        label={`Account: ${name}, ${detail}`}
+        placement="above"
+        className="account"
+        header={
+          <div className="account-head">
+            <div>
+              <div className="account-name">{name}</div>
+              <div className="account-detail">{detail}</div>
+              {email && email !== name && <div className="account-detail">{email}</div>}
+            </div>
+            {key && (
+              <span
+                className="account-mask"
+                id="key-mask"
+                title="This tab's API key, its last four characters"
+              >
+                {'••••' + (key.length >= 16 ? key.slice(-4) : '')}
+              </span>
+            )}
+          </div>
+        }
+        entries={entries}
+      >
         <span className={`dot ${key || viaSso ? 'ok' : 'off'}`} id="key-dot" />
-        <span id="key-state">{identity(me.data, key)}</span>
-        <span className="scope">this tab</span>
-      </div>
-      {sso && viaSso && (
-        <div className="kp-row">
-          <span className="kp-mask">{session.data?.email ?? session.data?.admin}</span>
-          <button type="button" id="sso-sign-out" onClick={() => void leave()}>
-            Sign out
-          </button>
-        </div>
-      )}
-      {sso && !viaSso && !key && (
-        <div className="kp-row">
-          <a
-            className="btn primary sm"
-            id="sso-sign-in"
-            href={signInUrl()}
-            onClick={() => setApiKey('')} // the session, not a key, from here on
-          >
-            Sign in with SSO
-          </a>
-          <span className="dim kp-or">or a token below</span>
-        </div>
-      )}
-      <div className="kp-row" id="key-view" hidden={!showView}>
-        <span className="kp-mask" id="key-mask">
-          {'••••••••' + (key.length >= 16 ? key.slice(-4) : '')}
+        <span className="account-text">
+          <span className="account-name" id="key-state">
+            {name}
+          </span>
+          <span className="account-detail">{detail}</span>
         </span>
-        <button type="button" id="key-change" onClick={() => setEditing(true)}>
-          Change
-        </button>
-        <button type="button" id="key-sign-out" onClick={forget}>
-          Sign out
-        </button>
-      </div>
-      <form id="key-bar" autoComplete="off" hidden={showView || viaSso} onSubmit={submit}>
-        <input
-          id="key"
-          type="password"
+        <span className="account-chevron">
+          <ChevronsUpDownIcon />
+        </span>
+      </MenuButton>
+      {editing && (
+        <form
+          ref={form}
+          id="key-bar"
+          className="popover above"
+          role="dialog"
+          aria-label="API key for this tab"
           autoComplete="off"
-          placeholder="X-API-Key"
-          aria-label="API key"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <button id="save-key" type="submit">
-          Apply
-        </button>
-      </form>
+          onSubmit={submit}
+        >
+          <label className="account-form-label" htmlFor="key">
+            Admin token or API key
+          </label>
+          <input
+            id="key"
+            type="password"
+            autoComplete="off"
+            placeholder="X-API-Key"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="account-form-actions">
+            <button type="button" className="btn sm" onClick={() => closeForm(true)}>
+              Cancel
+            </button>
+            <button id="save-key" className="btn primary sm" type="submit" disabled={!draft.trim()}>
+              Apply
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
