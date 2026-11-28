@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router';
 import { api, unwrap } from '@/api/client';
 import { useAllQueries, useCan, useCollections, useConnections } from '@/app/data';
 import { useFeedback } from '@/app/feedback';
+import { DEFAULT_WORKSPACE, getWorkspace } from '@/auth/workspace';
 
 import { NewCollectionForm, QueryForm } from './forms';
 import { QueryDetail } from './QueryDetail';
@@ -74,21 +75,26 @@ export function RepositoryPage() {
 
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
+/** The examples are the server's - the default workspace's APIs and the example workspace beside them - so the line
+ * about them is in `default` alone: in `example-stores` it would count default's queries over a list of its own. */
 function ExamplesStrip() {
   const can = useCan();
   const client = useQueryClient();
   const { toast, showError } = useFeedback();
+  const inDefault = getWorkspace() === DEFAULT_WORKSPACE;
   const examples = useQuery({
     queryKey: ['examples'],
     queryFn: async () => unwrap(await api.GET('/api/v1/examples')),
     retry: false,
+    enabled: inDefault,
   });
   const collections = useCollections();
   const connections = useConnections();
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const st = examples.data;
-  if (!st || (!st.loaded && !st.partial) || !can('examples.write')) return <div id="examples-strip" hidden />;
+  if (!inDefault || !st || (!st.loaded && !st.partial) || !can('examples.write'))
+    return <div id="examples-strip" hidden />;
 
   const refreshAll = () => {
     client.invalidateQueries();

@@ -241,6 +241,13 @@ otherwise be kept until 2.0.
 
 Found in a review of what 1.0.0-rc1 would freeze.
 
+- **Seen from the example workspace, the examples looked partly loaded - and finishing them copied them there.** The
+  examples' status, load and remove acted in the workspace the request was in. A server-wide owner looking at
+  `example-stores` saw only its two queries, so API Repository said "only partly loaded", and **Finish loading**
+  installed the default workspace's example queries, roles and keys into `example-stores`. The examples are the
+  server's - `default`'s and the example workspace beside them - so `/api/v1/examples` acts on them whichever
+  workspace it's asked from (`/w/<workspace>/api/v1/examples` too), and is audited in `default`. The Console shows the
+  examples line in `default` alone. Since the example workspace (#212, not yet released).
 - **A saved query read through the Management API lost its parameters' `example` and `embed`.** The v1 parameter
   rule gave every other rule but those two, so saving back what was read - by a client, configuration as code's export
   or a bundle - dropped them, and `config diff` couldn't see a change to them. Both are given now, `embed` in the

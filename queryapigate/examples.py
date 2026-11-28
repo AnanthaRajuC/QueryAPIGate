@@ -42,6 +42,7 @@ counters or the API Keys/Connections "Usage" columns: those are documented as li
 every restart, and synthesizing them would only last until the next one while quietly changing what they
 honestly mean.
 """
+import functools
 import os
 import random
 import sqlite3
@@ -388,6 +389,18 @@ def _marked_connection():
     return store.read_connections().get(CONNECTION)
 
 
+def _in_default(function):
+    """The examples are the server's, not a workspace's: the default workspace's connection, queries, roles and keys,
+    and the example workspace beside it. So status(), load() and unload() act in `default` whatever workspace the
+    request is in - an owner looking at `example-stores` would otherwise see only its part (a "partial" load), and
+    finishing it would install the default examples into `example-stores`."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        with scope.using(db.DEFAULT_WORKSPACE):
+            return function(*args, **kwargs)
+    return wrapper
+
+
 def _example_admins():
     """The examples' administrators: made by the examples, whatever has become of their memberships since."""
     return sorted(a['name'] for a in admins.list_admins() if a['created_by'] == AUTHOR)
@@ -419,6 +432,7 @@ def _workspace_status():
             'members': sorted(name for name in _example_admins() if name in members)}
 
 
+@_in_default
 def status():
     """What is installed right now. ``loaded`` means all of it (the connection, every query, every role and
     every key, and the example workspace with its own and its members); a partly installed state - an interrupted
@@ -595,6 +609,7 @@ def _install_workspace():
     return added, here['key_secrets'], tokens
 
 
+@_in_default
 def load(now=None):
     """Install the examples. Idempotent (what is already there is left alone, so re-running never adds versions) and
     completes an interrupted load. Refuses, changing nothing, if something of yours holds an example's name.
@@ -645,6 +660,7 @@ def _remove_here(state):
     return removed
 
 
+@_in_default
 def unload():
     """Remove exactly what is marked as an example: its queries, roles, keys and connection (and the database
     file), and the example workspace - what it holds of the examples', its members, and the workspace itself once

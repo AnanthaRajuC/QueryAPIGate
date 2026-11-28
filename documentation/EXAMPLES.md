@@ -29,7 +29,7 @@ called `examples`.
 | `queryapigate examples unload` | Remove exactly what was installed - the queries, roles, keys, connection and database file, and the example workspace's members, and the workspace itself unless something of yours is in it. |
 | `queryapigate examples status` | Say whether they are loaded (`Loaded`, `Partly loaded`, or `Not loaded`). |
 | `QUERYAPIGATE_LOAD_EXAMPLES=yes` | Load them at server start - for a container (`docker run -e QUERYAPIGATE_LOAD_EXAMPLES=yes -v qag:/data ...`). Idempotent across restarts. Unset, or `no`, leaves things as they are: it never removes anything - use `unload`. |
-| Admin UI | Once loaded, API Repository shows an "Example APIs are loaded" bar with **Remove examples** (and **Finish loading** after an interrupted load). Loading itself is the command above, the variable below or the API. |
+| Admin UI | Once loaded, API Repository in the `default` workspace shows an "Example data is loaded" line with **Remove examples** (and **Finish loading** after an interrupted load). Loading itself is the command above, the variable below or the API. |
 | `POST` / `DELETE` / `GET /api/v1/examples` | The same, over [HTTP](API.md#example-apis). Loading and removing take a server-wide **owner** (the shared key is one): they make and remove administrators. |
 
 Everything installed is **marked `example`** (`"example": true` on each query, role, key and connection; the example
@@ -179,7 +179,9 @@ curl 'http://127.0.0.1:5000/api/v1/queries'                        -H 'X-API-Key
 
 A key acts in its own workspace, so the `example-stores` key needs no `/w/...` in the path; an administrator names
 the workspace (`/w/example-stores/...`), as the Console does for them. Loading the examples is what turns
-workspaces on, so the server logs that this experimental feature is in use.
+workspaces on, so the server logs that this experimental feature is in use. The examples themselves are the
+server's, not a workspace's: `/api/v1/examples` loads, removes and reports `default`'s examples and this workspace
+together, whichever workspace it's asked from.
 
 `unload` removes the workspace's example queries, role, key and connection, its three members (their tokens and
 memberships with them), and then the workspace - unless something of yours is in it, which stays, with the

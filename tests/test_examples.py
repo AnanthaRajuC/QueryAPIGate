@@ -499,6 +499,28 @@ class WorkspaceEndToEndTests(ExamplesTestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.get_json()['admin_tokens'], {})  # already there: no new tokens
 
+    def test_asked_from_the_example_workspace_they_are_the_servers_examples(self):
+        # The Console asks from the workspace it is in: an owner in example-stores once saw a "partial" load, and
+        # finishing it installed the default examples, roles and keys into example-stores.
+        path = f'/w/{examples.WORKSPACE}/api/v1/examples'
+        state = self.client.get(path, headers=self.admin).get_json()
+        self.assertEqual((state['loaded'], state['partial']), (True, False))
+        self.assertEqual(state['queries'], sorted(examples.QUERY_NAMES))
+        res = self.client.post(path, headers=self.admin)
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(res.get_json()['added']['queries'], [])
+        with scope.using(examples.WORKSPACE):
+            self.assertEqual(sorted(store.example_query_names()), sorted(examples.WORKSPACE_QUERY_NAMES))
+            self.assertEqual(sorted(apikeys.list_keys()), sorted(examples.WORKSPACE_KEY_NAMES))
+        res = self.client.delete(path, headers=self.admin)
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True))
+        self.assertEqual(sorted(res.get_json()['removed']['queries']), sorted(examples.QUERY_NAMES))
+        self.assertTrue(res.get_json()['removed']['workspace']['workspace'])
+        self.assertEqual(list(store.example_query_names()), [])
+        actions = [(e['action'], e['workspace'])
+                   for e in self.client.get('/api/v1/audit', headers=self.admin).get_json()['items']]
+        self.assertIn(('unload_examples', 'default'), actions)  # audited in default, where the examples are
+
 
 class RunTests(ExamplesTestCase):
     """The examples are only worth shipping if they work: every query, with the example values its own rules

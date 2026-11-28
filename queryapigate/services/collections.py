@@ -6,7 +6,7 @@ A collection is a name a saved query is filed under (moving a query is a change 
 and its Postman export. The example APIs are a marked set of connection, queries, roles and keys that can be installed
 and removed as a unit. Every change is audited exactly as the legacy routes audit theirs.
 """
-from .. import adminroles, collection_admin, examples, postman, store
+from .. import adminroles, collection_admin, db, examples, postman, scope, store
 from ..errors import ApiError
 
 
@@ -66,7 +66,13 @@ def examples_status():
 
 def load_examples(actor):
     """Install the examples (idempotent; completes an interrupted load). The example keys' secrets and the example
-    workspace's members' admin tokens are in the result, shown this once."""
+    workspace's members' admin tokens are in the result, shown this once. In `default` from whichever workspace it is
+    asked (examples.py), audited there too."""
+    with scope.using(db.DEFAULT_WORKSPACE):
+        return _load_examples(actor)
+
+
+def _load_examples(actor):
     try:
         added = examples.load()
     except ApiError as error:
@@ -82,7 +88,12 @@ def load_examples(actor):
 
 def unload_examples(actor):
     """Remove exactly what is marked as an example. `keys_still_granted`: other keys granted an example collection,
-    whose grant is now inert."""
+    whose grant is now inert. In `default`, audited there, as load_examples()."""
+    with scope.using(db.DEFAULT_WORKSPACE):
+        return _unload_examples(actor)
+
+
+def _unload_examples(actor):
     removed = examples.unload()
     if examples.removed_anything(removed):
         store.record_audit(actor, 'unload_examples', 'examples', removed)
