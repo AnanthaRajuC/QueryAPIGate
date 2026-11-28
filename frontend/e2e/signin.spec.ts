@@ -17,9 +17,12 @@ test('a tab with no key signs in first, and signs out back to it', async ({ page
 
   await page.getByLabel('Admin token or API key').fill(ADMIN_KEY);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.locator('#key-state')).toHaveText('Shared admin key (owner)');
+  await expect(
+    page.getByRole('button', { name: 'Account: Shared admin key, Owner · this tab' }),
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Sign in to the Console' })).toHaveCount(0);
 
+  await page.getByRole('button', { name: /^Account:/ }).click();
   await page.locator('#key-sign-out').click();
   await expect(page.getByRole('heading', { name: 'Sign in to the Console' })).toBeVisible();
 });

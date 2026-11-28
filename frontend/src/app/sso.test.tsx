@@ -58,9 +58,11 @@ describe('Console sign-in through SSO', () => {
       'GET /auth/session': () => ({ sso: true, signed_in: false, sso_only: false }),
     });
     renderAt('/alerts');
-    const link = await screen.findByRole('link', { name: 'Sign in with SSO' });
+    await userEvent.click(await screen.findByRole('button', { name: /^Account:/ }));
+    const link = await screen.findByRole('menuitem', { name: 'Sign in with SSO' });
     expect(link.getAttribute('href')).toMatch(/^\/auth\/sso\/login\?next=/);
-    expect(screen.getByLabelText('API key')).toBeInTheDocument(); // a token still works
+    // a token still works
+    expect(screen.getByRole('menuitem', { name: 'Use an API key' })).toBeInTheDocument();
   });
 
   it('signed in, every request carries the CSRF token and no key; signing out ends it', async () => {
@@ -73,15 +75,17 @@ describe('Console sign-in through SSO', () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...globalThis.location, reload, assign: vi.fn() });
     renderAt('/');
-    expect(await screen.findByText('Signed in as alice · Owner via SSO')).toBeInTheDocument();
+    const account = await screen.findByRole('button', { name: 'Account: alice, Owner via SSO' });
     const apiCalls = calls.filter((c) => c.path.startsWith('/api/v1/'));
     expect(apiCalls.length).toBeGreaterThan(0);
     for (const call of apiCalls) {
       expect(call.headers.get('X-QAG-CSRF')).toBe('the-csrf-token');
       expect(call.headers.get('X-API-Key')).toBeNull();
     }
-    expect(screen.queryByLabelText('API key')).not.toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    await userEvent.click(account);
+    // signed in by the session, not a key: nothing to change, only signing out
+    expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Sign out']);
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
     await waitFor(() => expect(reload).toHaveBeenCalled());
     expect(calls.find((c) => c.path === '/auth/sso/logout')!.headers.get('X-QAG-CSRF')).toBe(
       'the-csrf-token',
@@ -96,7 +100,9 @@ describe('Console sign-in through SSO', () => {
       'GET /api/v1/me': me('token'),
     });
     renderAt('/');
-    expect(await screen.findByText('Signed in as alice · Owner')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Account: alice, Owner · this tab' }),
+    ).toBeInTheDocument();
     const call = calls.find((c) => c.path === '/api/v1/me')!;
     expect(call.headers.get('X-API-Key')).toBe('qagadm_key');
     expect(call.headers.get('X-QAG-CSRF')).toBeNull();

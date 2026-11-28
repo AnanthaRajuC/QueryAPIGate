@@ -36,6 +36,44 @@ export function ChevronLeftIcon() {
   );
 }
 
+export function ChevronRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/** The account button's: it opens a menu, up or down. */
+export function ChevronsUpDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m8 9 4-4 4 4" />
+      <path d="m8 15 4 4 4-4" />
+    </svg>
+  );
+}
+
+export function SignOutIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  );
+}
+
+export function SignInIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+      <path d="m10 17 5-5-5-5" />
+      <path d="M15 12H3" />
+    </svg>
+  );
+}
+
 /** "More actions": three dots, for a ⋯ menu (MenuButton). */
 export function MoreIcon() {
   return (

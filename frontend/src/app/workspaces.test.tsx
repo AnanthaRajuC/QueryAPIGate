@@ -124,7 +124,7 @@ describe('workspaces in the Console', () => {
     });
     renderAt('/');
     await waitFor(() => expect(getWorkspace()).toBe('team-b'));
-    expect(await screen.findByText('Signed in as bea · Admin')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Account: bea, Admin · this tab' })).toBeInTheDocument();
     // nothing but "who am I" was asked of default, where bea has no role: no screen, count or bell drew a 403 there
     const inDefault = paths(calls).filter((p) => p.startsWith('/api/v1/'));
     expect(inDefault.every((p) => p === '/api/v1/me')).toBe(true);

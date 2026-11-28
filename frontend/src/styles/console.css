@@ -1266,7 +1266,11 @@ body.side-collapsed .ws-chip.rail-only {
   min-width: 210px;
   padding: 4px;
 }
-.menu-pop button {
+.menu-pop button,
+.menu-pop a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 7px 10px;
   border: 0;
   border-radius: 5px;
@@ -1275,10 +1279,13 @@ body.side-collapsed .ws-chip.rail-only {
   font: 500 12.5px var(--sans);
   text-align: left;
   white-space: nowrap;
+  text-decoration: none;
   cursor: pointer;
 }
 .menu-pop button:hover,
-.menu-pop button:focus {
+.menu-pop button:focus,
+.menu-pop a:hover,
+.menu-pop a:focus {
   background: var(--surface-2);
   outline: none;
 }
@@ -1288,6 +1295,34 @@ body.side-collapsed .ws-chip.rail-only {
 .menu-pop button.danger:hover,
 .menu-pop button.danger:focus {
   background: var(--danger-soft);
+}
+.menu-pop .menu-label {
+  flex: 1;
+}
+.menu-pop .menu-hint {
+  font: 11px var(--mono);
+  color: var(--ink-3);
+}
+.menu-pop .menu-icon {
+  display: inline-flex;
+  color: var(--ink-2);
+}
+.menu-pop .menu-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* over its button, left edges aligned (the sidebar's Help and docs, and account) */
+.menu-pop.above,
+.popover.above {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
 }
 .menu-pop .menu-note {
   padding: 7px 10px;
@@ -1308,4 +1343,146 @@ body.side-collapsed .ws-chip.rail-only {
 .popover {
   width: 240px;
   padding: 12px;
+}
+
+/* The sidebar's foot (Sidebar.tsx): Help and docs, a nav entry with a chevron, and the account - who this tab is, as a
+   button. Each opens its menu over it, as wide as the foot; in the icon rail (collapsed, or a narrow window) the
+   entry is its icon and the account its dot, and the menus open beside them. */
+.side-foot .menu-anchor {
+  display: flex;
+}
+.side-foot .menu-pop.above,
+.side-foot .popover.above {
+  right: 0;
+  width: auto;
+}
+.nav-chevron,
+.account-chevron {
+  display: inline-flex;
+  color: var(--ink-3);
+}
+.nav-chevron svg,
+.account-chevron svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.account-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+.account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.account:hover,
+.account[aria-expanded='true'] {
+  background: var(--surface-2);
+}
+.account-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.account-name {
+  overflow: hidden;
+  font: 600 12.5px var(--sans);
+  color: var(--ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.account-detail {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.account-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -4px 4px;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.account-head > div {
+  min-width: 0;
+}
+.account-mask {
+  font: 11px var(--mono);
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+#key-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.account-form-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+#key-bar input {
+  font: 12px var(--mono);
+}
+.account-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+body.side-collapsed .nav-chevron,
+body.side-collapsed .account-text,
+body.side-collapsed .account-chevron {
+  display: none;
+}
+body.side-collapsed .account {
+  justify-content: center;
+  padding: 10px 0;
+  border-color: transparent;
+  background: none;
+}
+body.side-collapsed .side-foot .menu-pop.above,
+body.side-collapsed .side-foot .popover.above {
+  right: auto;
+  bottom: 0;
+  left: calc(100% + 8px);
+  width: 260px;
+}
+@media (max-width: 980px) {
+  .nav-chevron,
+  .account-text,
+  .account-chevron {
+    display: none;
+  }
+  .account {
+    justify-content: center;
+    padding: 10px 0;
+    border-color: transparent;
+    background: none;
+  }
+  .side-foot .menu-pop.above,
+  .side-foot .popover.above {
+    right: auto;
+    bottom: 0;
+    left: calc(100% + 8px);
+    width: 260px;
+  }
 }

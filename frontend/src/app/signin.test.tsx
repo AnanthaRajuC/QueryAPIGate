@@ -45,7 +45,7 @@ describe('the sign-in page', () => {
     await waitFor(() => expect(shell()).not.toBeNull());
     expect(screen.queryByRole('heading', { name: 'Sign in to the Console' })).toBeNull();
     expect(getApiKey()).toBe('tok_alice'); // this tab's key, as the sidebar's panel keeps it
-    await waitFor(() => expect(document.getElementById('key-state')).toHaveTextContent('Signed in as alice'));
+    await waitFor(() => expect(document.getElementById('key-state')).toHaveTextContent('alice'));
   });
 
   it('says so when a token is refused, and stays', async () => {
@@ -116,7 +116,8 @@ describe('the sign-in page', () => {
     setApiKey('tok_alice');
     fakeBackend({ ...baseRoutes(), 'GET /api/v1/me': meFor('tok_alice') });
     renderAt('/');
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Account: alice/ }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in to the Console' })).toBeInTheDocument();
     expect(getApiKey()).toBe('');
   });

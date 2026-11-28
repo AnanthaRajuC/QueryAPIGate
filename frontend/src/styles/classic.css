@@ -81,24 +81,11 @@
   .side-link { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 10px; border-radius: 6px; font-size: 12.5px; }
   .side-link:hover { background: var(--surface-2); }
   .side-link span { font: 11px var(--mono); color: var(--ink-3); }
-  .side-foot .key-dot-only { display: none; justify-content: center; padding: 10px 0 4px; }
-  #key-panel { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); display: flex; flex-direction: column; gap: 8px; }
-  .kp-state { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-2); }
-  .kp-state .scope { margin-left: auto; color: var(--ink-3); }
-  .kp-row { display: flex; align-items: center; gap: 6px; }
-  .kp-or { font-size: 11px; }
-  #sso-sign-in { text-decoration: none; }
-  .kp-mask { flex: 1; font: 12px var(--mono); color: var(--ink); letter-spacing: 0.08em; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  #key-change, #save-key { height: 24px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font: 500 12px var(--sans); cursor: pointer; }
-  #key-change:hover, #save-key:hover { background: var(--surface-2); }
-  #key-bar { display: flex; align-items: center; gap: 6px; margin: 0; }
-  #key-bar input { height: 24px; font: 12px var(--mono); padding: 0 7px; }
   body.side-collapsed .side-head { justify-content: center; padding: 0; }
   body.side-collapsed .wordmark, body.side-collapsed .health, body.side-collapsed .nav-label, body.side-collapsed .nav-text,
-  body.side-collapsed #tabs .count, body.side-collapsed .side-link, body.side-collapsed #key-panel { display: none; }
+  body.side-collapsed #tabs .count, body.side-collapsed .side-link { display: none; }
   body.side-collapsed .wordmark-short, body.side-collapsed .nav-rule { display: block; }
   body.side-collapsed .nav-abbr { display: inline; }
-  body.side-collapsed .side-foot .key-dot-only { display: flex; }
   body.side-collapsed #tabs button, body.side-collapsed .side-foot button.nav { justify-content: center; padding: 0; }
 
   /* ---- top bar ---- */
@@ -496,10 +483,9 @@
   @media (max-width: 980px) {
     body { --side-w: 60px; }
     .side-head { justify-content: center; padding: 0; }
-    .wordmark, .health, .nav-label, .nav-text, #tabs .count, .side-link, #key-panel, .star-cta { display: none; }
+    .wordmark, .health, .nav-label, .nav-text, #tabs .count, .side-link, .star-cta { display: none; }
     .wordmark-short, .nav-rule { display: block; }
     .nav-abbr { display: inline; }
-    .side-foot .key-dot-only { display: flex; }
     #tabs button, .side-foot button.nav { justify-content: center; padding: 0; }
     #side-toggle { display: none; }
     .search-wrap { display: none; }

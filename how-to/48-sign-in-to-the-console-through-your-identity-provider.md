@@ -93,7 +93,8 @@ The cookie alone is not enough - the same request without the CSRF token gets `4
 {"actor": "alice", "via": "sso", "action": "sign_in", "target": "alice", "changes": {"role": "admin", ...}}
 ```
 
-and every change she makes says `"via": "sso"`. **Sign out** ends the session here and at the provider.
+and every change she makes says `"via": "sso"`. **Sign out**, in the account menu at the foot of the sidebar, ends the
+session here and at the provider.
 
 ## Step 4: Someone with no role
 

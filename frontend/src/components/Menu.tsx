@@ -5,10 +5,24 @@ import { useDismiss } from './useDismiss';
 // A button that opens a menu of actions under it (the ⋯ menus). The menu follows the WAI-ARIA menu button pattern:
 // Enter, Space or ArrowDown on the button opens it with the first item focused; ArrowUp/ArrowDown move through the
 // items (wrapping), Home and End jump to the ends; Escape closes it and puts focus back on the button, and Tab closes
-// it and moves on. A pressed item closes the menu and then runs.
+// it and moves on. A pressed item closes the menu and then runs; a link item is a real link (middle-click, copy link).
+
+type Item = {
+  label: string;
+  title?: string;
+  /** An icon before the label. */
+  icon?: ReactNode;
+  id?: string;
+  /** Quiet text at the item's right ("/docs"). */
+  hint?: string;
+  hidden?: boolean;
+};
 
 export type MenuEntry =
-  | { label: string; title?: string; danger?: boolean; hidden?: boolean; onSelect: () => void }
+  | (Item & { danger?: boolean; onSelect: () => void })
+  /** A link. `newTab` opens it in a new tab with rel="opener" - for same-origin pages only: a noopener tab starts with
+   * empty sessionStorage, and /docs would lose this tab's API key. */
+  | (Item & { href: string; newTab?: boolean; onSelect?: () => void })
   /** A line that says something rather than doing something ("Granted to 2 keys"): reachable, not pressable. */
   | { note: string; title?: string }
   | 'separator';
@@ -17,12 +31,19 @@ export function MenuButton({
   label,
   entries,
   className = 'btn icon',
+  placement = 'below',
+  header,
   children,
 }: {
   /** The button's accessible name, and the menu's. */
   label: string;
   entries: MenuEntry[];
   className?: string;
+  /** Where the menu opens: under the button, its right edges aligned, or over it (the sidebar's foot). */
+  placement?: 'below' | 'above';
+  /** Something the menu says before its items (the account menu's who-you-are): not an item, not reachable by the
+   * arrow keys. */
+  header?: ReactNode;
   /** What the button shows: an icon, or text. */
   children: ReactNode;
 }) {
@@ -41,7 +62,7 @@ export function MenuButton({
   }, [open]);
 
   const shown = entries.filter((e) => e === 'separator' || !('hidden' in e) || !e.hidden);
-  if (!shown.some((e) => e !== 'separator' && 'onSelect' in e)) return null;
+  if (!shown.some((e) => e !== 'separator' && ('onSelect' in e || 'href' in e))) return null;
 
   const onMenuKey = (e: KeyboardEvent) => {
     const list = items(menu.current);
@@ -79,7 +100,15 @@ export function MenuButton({
         {children}
       </button>
       {open && (
-        <div ref={menu} id={id} className="menu-pop" role="menu" aria-label={label} onKeyDown={onMenuKey}>
+        <div
+          ref={menu}
+          id={id}
+          className={placement === 'above' ? 'menu-pop above' : 'menu-pop'}
+          role="menu"
+          aria-label={label}
+          onKeyDown={onMenuKey}
+        >
+          {header}
           {shown.map((entry, i) => {
             if (entry === 'separator') return <div key={i} role="separator" className="menu-sep" />;
             if ('note' in entry)
@@ -95,9 +124,39 @@ export function MenuButton({
                   {entry.note}
                 </div>
               );
+            const text =
+              entry.hint || entry.icon ? (
+                <>
+                  {entry.icon && <span className="menu-icon">{entry.icon}</span>}
+                  <span className="menu-label">{entry.label}</span>
+                  {entry.hint && <span className="menu-hint">{entry.hint}</span>}
+                </>
+              ) : (
+                entry.label
+              );
+            if ('href' in entry)
+              return (
+                <a
+                  key={i}
+                  id={entry.id}
+                  href={entry.href}
+                  role="menuitem"
+                  tabIndex={-1}
+                  title={entry.title}
+                  target={entry.newTab ? '_blank' : undefined}
+                  rel={entry.newTab ? 'opener' : undefined}
+                  onClick={() => {
+                    close(true);
+                    entry.onSelect?.();
+                  }}
+                >
+                  {text}
+                </a>
+              );
             return (
               <button
                 key={i}
+                id={entry.id}
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
@@ -108,7 +167,7 @@ export function MenuButton({
                   entry.onSelect();
                 }}
               >
-                {entry.label}
+                {text}
               </button>
             );
           })}
