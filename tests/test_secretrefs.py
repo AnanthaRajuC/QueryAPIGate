@@ -380,6 +380,7 @@ class ServerSecretFileTests(SecretTestCase):
             row = next(r for section in config.describe_settings() for r in section['rows']
                        if r['env'] == 'QUERYAPIGATE_API_KEY')
             self.assertEqual((row['value'], row['env_value']), ('configured (from QUERYAPIGATE_API_KEY_FILE)', None))
+            self.assertEqual((row['source'], row['secret']), ('file', True))  # set, by its file - not by env
             os.environ.pop('QUERYAPIGATE_API_KEY')
 
     def test_both_or_an_empty_file_is_refused(self):

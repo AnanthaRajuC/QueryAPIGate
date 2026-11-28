@@ -1,13 +1,14 @@
-// Which Settings section is open, kept while the page lives - as the classic tab, which only hides itself, did.
-let section = 'general';
+// Which Settings tab was open last, kept while the page lives - /settings opens it again, as the classic screen kept
+// its section. A tab has its own link too (/settings/<tab>).
+let tab = 'general';
 
-export const lastSection = () => section;
+export const lastTab = () => tab;
 
-export function rememberSection(id: string) {
-  section = id;
+export function rememberTab(id: string) {
+  tab = id;
 }
 
-/** Back to the first section - for tests. */
-export function resetSettingsSection() {
-  section = 'general';
+/** Back to the first tab - for tests. */
+export function resetSettingsTab() {
+  tab = 'general';
 }

@@ -4,7 +4,6 @@ import { useNavigate, useParams } from 'react-router';
 import { ALERT_TABS, dismissAlert, restoreAlert, useAlertFeed, type Alert } from '@/app/alerts';
 import { Loading } from '@/app/feedback';
 import { Time } from '@/components/Time';
-import { rememberSection } from '@/features/settings/state';
 import { PageTitle } from '@/components/PageTitle';
 
 // What needs attention now (GET /api/v1/alerts): expiring keys, failing connections, failing or slow queries, rate
@@ -39,10 +38,7 @@ function useOpen() {
     else if (target.type === 'agent') navigate('/agents');
     else if (target.type === 'approvals') navigate('/approvals');
     else if (target.type === 'audit') navigate('/audit-log');
-    else {
-      rememberSection(target.name);
-      navigate('/settings');
-    }
+    else navigate(`/settings/${encodeURIComponent(target.name)}`); // a section: Settings opens the tab it's under
   };
 }
 

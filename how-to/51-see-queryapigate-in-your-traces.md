@@ -30,10 +30,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=queryapigate
   gunicorn --bind 127.0.0.1:5000 --workers 1 --worker-class gthread --threads 8 "queryapigate.app:create_app()"
 ```
 
-**Settings → Tracing** shows the endpoint, the service name and the sampler. Every other
-OpenTelemetry variable works as it does for any service (`OTEL_RESOURCE_ATTRIBUTES`, `OTEL_EXPORTER_OTLP_HEADERS` for
-a backend's token, ...). Without the extra installed, setting the endpoint stops the server: *An OTLP endpoint is set
-... run `pip install "queryapigate[otel]"`*.
+**Settings → Observability**, under *Tracing (OpenTelemetry)*, shows the endpoint, the service name and the sampler.
+Every other OpenTelemetry variable works as it does for any service (`OTEL_RESOURCE_ATTRIBUTES`,
+`OTEL_EXPORTER_OTLP_HEADERS` for a backend's token, ...). Without the extra installed, setting the endpoint stops the
+server: *An OTLP endpoint is set ... run `pip install "queryapigate[otel]"`*.
 
 ## Step 3: Call it from inside your app's trace
 

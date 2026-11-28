@@ -1476,23 +1476,28 @@ def _provider_status():
 
 
 def describe_settings():
-    """Every server setting the admin UI's Settings screen shows, grouped: [{id, title, description, rows}].
+    """Every server setting the admin UI's Settings screen shows, grouped: [{id, title, description, area, rows}].
+    ``area`` is the Settings tab a section is under - several small sections share one.
 
-    Each row is {label, description, env, value, source, env_value}. ``value`` is what to display (secrets are
-    reduced to "configured" / "enabled" - never the secret itself), ``source`` is "env" when the variable is set
-    and "default" when the built-in default applies, and ``env_value`` is the raw value for a "copy as .env"
-    export, or None for a secret - a URL with a password among them - so that export can never leak one.
+    Each row is {label, description, env, value, source, env_value, experimental, secret, group}. ``value`` is what
+    to display (secrets are reduced to "configured" / "enabled" - never the secret itself), ``source`` is "env" when
+    the variable is set, "file" when a secret was read from its NAME_FILE, and "default" when the built-in default
+    applies, and ``env_value`` is the raw value for a "copy as .env" export, or None for a secret - a URL with a
+    password among them - so that export can never leak one. ``secret`` says the row is one of those, so nothing of
+    its value is offered for copying; ``group`` is a heading within the section, or None.
     Read-only: settings are environment variables, changed by restarting the server, not through the API."""
-    def row(label, description, env, value, secret=False):
+    def row(label, description, env, value, secret=False, group=None):
         raw = os.environ.get(env, '').strip()
-        if secret and secret_source(env):
+        from_file = bool(env) and secret_source(env) is not None
+        if secret and from_file:
             value = f'{value} (from {env}_FILE)'  # never the file's content: where it came from
+        # a URL's password is a secret too, whatever row it's in (the syslog and OTLP endpoints): the value shown is
+        # redacted, and the raw one isn't given for the .env export either
+        hidden = bool(secret) or (bool(raw) and _url_has_password(raw))
         return {'label': label, 'description': description, 'env': env, 'value': value,
-                'source': 'env' if raw else 'default',
-                # a URL's password is a secret too, whatever row it's in (the syslog and OTLP endpoints): the
-                # value shown is redacted, and the raw one isn't given for the .env export either
-                'env_value': None if secret or not raw or _url_has_password(raw) else raw,
-                'experimental': env in experimental.SETTINGS}
+                'source': 'file' if from_file else 'env' if raw else 'default',
+                'env_value': None if hidden or not raw else raw,
+                'experimental': env in experimental.SETTINGS, 'secret': hidden, 'group': group}
 
     def on_off(flag):
         return 'on' if flag else 'off'
@@ -1503,81 +1508,87 @@ def describe_settings():
     cors = cors_origins()
     redis_val = redis_url()
     return [
-        {'id': 'general', 'title': 'General',
+        {'id': 'general', 'area': 'general', 'title': 'General',
          'description': 'Where this server keeps its files and what it loads at startup.', 'rows': [
             row('Home directory', 'Folder holding queryapigate.db (connections, saved queries, API keys, '
                 'roles and the audit log), unless a metadata database is set below.', 'QUERYAPIGATE_HOME',
-                str(home())),
+                str(home()), group='Storage'),
             row('Metadata database', 'Where connections, saved queries, API keys, roles, run history and the '
                 'audit log are kept: queryapigate.db in the home directory (default), or a shared PostgreSQL '
                 'database so several instances can run side by side.', 'QUERYAPIGATE_DATABASE_URL',
                 'SQLite (queryapigate.db)' if database_url() is None
-                else f'PostgreSQL ({redact_url(database_url())})', secret=True),
+                else f'PostgreSQL ({redact_url(database_url())})', secret=True, group='Storage'),
             row('Run store', 'Where run history, the event log and usage rollups are kept: the metadata store '
                 '(default), or ClickHouse, for a data plane\'s rates (ADR 0029).', 'QUERYAPIGATE_RUN_STORE_URL',
                 'the metadata store' if run_store_url() is None
-                else f'ClickHouse ({redact_url(run_store_url())})', secret=True),
+                else f'ClickHouse ({redact_url(run_store_url())})', secret=True, group='Storage'),
             row('Load examples', 'Load the example APIs at startup. Idempotent.',
-                'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples())),
+                'QUERYAPIGATE_LOAD_EXAMPLES', on_off(load_examples()), group='Startup'),
             row('Configuration file', 'A configuration file applied at startup, once per file - connections, '
                 'queries, roles, keys and the rest as code (ADR 0014).', 'QUERYAPIGATE_CONFIG_FILE',
-                str(config_file()) if config_file() else 'none'),
+                str(config_file()) if config_file() else 'none', group='Configuration file'),
             row('Prune at startup', 'Applying it also deletes what a file manages and this one no longer has.',
-                'QUERYAPIGATE_CONFIG_PRUNE', on_off(config_prune())),
+                'QUERYAPIGATE_CONFIG_PRUNE', on_off(config_prune()), group='Configuration file'),
             row('Locked to the file', 'What a file manages can be changed only through a file, not here or the API.',
-                'QUERYAPIGATE_CONFIG_LOCKED', on_off(config_locked())),
+                'QUERYAPIGATE_CONFIG_LOCKED', on_off(config_locked()), group='Configuration file'),
             row('H2 driver', 'JAR used for h2 connections.', 'QUERYAPIGATE_H2_JAR',
-                Path(h2_jar()).name + ('' if os.environ.get('QUERYAPIGATE_H2_JAR') else ' (bundled)'))]},
-        {'id': 'security', 'title': 'Security',
+                Path(h2_jar()).name + ('' if os.environ.get('QUERYAPIGATE_H2_JAR') else ' (bundled)'),
+                group='Drivers')]},
+        {'id': 'security', 'area': 'security', 'title': 'Security',
          'description': 'Admin access, write protection and secrets at rest.', 'rows': [
             row('Secret files', 'Folders ${file:...} references may read - a connection\'s or destination\'s '
                 'password from a file the CSI driver, Docker or Vault Agent keeps current (ADR 0015).',
-                'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused'),
+                'QUERYAPIGATE_SECRET_FILE_DIRS', ', '.join(secret_file_dirs()) or 'none - ${file:...} refused',
+                group='Secret references'),
             row('Environment secrets', 'Variables ${VAR} references may read. Never the server\'s own settings, nor '
                 'the cloud, Vault and Kubernetes credentials it may run with (AWS_*, AZURE_*, ARM_*, GOOGLE_*, GCP_*, '
                 'VAULT_*, KUBERNETES_*).', 'QUERYAPIGATE_SECRET_ENV_VARS',
-                ', '.join(secret_env_vars()) or 'none - ${VAR} refused'),
+                ', '.join(secret_env_vars()) or 'none - ${VAR} refused', group='Secret references'),
             row('Secret cache', 'How long a secret from a provider is kept in memory at most.',
-                'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s'),
+                'QUERYAPIGATE_SECRET_CACHE_SECONDS', f'{secret_cache_seconds()} s', group='Secret references'),
             row('Secret providers', 'How the ones this process has used answered, last.', '',
-                _provider_status()),
+                _provider_status(), group='Secret references'),
             row('AWS', 'Region for ${aws-sm:...} and aws-rds-iam - else boto3\'s own. Secrets: names beginning with '
                 'QUERYAPIGATE_AWS_SECRET_PREFIXES; IAM tokens: hosts in QUERYAPIGATE_AWS_RDS_HOSTS.',
-                'QUERYAPIGATE_AWS_REGION', aws_region() or 'boto3\'s default'),
+                'QUERYAPIGATE_AWS_REGION', aws_region() or 'boto3\'s default', group='AWS'),
             row('AWS secret prefixes', 'Secret names ${aws-sm:...} may read begin with one of these.',
-                'QUERYAPIGATE_AWS_SECRET_PREFIXES', ', '.join(aws_secret_prefixes()) or 'none - ${aws-sm:...} refused'),
+                'QUERYAPIGATE_AWS_SECRET_PREFIXES', ', '.join(aws_secret_prefixes()) or 'none - ${aws-sm:...} refused',
+                group='AWS'),
             row('RDS IAM hosts', 'Hosts aws-rds-iam credentials may be made for.', 'QUERYAPIGATE_AWS_RDS_HOSTS',
-                ', '.join(aws_rds_hosts()) or 'none - aws-rds-iam refused'),
+                ', '.join(aws_rds_hosts()) or 'none - aws-rds-iam refused', group='AWS'),
             row('Vault', 'Where ${vault:...} references and vault-database credentials come from, and how this server '
                 'signs in to it.', 'QUERYAPIGATE_VAULT_ADDR',
-                f'{vault_addr()} ({vault_auth()})' if vault_addr() else 'off'),
+                f'{vault_addr()} ({vault_auth()})' if vault_addr() else 'off', group='Vault'),
             row('Vault paths', 'Path prefixes ${vault:...} may read.', 'QUERYAPIGATE_VAULT_PATHS',
-                ', '.join(vault_paths()) or 'none - ${vault:...} refused'),
+                ', '.join(vault_paths()) or 'none - ${vault:...} refused', group='Vault'),
             row('Vault database roles', 'Roles of the database secrets engine a connection\'s credentials may ask for.',
-                'QUERYAPIGATE_VAULT_DATABASE_ROLES', ', '.join(vault_database_roles()) or 'none'),
+                'QUERYAPIGATE_VAULT_DATABASE_ROLES', ', '.join(vault_database_roles()) or 'none', group='Vault'),
             row('Admin API key', 'Key with full access to this UI and the admin API. Unset means open access.',
-                'QUERYAPIGATE_API_KEY', 'configured' if api_key() else 'not set - open access', secret=True),
+                'QUERYAPIGATE_API_KEY', 'configured' if api_key() else 'not set - open access', secret=True,
+                group='Access'),
             row('Allow writes', 'When off, statements that modify data are rejected.',
-                'QUERYAPIGATE_ALLOW_WRITES', on_off(allow_writes())),
+                'QUERYAPIGATE_ALLOW_WRITES', on_off(allow_writes()), group='Access'),
             row('Encryption at rest', 'Fernet key used to encrypt connection and destination passwords on disk; '
                 'several, comma-separated, while rotating it - the first encrypts.',
-                encryption_key_setting(), _encryption_state(), secret=True),
+                encryption_key_setting(), _encryption_state(), secret=True, group='Encryption'),
             row('Metrics token', 'The bearer token /metrics needs. Unset: /metrics is open to whoever can reach it.',
                 'QUERYAPIGATE_METRICS_TOKEN', 'configured' if metrics_token() else 'not set - /metrics is open',
-                secret=True),
+                secret=True, group='Access'),
             row('Masking hash key', "Key for column masking's hash action. Unset: one made once in the store.",
-                'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True),
+                'QUERYAPIGATE_MASK_KEY', 'configured' if mask_key() else 'from the store', secret=True,
+                group='Encryption'),
             row('Data plane secret', 'Shared with a Rust data plane in front of this server (ADR 0028), which then '
                 'serves /q/ reads itself. Unset: no data plane can.',
-                'QUERYAPIGATE_DATAPLANE_SECRET', 'configured' if dataplane_secret() else 'not set', secret=True),
+                'QUERYAPIGATE_DATAPLANE_SECRET', 'configured' if dataplane_secret() else 'not set', secret=True,
+                group='Access'),
             row('Export folders', 'Local folders a destination may write under. Unset: object storage only.',
-                'QUERYAPIGATE_EXPORT_DIRS', ', '.join(export_dirs()) or 'object storage only'),
+                'QUERYAPIGATE_EXPORT_DIRS', ', '.join(export_dirs()) or 'object storage only', group='Network & files'),
             row('Trusted proxy hops', 'Reverse proxies whose X-Forwarded-* headers are trusted.',
-                'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops())),
+                'QUERYAPIGATE_TRUST_PROXY', str(proxy_hops()), group='Network & files'),
             row('HTTPS only (HSTS)', 'Seconds browsers should use only HTTPS for this host; sent only on requests '
                 'that arrived over HTTPS. Unset: not sent.', 'QUERYAPIGATE_HSTS_MAX_AGE',
-                f'{hsts_max_age()} seconds' if hsts_max_age() else 'off')]},
-        {'id': 'jwt', 'title': 'Signed-in users (JWT)',
+                f'{hsts_max_age()} seconds' if hsts_max_age() else 'off', group='Network & files')]},
+        {'id': 'jwt', 'area': 'sign-in', 'title': 'Signed-in users (JWT)',
          'description': 'Accept `Authorization: Bearer` tokens from your own login or identity provider, so each '
              'app user calls the API as themselves - no API key per user. Off unless a secret or JWKS URL is set.',
          'rows': [
@@ -1596,7 +1607,7 @@ def describe_settings():
             row('User claim', 'Claim identifying the user.', 'QUERYAPIGATE_JWT_USER_CLAIM', jwt_user_claim()),
             row('Workspace claim', 'Claim naming the workspace a user belongs to (ADR 0023); unset, the default '
                 'workspace.', 'QUERYAPIGATE_JWT_WORKSPACE_CLAIM', jwt_workspace_claim() or 'not set')]},
-        {'id': 'execution', 'title': 'Query execution',
+        {'id': 'execution', 'area': 'performance', 'title': 'Query execution',
          'description': 'Limits applied to every statement this server runs.', 'rows': [
             row('Query timeout', 'Server-wide statement limit. A request may ask for less, never more. '
                 '0 disables it.', 'QUERYAPIGATE_QUERY_TIMEOUT', _seconds(timeout) or 'off'),
@@ -1606,7 +1617,7 @@ def describe_settings():
                 'unbounded' if stream is None else f'{stream} rows'),
             row('Slow query threshold', 'Queries slower than this are logged as warnings. 0 disables it.',
                 'QUERYAPIGATE_SLOW_QUERY_THRESHOLD', _seconds(slow) or 'off')]},
-        {'id': 'pool', 'title': 'Threads & connection pool',
+        {'id': 'pool', 'area': 'performance', 'title': 'Threads & connection pool',
          'description': 'Requests served at once, and idle connections kept open per distinct connection.', 'rows': [
             row('Threads', "Requests one server process serves at once - the Docker image's gunicorn. Read at "
                 'startup.', 'QUERYAPIGATE_THREADS', str(threads())),
@@ -1619,7 +1630,7 @@ def describe_settings():
             row('Metadata cache', 'How long a key, saved query or connection read from the store is reused. '
                 '0 reads them on every request.', 'QUERYAPIGATE_METADATA_CACHE_TTL',
                 _seconds(metadata_cache_ttl() or None) or 'off')]},
-        {'id': 'traffic', 'title': 'Rate limits & CORS',
+        {'id': 'traffic', 'area': 'performance', 'title': 'Rate limits & CORS',
          'description': 'Per-client throttling and browser origins allowed to call the API.', 'rows': [
             row('Rate limit', 'Requests allowed per client. API keys and roles can set their own.',
                 'QUERYAPIGATE_RATE_LIMIT', format_rate_limit(limit) or 'off'),
@@ -1629,7 +1640,7 @@ def describe_settings():
             row('CORS origins', 'Comma-separated origins, or * for any. Unset turns CORS off.',
                 'QUERYAPIGATE_CORS_ORIGINS',
                 'off' if cors is None else '*' if cors == '*' else ', '.join(sorted(cors)))]},
-        {'id': 'tracing', 'title': 'Tracing (OpenTelemetry)',
+        {'id': 'tracing', 'area': 'observability', 'title': 'Tracing (OpenTelemetry)',
          'description': 'Spans to your tracing backend through an OpenTelemetry collector. On when an '
              'OTLP endpoint is set, with `pip install "queryapigate[otel]"`; every other OTEL_* variable works as '
              'for any service. Spans never hold parameter values, rows, statements or credentials.', 'rows': [
@@ -1643,7 +1654,7 @@ def describe_settings():
                 os.environ.get('OTEL_SERVICE_NAME', '').strip() or 'queryapigate'),
             row('Sampler', "Which traces are kept: the SDK's default follows the caller's decision.",
                 'OTEL_TRACES_SAMPLER', os.environ.get('OTEL_TRACES_SAMPLER', '').strip() or 'parentbased_always_on')]},
-        {'id': 'audit', 'title': 'Audit & logging',
+        {'id': 'audit', 'area': 'observability', 'title': 'Audit & logging',
          'description': 'Retention of administrative actions and log format.', 'rows': [
             row('Audit log limit', 'Entries kept in queryapigate.db.', 'QUERYAPIGATE_AUDIT_LOG_LIMIT',
                 str(audit_log_limit())),
@@ -1670,7 +1681,7 @@ def describe_settings():
                 'are logged either way.', 'QUERYAPIGATE_LOG_REQUESTS', on_off(log_requests())),
             row('Access log', "The Docker image's gunicorn access line per request, on stdout. Read at startup.",
                 'QUERYAPIGATE_ACCESS_LOG', on_off(access_log()))]},
-        {'id': 'history', 'title': 'Run history',
+        {'id': 'history', 'area': 'observability', 'title': 'Run history',
          'description': 'What each run - of a saved query, or ad-hoc SQL - leaves behind in its history, and for how '
              'long. GET /api/v1/history (and a query\'s own history) pages through everything kept.', 'rows': [
             row('History limit', 'Runs kept per saved-query version, unless a retention period is set.',
@@ -1691,7 +1702,7 @@ def describe_settings():
                 'QUERYAPIGATE_HISTORY_SAMPLE_RATE', f'{history_sample_rate():g}'),
             row('Flush interval', 'Seconds between batched history writes; 0 writes inside each request.',
                 'QUERYAPIGATE_HISTORY_FLUSH_INTERVAL', _seconds(history_flush_interval()))]},
-        {'id': 'cache', 'title': 'Response cache & live updates',
+        {'id': 'cache', 'area': 'performance', 'title': 'Response cache & live updates',
          'description': 'Where cache_ttl-carrying saved queries store their cached responses, and how the '
              'admin UI\'s Home tab is notified of new query runs.', 'rows': [
             row('Cache backend', 'In-process (default) or a shared Redis, surviving restarts and shared '
@@ -1721,7 +1732,7 @@ def describe_settings():
                 'each with its signing secret (JSON). Optional: CDC sources are managed in the Console '
                 '(/api/v1/cdc-sources); these are listed there read-only.', 'QUERYAPIGATE_CDC_SOURCES',
                 f'{len(cdc_sources())} source(s)', secret=True)]},
-        {'id': 'alerts', 'title': 'Alerts',
+        {'id': 'alerts', 'area': 'observability', 'title': 'Alerts',
          'description': 'When GET /api/v1/alerts (the Console\'s Alerts screen) calls something out. A query is '
              'slow when its typical run is over the slow-query threshold (Query execution).', 'rows': [
             row('Query error rate', 'Share of a saved query\'s recent runs that may fail before it is an alert. '
@@ -1733,7 +1744,7 @@ def describe_settings():
             row('Agent volume', 'Rows an AI agent may read over MCP in an hour before a sudden rise is an alert. 0 '
                 'turns the check off.', 'QUERYAPIGATE_ALERT_AGENT_ROWS',
                 f'{alert_agent_rows():,} rows' if alert_agent_rows() else 'off')]},
-        {'id': 'sso', 'title': 'Console sign-in (SSO)',
+        {'id': 'sso', 'area': 'sign-in', 'title': 'Console sign-in (SSO)',
          'description': 'Administrators sign in to the Console through your identity provider (OpenID Connect), '
              'with roles from their groups. Off unless the first four are set.', 'rows': [
             row('Issuer', 'The identity provider administrators sign in through.', 'QUERYAPIGATE_SSO_ISSUER',
@@ -1757,7 +1768,7 @@ def describe_settings():
                 'QUERYAPIGATE_SSO_DEFAULT_ROLE', sso_default_role() or 'none'),
             row('Allowed domains', 'Verified email domains a default role is given to.',
                 'QUERYAPIGATE_SSO_ALLOWED_DOMAINS', ', '.join(sso_allowed_domains()) or 'any')]},
-        {'id': 'mcp', 'title': 'MCP server',
+        {'id': 'mcp', 'area': 'mcp', 'title': 'MCP server',
          'description': 'Settings for `queryapigate mcp` (BACKLOG #42) - a separate process this one doesn\'t '
              'start. "Check now" tries its port on this host.', 'rows': [
             row('MCP port', 'Bind port for `queryapigate mcp`.', 'QUERYAPIGATE_MCP_PORT', str(mcp_port())),
