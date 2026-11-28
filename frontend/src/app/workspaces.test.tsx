@@ -130,6 +130,39 @@ describe('workspaces in the Console', () => {
     expect(inDefault.every((p) => p === '/api/v1/me')).toBe(true);
   });
 
+  it('says nothing about the examples outside default, where they are', async () => {
+    const loaded = {
+      loaded: true,
+      partial: false,
+      connection: 'examples',
+      queries: ['films'],
+      roles: [],
+      keys: [],
+      collections: ['catalog'],
+      workspace: null,
+    };
+    const owner = { capabilities: [...OWNER_CAPS, 'examples.write'] };
+    const { calls } = fakeBackend({
+      ...baseRoutes(),
+      ...under('team-b'),
+      'GET /api/v1/me': () => me(owner),
+      'GET /w/team-b/api/v1/me': () => me({ ...owner, workspace: 'team-b' }),
+      'GET /api/v1/workspaces': TWO,
+      'GET /w/team-b/api/v1/workspaces': TWO,
+      'GET /api/v1/examples': () => loaded,
+      'GET /w/team-b/api/v1/examples': () => loaded,
+    });
+    const inDefault = renderAt('/queries');
+    await waitFor(() => expect(document.getElementById('examples-strip')).toBeVisible());
+    inDefault.unmount();
+    setWorkspace('team-b');
+    calls.length = 0;
+    renderAt('/queries');
+    await waitFor(() => expect(paths(calls)).toContain('/w/team-b/api/v1/queries'));
+    expect(document.getElementById('examples-strip')).not.toBeVisible();
+    expect(paths(calls).some((p) => p.endsWith('/api/v1/examples'))).toBe(false);
+  });
+
   it('a tab left in a workspace that is gone goes back to default', async () => {
     setWorkspace('gone');
     const { calls } = fakeBackend({
