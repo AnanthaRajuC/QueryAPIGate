@@ -63,6 +63,7 @@ export function Sidebar() {
     onClick: () => void,
     badge?: ReactNode,
     extraClass?: string,
+    hint?: string,
   ) => (
     <button
       key={key}
@@ -70,7 +71,7 @@ export function Sidebar() {
       role="tab"
       data-tab={key}
       data-label={label}
-      title={label}
+      title={hint ? `${label}: ${hint}` : label}
       className={[extraClass, isActive ? 'active' : ''].filter(Boolean).join(' ') || undefined}
       aria-selected={isActive}
       onClick={onClick}
@@ -100,6 +101,8 @@ export function Sidebar() {
       active?.group === group.label,
       () => navigate(section.path),
       asking.length ? <AttentionBadge kinds={asking} /> : null,
+      undefined,
+      section.description,
     );
   };
 

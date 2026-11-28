@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { api, unwrap } from '@/api/client';
@@ -10,8 +10,10 @@ import { NewCollectionForm, QueryForm } from './forms';
 import { QueryDetail } from './QueryDetail';
 import { QueryList } from './QueryList';
 import { PageTitle } from '@/components/PageTitle';
+import { SectionActions } from '@/components/SectionActions';
 
-// The classic "API Repository" screen (ui.py #tab-queries): examples strip, page head, and the split list | detail.
+// The "API Repository" screen: its actions on the section's tab row, a one-line note when the example APIs are loaded,
+// and the split list | detail.
 
 export function RepositoryPage() {
   const can = useCan();
@@ -30,27 +32,10 @@ export function RepositoryPage() {
     navigate(`/queries/${encodeURIComponent(ordered[0]!.name)}`, { replace: true });
   }, [name, list, navigate]);
 
-  const versions = list.reduce((n, q) => n + q.version_count, 0);
-  const collections = new Set(list.map((q) => q.collection).filter(Boolean)).size;
-
   return (
     <>
-      <ExamplesStrip />
-      <div className="page-head">
-        <div className="titles">
-          <PageTitle tab>API Repository</PageTitle>
-          <span className="sub" id="queries-sub">
-            {list.length
-              ? `${versions}${versions === 1 ? ' version' : ' versions'}${
-                  collections
-                    ? ` across ${collections}${collections === 1 ? ' collection' : ' collections'}`
-                    : ''
-                }. `
-              : ''}
-            Each one is published at <code>/q/&lt;name&gt;</code>.
-          </span>
-        </div>
-        <span className="spacer" />
+      <PageTitle tab>API Repository</PageTitle>
+      <SectionActions>
         <button
           hidden={!can('queries.write')}
           id="new-collection"
@@ -77,7 +62,8 @@ export function RepositoryPage() {
         >
           New API
         </button>
-      </div>
+      </SectionActions>
+      <ExamplesStrip />
       <div className="split">
         <QueryList selected={name} />
         <QueryDetail name={name} />
@@ -85,6 +71,8 @@ export function RepositoryPage() {
     </>
   );
 }
+
+const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 function ExamplesStrip() {
   const can = useCan();
@@ -97,9 +85,10 @@ function ExamplesStrip() {
   });
   const collections = useCollections();
   const connections = useConnections();
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
   const st = examples.data;
-  if (!st || (!st.loaded && !st.partial) || !can('examples.write'))
-    return <div id="examples-strip" className="panel" hidden />;
+  if (!st || (!st.loaded && !st.partial) || !can('examples.write')) return <div id="examples-strip" hidden />;
 
   const refreshAll = () => {
     client.invalidateQueries();
@@ -137,32 +126,56 @@ function ExamplesStrip() {
       showError((e as Error).message);
     }
   };
+  const included = `Example APIs are loaded: ${plural(st.queries.length, 'query', 'queries')} in ${plural(
+    st.collections.length,
+    'collection',
+  )}, ${plural(st.roles.length, 'role')} and an “examples” connection${
+    st.workspace
+      ? `, and the ${st.workspace.name} workspace with ${plural(st.workspace.members.length, 'member')}`
+      : ''
+  }. Removing them touches nothing else.`;
   return (
-    <div id="examples-strip" className="panel">
-      <span className="tag example" title="Installed by the example APIs — removing the examples removes it">
-        example
-      </span>
-      <span style={{ flex: 1 }}>
-        {st.partial
-          ? 'The example APIs are only partly loaded (an interrupted load).'
-          : `Example APIs are loaded: ${st.queries.length} queries in ${st.collections.length} collections, ${st.roles.length}${
-              st.roles.length === 1 ? ' role' : ' roles'
-            } and an “examples” connection${
-              st.workspace
-                ? `, and the ${st.workspace.name} workspace with ${st.workspace.members.length}${
-                    st.workspace.members.length === 1 ? ' member' : ' members'
-                  }`
-                : ''
-            }. Removing them touches nothing else.`}
-      </span>
-      {st.partial && (
-        <button type="button" className="btn sm outlined" onClick={load}>
-          Finish loading
+    <div id="examples-strip">
+      <div className="examples-line">
+        <span
+          className="tag example"
+          title="Installed by the example APIs — removing the examples removes it"
+        >
+          example
+        </span>
+        <span>
+          {st.partial
+            ? 'The example APIs are only partly loaded (an interrupted load).'
+            : `Example data is loaded: ${plural(st.queries.length, 'query', 'queries')} in ${plural(
+                st.collections.length,
+                'collection',
+              )}.`}
+        </span>
+        {!st.partial && (
+          <button
+            type="button"
+            className="btn-text"
+            aria-expanded={open}
+            aria-controls={detailsId}
+            onClick={() => setOpen((o) => !o)}
+          >
+            What’s included
+          </button>
+        )}
+        {st.partial && (
+          <button type="button" className="btn-text" onClick={load}>
+            Finish loading
+          </button>
+        )}
+        <button type="button" className="btn-text danger" onClick={remove}>
+          Remove examples
         </button>
+      </div>
+      {!st.partial && (
+        <p id={detailsId} className="examples-included" hidden={!open}>
+          {included}
+        </p>
       )}
-      <button type="button" className="btn sm outlined danger" onClick={remove}>
-        Remove examples
-      </button>
     </div>
   );
 }

@@ -44,11 +44,15 @@ describe('API Repository - list', () => {
     expect(document.querySelector('.qitem[data-name="films"]')).toBeNull();
   });
 
-  it('heads the page like the classic one', async () => {
+  it('puts its actions on the section’s tab row, with no header band of its own', async () => {
     fakeBackend(baseRoutes());
     renderAt('/queries/films');
-    expect(await screen.findByText(/3 versions across 1 collection\./)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New API' })).toHaveClass('btn', 'primary');
+    const newApi = await screen.findByRole('button', { name: 'New API' });
+    expect(newApi).toHaveClass('btn', 'primary');
+    const row = document.querySelector('.section-tabbar .section-actions')!;
+    expect(row).toContainElement(newApi);
+    expect(row).toContainElement(screen.getByRole('button', { name: 'New collection' }));
+    expect(screen.queryByText(/versions? across/)).not.toBeInTheDocument();
   });
 });
 
@@ -333,7 +337,16 @@ describe('API Repository - collections and the example APIs', () => {
       if (!el || el.hidden) throw new Error('not shown yet');
       return el;
     });
-    expect(strip).toHaveTextContent('Example APIs are loaded: 1 queries in 1 collections, 1 role');
+    expect(strip).toHaveTextContent('Example data is loaded: 1 query in 1 collection.');
+    // the full account is one click away, behind a disclosure
+    const included = within(strip).getByRole('button', { name: 'What’s included' });
+    expect(included).toHaveAttribute('aria-expanded', 'false');
+    const account = strip.querySelector('.examples-included')!;
+    expect(account).not.toBeVisible();
+    await userEvent.click(included);
+    expect(included).toHaveAttribute('aria-expanded', 'true');
+    expect(account).toBeVisible();
+    expect(strip).toHaveTextContent('Example APIs are loaded: 1 query in 1 collection, 1 role');
     expect(strip).toHaveTextContent('and the example-stores workspace with 3 members');
     await userEvent.click(within(strip).getByRole('button', { name: 'Remove examples' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE')).toBe(true));
