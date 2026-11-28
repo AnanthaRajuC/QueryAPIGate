@@ -3747,6 +3747,18 @@
       },
       "SettingsSection": {
         "properties": {
+          "area": {
+            "description": "The Settings tab the section is under; several small sections share one.",
+            "enum": [
+              "general",
+              "security",
+              "sign-in",
+              "performance",
+              "observability",
+              "mcp"
+            ],
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
@@ -3772,12 +3784,23 @@
                   "description": "A setting of an experimental feature (outside the compatibility promise).",
                   "type": "boolean"
                 },
+                "group": {
+                  "description": "A heading within the section, or null.",
+                  "nullable": true,
+                  "type": "string"
+                },
                 "label": {
                   "type": "string"
                 },
+                "secret": {
+                  "description": "A secret, or a value holding one (a URL with a password): nothing of it is offered for copying, and `env_value` is null.",
+                  "type": "boolean"
+                },
                 "source": {
+                  "description": "`file`: a secret read from its NAME_FILE.",
                   "enum": [
                     "env",
+                    "file",
                     "default"
                   ],
                   "type": "string"
@@ -3794,7 +3817,9 @@
                 "value",
                 "source",
                 "env_value",
-                "experimental"
+                "experimental",
+                "secret",
+                "group"
               ],
               "type": "object"
             },
@@ -3808,6 +3833,7 @@
           "id",
           "title",
           "description",
+          "area",
           "rows"
         ],
         "type": "object"

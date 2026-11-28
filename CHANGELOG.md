@@ -131,6 +131,9 @@ otherwise be kept until 2.0.
 
 ### Added
 
+- **`GET /api/v1/settings` says more about each setting:** a section's `area` (the Settings tab it's under), a
+  row's `group` (a heading within its section) and `secret` (nothing of its value may be copied), and `source` is
+  `file` for a secret read from its `NAME_FILE` - which said `env` before.
 - **The examples include an example team's workspace, `example-stores`, with members who sign in to it**
   (workspaces, experimental). It has an `examples` connection, collection (`example_store_revenue`,
   `example_staff_activity`), role and key of its own, and three members - `example-owner`, `example-developer` and

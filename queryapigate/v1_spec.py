@@ -736,24 +736,34 @@ SCHEMAS = {
         },
     },
     'SettingsSection': {
-        'type': 'object', 'required': ['id', 'title', 'description', 'rows'],
+        'type': 'object', 'required': ['id', 'title', 'description', 'area', 'rows'],
         'properties': {
             'id': {'type': 'string'}, 'title': {'type': 'string'}, 'description': {'type': 'string'},
+            'area': {'type': 'string', 'enum': ['general', 'security', 'sign-in', 'performance', 'observability',
+                                                'mcp'],
+                     'description': "The Settings tab the section is under; several small sections share one."},
             'rows': {'type': 'array', 'items': {
                 'type': 'object',
-                'required': ['label', 'description', 'env', 'value', 'source', 'env_value', 'experimental'],
+                'required': ['label', 'description', 'env', 'value', 'source', 'env_value', 'experimental',
+                             'secret', 'group'],
                 'properties': {
                     'label': {'type': 'string'}, 'description': {'type': 'string'},
                     'env': {'type': 'string', 'description': 'The environment variable.'},
                     'value': {'type': 'string', 'description': 'The effective value; a secret only as '
                                                                '"configured" or "enabled".'},
-                    'source': {'type': 'string', 'enum': ['env', 'default']},
+                    'source': {'type': 'string', 'enum': ['env', 'file', 'default'],
+                               'description': '`file`: a secret read from its NAME_FILE.'},
                     'env_value': {'type': 'string', 'nullable': True,
                                   'description': 'The raw value, for a .env export; null at the default and '
                                                  'always for a secret.'},
                     'experimental': {'type': 'boolean',
                                      'description': 'A setting of an experimental feature (outside the '
                                                     'compatibility promise).'},
+                    'secret': {'type': 'boolean',
+                               'description': 'A secret, or a value holding one (a URL with a password): nothing '
+                                              'of it is offered for copying, and `env_value` is null.'},
+                    'group': {'type': 'string', 'nullable': True,
+                              'description': 'A heading within the section, or null.'},
                 }}},
         },
     },

@@ -527,6 +527,33 @@ class SettingsAndMcpTests(V1TestCase):
         self.assertNotIn('admin-key', res.get_data(as_text=True))
         self.assertNotIn('k' * 44, res.get_data(as_text=True))
 
+    def test_settings_rows_say_their_group_tab_and_whether_they_hold_a_secret(self):
+        url = 'tcp+tls://user:pw@syslog.example:6514'
+        with mock.patch.dict(os.environ, {'QUERYAPIGATE_AUDIT_SYSLOG_URL': url, 'QUERYAPIGATE_LOAD_EXAMPLES': 'yes'}):
+            res = self.call('get', '/api/v1/settings', '/api/v1/settings', 200)
+        sections = {s['id']: s for s in res.get_json()['items']}
+        self.assertEqual({s['area'] for s in sections.values()},
+                         {'general', 'security', 'sign-in', 'performance', 'observability', 'mcp'})
+        groups = {sid: {r['label']: r['group'] for r in sections[sid]['rows']} for sid in ('general', 'security')}
+        self.assertEqual(groups['general'], {
+            'Home directory': 'Storage', 'Metadata database': 'Storage', 'Run store': 'Storage',
+            'Load examples': 'Startup', 'Configuration file': 'Configuration file',
+            'Prune at startup': 'Configuration file', 'Locked to the file': 'Configuration file',
+            'H2 driver': 'Drivers'})
+        self.assertEqual(sorted(set(groups['security'].values())),
+                         ['AWS', 'Access', 'Encryption', 'Network & files', 'Secret references', 'Vault'])
+        self.assertEqual(groups['security']['Admin API key'], 'Access')
+        rows = {r['env']: r for s in sections.values() for r in s['rows'] if r['env']}
+        self.assertEqual({r['group'] for s in sections.values() if s['id'] not in groups for r in s['rows']}, {None})
+        # a URL with a password is a secret, whatever row it's in: never copied, never exported
+        syslog = rows['QUERYAPIGATE_AUDIT_SYSLOG_URL']
+        self.assertEqual((syslog['source'], syslog['secret'], syslog['env_value']), ('env', True, None))
+        self.assertNotIn('pw', syslog['value'])
+        examples = rows['QUERYAPIGATE_LOAD_EXAMPLES']
+        self.assertEqual((examples['source'], examples['secret'], examples['env_value']), ('env', False, 'yes'))
+        self.assertTrue(rows['QUERYAPIGATE_API_KEY']['secret'])
+        self.assertFalse(rows['QUERYAPIGATE_HOME']['secret'])
+
     def test_mcp_status_and_tools(self):
         self.create('films', publish=True)
         with mock.patch.dict(os.environ, {'QUERYAPIGATE_MCP_PORT': '1'}):  # nothing listens on port 1
