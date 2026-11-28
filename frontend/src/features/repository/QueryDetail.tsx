@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useState, type ReactElement, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 
 import { ApiError } from '@/api/client';
@@ -31,6 +31,8 @@ import {
 } from './tabs';
 import { Time } from '@/components/Time';
 import { ManagedTag } from '@/components/Managed';
+import { MoreIcon } from '@/components/icons';
+import { MenuButton, type MenuEntry } from '@/components/Menu';
 
 // The classic saved-query detail panel (ui.py renderDetail): title row with the version switcher and actions,
 // description, meta, stat tiles, requests-per-day chart and the subtabs. Publishing (drafts, ADR 0001) is shown
@@ -139,22 +141,28 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           ) : (
             <span className="vbadge">v{v.version}</span>
           )}
-          <span className="hint">{isLatest ? 'latest' : 'older version'}</span>
-          <span className={`pill ${v.status === 'published' ? 'ok' : 'off'}`} title={statusTitle(v, query)}>
-            <i />
+          {isLatest ? null : (
+            <span className="hint" title={`The latest is v${latest.version}`}>
+              older version
+            </span>
+          )}
+          <span
+            className={`d-status ${v.status === 'published' ? 'ok' : 'off'}`}
+            title={statusTitle(v, query)}
+          >
+            <i aria-hidden="true" />
             {STATUS_LABEL[v.status]}
           </span>
           {v.cache_ttl ? (
             <span
-              className="tag"
-              title={`Served from cache for ${v.cache_ttl}s after each run - see the Caching tab`}
+              className="d-cache"
+              title={`Served from cache for ${v.cache_ttl}s after each run - see the Cache tab`}
             >
-              Cached · {v.cache_ttl}s
+              Cached {v.cache_ttl}s
             </span>
           ) : null}
           <span className="spacer" />
-          {/* One group, so the buttons wrap onto the next line together, as the classic three always did. */}
-          <span style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <span className="d-actions">
             <HeadActions query={query} v={v} etag={etag} />
           </span>
         </div>
@@ -214,14 +222,14 @@ function MetaItem({ k, v }: { k: string; v: string | ReactElement }) {
   );
 }
 
-/** Publish / Roll back / Unpublish, New version, Move… and Delete… (a menu, as in the classic view). */
+/** Publish or Roll back (for a version that isn't the one served), New version, and a ⋯ menu: Move…, Unpublish
+ * and the Delete items, each with its confirmation. */
 function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: string | null }) {
   const can = useCan();
   const navigate = useNavigate();
   const { openDrawer, showError, toast } = useFeedback();
   const actions = useQueryActions(query.name);
-  const [menu, setMenu] = useState<DOMRect | null>(null);
-  const deleteBtn = useRef<HTMLButtonElement>(null);
+  const writer = can('queries.write');
 
   const report = (error: unknown) => {
     if (error instanceof ApiError && error.code === 'precondition_failed') {
@@ -260,49 +268,84 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       { onSuccess: () => toast(`${query.name} unpublished`), onError: report },
     );
   };
-
-  const items: { label: string; title?: string; run: () => void }[] = [];
-  if (query.versions.length > 1) {
-    items.push({
-      label: `Delete v${v.version}`,
-      title: `DELETE /api/v1/queries/${query.name}/versions/${v.version}`,
-      run: () => {
-        if (!window.confirm(`Delete version ${v.version} of ${query.name}?`)) return;
-        actions.deleteVersion.mutate(
-          { version: v.version, etag },
-          { onSuccess: () => toast(`Deleted v${v.version} of ${query.name}`), onError: report },
-        );
-      },
-    });
-  }
-  items.push({
-    label:
-      query.versions.length > 1 ? `Delete query (all ${query.versions.length} versions)` : 'Delete query',
-    run: () => {
-      if (
-        !window.confirm(
-          `Delete ${query.name}${query.versions.length > 1 ? ` and all ${query.versions.length} versions` : ''}?`,
-        )
+  const deleteVersion = () => {
+    if (!window.confirm(`Delete version ${v.version} of ${query.name}?`)) return;
+    actions.deleteVersion.mutate(
+      { version: v.version, etag },
+      { onSuccess: () => toast(`Deleted v${v.version} of ${query.name}`), onError: report },
+    );
+  };
+  const deleteQuery = () => {
+    if (
+      !window.confirm(
+        `Delete ${query.name}${query.versions.length > 1 ? ` and all ${query.versions.length} versions` : ''}?`,
       )
-        return;
-      actions.deleteQuery.mutate(
-        { etag },
-        {
-          onSuccess: () => {
-            toast(`Deleted ${query.name}`);
-            navigate('/queries');
-          },
-          onError: report,
+    )
+      return;
+    actions.deleteQuery.mutate(
+      { etag },
+      {
+        onSuccess: () => {
+          toast(`Deleted ${query.name}`);
+          navigate('/queries');
         },
-      );
-    },
-  });
+        onError: report,
+      },
+    );
+  };
 
   const busy = actions.publish.isPending || actions.unpublish.isPending;
+  const several = query.versions.length > 1;
+  const entries: MenuEntry[] = [
+    {
+      label: 'Move…',
+      title: `File this query under a collection (PATCH /api/v1/queries/${query.name})`,
+      hidden: !writer,
+      onSelect: () =>
+        openDrawer({
+          title: 'Move to a collection',
+          kicker: query.name,
+          content: <MoveForm query={query} etag={etag} />,
+        }),
+    },
+    {
+      label: 'Unpublish',
+      title: `Stop serving ${query.endpoint} (POST /api/v1/queries/${query.name}/unpublish)`,
+      hidden: !writer || v.status !== 'published',
+      onSelect: unpublish,
+    },
+    'separator',
+    {
+      label: `Delete v${v.version}…`,
+      title: `DELETE /api/v1/queries/${query.name}/versions/${v.version}`,
+      danger: true,
+      hidden: !writer || !several,
+      onSelect: deleteVersion,
+    },
+    {
+      label: several ? `Delete query (all ${query.versions.length} versions)…` : 'Delete query…',
+      title: `DELETE /api/v1/queries/${query.name}`,
+      danger: true,
+      hidden: !writer,
+      onSelect: deleteQuery,
+    },
+  ];
   return (
     <>
+      {v.status !== 'published' && (
+        <button
+          hidden={!writer}
+          type="button"
+          className={v.status === 'draft' ? 'btn md primary' : 'btn md'}
+          disabled={busy}
+          title={`POST /api/v1/queries/${query.name}/publish`}
+          onClick={publish}
+        >
+          {v.status === 'draft' ? `Publish v${v.version}` : `Roll back to v${v.version}`}
+        </button>
+      )}
       <button
-        hidden={!can('queries.write')}
+        hidden={!writer}
         type="button"
         className="btn md"
         onClick={() =>
@@ -315,111 +358,10 @@ function HeadActions({ query, v, etag }: { query: Query; v: QueryVersion; etag: 
       >
         New version
       </button>
-      <button
-        hidden={!can('queries.write')}
-        type="button"
-        className="btn md"
-        title={`File this query under a collection (PATCH /api/v1/queries/${query.name})`}
-        onClick={() =>
-          openDrawer({
-            title: 'Move to a collection',
-            kicker: query.name,
-            content: <MoveForm query={query} etag={etag} />,
-          })
-        }
-      >
-        Move…
-      </button>
-      <button
-        hidden={!can('queries.write')}
-        ref={deleteBtn}
-        type="button"
-        className="btn md danger"
-        title="Delete this version or the whole query"
-        onClick={() => setMenu(deleteBtn.current?.getBoundingClientRect() ?? null)}
-      >
-        Delete…
-      </button>
-      {v.status !== 'published' && (
-        <button
-          hidden={!can('queries.write')}
-          type="button"
-          className={v.status === 'draft' ? 'btn md primary' : 'btn md'}
-          disabled={busy}
-          title={`POST /api/v1/queries/${query.name}/publish`}
-          onClick={publish}
-        >
-          {v.status === 'draft' ? `Publish v${v.version}` : `Roll back to v${v.version}`}
-        </button>
-      )}
-      {v.status === 'published' && (
-        <button
-          hidden={!can('queries.write')}
-          type="button"
-          className="btn md"
-          disabled={busy}
-          title={`POST /api/v1/queries/${query.name}/unpublish`}
-          onClick={unpublish}
-        >
-          Unpublish
-        </button>
-      )}
-      {menu && <Menu anchor={menu} items={items} onClose={() => setMenu(null)} />}
+      <MenuButton label="More actions: move, unpublish, delete" className="btn md icon" entries={entries}>
+        <MoreIcon />
+      </MenuButton>
     </>
-  );
-}
-
-/** A small popover menu under its anchor; closes on an outside click or Escape (ui.py openMenu). */
-function Menu({
-  anchor,
-  items,
-  onClose,
-}: {
-  anchor: DOMRect;
-  items: { label: string; title?: string; run: () => void }[];
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const outside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    const t = setTimeout(() => {
-      document.addEventListener('mousedown', outside, true);
-      document.addEventListener('keydown', esc, true);
-    }, 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener('mousedown', outside, true);
-      document.removeEventListener('keydown', esc, true);
-    };
-  }, [onClose]);
-  return (
-    <div
-      ref={ref}
-      id="popmenu"
-      className="menu"
-      role="menu"
-      style={{ top: anchor.bottom + 4, right: Math.max(8, window.innerWidth - anchor.right) }}
-    >
-      {items.map((it) => (
-        <button
-          key={it.label}
-          type="button"
-          role="menuitem"
-          title={it.title}
-          onClick={() => {
-            onClose();
-            it.run();
-          }}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
   );
 }
 

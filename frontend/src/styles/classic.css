@@ -551,14 +551,20 @@
   .detail { min-height: 200px; min-width: 0; }
   .d-head { padding: 18px 20px 0; display: flex; flex-direction: column; gap: 12px; }
   .d-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .d-title h3 { font: 600 16px var(--mono); }
+  .d-title h3 { font: 600 18px var(--mono); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  /* status and cache: quiet text, not pills - a dot carries the colour */
+  .d-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  .d-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+  .d-status.ok i { background: var(--accent); }
+  .d-cache { font-size: 12px; color: var(--ink-3); }
+  .d-actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .d-desc { color: var(--ink-2); margin: 0; text-wrap: pretty; }
-  .vbadge { font: 500 11.5px/22px var(--mono); padding: 0 8px; border-radius: 5px; background: var(--ink); color: var(--surface); }
+  .vbadge { font: 500 11.5px/20px var(--mono); padding: 0 6px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-2); }
   .versions { display: inline-flex; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-strong); }
-  .versions button { border: 0; border-right: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: 500 11.5px var(--mono); padding: 0 8px; height: 22px; cursor: pointer; }
+  .versions button { border: 0; border-right: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: 500 11.5px var(--mono); padding: 0 7px; height: 22px; cursor: pointer; }
   .versions button:last-child { border-right: 0; }
   .versions button:hover { background: var(--surface-2); }
-  .versions button.on { background: var(--ink); color: var(--surface); }
+  .versions button.on { background: var(--surface-2); color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
   .meta { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .meta div { background: var(--bg); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .meta dt { font-size: 11px; color: var(--ink-3); }
@@ -588,9 +594,6 @@
   .ln-r { display: flex; white-space: pre; }
   .ln-n { flex: none; width: 44px; padding-right: 14px; text-align: right; color: var(--line-strong); user-select: none; }
   .curlbox { margin: 0; padding: 14px 16px; font: 12.5px/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
-  .menu { position: fixed; z-index: 60; min-width: 190px; padding: 4px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; }
-  .menu button { border: 0; background: none; text-align: left; padding: 7px 10px; border-radius: 5px; font: 500 12.5px var(--sans); color: var(--danger); cursor: pointer; }
-  .menu button:hover { background: var(--danger-soft); }
   /* ---- double-click a column/value in the SQL editor to turn it into a bound parameter ---- */
   .paramize-popover { position: fixed; z-index: 65; width: 260px; padding: 10px; background: var(--surface);
     border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }

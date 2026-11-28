@@ -101,9 +101,60 @@ describe('API Repository - detail and publishing', () => {
     await waitFor(() => expect(detail()).toHaveTextContent('Draft'));
     expect(within(detail()).getByRole('group', { name: 'Version' })).toHaveTextContent('v1v2');
     expect(within(detail()).getByRole('button', { name: 'Publish v2' })).toBeInTheDocument();
+    expect(detail()).not.toHaveTextContent('older version'); // the latest is the usual case: no label
     await userEvent.click(within(detail()).getByRole('button', { name: 'v1' }));
     expect(detail()).toHaveTextContent('Published');
-    expect(within(detail()).getByRole('button', { name: 'Unpublish' })).toBeInTheDocument();
+    expect(detail()).toHaveTextContent('older version');
+    // a published version has no Publish button; Unpublish is in the ⋯ menu
+    expect(within(detail()).queryByRole('button', { name: /Publish/ })).toBeNull();
+    await userEvent.click(within(detail()).getByRole('button', { name: /^More actions/ }));
+    expect(screen.getByRole('menuitem', { name: 'Unpublish' })).toBeInTheDocument();
+  });
+
+  it('keeps New version in view and the rest in the ⋯ menu, Delete red and confirmed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { calls } = fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    await waitFor(() => expect(detail()).toHaveTextContent('Draft'));
+    expect(within(detail()).getByRole('button', { name: 'New version' })).toBeInTheDocument();
+    const more = within(detail()).getByRole('button', { name: /^More actions/ });
+    expect(more).toHaveAttribute('aria-haspopup', 'menu');
+    await userEvent.click(more);
+    const items = screen.getAllByRole('menuitem');
+    // a draft isn't served, so there is nothing to unpublish
+    expect(items.map((i) => i.textContent)).toEqual([
+      'Move…',
+      'Delete v2…',
+      'Delete query (all 2 versions)…',
+    ]);
+    expect(items[1]).toHaveClass('danger');
+    expect(items[2]).toHaveClass('danger');
+    await userEvent.click(items[2]!);
+    expect(confirm).toHaveBeenCalledWith('Delete films and all 2 versions?');
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false); // declined: nothing sent
+    expect(more).toHaveFocus();
+    confirm.mockRestore();
+  });
+
+  it('shows status and cache as quiet text, not pills', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse({ ...FILMS, versions: [version(1, 'published', { cache_ttl: 30 })] }, 200, {
+          ETag: ETAG,
+        }),
+    });
+    renderAt('/queries/films');
+    const status = await waitFor(() => {
+      const el = detail().querySelector('.d-status');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(status).toHaveTextContent('Published');
+    expect(status).toHaveClass('ok');
+    expect(detail().querySelector('.d-cache')).toHaveTextContent('Cached 30s');
+    expect(detail().querySelector('.pill')).toBeNull();
+    expect(detail().querySelector('.vbadge')).toHaveTextContent('v1');
   });
 
   it('publishes conditionally on the version it loaded', async () => {
