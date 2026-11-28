@@ -136,6 +136,24 @@ describe('API Repository - detail and publishing', () => {
     confirm.mockRestore();
   });
 
+  it('says what the query runs on as one line: connection, author, modified to the minute, tags as chips', async () => {
+    fakeBackend(baseRoutes());
+    renderAt('/queries/films');
+    const meta = await waitFor(() => {
+      const el = detail().querySelector('.d-meta');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(meta).toHaveTextContent('Connectionlite');
+    expect(meta).toHaveTextContent('Authoralice');
+    expect(meta).not.toHaveTextContent(/collection/i); // the list's head already names it
+    await waitFor(() => expect(meta.querySelector('time')).not.toBeNull());
+    const modified = meta.querySelector('time')!;
+    expect(modified.textContent).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+    expect(modified.getAttribute('title')).toMatch(/\d\d:\d\d:\d\d/); // the tooltip keeps the seconds
+    expect([...meta.querySelectorAll('.tag-chip')].map((t) => t.textContent)).toEqual(['films']);
+  });
+
   it('shows status and cache as quiet text, not pills', async () => {
     fakeBackend({
       ...baseRoutes(),

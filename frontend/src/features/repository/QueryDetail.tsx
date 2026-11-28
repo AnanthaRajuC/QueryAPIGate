@@ -167,12 +167,20 @@ function Detail({ query, etag }: { query: Query; etag: string | null }) {
           </span>
         </div>
         {v.description ? <p className="d-desc">{v.description}</p> : null}
-        <dl className="meta">
-          <MetaItem k="connection" v={v.connection_name || '—'} />
-          <MetaItem k="collection" v={query.collection || '—'} />
-          <MetaItem k="author" v={v.author || '—'} />
-          <MetaItem k="modified" v={<Time value={v.last_modified_at || v.created_at} />} />
-          {v.tags.length ? <MetaItem k="tags" v={v.tags.join(', ')} /> : null}
+        <dl className="d-meta">
+          <MetaItem k="Connection" v={v.connection_name || '—'} />
+          <MetaItem k="Author" v={v.author || '—'} />
+          <MetaItem k="Modified" v={<Time value={v.last_modified_at || v.created_at} seconds={false} />} />
+          {v.tags.length ? (
+            <div className="d-tags">
+              <dt className="visually-hidden">Tags</dt>
+              {v.tags.map((t) => (
+                <dd key={t} className="tag-chip">
+                  {t}
+                </dd>
+              ))}
+            </div>
+          ) : null}
         </dl>
         <StatTiles runs={runs} />
         <RequestsPerDay runs={runs} />
