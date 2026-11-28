@@ -605,12 +605,15 @@
   .connect-tab { display: flex; flex-direction: column; gap: 14px; }
   .connect-tab > .seg { align-self: flex-start; }
   .connect-panel { display: flex; flex-direction: column; gap: 12px; }
-  .subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 -20px; padding: 0 14px; }
+  .subtabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 -20px; padding: 0 14px; }
   .subtabs button { border: 0; background: none; font: 500 12.5px var(--sans); color: var(--ink-2); padding: 10px 8px; cursor: pointer; position: relative; display: flex; gap: 6px; align-items: center; }
   .subtabs button:hover { color: var(--ink); }
   .subtabs button.on { color: var(--ink); }
   .subtabs button.on::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: var(--ink); }
   .d-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
+  /* the Run tab: the request row first, then its parameters, then where the rows will be */
+  .run-noparams { margin: -4px 0 0; font-size: 12px; }
+  .run-empty { display: flex; align-items: center; justify-content: center; min-height: 190px; padding: 24px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--ink-3); text-align: center; }
   .get-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
   .get-row .method { font: 600 11px var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
   .get-row .endpoint { flex: 1; min-width: 160px; font: 12.5px var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

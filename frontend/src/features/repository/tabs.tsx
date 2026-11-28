@@ -123,52 +123,6 @@ export function RunTab({ query, v }: { query: Query; v: QueryVersion }) {
           void run(1);
         }}
       >
-        {params.length ? (
-          <div className="panel" style={{ overflow: 'auto' }}>
-            <table className="grid">
-              <thead>
-                <tr>
-                  {['Name', 'Type', 'Constraints', 'Description'].map((t) => (
-                    <th key={t}>{t}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {params.map((p) => {
-                  const rule = v.parameters[p];
-                  const decl = declared(rule);
-                  const required = !rule || (rule.required && !('default' in rule));
-                  return (
-                    <tr key={p}>
-                      <td>
-                        <span className="name">{p}</span>
-                        {required ? <span className="req"> *</span> : null}
-                      </td>
-                      <td className="mono">{decl.type}</td>
-                      <td>
-                        <input
-                          id={`run-q-${p}`}
-                          className="mono"
-                          spellCheck={false}
-                          autoComplete="off"
-                          placeholder={decl.constraints}
-                          required={required}
-                          type={rule?.type === 'integer' ? 'number' : 'text'}
-                          value={values[p] ?? ''}
-                          aria-label={p}
-                          onChange={(e) => setValues((all) => ({ ...all, [p]: e.target.value }))}
-                        />
-                      </td>
-                      <td>{decl.description}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="hint">No parameters — this query runs as-is.</div>
-        )}
         <div className="get-row">
           <span className="method">GET</span>
           <span className="endpoint" title={`/${url}`}>
@@ -215,6 +169,52 @@ export function RunTab({ query, v }: { query: Query; v: QueryVersion }) {
             Run
           </button>
         </div>
+        {params.length ? (
+          <div className="panel" style={{ overflow: 'auto' }}>
+            <table className="grid">
+              <thead>
+                <tr>
+                  {['Name', 'Type', 'Constraints', 'Description'].map((t) => (
+                    <th key={t}>{t}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {params.map((p) => {
+                  const rule = v.parameters[p];
+                  const decl = declared(rule);
+                  const required = !rule || (rule.required && !('default' in rule));
+                  return (
+                    <tr key={p}>
+                      <td>
+                        <span className="name">{p}</span>
+                        {required ? <span className="req"> *</span> : null}
+                      </td>
+                      <td className="mono">{decl.type}</td>
+                      <td>
+                        <input
+                          id={`run-q-${p}`}
+                          className="mono"
+                          spellCheck={false}
+                          autoComplete="off"
+                          placeholder={decl.constraints}
+                          required={required}
+                          type={rule?.type === 'integer' ? 'number' : 'text'}
+                          value={values[p] ?? ''}
+                          aria-label={p}
+                          onChange={(e) => setValues((all) => ({ ...all, [p]: e.target.value }))}
+                        />
+                      </td>
+                      <td>{decl.description}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="hint run-noparams">No parameters. This query runs as-is.</p>
+        )}
         {v.status === 'draft' && (
           <div className="hint">
             A draft: only the admin key can run it (with <code>?version={v.version}</code>) until it is
@@ -222,16 +222,20 @@ export function RunTab({ query, v }: { query: Query; v: QueryVersion }) {
           </div>
         )}
       </form>
-      <Results
-        result={result}
-        running={running}
-        filename={query.name}
-        onPage={(n) => void run(n)}
-        onPageSize={(n) => {
-          setSize(n);
-          void run(1, n);
-        }}
-      />
+      {result || running ? (
+        <Results
+          result={result}
+          running={running}
+          filename={query.name}
+          onPage={(n) => void run(n)}
+          onPageSize={(n) => {
+            setSize(n);
+            void run(1, n);
+          }}
+        />
+      ) : (
+        <div className="run-empty">Run the query to see its rows here.</div>
+      )}
     </>
   );
 }

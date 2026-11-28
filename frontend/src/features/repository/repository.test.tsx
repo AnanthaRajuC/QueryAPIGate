@@ -221,13 +221,39 @@ describe('API Repository - detail and publishing', () => {
         }),
     });
     renderAt('/queries/films');
-    await userEvent.type(await screen.findByLabelText('film_id'), '7');
+    const filmId = await screen.findByLabelText('film_id');
+    // the request row comes first, then the parameters; the rows' place waits for a run
+    const getRow = detail().querySelector('.get-row')!;
+    expect(getRow.compareDocumentPosition(filmId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(detail()).getByText('Run the query to see its rows here.')).toBeInTheDocument();
+    await userEvent.type(filmId, '7');
     await userEvent.click(within(detail()).getByRole('button', { name: 'Run' }));
     expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(within(detail()).queryByText('Run the query to see its rows here.')).toBeNull();
     const run = calls.find((c) => c.path === '/q/films')!;
     expect(run.search.get('film_id')).toBe('7');
     expect(run.search.get('version')).toBe('2'); // the draft, not the published version
     expect(document.querySelector('table.rs')).not.toBeNull();
+  });
+
+  it('says in one line that a query without parameters runs as-is', async () => {
+    fakeBackend({
+      ...baseRoutes(),
+      'GET /api/v1/queries/films': () =>
+        jsonResponse(
+          {
+            ...FILMS,
+            versions: [version(1, 'published', { parameters: {}, placeholders: [], sql: 'SELECT 1' })],
+          },
+          200,
+          { ETag: ETAG },
+        ),
+    });
+    renderAt('/queries/films');
+    expect(
+      await within(await loadedDetail()).findByText('No parameters. This query runs as-is.'),
+    ).toHaveClass('hint');
+    expect(detail().querySelector('.d-body table')).toBeNull();
   });
 
   it('builds its stat strip and history from the version runs, and Metrics has the rest', async () => {

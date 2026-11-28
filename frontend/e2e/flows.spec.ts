@@ -144,7 +144,10 @@ test('API Designer to a published API: run, save as draft, publish, call it', as
   expect(
     (await page.request.get('/q/e2e_film_title?id=1', { headers: { 'X-API-Key': ADMIN_KEY } })).status(),
   ).toBe(404);
-  await page.locator('#query-detail').getByRole('button', { name: 'Publish' }).click();
+  await page
+    .locator('#query-detail')
+    .getByRole('button', { name: /^Publish v\d+$/ })
+    .click();
   await expect(page.locator('#query-detail')).toContainText('Published');
   const served = await page.request.get('/q/e2e_film_title?id=1', { headers: { 'X-API-Key': ADMIN_KEY } });
   expect(served.status()).toBe(200);
